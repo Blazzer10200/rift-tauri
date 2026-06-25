@@ -133,10 +133,16 @@ impl UpdateService {
                             };
                             g.init_error = Some(reason.clone());
                             log::error!("update check: updater unavailable — {reason}");
-                            return Err(format!(
-                                "Rift isn't properly installed for auto-update ({reason}). \
-                                 Reinstall from the latest Setup.exe to restore updates."
-                            ));
+                            // Distinguish a blocked network from a broken install —
+                            // a firewalled R2 feed isn't a reinstall problem.
+                            let low = reason.to_ascii_lowercase();
+                            let looks_network = ["connect", "dns", "timeout", "timed out", "network", "refused", "unreachable", "resolve"]
+                                .iter().any(|k| low.contains(k));
+                            return Err(if looks_network {
+                                format!("Couldn't reach the update server (the feed host pub-*.r2.dev may be blocked by your network/firewall): {reason}")
+                            } else {
+                                format!("Rift isn't properly installed for auto-update ({reason}). Reinstall from the latest Setup.exe to restore updates.")
+                            });
                         }
                     }
                 }

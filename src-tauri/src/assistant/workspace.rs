@@ -20,9 +20,12 @@ pub struct WorkspaceState {
 }
 
 fn workspace_state_from(cfg: &AssistantConfig) -> WorkspaceState {
+    // Drop roots that don't exist on THIS machine — a config copied across
+    // machines (or a roaming profile) carries the old box's absolute paths,
+    // which would otherwise surface as dead picker entries.
     WorkspaceState {
-        current: cfg.current_root.as_ref().map(|p| p.to_string_lossy().into_owned()),
-        recent: cfg.recent_roots.iter().map(|p| p.to_string_lossy().into_owned()).collect(),
+        current: cfg.current_root.as_ref().filter(|p| p.is_dir()).map(|p| p.to_string_lossy().into_owned()),
+        recent: cfg.recent_roots.iter().filter(|p| p.is_dir()).map(|p| p.to_string_lossy().into_owned()).collect(),
     }
 }
 
@@ -41,7 +44,13 @@ pub fn assistant_set_root(path: String) -> Result<WorkspaceState, String> {
     if !raw.is_dir() {
         return Err(format!("not a directory: {path}"));
     }
-    let canonical = std::fs::canonicalize(&raw).unwrap_or(raw);
+    // canonicalize can fail on a junction-to-nowhere even when is_dir() passed;
+    // only fall back to raw if raw itself still resolves, else fail loud.
+    let canonical = match std::fs::canonicalize(&raw) {
+        Ok(c) => c,
+        Err(_) if raw.is_dir() => raw,
+        Err(e) => return Err(format!("could not resolve {path}: {e}")),
+    };
     let mut cfg = load_config();
     // Dedup: pull existing entry then re-insert at the front.
     cfg.recent_roots.retain(|p| p != &canonical);
@@ -67,7 +76,11 @@ pub fn assistant_set_tab_root(path: String) -> Result<String, String> {
     if !raw.is_dir() {
         return Err(format!("not a directory: {path}"));
     }
-    let canonical = std::fs::canonicalize(&raw).unwrap_or(raw);
+    let canonical = match std::fs::canonicalize(&raw) {
+        Ok(c) => c,
+        Err(_) if raw.is_dir() => raw,
+        Err(e) => return Err(format!("could not resolve {path}: {e}")),
+    };
     let mut cfg = load_config();
     cfg.recent_roots.retain(|p| p != &canonical);
     cfg.recent_roots.insert(0, canonical.clone());

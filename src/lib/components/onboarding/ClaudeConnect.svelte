@@ -15,6 +15,7 @@
 
   const CLI_DOCS_URL = "https://docs.claude.com/en/docs/claude-code";
   const INSTALL_CMD = "irm https://claude.ai/install.ps1 | iex";
+  const INSTALL_CMD_NPM = "npm install -g @anthropic-ai/claude-code";
 
   type AuthStatus = {
     cliPresent: boolean;
@@ -25,6 +26,7 @@
     email: string | null;
     subscriptionType: string | null;
     apiKeyConfigured: boolean;
+    envApiKeyPresent: boolean;
     pill: "green" | "yellow" | "red";
     summary: string;
   };
@@ -37,9 +39,13 @@
   let apiKeyDraft = $state("");
   let savingKey = $state(false);
 
+  type Props = { onConnectedChange?: (connected: boolean) => void };
+  const { onConnectedChange }: Props = $props();
+
   const connected = $derived(
     !!status && status.cliPresent && (status.loggedIn || status.apiKeyConfigured),
   );
+  $effect(() => { onConnectedChange?.(connected); });
 
   async function probe() {
     if (probing) return;
@@ -78,8 +84,8 @@
     }
   }
 
-  async function signIn() {
-    await assistant.startLogin();
+  async function signIn(useConsole = false) {
+    await assistant.startLogin(useConsole);
     await probe();
   }
 
@@ -137,6 +143,11 @@
         <span class="v">{status.subscriptionType}</span>
       </div>
     {/if}
+    {#if status.summary}
+      <div class="ob-statrow ob-statrow--summary">
+        <span class="v">{status.summary}</span>
+      </div>
+    {/if}
   </div>
 
   {#if !status.cliPresent}
@@ -148,18 +159,18 @@
           {#if copied}<Check size={13} /> Copied{:else}<Copy size={13} /> Copy{/if}
         </button>
       </div>
-      <p class="ob-hint"><span>Rift detects the install automatically. More options at <button type="button" class="ob-link" onclick={() => void openUrl(CLI_DOCS_URL).catch((e) => console.warn("openUrl failed", e))}>docs.claude.com/en/docs/claude-code</button>.</span></p>
+      <p class="ob-hint"><span>Already use npm? <code>{INSTALL_CMD_NPM}</code> works too. Rift detects either install automatically. More options at <button type="button" class="ob-link" onclick={() => void openUrl(CLI_DOCS_URL).catch((e) => console.warn("openUrl failed", e))}>docs.claude.com/en/docs/claude-code</button>.</span></p>
     </div>
   {:else if !connected}
     <div class="ob-input-row">
-      <button class="ob-btn primary" type="button" onclick={() => void signIn()} disabled={assistant.loginInProgress}>
+      <button class="ob-btn primary" type="button" onclick={() => void signIn(false)} disabled={assistant.loginInProgress}>
         {#if assistant.loginInProgress}<Loader2 size={15} class="spin" /> Waiting for sign-in…{:else}<LogIn size={15} /> Sign in with Claude{/if}
       </button>
     </div>
     {#if assistant.loginInProgress}
-      <p class="ob-hint"><span>A console window opened with the login link — it may be behind this window. Complete the sign-in there; Rift detects it automatically.</span></p>
+      <p class="ob-hint"><span>A console window opened with the login link — it may be behind this window (check your taskbar). Complete the sign-in there; Rift detects it automatically.</span></p>
     {:else}
-      <p class="ob-hint"><span>Opens the Claude login in a console window. Or <button type="button" class="ob-link" onclick={() => (showApiKey = !showApiKey)}>use an API key instead</button>.</span></p>
+      <p class="ob-hint"><span>Subscription (Pro/Max) login. On a Console/API account instead? <button type="button" class="ob-link" onclick={() => void signIn(true)}>Sign in with Console</button> — or <button type="button" class="ob-link" onclick={() => (showApiKey = !showApiKey)}>paste an API key</button>.</span></p>
     {/if}
     {#if showApiKey}
       <div class="ob-input-row">

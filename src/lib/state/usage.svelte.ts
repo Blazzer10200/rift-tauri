@@ -8,6 +8,8 @@ export type LimitWindow = { utilization: number; resetsAt: string | null };
 export type ExtraUsage = {
   isEnabled: boolean; monthlyLimit: number | null; usedCredits: number | null;
   utilization: number | null; currency: string | null;
+  // Minor-unit exponent: monthlyLimit/usedCredits are scaled integers (8000 @ dp=2 = $80).
+  decimalPlaces: number;
 };
 export type RateLimits = {
   fiveHour: LimitWindow | null; sevenDay: LimitWindow | null;

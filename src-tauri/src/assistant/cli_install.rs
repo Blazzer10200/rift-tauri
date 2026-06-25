@@ -78,6 +78,30 @@ fn where_claude_lines() -> Vec<String> {
     }
 }
 
+/// The user's real npm global prefix (`npm config get prefix`), so we probe the
+/// ACTUAL node_modules drop-site, not just the default `%APPDATA%\npm`. A user
+/// who ran `npm config set prefix D:\tools` installs claude elsewhere. None when
+/// npm isn't runnable; the caller falls back to the default site.
+#[cfg(windows)]
+fn npm_global_prefix() -> Option<PathBuf> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    let out = std::process::Command::new("npm.cmd")
+        .args(["config", "get", "prefix"])
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if s.is_empty() || s == "undefined" {
+        return None;
+    }
+    Some(PathBuf::from(s))
+}
+
 /// Classify how a `claude` binary at `p` was installed, from its path.
 /// npm-global installs must update via `npm install -g …@latest`; native
 /// installs self-update and accept `claude update`.
@@ -200,12 +224,23 @@ pub(super) fn enumerate_claude_installs() -> Vec<ClaudeInstall> {
                 &mut paths,
             );
         }
-        // npm-global bundled exe (PATH only carries the `.cmd` shim).
-        if let Some(appdata) = std::env::var_os("APPDATA") {
+        // npm-global bundled exe (PATH only carries the `.cmd` shim). Probe the
+        // user's REAL npm prefix first (custom-prefix installs), then the default
+        // %APPDATA%\npm site — both, so a non-default prefix is covered without
+        // regressing the default-install detection.
+        let npm_roots = {
+            let mut v: Vec<PathBuf> = Vec::new();
+            if let Some(prefix) = npm_global_prefix() {
+                v.push(prefix);
+            }
+            if let Some(appdata) = std::env::var_os("APPDATA") {
+                v.push(PathBuf::from(&appdata).join("npm"));
+            }
+            v
+        };
+        for root in npm_roots {
             add(
-                PathBuf::from(&appdata)
-                    .join("npm")
-                    .join("node_modules")
+                root.join("node_modules")
                     .join("@anthropic-ai")
                     .join("claude-code")
                     .join("bin")

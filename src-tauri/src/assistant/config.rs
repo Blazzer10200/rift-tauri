@@ -80,9 +80,10 @@ pub(super) struct AssistantConfig {
 pub(super) const RECENT_ROOTS_MAX: usize = 10;
 
 pub(super) fn config_path() -> Result<PathBuf, String> {
-    let home = super::dirs_home()?;
+    let home = super::dirs_home()
+        .map_err(|e| format!("cannot locate home dir (USERPROFILE/HOME unset): {e}"))?;
     let dir = home.join(".rift").join("assistant");
-    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir ~/.rift/assistant: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir {}: {e}", dir.display()))?;
     Ok(dir.join("config.json"))
 }
 

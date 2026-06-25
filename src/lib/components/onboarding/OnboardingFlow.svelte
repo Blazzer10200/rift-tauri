@@ -31,14 +31,25 @@
   let step = $state(1);
   const last = steps.length;
 
+  // Soft-block: if the user tries to leave the Connect step (2) without Claude
+  // connected, warn ONCE — a model pick is inert without auth — then let them
+  // proceed on the next press (we don't hard-block; some users connect later).
+  let connectConnected = $state(false);
+  let warnSkipConnect = $state(false);
+
   function goto(n: number) {
     if (n < step) step = n; // rail nodes only navigate backward (completed)
   }
   function next() {
+    if (step === 2 && !connectConnected && !warnSkipConnect) {
+      warnSkipConnect = true;
+      return;
+    }
     if (step < last) step += 1;
     else onDone();
   }
   function back() {
+    warnSkipConnect = false;
     if (step > 1) step -= 1;
   }
 
@@ -194,7 +205,10 @@
             </div>
           {:else if step === 2}
             <ObStage kind="claude" caption="embedded assistant" />
-            <ClaudeConnect />
+            <ClaudeConnect onConnectedChange={(c) => { connectConnected = c; if (c) warnSkipConnect = false; }} />
+            {#if warnSkipConnect}
+              <p class="ob-hint ob-hint--warn"><TriangleAlert size={14} /><span>Claude isn't connected yet — your model and tool picks won't work until it is. Press Next again to continue anyway, or connect above first.</span></p>
+            {/if}
           {:else if step === 3}
             <ObStage kind="project" caption="your workspace" />
             <header class="ob-head">

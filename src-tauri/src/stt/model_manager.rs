@@ -77,15 +77,15 @@ struct ModelEntry {
 }
 
 fn models_dir() -> PathBuf {
-    // Resolve via the canonical USERPROFILE→HOME helper. Last-resort fallback is
-    // the OS temp dir (an absolute, writable path) rather than "." — a CWD-
-    // relative ".rift/models" would land next to the exe under
-    // %LOCALAPPDATA%\…\current\ on a Velopack install and be wiped on every
-    // update. temp is never wiped mid-session and is always absolute.
-    crate::state::paths::dirs_home()
-        .unwrap_or_else(|_| std::env::temp_dir())
-        .join(".rift")
-        .join("models")
+    // Resolve via the canonical USERPROFILE→HOME helper. Fallback is LOCALAPPDATA
+    // (persistent + outside the Velopack `current/` dir, so not wiped on update),
+    // then temp only as a true last resort. NOT a CWD-relative path (would land
+    // next to the exe under a Velopack install and vanish on every update).
+    let base = crate::state::paths::dirs_home()
+        .ok()
+        .or_else(|| std::env::var_os("LOCALAPPDATA").map(PathBuf::from))
+        .unwrap_or_else(std::env::temp_dir);
+    base.join(".rift").join("models")
 }
 
 pub fn known_models() -> Vec<ModelInfo> {
@@ -192,7 +192,7 @@ pub async fn download(
     let resp = req
         .send()
         .await
-        .map_err(|e| format!("download request failed: {e}"))?;
+        .map_err(|e| format!("could not reach huggingface.co (check your network/proxy/firewall): {e}"))?;
     let status = resp.status();
     // 416 = Range Not Satisfiable: .partial already covers the full file.
     if status.as_u16() == 416 {

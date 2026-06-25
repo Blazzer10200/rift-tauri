@@ -1778,6 +1778,12 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
     let mut first_line_logged = false;
     let mut first_think_logged = false;
     let mut first_text_logged = false;
+    // WS6 latency attribution: turn-start → first ANY frame, and total tool time
+    // accrued BEFORE first text. `tool_open_at` marks the most recent tool_use so
+    // its result can add the elapsed gap to `pre_text_tool_ms`.
+    let mut perf_first_line_ms: Option<u64> = None;
+    let mut perf_pre_text_tool_ms: u64 = 0;
+    let mut tool_open_at: Option<std::time::Instant> = None;
     // Steers that arrive before the (first-turn) handshake completes are
     // buffered, then flushed the instant the user turn is sent.
     let mut steer_pending: Vec<SteerMsg> = Vec::new();
@@ -1914,6 +1920,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                         record_turn_perf(
                             &v, ts_start_ms, turn_start, perf_ttft_thinking_ms,
                             perf_ttft_text_ms, stream_sid, model, effort,
+                            perf_first_line_ms, perf_pre_text_tool_ms, !was_reused,
                         );
                         let _ = app_out.emit_to(win_label, STREAM_EVENT, serde_json::json!({
                             "session_id": stream_sid, "line": trimmed,
@@ -1934,6 +1941,11 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                                 // build / grep / ask_user is silent-but-healthy).
                                 if block_ty == Some("tool_use") {
                                     tools_in_flight += 1;
+                                    // WS6: clock the tool open so its result adds the
+                                    // gap to pre-text tool time (only matters pre-text).
+                                    if !first_text_logged && tool_open_at.is_none() {
+                                        tool_open_at = Some(std::time::Instant::now());
+                                    }
                                 }
                                 if block_ty == Some("tool_use")
                                     && block.get("name").and_then(|n| n.as_str()) == Some("Bash")
@@ -1954,6 +1966,15 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                             for block in content {
                                 if block.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
                                     tools_in_flight = (tools_in_flight - 1).max(0);
+                                    // WS6: a tool finished before any text → bank the
+                                    // round-trip into pre-text tool time. Only the
+                                    // outermost open (the one we clocked) closes here.
+                                    if !first_text_logged && tools_in_flight == 0 {
+                                        if let Some(at) = tool_open_at.take() {
+                                            perf_pre_text_tool_ms =
+                                                perf_pre_text_tool_ms.saturating_add(at.elapsed().as_millis() as u64);
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1982,6 +2003,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                 }
                 if !first_line_logged {
                     first_line_logged = true;
+                    perf_first_line_ms = Some(turn_start.elapsed().as_millis() as u64);
                     log::info!("warm_pool: TTFT {} ms (turn-start→first-line) session={}", turn_start.elapsed().as_millis(), stream_sid);
                 }
                 let _ = app_out.emit_to(win_label, STREAM_EVENT,
@@ -2099,6 +2121,7 @@ async fn emit_turn_end_error(
 /// bus as a structured event. The CLI carries token/cache/cost data ONLY on the
 /// `result` frame — `v` here is that parsed frame. Best-effort: a malformed or
 /// usage-less frame just yields `None` fields, never an error.
+#[allow(clippy::too_many_arguments)]
 fn record_turn_perf(
     v: &Value,
     ts_start_ms: u64,
@@ -2108,6 +2131,9 @@ fn record_turn_perf(
     stream_sid: &str,
     model: &str,
     effort: &str,
+    first_line_ms: Option<u64>,
+    pre_text_tool_ms: u64,
+    was_cold: bool,
 ) {
     use crate::diagnostics::{self, perf::TurnPerf, DiagLevel, DiagStage};
 
@@ -2126,6 +2152,13 @@ fn record_turn_perf(
         _ => None,
     };
 
+    // WS6: attribute the first-reply wait to its dominant phase so the advisor
+    // names the lever instead of inferring it. Pure fn in `perf`, unit-tested.
+    let pre_text_tool = if pre_text_tool_ms > 0 { Some(pre_text_tool_ms) } else { None };
+    let dominant_cause = crate::diagnostics::perf::classify_latency_cause(
+        ttft_text_ms, ttft_thinking_ms, first_line_ms, pre_text_tool, was_cold, cache_hit_rate,
+    );
+
     let rec = TurnPerf {
         ts_start_ms,
         ttft_thinking_ms,
@@ -2141,6 +2174,10 @@ fn record_turn_perf(
         result_subtype,
         model: Some(model.to_owned()),
         effort: Some(effort.to_owned()),
+        ttft_first_line_ms: first_line_ms,
+        pre_text_tool_ms: pre_text_tool,
+        was_cold: Some(was_cold),
+        dominant_cause,
     };
 
     // Structured bus event — DiagStage::Log so it rides the normal 200/s cap,

@@ -687,11 +687,28 @@ alive so the model stays warm.\n\
 time. Use it to pin slowness to a specific choice — e.g. if Opus/deep p50FirstReplyMs is 22000 but Sonnet/smart is \
 4000, the lever is \"use Sonnet (or a lower effort) for routine turns\" with the two real numbers quoted side by side. \
 Only compare groups with enough turns to trust; don't over-read a 1-turn group.\n\
+- MEASURED ROOT CAUSE (perf.byModel[].dominantCause + dominantCauseTurns): when present, this is the MEASURED reason \
+that group's slow turns were slow — not a guess. Lead with it as fact and quote the vote (\"dominantCauseTurns of \
+turns\"). Map each cause straight to its lever:\n\
+  • \"thinking\" → the model spent the wait reasoning before it replied; the lever is LOWER EFFORT for that kind of \
+turn (emit a kind \"effort\" apply one tier down). e.g. \"9 of your 12 slow Opus turns were spent thinking — Smart \
+effort would start replies sooner.\"\n\
+  • \"cold_start\" → the first turn paid model warm-up; the lever is keeping a session alive so later turns stay warm \
+(apply:null behavior tip, NOT a setting). Don't blame the model choice for this.\n\
+  • \"upload\" → a large context was re-uploaded because it wasn't cached; the lever is keeping ONE session going so \
+the conversation stays cached (apply:null tip). Pairs with low cacheHitRate.\n\
+  • \"tools\" → tool round-trips ran before the first reply; the lever is batching independent tool calls into one \
+turn (apply:null tip).\n\
+A dominantCause of \"none\" or absent means no single phase dominated — do NOT invent a cause; fall back to the \
+aggregate signals. NEVER recommend lowering effort purely from a high p90 when the cause is cold_start/upload/tools — \
+the effort lever only helps a \"thinking\"-dominated group.\n\
 - CACHE THRASH (low cacheHitRate): short, frequently-restarted sessions re-bill the whole context every turn instead \
 of reading it from cache. Lever: keep one session going longer rather than starting fresh — explain that cached \
 context is far cheaper AND faster.\n\
 - COST SPIKE: if the most recent day in costTrend is much higher than the others, call it out and ask what changed.\n\
-- ADD-ON CREDITS: if planLimits.extraUsage.isEnabled is true, factor their top-up credits into the picture.\n\
+- USAGE CREDITS: if planLimits.extraUsage.isEnabled is true, the user has Anthropic's pay-as-you-go usage credits \
+turned on (spend beyond their plan, billed per token). monthlyLimit/usedCredits are in minor units (divide by \
+10^decimalPlaces for dollars). Factor their remaining credit headroom into the picture.\n\
 - ZERO-TOOL WASTE (thisSession.zeroToolTurns / zeroToolCostUsd): pure-conversation turns (no tool calls) that ran on \
 an expensive model are the cheapest thing to route cheaper. If zeroToolTurns is a large share of totalTurns AND the \
 default model is opus/a costly one, suggest a cheaper default for chat-only work, quoting the count and its spend. \

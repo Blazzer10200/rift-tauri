@@ -268,6 +268,8 @@
 .ob-hint { display: flex; align-items: flex-start; gap: 7px; font-size: 12px; color: var(--fg-muted); line-height: 1.5; margin: 0; }
 .ob-hint :global(.lucide) { flex: none; margin-top: 1px; color: var(--fg-subtle); }
 .ob-hint.ok { color: var(--ok); }
+.ob-hint--warn { color: var(--warn); }
+.ob-hint--warn :global(.lucide) { color: var(--warn); }
 
 /* green "connected" bar w/ pulsing dot — Claude step success state */
 .ob-connbar { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: var(--r-card); font-size: 12px; font-weight: 540; background: var(--ok-soft); color: var(--ok); }
@@ -290,6 +292,10 @@
 .ob-statrow .v.ok { color: var(--ok); }
 .ob-statrow .v.warn { color: var(--warn); }
 .ob-statrow .v :global(.lucide) { flex: none; }
+/* Summary row = a full-width plain-English sentence (the backend diagnostic),
+   not a key/value pair — left-aligned, muted, normal weight. */
+.ob-statrow--summary { justify-content: flex-start; }
+.ob-statrow--summary .v { color: var(--fg-muted); font-weight: 400; line-height: 1.5; }
 
 :where(.ob-overlay) .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

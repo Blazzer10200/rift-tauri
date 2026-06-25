@@ -25,12 +25,23 @@ pub struct LimitWindow {
 pub struct ExtraUsage {
     #[serde(rename = "isEnabled", alias = "is_enabled", default)]
     pub is_enabled: bool,
+    /// Spend cap + spend-to-date in MINOR currency units (e.g. cents). The
+    /// endpoint returns integers scaled by `decimal_places` — 8000 w/ dp=2 is
+    /// $80.00, NOT $8000. The frontend divides by 10^decimal_places to format.
     #[serde(rename = "monthlyLimit", alias = "monthly_limit")]
     pub monthly_limit: Option<f64>,
     #[serde(rename = "usedCredits", alias = "used_credits")]
     pub used_credits: Option<f64>,
     pub utilization: Option<f64>,
     pub currency: Option<String>,
+    /// Minor-unit exponent for monthly_limit/used_credits (2 ⇒ divide by 100).
+    /// Defaults to 2 when the endpoint omits it (the observed USD default).
+    #[serde(rename = "decimalPlaces", alias = "decimal_places", default = "default_decimal_places")]
+    pub decimal_places: u32,
+}
+
+fn default_decimal_places() -> u32 {
+    2
 }
 
 /// Deserializes the endpoint's snake_case body (via `alias`), serializes
@@ -114,12 +125,12 @@ fn read_oauth_token() -> Result<String, String> {
     let home = crate::state::paths::dirs_home().map_err(|e| e.to_string())?;
     let path = home.join(".claude").join(".credentials.json");
     let bytes = std::fs::read(&path)
-        .map_err(|_| "no Claude subscription login found".to_string())?;
+        .map_err(|e| format!("usage gauge needs a Claude subscription login (checked {}): {e}", path.display()))?;
     let creds: CredsFile = serde_json::from_slice(&bytes)
         .map_err(|_| "could not parse Claude credentials".to_string())?;
     let oauth = creds
         .claude_ai_oauth
-        .ok_or_else(|| "not signed in with a Claude subscription".to_string())?;
+        .ok_or_else(|| "usage gauge requires a Claude subscription (not available for API-key users)".to_string())?;
     if let Some(exp) = oauth.expires_at {
         if exp < now_ms() {
             return Err("Claude login token expired — it refreshes next time the CLI runs".into());

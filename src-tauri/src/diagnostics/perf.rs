@@ -56,6 +56,87 @@ pub struct TurnPerf {
     /// Effort tier for this turn ("none"/"quick"/"smart"/"deep"/"ultra").
     #[serde(default)]
     pub effort: Option<String>,
+
+    // ── Latency cause attribution (WS6) ───────────────────────────────────────
+    // The clocks below decompose `ttft_text_ms` into WHERE the wait went, so the
+    // advisor can name the real lever instead of inferring it from an aggregate.
+    // All `serde(default)` so pre-WS6 NDJSON lines deserialize as None.
+    /// Turn-start → first ANY frame from the CLI. The gap before the model emits
+    /// anything = prompt upload + (on a cold spawn) process warm-up.
+    #[serde(default)]
+    pub ttft_first_line_ms: Option<u64>,
+    /// Total ms a tool was in-flight BEFORE the first text token. Large = tool
+    /// round-trips, not the model, blocked the reply.
+    #[serde(default)]
+    pub pre_text_tool_ms: Option<u64>,
+    /// This turn ran on a freshly-spawned child (cold), not a warm-pool reuse.
+    #[serde(default)]
+    pub was_cold: Option<bool>,
+    /// The largest contributor to the first-reply wait, computed at finalisation:
+    /// "thinking" | "upload" | "cold_start" | "tools" | "none". The advisor maps
+    /// each to a concrete lever. None when `ttft_text_ms` is absent (no reply).
+    #[serde(default)]
+    pub dominant_cause: Option<String>,
+}
+
+/// Decompose a turn's first-reply wait into its largest contributor. Pure so it
+/// can be unit-tested independently of the turn loop. Returns one of
+/// "thinking" | "upload" | "cold_start" | "tools" | "none".
+///
+/// Model: `ttft_text` = pre-model wait (first_line) + thinking time + tool time.
+/// We attribute to whichever phase is largest AND clears a noise floor — a snappy
+/// turn (every phase small) is "none", never a misleading culprit.
+pub fn classify_latency_cause(
+    ttft_text_ms: Option<u64>,
+    ttft_thinking_ms: Option<u64>,
+    ttft_first_line_ms: Option<u64>,
+    pre_text_tool_ms: Option<u64>,
+    was_cold: bool,
+    cache_hit_rate: Option<f64>,
+) -> Option<String> {
+    let text = ttft_text_ms?;
+    // Below this, the reply was fast enough that no phase is worth blaming.
+    const FAST_FLOOR_MS: u64 = 4000;
+    if text < FAST_FLOOR_MS {
+        return Some("none".to_string());
+    }
+    let first_line = ttft_first_line_ms.unwrap_or(0);
+    let tools = pre_text_tool_ms.unwrap_or(0);
+    // Thinking phase = first-text minus first-thinking (the model reasoned before
+    // it spoke). Only when thinking actually started before text.
+    let thinking = match ttft_thinking_ms {
+        Some(t) if text > t => text - t,
+        _ => 0,
+    };
+    // Pre-model wait: time before the first frame, minus any tool time that fell
+    // inside it (tools open after the first frame, so first_line is purely wait).
+    let pre_model = first_line;
+
+    // Pick the largest phase; ties resolve toward the cheapest-to-explain lever.
+    let mut best = ("none", 0u64);
+    for (name, ms) in [("thinking", thinking), ("tools", tools), ("upload", pre_model)] {
+        if ms > best.1 {
+            best = (name, ms);
+        }
+    }
+    // A dominant pre-model wait on a cold spawn is warm-up, not context size.
+    // A warm spawn with low cache-hit points at context re-upload instead.
+    if best.0 == "upload" {
+        if was_cold {
+            return Some("cold_start".to_string());
+        }
+        // Warm but slow first frame with a healthy cache is just network/queue —
+        // don't pin it on the user's context. Only call it "upload" when the
+        // cache is actually missing (context being re-billed).
+        if cache_hit_rate.map(|c| c >= 0.7).unwrap_or(false) {
+            return Some("none".to_string());
+        }
+    }
+    // The winning phase must be a real majority of the wait, else it's diffuse.
+    if best.1 * 2 < text {
+        return Some("none".to_string());
+    }
+    Some(best.0.to_string())
 }
 
 static TURNS_LOG: OnceLock<Option<Mutex<std::fs::File>>> = OnceLock::new();
@@ -143,6 +224,13 @@ pub struct ModelPerfStats {
     pub p90_ttft_text_ms: Option<u64>,
     pub p50_duration_ms: Option<u64>,
     pub turn_count: usize,
+    /// Modal latency cause for slow turns in this group ("thinking"/"upload"/
+    /// "cold_start"/"tools"), with how many turns voted for it. None when no turn
+    /// in the group carried a cause, or the modal cause is "none" (group is fast).
+    /// Lets the advisor say "9 of your 12 slow Opus turns were thinking" — a
+    /// measured fact, not an inference from the aggregate p90.
+    pub dominant_cause: Option<String>,
+    pub dominant_cause_turns: usize,
 }
 
 /// `pct` in [0,1]. `min_samples` is the floor below which the result is None.
@@ -169,7 +257,11 @@ fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
     // Per-day first-reply latencies (for the trend sparkline) and per-(model,
     // effort) latency+duration vecs (for the breakdown).
     let mut ttft_by_day: BTreeMap<String, Vec<u64>> = BTreeMap::new();
-    let mut by_group: BTreeMap<(String, Option<String>), (Vec<u64>, Vec<u64>)> = BTreeMap::new();
+    // Per group: (ttft vec, duration vec, cause→count tally for the modal cause).
+    let mut by_group: BTreeMap<
+        (String, Option<String>),
+        (Vec<u64>, Vec<u64>, BTreeMap<String, usize>),
+    > = BTreeMap::new();
     let mut total = 0usize;
 
     for line in lines {
@@ -211,6 +303,12 @@ fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
             if let Some(d) = rec.duration_ms {
                 g.1.push(d);
             }
+            // Tally the cause, ignoring "none" (a fast turn has no culprit to vote).
+            if let Some(c) = rec.dominant_cause.as_deref() {
+                if c != "none" {
+                    *g.2.entry(c.to_string()).or_default() += 1;
+                }
+            }
         }
     }
 
@@ -241,9 +339,16 @@ fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
     // Per-(model, effort) breakdown, busiest group first.
     let mut by_model: Vec<ModelPerfStats> = by_group
         .into_iter()
-        .map(|((model, effort), (mut ttft, mut dur))| {
+        .map(|((model, effort), (mut ttft, mut dur, causes))| {
             ttft.sort_unstable();
             dur.sort_unstable();
+            // Modal cause = the most-voted culprit; ties break by name order
+            // (deterministic). None when no slow turn cast a vote.
+            let (dominant_cause, dominant_cause_turns) = causes
+                .iter()
+                .max_by(|a, b| a.1.cmp(b.1).then(b.0.cmp(a.0)))
+                .map(|(c, n)| (Some(c.clone()), *n))
+                .unwrap_or((None, 0));
             ModelPerfStats {
                 model,
                 effort,
@@ -251,6 +356,8 @@ fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
                 p90_ttft_text_ms: percentile(&ttft, 0.90, 5),
                 p50_duration_ms: percentile(&dur, 0.50, 1),
                 turn_count: ttft.len().max(dur.len()),
+                dominant_cause,
+                dominant_cause_turns,
             }
         })
         .collect();
@@ -308,12 +415,20 @@ mod tests {
             result_subtype: Some("success".into()),
             model: None,
             effort: None,
+            ttft_first_line_ms: None,
+            pre_text_tool_ms: None,
+            was_cold: None,
+            dominant_cause: None,
         };
         serde_json::to_string(&r).unwrap()
     }
 
-    // Like `rec` but stamps model/effort so by_model grouping can be exercised.
+    // Like `rec` but stamps model/effort (+ optional cause) so by_model grouping
+    // and the modal-cause rollup can be exercised.
     fn rec_m(model: &str, effort: &str, ttft: Option<u64>, dur: Option<u64>) -> String {
+        rec_mc(model, effort, ttft, dur, None)
+    }
+    fn rec_mc(model: &str, effort: &str, ttft: Option<u64>, dur: Option<u64>, cause: Option<&str>) -> String {
         let r = TurnPerf {
             ts_start_ms: 1_700_000_000_000,
             ttft_thinking_ms: None,
@@ -329,6 +444,10 @@ mod tests {
             result_subtype: Some("success".into()),
             model: Some(model.into()),
             effort: Some(effort.into()),
+            ttft_first_line_ms: None,
+            pre_text_tool_ms: None,
+            was_cold: None,
+            dominant_cause: cause.map(|c| c.to_string()),
         };
         serde_json::to_string(&r).unwrap()
     }
@@ -381,5 +500,74 @@ mod tests {
         assert_eq!(opus.p90_ttft_text_ms, None); // p90 floored at 5 samples
         assert_eq!(s.by_model[1].model, "sonnet");
         assert_eq!(s.by_model[1].turn_count, 1);
+    }
+
+    #[test]
+    fn classify_fast_turn_is_none() {
+        // Under the fast floor → no culprit even if a phase is nominally largest.
+        assert_eq!(
+            classify_latency_cause(Some(2500), Some(200), Some(300), None, false, None),
+            Some("none".into())
+        );
+    }
+
+    #[test]
+    fn classify_thinking_dominates() {
+        // 12s reply, thinking started at 1s → 11s thinking = the wait. Lever: effort.
+        assert_eq!(
+            classify_latency_cause(Some(12_000), Some(1000), Some(800), None, false, None),
+            Some("thinking".into())
+        );
+    }
+
+    #[test]
+    fn classify_cold_start_vs_upload() {
+        // Big pre-model wait, no thinking/tools. Cold spawn → cold_start.
+        assert_eq!(
+            classify_latency_cause(Some(10_000), None, Some(9000), None, true, None),
+            Some("cold_start".into())
+        );
+        // Same shape but warm + cache missing → context re-upload.
+        assert_eq!(
+            classify_latency_cause(Some(10_000), None, Some(9000), None, false, Some(0.2)),
+            Some("upload".into())
+        );
+        // Warm + healthy cache → just network/queue, not the user's fault → none.
+        assert_eq!(
+            classify_latency_cause(Some(10_000), None, Some(9000), None, false, Some(0.9)),
+            Some("none".into())
+        );
+    }
+
+    #[test]
+    fn classify_tools_dominate() {
+        // 11s reply, 8s of it tool round-trips before first text → tools.
+        assert_eq!(
+            classify_latency_cause(Some(11_000), None, Some(500), Some(8000), false, None),
+            Some("tools".into())
+        );
+    }
+
+    #[test]
+    fn classify_diffuse_is_none() {
+        // Slow but no single phase is a majority → none (not a misleading blame).
+        assert_eq!(
+            classify_latency_cause(Some(10_000), Some(7000), Some(2000), Some(1500), false, None),
+            Some("none".into())
+        );
+    }
+
+    #[test]
+    fn aggregate_rolls_up_modal_cause() {
+        let lines = vec![
+            rec_mc("opus", "deep", Some(9000), Some(40000), Some("thinking")),
+            rec_mc("opus", "deep", Some(8000), Some(38000), Some("thinking")),
+            rec_mc("opus", "deep", Some(7000), Some(30000), Some("upload")),
+            rec_mc("opus", "deep", Some(2000), Some(9000), Some("none")), // fast → no vote
+        ];
+        let s = aggregate(lines.into_iter());
+        let opus = &s.by_model[0];
+        assert_eq!(opus.dominant_cause.as_deref(), Some("thinking"));
+        assert_eq!(opus.dominant_cause_turns, 2); // "none" didn't vote
     }
 }

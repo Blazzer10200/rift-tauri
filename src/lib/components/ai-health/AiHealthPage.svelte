@@ -31,6 +31,8 @@
     p90_ttft_text_ms: number | null;
     p50_duration_ms: number | null;
     turn_count: number;
+    dominant_cause: string | null;
+    dominant_cause_turns: number;
   };
   type TurnPerfStats = {
     p50_ttft_text_ms: number | null;
@@ -212,7 +214,9 @@
     const dims: { k: string; tint: string; v: string }[] = [];
     if (latencyTint) dims.push({ k: "Latency", tint: latencyTint, v: fmtMs(perfStats?.p90_ttft_text_ms ?? null) });
     if (cacheTint && perfStats?.cache_hit_rate != null) dims.push({ k: "Cache", tint: cacheTint, v: `${Math.round(perfStats.cache_hit_rate * 100)}%` });
-    if (usage.rateLimits) dims.push({ k: "Plan", tint: rateLimitRisk, v: `${peakLimit}%` });
+    // Only when a real usage window reported — a non-null rateLimits with all
+    // windows null (Pro plan, or pre-data) must NOT contribute a false "ok".
+    if (limitRows.length > 0) dims.push({ k: "Plan", tint: rateLimitRisk, v: `${peakLimit}%` });
     if (dims.length === 0) return null;
     const worst = dims.reduce((a, b) => (RANK[b.tint] > RANK[a.tint] ? b : a));
     const tint = worst.tint;
@@ -281,6 +285,11 @@
               p90FirstReplyMs: m.p90_ttft_text_ms,
               p50TurnMs: m.p50_duration_ms,
               turns: m.turn_count,
+              // WS6 measured root cause: the modal reason this group's slow turns
+              // were slow + how many voted. Lets the advisor name the lever from
+              // fact ("9 of 12 slow Opus turns were thinking") not inference.
+              dominantCause: m.dominant_cause,
+              dominantCauseTurns: m.dominant_cause_turns,
             })),
           }
         : null,
@@ -416,8 +425,8 @@
           <span class="dot"></span>{healthScore.label}
         </span>
       {:else}
-        <span class="ah-chip">
-          <span class="dot"></span>Loading
+        <span class="ah-chip" aria-label="No health data yet — send a few Claude turns to start measuring.">
+          <span class="dot"></span>Getting started
         </span>
       {/if}
     {/snippet}
@@ -542,10 +551,12 @@
       <!-- ── Plan limits ── -->
       <section class="ah-card">
         <div class="ah-card-h"><Gauge size={15} strokeWidth={1.9} />Plan limits{#if fetchedAgo && limitRows.length > 0}<span class="ah-asof">{fetchedAgo}</span>{/if}</div>
-        {#if usage.rateLimitsError}
-          <p class="ah-muted">{usage.rateLimitsError}</p>
+        {#if assistant.hasApiKey}
+          <p class="ah-muted">Plan limits apply to Claude subscription accounts. You're on an API key — billed per token — so there are no usage windows to track here. Your speed &amp; efficiency below still apply.</p>
+        {:else if usage.rateLimitsError}
+          <p class="ah-muted">Couldn't load your plan limits right now. {usage.rateLimitsError} They'll appear once you've run a Claude turn to refresh your login.</p>
         {:else if limitRows.length === 0}
-          <p class="ah-muted">No subscription limits to show — sign in with a Claude plan to see them here.</p>
+          <p class="ah-muted">No subscription limits to show yet — sign in with a Claude plan, or run a turn to refresh.</p>
         {:else}
           <p class="ah-card-sub">How much of each usage window you've used. When a bar fills up, Claude pauses until it resets at the time shown.</p>
           <div class="ah-bars">
@@ -564,13 +575,14 @@
         {#if usage.rateLimits?.extraUsage?.isEnabled}
           {@const x = usage.rateLimits.extraUsage}
           {@const xu = x.utilization != null ? Math.round(x.utilization) : null}
+          {@const scale = 10 ** (x.decimalPlaces ?? 2)}
           <div class="ah-bars ah-extra">
             <div class="ah-bar-row">
               <div class="ah-bar-top">
-                <span class="ah-bar-k">Add-on credits</span>
+                <span class="ah-bar-k">Usage credits</span>
                 <span class="ah-bar-v">
                   {#if x.usedCredits != null && x.monthlyLimit != null}
-                    {fmtUsd(x.usedCredits)} / {fmtUsd(x.monthlyLimit)}
+                    {fmtUsd(x.usedCredits / scale)} / {fmtUsd(x.monthlyLimit / scale)}
                   {:else if xu != null}{xu}%{/if}
                 </span>
               </div>
