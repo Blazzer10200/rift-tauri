@@ -84,24 +84,6 @@
 </script>
 
 <div class="nc" bind:this={rootEl}>
-  <button
-    class="nc-bell"
-    class:has-unread={toast.unreadCount > 0}
-    class:active={toast.centerOpen}
-    type="button"
-    onclick={() => toast.toggleCenter()}
-    use:tooltip={"Notifications"}
-    aria-label={toast.unreadCount > 0 ? `Notifications — ${toast.unreadCount} unread` : "Notifications"}
-    aria-expanded={toast.centerOpen}
-  >
-    <Bell size={15} />
-    {#if toast.unreadCount > 0}
-      <span class="badge" transition:fade={{ duration: reducedMotion ? 0 : 120 }}>
-        {toast.unreadCount > 9 ? "9+" : toast.unreadCount}
-      </span>
-    {/if}
-  </button>
-
   {#if toast.centerOpen}
     <div
       class="panel"
@@ -186,42 +168,14 @@
 </div>
 
 <style>
-  .nc { position: relative; display: flex; }
-
-  /* Topbar icon-button base — duplicated from Topbar (scoped styles don't cross
-     into this child) so the bell matches Search / New-window exactly. */
-  .nc-bell {
-    position: relative;
-    width: 30px; height: 30px;
-    display: grid; place-items: center;
-    border-radius: 8px;
-    color: var(--fg-subtle);
-    transition: background var(--dur-fast), color var(--dur-fast);
-  }
-  .nc-bell:hover { background: var(--surface-hover); color: var(--fg-2); }
-  .nc-bell.active { background: var(--surface-hover); color: var(--fg-2); }
-  .nc-bell.has-unread { color: var(--fg-2); }
-
-  .badge {
-    position: absolute;
-    top: 2px; right: 2px;
-    min-width: 14px; height: 14px;
-    padding: 0 3px;
-    border-radius: 999px;
-    background: var(--accent);
-    color: var(--bg);
-    font-size: 9px;
-    font-weight: 700;
-    line-height: 14px;
-    text-align: center;
-    box-shadow: 0 0 0 2px var(--bg);
-    pointer-events: none;
-  }
+  /* The bell trigger now lives in TopbarMenu; this component owns only the
+     history panel, anchored to the top-right under the topbar utility menu. */
+  .nc { display: contents; }
 
   .panel {
-    position: absolute;
-    top: calc(100% + 8px);
-    right: 0;
+    position: fixed;
+    top: 46px;
+    right: 8px;
     width: 360px;
     max-width: calc(100vw - 24px);
     max-height: min(560px, calc(100vh - 84px));
@@ -366,6 +320,6 @@
   .empty-sub { font-size: var(--fs-xs); color: var(--fg-faint); }
 
   @media (prefers-reduced-motion: reduce) {
-    .row, .ph-btn, .row-action, .row-close, .nc-bell { transition: none; }
+    .row, .ph-btn, .row-action, .row-close { transition: none; }
   }
 </style>

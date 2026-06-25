@@ -1,14 +1,13 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { invoke } from "@tauri-apps/api/core";
-  import { PanelLeftOpen, Search, AppWindow, X, SplitSquareHorizontal } from "lucide-svelte";
+  import { PanelLeftOpen, X } from "lucide-svelte";
   import { workspace } from "$lib/state/workspace.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { shell } from "$lib/state/shell.svelte";
-  import { commandPalette } from "$lib/state/command-palette.svelte";
   import { WORKSPACES } from "../workspaces";
   import { tooltip } from "$lib/actions/tooltip";
   import NotificationCenter from "./NotificationCenter.svelte";
+  import TopbarMenu from "./TopbarMenu.svelte";
 
   const win = getCurrentWindow();
 
@@ -38,28 +37,11 @@
   <span class="topbar-title" data-tauri-drag-region>{title}</span>
 
   <div class="topbar-r">
-    {#if workspace.activeId === "chat"}
-      <!-- Split-pane entry point — was keyboard-only (Ctrl+\), so undiscoverable.
-           Add a pane when there's room; once split, this disables (Ctrl+Shift+\
-           still closes the focused pane). -->
-      <button
-        class="topbar-ic"
-        type="button"
-        onclick={() => assistant.addPane()}
-        disabled={!assistant.canAddPane}
-        use:tooltip={assistant.canAddPane ? "Split editor — Ctrl+\\" : "Maximum panes open"}
-        aria-label="Split editor"
-      >
-        <SplitSquareHorizontal size={15} />
-      </button>
-    {/if}
-    <button class="topbar-ic" type="button" onclick={() => commandPalette.show()} use:tooltip={"Search — Ctrl+K"} aria-label="Search commands & chats">
-      <Search size={15} />
-    </button>
+    <!-- Split / Search / Notifications / New-window folded into one dropdown so
+         the topbar-right reads as a single affordance beside the window ctls. -->
+    <TopbarMenu />
+    <!-- Panel only — its trigger lives in TopbarMenu's Notifications row. -->
     <NotificationCenter />
-    <button class="topbar-ic" type="button" onclick={() => invoke("open_new_window").catch(console.error)} use:tooltip={"New window"} aria-label="New window">
-      <AppWindow size={15} />
-    </button>
 
     <div class="winctl">
       <button class="wc" type="button" onclick={() => win.minimize().catch(console.error)} use:tooltip={"Minimize"} aria-label="Minimize"><span class="wc-min"></span></button>

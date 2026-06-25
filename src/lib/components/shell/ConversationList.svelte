@@ -105,29 +105,6 @@
   function isActive(id: string) { return assistant.currentConvoId === id && workspace.activeId === "chat"; }
   function isOpen(id: string) { return assistant.openTabs.includes(id) && !isActive(id); }
 
-  // ── delayed hover preview ──────────────────────────────────────────────
-  let preview = $state<{ c: ConversationMeta; x: number; y: number } | null>(null);
-  let hoverTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const PREVIEW_W = 268; // keep in sync with .conv-preview width
-  function onRowEnter(e: MouseEvent, c: ConversationMeta) {
-    if (hoverTimer) clearTimeout(hoverTimer);
-    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    hoverTimer = setTimeout(() => {
-      // Flip to the row's left if the right side would run past the viewport,
-      // then hard-clamp into [8, vw-W-8] so it can never render clipped.
-      let x = r.right + 8;
-      if (x + PREVIEW_W + 8 > window.innerWidth) x = r.left - PREVIEW_W - 8;
-      x = Math.max(8, Math.min(x, window.innerWidth - PREVIEW_W - 8));
-      const y = Math.max(8, Math.min(r.top, window.innerHeight - 150));
-      preview = { c, x, y };
-    }, 460);
-  }
-  function onRowLeave() {
-    if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
-    preview = null;
-  }
-
   function open(id: string) {
     if (renaming) return;
     workspace.setActive("chat");
@@ -187,8 +164,6 @@
     closeMenu();
     void assistant.deleteConversation(id).catch(console.error);
   }
-
-  $effect(() => () => { if (hoverTimer) clearTimeout(hoverTimer); });
 
   $effect(() => {
     if (menuId === null) return;
@@ -253,8 +228,6 @@
         ondragend={onRowDragEnd}
         onclick={() => open(c.id)}
         onkeydown={(e) => { if (e.key === "Enter") open(c.id); }}
-        onmouseenter={(e) => onRowEnter(e, c)}
-        onmouseleave={onRowLeave}
       >
         {#if workingIds.has(c.id)}
           <span class="workdots on" aria-label="Working">
@@ -305,18 +278,6 @@
     <button class="pop-item danger" type="button" role="menuitem" onclick={(e) => { e.stopPropagation(); del(id); }}>
       <Trash2 size={13} />Delete
     </button>
-  </div>
-{/if}
-
-{#if preview && !menuId && !renaming}
-  <div class="conv-preview" use:portal style="left:{preview.x}px; top:{preview.y}px" aria-hidden="true">
-    <div class="cp-title">{preview.c.title || "Untitled"}</div>
-    {#if preview.c.lastSnippet}
-      <div class="cp-snip">{preview.c.lastSnippet}</div>
-    {/if}
-    <div class="cp-meta">
-      <span class="cp-when">{relTime(preview.c.updatedAt)} ago</span>
-    </div>
   </div>
 {/if}
 
@@ -410,14 +371,4 @@
   .workdots i:nth-child(9) { animation-delay: 0.36s; }
   @keyframes workPulse { 0%, 100% { opacity: 0.16; transform: scale(0.5); } 45% { opacity: 1; transform: scale(1); } }
   @media (prefers-reduced-motion: reduce) { .workdots i { animation: none; opacity: 0.9; transform: scale(1); } }
-
-  /* delayed hover preview (fixed, portaled, anchored beside the row) */
-  :global(.conv-preview) { position: fixed; z-index: 50; width: 268px; padding: 12px 13px; border-radius: 13px; pointer-events: none;
-    background: color-mix(in oklab, var(--bg-elev-2) 94%, var(--bg)); border: 1px solid var(--border-strong);
-    box-shadow: 0 28px 64px -30px oklch(0 0 0 / 0.7), var(--shadow-lg); animation: convPopIn 0.16s var(--ease-page) both; }
-  :global(.conv-preview .cp-title) { font-size: 12.5px; font-weight: 650; color: var(--fg); margin-bottom: 6px; line-height: 1.32; text-wrap: pretty; }
-  :global(.conv-preview .cp-snip) { font-size: 11.5px; color: var(--fg-muted); line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-  :global(.conv-preview .cp-meta) { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--border);
-    font-size: 10.5px; color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
-  :global(.conv-preview .cp-when) { display: inline-flex; align-items: center; gap: 5px; }
 </style>

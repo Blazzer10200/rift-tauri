@@ -613,6 +613,10 @@ class AssistantStore {
   // updated whenever the user opens, switches, or clears a folder. Empty
   // `current` falls back to AutoSync folders on the Rust side.
   workspace = $state<WorkspaceState>({ current: null, recent: [] });
+  /** True once `refreshWorkspace()` has resolved the persisted folder on boot.
+   *  Gates the cold "no folder" welcome so it never flashes for a frame before
+   *  the rehydrated root lands (same pattern as `configLoaded`). */
+  workspaceReady = $state<boolean>(false);
 
   // Cached relative file paths under the workspace root, populated on first
   // `@` trigger and re-loaded whenever the workspace root changes. Drives the
@@ -964,6 +968,7 @@ class AssistantStore {
 
     await this.refreshConversations();
     await this.refreshWorkspace();
+    this.workspaceReady = true;
     await this.restoreTabs();
 
     // Best-effort flush on window close so we don't lose the last turn

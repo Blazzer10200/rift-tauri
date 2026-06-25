@@ -171,6 +171,11 @@
         {/if}
       </div>
     </div>
+  {:else if !assistant.workspaceReady}
+    <!-- Boot hold — the persisted folder is still rehydrating. Render nothing
+         branded so the cold "Welcome to Rift" can't flash for a frame before the
+         real Home greeting lands (the bug: empty `workspace.current` on reload). -->
+    <div class="wel-boot" aria-hidden="true"></div>
   {:else}
     <!-- No folder open — branded welcome: viewfinder open-folder target, recents, orientation primer. -->
     <div class="wel-inner welcome-cold">
@@ -272,6 +277,10 @@
     display: flex; flex-direction: column; gap: 24px;
   }
   .wel-inner.narrow { max-width: 440px; gap: 20px; }
+
+  /* Boot hold — empty, no branded content, so the cold welcome can't flash
+     during the one-frame window before the persisted folder rehydrates. */
+  .wel-boot { width: 100%; min-height: 1px; }
 
   /* Stagger child entrance so the screen feels composed top-down. */
   .wel-inner > * {
