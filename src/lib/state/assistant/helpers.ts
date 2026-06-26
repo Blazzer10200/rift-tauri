@@ -21,6 +21,16 @@ export function fableAvailable(): boolean {
   return !FABLE_DISABLED && Date.now() < FABLE_SUNSET_MS;
 }
 
+// Haiku 4.5 — pulled by Anthropic 2026-06-26 (model removed). Kill-switch mirror
+// of Fable: hides the picker row + coerces any stored/pinned Haiku pref → sonnet
+// (the fast-tier fallback). Label/effort/history fallbacks stay intact so old
+// Haiku conversations still render. Flip false to restore if it ever returns;
+// mirror HAIKU_DISABLED in config.rs (backend coerces a pinned Haiku session).
+export const HAIKU_DISABLED = true;
+export function haikuAvailable(): boolean {
+  return !HAIKU_DISABLED;
+}
+
 const MODEL_KEY = "rift.assistant.model";
 const EFFORT_KEY = "rift.assistant.thinkingEffort";
 const THINKING_KEY = "rift.assistant.thinkingEnabled";
@@ -47,6 +57,7 @@ const PERMISSION_MODES: readonly PermissionMode[] = [
 export function asModelSel(v: unknown): ModelSel | null {
   if (typeof v !== "string" || !(MODEL_SELS as readonly string[]).includes(v)) return null;
   if (v === "claude-fable-5" && !fableAvailable()) return null;
+  if (v === "haiku" && !haikuAvailable()) return null;
   return v as ModelSel;
 }
 
@@ -57,6 +68,7 @@ export function loadModel(ws?: string | null): ModelSel {
       const v = (k ? localStorage.getItem(k) : null) ?? localStorage.getItem(MODEL_KEY);
       if (v && (MODEL_SELS as readonly string[]).includes(v)) {
         if (v === "claude-fable-5" && !fableAvailable()) return "opus"; // matches backend FABLE_FALLBACK_MODEL (turn.rs)
+        if (v === "haiku" && !haikuAvailable()) return "sonnet"; // Haiku pulled → fast-tier fallback (mirror config.rs)
         return v as ModelSel;
       }
     }

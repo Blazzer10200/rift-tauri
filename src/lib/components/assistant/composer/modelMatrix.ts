@@ -4,7 +4,7 @@
 // children derive from one source and can never disagree.
 import { Hand, Code2, ClipboardList, Zap, Infinity as InfinityIcon, Gem, Feather, Sparkles, Rabbit } from "lucide-svelte";
 import type { ModelSel, PermissionMode, ThinkingEffort } from "../../../state/assistant/types";
-import { fableAvailable, MODEL_MAX_EFFORT } from "../../../state/assistant/helpers";
+import { fableAvailable, haikuAvailable, MODEL_MAX_EFFORT } from "../../../state/assistant/helpers";
 
 export type EffortOpt = { id: ThinkingEffort; label: string; hint: string };
 // Effort ladder mapped to the CLI's `--effort` flag (low/medium/high/xhigh) by
@@ -61,7 +61,7 @@ export const MODEL_OPTIONS: ModelOpt[] = [
   ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", tagline: "Anthropic's most capable model — limited run", blurb: "Most capable — limited run", ctx: "1M ctx", suffix: "1M context", legacy: false, limited: true, effort: true, maxEffort: MODEL_MAX_EFFORT["claude-fable-5"], icon: Sparkles }] : []),
   { id: "opus",            label: "Opus",   version: "4.8", tagline: "Newest + most capable — complex reasoning & agentic coding", blurb: "Deep reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.opus, icon: Gem },
   { id: "sonnet",          label: "Sonnet", version: "4.6", tagline: "Best speed + intelligence balance — the default",            blurb: "Everyday default — speed + smarts", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.sonnet, icon: Feather },
-  { id: "haiku",           label: "Haiku",  version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups",             blurb: "Fastest — quick edits & lookups", ctx: "200K ctx", suffix: "200K context", legacy: false, effort: false, maxEffort: MODEL_MAX_EFFORT.haiku, icon: Rabbit },
+  ...(haikuAvailable() ? [{ id: "haiku" as ModelSel, label: "Haiku", version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups", blurb: "Fastest — quick edits & lookups", ctx: "200K ctx", suffix: "200K context", legacy: false, effort: false, maxEffort: MODEL_MAX_EFFORT.haiku, icon: Rabbit }] : []),
   { id: "claude-opus-4-7", label: "Opus",   version: "4.7", tagline: "Previous-generation Opus — proven for complex reasoning",    blurb: "Previous-generation Opus", ctx: "1M ctx",   suffix: "1M context",   legacy: true,  effort: true,  maxEffort: MODEL_MAX_EFFORT["claude-opus-4-7"], icon: Gem },
 ];
 // 1-based number shortcut → model id (digit keys pick directly in the menu).

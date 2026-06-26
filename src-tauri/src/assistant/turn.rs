@@ -21,6 +21,7 @@ use super::auth_update::assistant_auth_probe;
 use super::cli_install::{claude_command, resolve_claude_exe};
 use super::config::{
     clamp_effort, current_api_key, current_api_key_with, effective_trust_level, fable_unavailable,
+    haiku_unavailable, HAIKU_FALLBACK_MODEL, HAIKU_MODEL,
     is_valid_effort_tier,
     is_valid_local_model_name, is_valid_model_name, is_valid_permission_mode, load_config,
     DEFAULT_MODEL, FABLE_FALLBACK_MODEL, FABLE_MODEL,
@@ -596,6 +597,12 @@ pub async fn assistant_send(
         if model == FABLE_MODEL && fable_unavailable() {
             log::info!("assistant_send: {FABLE_MODEL} unavailable — falling back to {FABLE_FALLBACK_MODEL}");
             model = FABLE_FALLBACK_MODEL.to_string();
+        }
+        // Haiku guard — pulled 2026-06-26; a pinned/stale Haiku session falls back
+        // to sonnet before the id reaches the API (mirror helpers.ts).
+        if model == HAIKU_MODEL && haiku_unavailable() {
+            log::info!("assistant_send: {HAIKU_MODEL} unavailable — falling back to {HAIKU_FALLBACK_MODEL}");
+            model = HAIKU_FALLBACK_MODEL.to_string();
         }
     }
     // Effort tier: per-turn override wins, else stored default, else "smart"
