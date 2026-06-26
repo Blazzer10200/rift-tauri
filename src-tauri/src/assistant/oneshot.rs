@@ -356,6 +356,12 @@ names), then output the rewritten prompt. Keep lookups minimal."
     let mut cost_usd: Option<f64> = None;
     let mut duration_ms: Option<u64> = None;
     let mut lines = BufReader::new(stdout).lines();
+    // Overall wall-clock budget on the read+wait, mirroring title (30s) and
+    // analyze (90s). The grounded path is multi-turn (--max-turns 6) and can call
+    // MCP tools, so a hung tool/subprocess or stalled CLI would otherwise wedge
+    // this command forever (and keep a billed child alive) if the user dismisses
+    // the panel without clicking Discard. 90s matches the analyze multi-turn cap.
+    let read_loop = async {
     while let Ok(Some(line)) = lines.next_line().await {
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -436,11 +442,22 @@ names), then output the rewritten prompt. Keep lookups minimal."
             );
         }
     }
-
-    let status = child
+    child
         .wait()
         .await
-        .map_err(|e| format!("await claude (enhance): {e}"))?;
+        .map_err(|e| format!("await claude (enhance): {e}"))
+    };
+
+    let status = match tokio::time::timeout(std::time::Duration::from_secs(90), read_loop).await {
+        Ok(r) => r?,
+        Err(_) => {
+            let _ = child.start_kill();
+            stderr_task.abort();
+            // Drop our PID entry so a later cancel doesn't double-kill a recycled PID.
+            with_enhance_pids(|m| m.remove(&request_id));
+            return Err("prompt enhancement timed out".to_string());
+        }
+    };
     // Entry already gone = `assistant_enhance_cancel` took it and killed the
     // child — report the cancel, not the kill's nonzero exit, and skip the
     // empty-output error path.

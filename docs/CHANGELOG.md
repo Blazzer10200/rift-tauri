@@ -10,6 +10,7 @@
 - **The model picker's "More models" flyout behaves with the keyboard.** Arrowing onto a previous-generation model opened the flyout (good), but arrowing back to a current model left it stuck open. It now opens and closes as your cursor moves, and still responds to hover and the toggle as before.
 - **Cleaner tool readout during planning.** The newer Claude CLI's task-management calls (list/get/stop/output) no longer show up as stray generic tool chips in the chat — they're folded into the plan flow.
 - **Accurate "earlier steps" count under a collapsed sub-agent.** The "+N earlier steps" trail no longer counts a step that's still in progress, so the number matches what actually finished.
+- **Prompt enhancement can't hang forever anymore.** "Enhance prompt" now has a 90-second safety timeout (matching the other background helpers). If the Claude CLI stalls mid-enhance, the panel stops cleanly instead of spinning indefinitely — and the background process is shut down so it can't keep running (or billing) after you've moved on.
 
 ## v0.51.1 — Live sub-agent activity
 
