@@ -876,13 +876,23 @@ class AssistantStore {
           if (tab && typeof line === "string") tab.onStream(line);
         },
       ),
-      await listen<{ session_id?: string; exit_code?: number }>(
+      await listen<{ session_id?: string; exit_code?: number; bg_task?: boolean }>(
         "assistant://done",
         (e) => {
           const p = e.payload;
           const sid = p?.session_id;
           const tab = sid ? this.tabByCliSession(sid) : this.activeTab;
           tab?.onDone();
+          // B: the turn backgrounded a Bash task. In headless -p mode the CLI
+          // kills that shell ~5s after the turn and never re-invokes the model,
+          // so a "I'll report when it lands" promise can't be kept. Warn once so
+          // the user knows to ask explicitly rather than wait for a phantom reply.
+          if (p?.bg_task) {
+            notify.warn("Background task won't auto-report", {
+              detail: "This turn started a task in the background, but Rift can't notify you when it finishes. Send a message to ask how it went.",
+              timeoutMs: 9000,
+            });
+          }
         },
       ),
       await listen<{ session_id?: string; message?: string } | string>(

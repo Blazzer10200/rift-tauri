@@ -2,6 +2,10 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## Unreleased
+
+- **Background tasks no longer leave you waiting on a reply that never comes.** When the assistant ran a slow command "in the background" and said it would report back when it finished, that report could never arrive — Rift runs each turn as a one-shot, so there's nothing left listening once the turn ends (and the background command actually gets killed seconds later). The assistant is now told to run slow work in the foreground instead, so the result lands in the same reply. As a backstop, if a turn still kicks off a background task, you'll get a one-time heads-up — *"Background task won't auto-report — send a message to ask how it went"* — instead of silence.
+
 ## v0.51.1 — Live sub-agent activity
 
 > A focused hotfix that overhauls the sub-agent panel so you can actually see what Claude's helper agents are doing, and stops it from overlapping the chat.
