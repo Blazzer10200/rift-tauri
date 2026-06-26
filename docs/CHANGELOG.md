@@ -2,7 +2,7 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased
+## v0.51.3 — Haiku 4.5 removed
 
 - **Haiku 4.5 removed from the model picker.** Anthropic pulled Haiku 4.5, so it's no longer an option. Any chat or workspace that had Haiku pinned now falls back to Sonnet automatically; older conversations that used Haiku still display correctly. (Done as a reversible kill-switch, mirroring how Fable was handled — one flag restores it if it ever returns.)
 
