@@ -295,6 +295,11 @@ export async function restoreTabs(host: TabsHost) {
         ? active
         : valid.length > 0 ? valid[0] : null;
     if (winner) {
+      // If the focused pane's tab was pruned (stale/deleted convo), point it at
+      // the winner so the visible focused pane and currentConvoId agree — else
+      // the pane renders empty while a different convo is "current".
+      const fp = host.panes[host.focusedPaneIdx];
+      if (fp && fp.tabId !== winner) fp.tabId = winner;
       await host.loadConversation(winner);
     }
   } catch (e) {

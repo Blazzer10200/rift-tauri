@@ -161,7 +161,13 @@
     void _v;
     void tick().then(() => {
       autosize();
-      if (draft && ta) ta.focus();
+      // Refocus the textarea on programmatic draft writes (e.g. recall, mention
+      // insert), but NOT when focus legitimately lives elsewhere — the EnhanceBar
+      // steer input would otherwise lose focus mid-keystroke every time STT writes
+      // an interim transcript into the draft.
+      if (draft && ta && (document.activeElement === ta || document.activeElement === document.body || document.activeElement === null)) {
+        ta.focus();
+      }
     });
   });
 
@@ -191,13 +197,30 @@
   let mentionState = $state<MentionState | null>(null);
   let mentionIdx = $state(0);
   // RR9: this Composer instance persists across tabId changes (AssistantPane
-  // renders it un-keyed), but mentionState holds a character offset into the
-  // PREVIOUS tab's draft. Switching tabs with the @-popover open + then picking
-  // a mention spliced at a stale offset into the new tab's draft, corrupting it.
-  // Clear transient per-draft popover state whenever the active tab changes.
+  // renders it un-keyed), but transient per-tab UI state (mention popover offset,
+  // recall cursor, open menus, and any in-flight enhance) belongs to the PREVIOUS
+  // tab. Picking a mention at a stale offset corrupts the new draft; an in-flight
+  // enhance from Tab A would resolve and render its result over Tab B (and Accept
+  // would overwrite Tab B's draft). Reset it all when the active tab changes.
   $effect(() => {
     void tabId;
-    mentionState = null;
+    untrack(() => {
+      mentionState = null;
+      recallOffset = -1;
+      settingsOpen = false;
+      permOpen = false;
+      // Cancel + clear any enhance bound to the tab we're leaving so its async
+      // result can't land in this tab (the seq bump invalidates pending callbacks).
+      if (enhancing && enhanceRequestId) assistant.cancelEnhance(enhanceRequestId);
+      enhanceRequestId = null;
+      enhanceSeq++;
+      enhancing = false;
+      enhancedPreview = null;
+      enhanceError = null;
+      enhanceOriginal = null;
+      enhanceStatus = null;
+      enhanceMeta = null;
+    });
   });
   function refreshMention() {
     mentionState = detectMention();

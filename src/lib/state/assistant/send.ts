@@ -19,6 +19,7 @@ import { toast, notify } from "../toast.svelte";
 import type { AssistantStore, TabState } from "../assistant.svelte";
 import type { Block, ChatMessage, TurnRecord } from "./types";
 import { effortToFlag, FABLE_SUNSET_MS } from "./helpers";
+import { finalizeInflightBlocks } from "./streaming";
 
 // One-shot per app session — the sunset warning shouldn't nag on every send.
 let fableSunsetNoticed = false;
@@ -266,6 +267,10 @@ export async function stop(store: AssistantStore, tabId?: string | null) {
   // #179: flush pacer-buffered text into the message BEFORE clearing
   // streamingMsgId — otherwise mutateStreaming's early-return drops it.
   tab.flushPendingText();
+  // RR10/#64-fe: settle in-flight thinking/tool blocks before clearing
+  // streamingMsgId, else a user Stop mid-reasoning persists a stuck
+  // status:"active" thinking chip + status:"pending" tool chips in history.
+  finalizeInflightBlocks(tab);
   tab.streaming = false;
   tab.streamingMsgId = null;
   tab.streamingMsgIdx = null;

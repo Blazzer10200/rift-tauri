@@ -962,18 +962,13 @@ export function onStreamDone(tab: TabState) {
   tab.onTurnComplete?.(tab);
 }
 
-export function onStreamError(tab: TabState, msg: string) {
-  tab.lastError = msg;
-  tab.streaming = false;
-  if (tab.drainHandle !== null) {
-    cancelAnimationFrame(tab.drainHandle);
-    tab.drainHandle = null;
-  }
-  tab.pendingText = "";
-  // RR10: finalize in-flight blocks BEFORE clearing streamingMsgId (the mutate
-  // helpers no-op once it's null). A mid-reasoning error otherwise leaves a
-  // thinking chip stuck status:"active" and tool chips stuck status:"pending"
-  // forever in the persisted history.
+/** RR10: settle any in-flight thinking/tool blocks to a terminal status BEFORE
+ *  the caller clears streamingMsgId (the mutate helpers no-op once it's null).
+ *  Any terminal path that stops a stream mid-reasoning — error OR a user Stop —
+ *  must call this, else a thinking chip persists stuck status:"active" and tool
+ *  chips stuck status:"pending" forever in the saved history. Shared by
+ *  onStreamError and send.ts::stop(). Does NOT clear streamingMsgId itself. */
+export function finalizeInflightBlocks(tab: TabState) {
   for (const index of [...tab.thinkingByIndex.keys()]) {
     const entry = tab.thinkingByIndex.get(index);
     const durationMs = entry ? Date.now() - entry.startedAt : 0;
@@ -993,6 +988,19 @@ export function onStreamError(tab: TabState, msg: string) {
         b.type === "tool" && b.status === "pending" ? { ...b, status: "error" } : b,
       ),
     }));
+  }
+}
+
+export function onStreamError(tab: TabState, msg: string) {
+  tab.lastError = msg;
+  tab.streaming = false;
+  if (tab.drainHandle !== null) {
+    cancelAnimationFrame(tab.drainHandle);
+    tab.drainHandle = null;
+  }
+  tab.pendingText = "";
+  finalizeInflightBlocks(tab);
+  if (tab.streamingMsgId) {
     const id = tab.streamingMsgId;
     tab.messages = tab.messages.filter((m) => !(m.id === id && m.blocks.length === 0));
     tab.streamingMsgId = null;

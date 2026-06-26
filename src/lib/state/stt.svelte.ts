@@ -492,13 +492,18 @@ class SttStore {
     this.segments = [];
     this.pendingSend = false;
     if (this.config.engine === "whisper") {
-      if (this.recording || this.transcribing) {
+      // Include whisperStartInvoked: cancel can fire in the gap between
+      // stt_start_recording returning and the `recording` state event landing —
+      // recording is still false then, so without this the backend keeps
+      // recording after a cancel (mirrors the same guard in stop(), line ~455).
+      if (this.recording || this.transcribing || this.whisperStartInvoked) {
         try {
           await invoke("stt_stop_recording");
         } catch {
           /* may already be stopped */
         }
       }
+      this.whisperStartInvoked = false;
       if (!this.consumed) {
         this.writeDraft(this.baseDraft);
       }

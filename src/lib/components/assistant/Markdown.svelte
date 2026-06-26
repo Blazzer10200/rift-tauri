@@ -33,7 +33,7 @@
   // The `parsed` $derived depends on this so all code blocks re-render w/
   // syntax highlighting on first warmup.
   let shikiReady = $state(false);
-  whenReady().then(() => { shikiReady = true; }).catch(() => {});
+  whenReady().then(() => { shikiReady = true; }).catch((e) => console.error("shiki init failed (code blocks stay plain text):", e));
 
   // Diff code blocks: when fenced as ```diff, color +/- lines inline.
   function esc(s: string) {
@@ -277,15 +277,26 @@
     const text = code?.textContent ?? "";
     if (!text) return;
     void navigator.clipboard.writeText(text).then(() => {
-      const prev = copyBtn.textContent;
+      // Clear any prior timer first — a rapid double-click would otherwise
+      // capture prev="Copied" on the 2nd click and leave the label stuck.
+      const existing = copyTimers.get(copyBtn);
+      if (existing !== undefined) clearTimeout(existing);
       copyBtn.classList.add("copied");
       copyBtn.textContent = "Copied";
-      setTimeout(() => {
+      const t = window.setTimeout(() => {
         copyBtn.classList.remove("copied");
-        copyBtn.textContent = prev ?? "Copy";
+        copyBtn.textContent = "Copy";
+        copyTimers.delete(copyBtn);
       }, 1200);
+      copyTimers.set(copyBtn, t);
     }).catch((err) => console.warn("copy failed", err));
   }
+  // Per-button copy-reset timers, so a re-click clears the in-flight one.
+  const copyTimers = new Map<HTMLElement, number>();
+  // Indices of collapsible code blocks the user expanded — survives innerHTML
+  // re-injection so a re-render doesn't snap them back to collapsed (plain Set,
+  // non-reactive: re-applying must not re-trigger the render effect).
+  const expandedBlocks = new Set<number>();
 
   function onClick(e: MouseEvent) {
     const target = e.target as HTMLElement | null;
@@ -302,7 +313,16 @@
     if (moreBtn) {
       e.preventDefault();
       const host = moreBtn.closest("[data-collapsible]") as HTMLElement | null;
-      host?.setAttribute("data-expanded", "true");
+      if (host) {
+        host.setAttribute("data-expanded", "true");
+        // Persist by index so a mid-message re-render (e.g. shikiReady flip wipes
+        // innerHTML) doesn't snap the block back to collapsed.
+        if (container) {
+          const all = [...container.querySelectorAll("[data-collapsible]")];
+          const idx = all.indexOf(host);
+          if (idx >= 0) expandedBlocks.add(idx);
+        }
+      }
       return;
     }
     const a = target?.closest("a") as HTMLAnchorElement | null;
@@ -481,6 +501,12 @@
     if (!container) return;
     const revealActive = (everStreamed || streaming) && !prefersReducedMotion;
     container.innerHTML = baseHtml;
+    // Re-apply user-expanded collapsible blocks — innerHTML wiped the imperative
+    // data-expanded attribute (shikiReady flip / new delta re-runs this effect).
+    if (expandedBlocks.size > 0) {
+      const all = [...container.querySelectorAll("[data-collapsible]")];
+      for (const idx of expandedBlocks) all[idx]?.setAttribute("data-expanded", "true");
+    }
     if (!revealActive) {
       wordSpans = [];
       totalWords = 0;

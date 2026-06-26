@@ -11,6 +11,11 @@
 - **Cleaner tool readout during planning.** The newer Claude CLI's task-management calls (list/get/stop/output) no longer show up as stray generic tool chips in the chat — they're folded into the plan flow.
 - **Accurate "earlier steps" count under a collapsed sub-agent.** The "+N earlier steps" trail no longer counts a step that's still in progress, so the number matches what actually finished.
 - **Prompt enhancement can't hang forever anymore.** "Enhance prompt" now has a 90-second safety timeout (matching the other background helpers). If the Claude CLI stalls mid-enhance, the panel stops cleanly instead of spinning indefinitely — and the background process is shut down so it can't keep running (or billing) after you've moved on.
+- **Switching chats no longer drags one chat's state into another.** Quick tab-switches used to leak transient composer state across chats — an in-flight "Enhance" started in one chat could pop up over a different one (and Accepting it would overwrite the wrong draft), and the prompt-recall cursor / open menus carried over too. Switching chats now resets all of that cleanly.
+- **Dictation no longer fights the Enhance refine box.** Typing a refine directive in the Enhance panel while dictation was running could yank your cursor back to the main box on every interim transcript. The textarea now only refocuses when it actually had focus.
+- **Stopping a turn mid-thought leaves a clean record.** Pressing Stop while Claude was thinking or running a tool used to persist a chip stuck forever on "thinking…"/"running…" in that conversation's history. Stopped turns now settle those chips to a finished state.
+- **Multiple-choice answers survive a streaming question.** If you picked an answer to the first question of a multi-question prompt while later questions were still streaming in, your selection could get wiped. Selections are now preserved as more questions arrive.
+- **Smaller polish:** the code-block Copy button no longer gets stuck on "Copied" after a fast double-click; expanding a long code block stays expanded if the message re-renders; dictation cancel/stop is tighter; and reopening the app restores the focused split-pane to the right conversation.
 
 ## v0.51.1 — Live sub-agent activity
 

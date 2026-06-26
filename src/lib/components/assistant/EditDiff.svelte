@@ -143,7 +143,7 @@
   // fenced code blocks) so diff code is colorized instead of monochrome. Falls
   // back to plain text for unsupported langs or until shiki finishes loading.
   let shikiReady = $state(false);
-  whenReady().then(() => { shikiReady = true; }).catch(() => {});
+  whenReady().then(() => { shikiReady = true; }).catch((e) => console.error("shiki init failed (diff stays monochrome):", e));
   const EXT_LANG: Record<string, string> = {
     rs: "rust", ts: "typescript", tsx: "typescript", mts: "typescript", cts: "typescript",
     js: "javascript", jsx: "javascript", mjs: "javascript", cjs: "javascript",

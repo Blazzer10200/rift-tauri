@@ -63,14 +63,17 @@
   let askMultiSet = $state<Set<number>[]>([]);
   let askOtherText = $state<string[]>([]);
   $effect(() => {
-    // Reset arrays only when the question COUNT changes, not on every reactive
-    // re-run. askQuestions is $derived from streaming tool input, so it churns
-    // token-by-token while the tool_use block fills in — resetting on each churn
-    // silently erased a selection the user made before streaming finished.
-    if (askQuestions.length === askSingleIdx.length) return;
-    askSingleIdx = askQuestions.map(() => -2);     // -2 = no selection yet
-    askMultiSet = askQuestions.map(() => new Set());
-    askOtherText = askQuestions.map(() => "");
+    // Grow the per-question arrays as questions stream in, but PRESERVE any
+    // answers already made. askQuestions is $derived from streaming tool input,
+    // so it churns token-by-token while the tool_use block fills in — and the
+    // count can tick up (Q1 done, Q2 arrives). Rebuilding wholesale erased a
+    // selection the user made on Q1 before Q2 finished streaming; index-aligned
+    // growth keeps it. Shrinking (rare) just truncates the tail.
+    const n = askQuestions.length;
+    if (n === askSingleIdx.length) return;
+    askSingleIdx = Array.from({ length: n }, (_, i) => askSingleIdx[i] ?? -2);
+    askMultiSet = Array.from({ length: n }, (_, i) => askMultiSet[i] ?? new Set<number>());
+    askOtherText = Array.from({ length: n }, (_, i) => askOtherText[i] ?? "");
   });
   // Submission state — flips on submit, reset by tool_result via parent.
   let askSubmitting = $state(false);
