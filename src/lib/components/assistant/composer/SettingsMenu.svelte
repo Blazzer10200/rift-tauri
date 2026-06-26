@@ -123,12 +123,17 @@
   // (matches the desktop picker) instead of a permanently-expanded Legacy block.
   // Opens on hover/focus of the trigger row; the active model being a legacy one
   // surfaces it (accent dot + auto-open) so the current pick is never hidden.
-  let legacyOpen = $state(false);
   const activeIsLegacy = $derived(legacyModels.some((m) => m.id === assistant.effectiveModel));
   // Keep the flyout open whenever the active model OR the keyboard cursor lands
   // on a legacy row — otherwise arrowing onto Opus 4.7 highlights nothing.
   const cursorIsLegacy = $derived(!!MODEL_OPTIONS[settingsIdx]?.legacy);
-  $effect(() => { if (activeIsLegacy || cursorIsLegacy) legacyOpen = true; });
+  // Transient open-drivers: mouse hover + an explicit pin via the "More models"
+  // click. `legacyOpen` is fully derived so it auto-CLOSES when the keyboard
+  // cursor arrows back off a legacy row (no hover/pin) — the old one-way $effect
+  // left it stuck open for keyboard users.
+  let legacyHover = $state(false);
+  let legacyPinned = $state(false);
+  const legacyOpen = $derived(activeIsLegacy || cursorIsLegacy || legacyHover || legacyPinned);
 </script>
 
 <div
@@ -180,8 +185,8 @@
     <div
       class="legacy-zone"
       role="presentation"
-      onmouseenter={() => (legacyOpen = true)}
-      onmouseleave={() => { if (!activeIsLegacy) legacyOpen = false; }}
+      onmouseenter={() => (legacyHover = true)}
+      onmouseleave={() => { legacyHover = false; }}
     >
       <button
         type="button"
@@ -189,7 +194,7 @@
         class:expanded={legacyOpen}
         class:sel={activeIsLegacy}
         aria-expanded={legacyOpen}
-        onmousedown={(e) => { e.preventDefault(); legacyOpen = !legacyOpen; }}
+        onmousedown={(e) => { e.preventDefault(); legacyPinned = !legacyOpen; }}
         use:tooltip={"Previous-generation models"}
       >
         <span class="pi-ic more-ic"><Layers size={14} /></span>

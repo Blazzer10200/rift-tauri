@@ -121,6 +121,10 @@
 
   // Count the tool steps in a transcript for the collapsed-section "+N earlier".
   const toolCount = (blocks: { type: string }[]) => blocks.filter((b) => b.type === "tool").length;
+  // Settled (non-pending) tool blocks only — matches what `recentSteps` lists, so
+  // the "+N earlier steps" trail-more count isn't inflated by an in-flight call.
+  const settledToolCount = (blocks: { type: string; status?: string }[]) =>
+    blocks.filter((b) => b.type === "tool" && b.status !== "pending").length;
 </script>
 
 {#if !activityDock.open}
@@ -257,7 +261,7 @@
             </div>
           {:else}
             {@const steps = recentSteps(a.blocks)}
-            {@const total = toolCount(a.blocks)}
+            {@const total = settledToolCount(a.blocks)}
             {#if steps.length > 0}
               <ul class="trail" aria-label="Recent steps">
                 {#each steps as s (s.id)}

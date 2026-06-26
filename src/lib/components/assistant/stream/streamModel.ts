@@ -108,7 +108,10 @@ function nameToKind(name: string): TKind {
   if (n === "Agent" || n === "Task") return "agent";
   if (n === "WebSearch") return "web";
   if (n === "WebFetch") return "fetch";
-  if (n === "TodoWrite" || n === "TaskCreate" || n === "TaskUpdate") return "plan";
+  if (
+    n === "TodoWrite" || n === "TaskCreate" || n === "TaskUpdate" ||
+    n === "TaskList" || n === "TaskGet" || n === "TaskStop" || n === "TaskOutput"
+  ) return "plan";
   if (n === "ask_user") return "ask";
   return "mcp";
 }

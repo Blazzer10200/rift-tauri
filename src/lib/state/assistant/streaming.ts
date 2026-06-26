@@ -401,21 +401,30 @@ function applyTaskUpdate(tab: TabState, input: Record<string, unknown> | undefin
   tab.tasks = tab.tasks.map((t) => (t.id === taskId ? { ...t, status } : t));
 }
 
-// Ensure exactly ONE inline plan block exists for this turn. The plan card
-// (StreamPlan via StreamTurn) renders from the live `tab.tasks` aggregate, so a
-// single placeholder block is enough — every TaskCreate/TaskUpdate/TodoWrite
-// just mutates `tasks` and the one block re-renders reactively. Without a block
-// in the message the card has no mount point (the bug found 2026-06-25: tasks
-// were created in state but nothing displayed them).
+// Ensure exactly ONE inline plan block exists for this turn AND keep its
+// `input.todos` synced to the live `tab.tasks` aggregate. The plan card
+// (StreamPlan via StreamTurn) prefers the live aggregate, but `tab.tasks` is
+// runtime-only (reset to [] on reload — persistence.ts), so a block carrying
+// `input:{}` rendered an empty/invisible card on reopen. Mirroring the tasks
+// into the block's own `input.todos` makes it self-describing → the persisted
+// card survives reload. Called after every apply*(), so `tab.tasks` is current.
 function ensurePlanBlock(tab: TabState) {
-  if (tab.planBlockId) return;
+  const todos = tab.tasks.map((t) => ({ content: t.content, status: t.status }));
+  if (tab.planBlockId) {
+    const pid = tab.planBlockId;
+    mutateStreaming(tab, (m) => ({
+      ...m,
+      blocks: m.blocks.map((b) => (b.type === "tool" && b.id === pid ? { ...b, input: { todos } } : b)),
+    }));
+    return;
+  }
   const id = `plan-${tab.streamingMsgId ?? "x"}-${tab.tasks.length}`;
   tab.planBlockId = id;
   mutateStreaming(tab, (m) => ({
     ...m,
     blocks: [
       ...m.blocks,
-      { type: "tool", id, name: "TodoWrite", input: {}, result: null, isError: false, status: "done", startedAt: Date.now() },
+      { type: "tool", id, name: "TodoWrite", input: { todos }, result: null, isError: false, status: "done", startedAt: Date.now() },
     ],
   }));
 }
@@ -461,7 +470,11 @@ function appendToolUse(tab: TabState, block: { id: string; name: string; input?:
     ]);
     return;
   }
-  const DENY = new Set(["ToolSearch"]);
+  // Suppress: ToolSearch (internal schema fetch) + the read/control Task tools
+  // (TaskList/TaskGet/TaskStop/TaskOutput — newer CLI). TaskCreate/TaskUpdate
+  // drive the plan card above; these four are informational and would otherwise
+  // render as noisy generic tool chips in the main bubble.
+  const DENY = new Set(["ToolSearch", "TaskList", "TaskGet", "TaskStop", "TaskOutput"]);
   if (DENY.has(block.name)) return;
   if (
     block.name === "DesignSync" &&

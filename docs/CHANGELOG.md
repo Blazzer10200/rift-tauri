@@ -4,7 +4,12 @@
 
 ## Unreleased
 
-- **Background tasks no longer leave you waiting on a reply that never comes.** When the assistant ran a slow command "in the background" and said it would report back when it finished, that report could never arrive — Rift runs each turn as a one-shot, so there's nothing left listening once the turn ends (and the background command actually gets killed seconds later). The assistant is now told to run slow work in the foreground instead, so the result lands in the same reply. As a backstop, if a turn still kicks off a background task, you'll get a one-time heads-up — *"Background task won't auto-report — send a message to ask how it went"* — instead of silence.
+- **Background tasks no longer leave you waiting on a reply that never comes.** When the assistant ran a slow command "in the background" and said it would report back when it finished, that report could never arrive — Rift runs each turn as a one-shot, so there's nothing left listening once the turn ends (and the background command actually gets killed seconds later). The assistant is now told to run slow work in the foreground instead, so the result lands in the same reply. As a backstop, if a turn still kicks off a background task, you'll get a one-time heads-up — *"Background task won't auto-report — send a message to ask how it went"* — instead of silence (now shown once per chat, not once per turn).
+
+- **Your plan/checklist no longer disappears when you reopen a chat.** A plan the assistant built during a turn (the Tasks card) would vanish from the conversation after closing and reopening Rift — the card had nothing to render from once the live data was gone. The card now carries its own contents, so it survives a reload intact.
+- **The model picker's "More models" flyout behaves with the keyboard.** Arrowing onto a previous-generation model opened the flyout (good), but arrowing back to a current model left it stuck open. It now opens and closes as your cursor moves, and still responds to hover and the toggle as before.
+- **Cleaner tool readout during planning.** The newer Claude CLI's task-management calls (list/get/stop/output) no longer show up as stray generic tool chips in the chat — they're folded into the plan flow.
+- **Accurate "earlier steps" count under a collapsed sub-agent.** The "+N earlier steps" trail no longer counts a step that's still in progress, so the number matches what actually finished.
 
 ## v0.51.1 — Live sub-agent activity
 

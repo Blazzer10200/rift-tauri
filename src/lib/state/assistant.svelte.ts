@@ -405,6 +405,10 @@ class AssistantStore {
    *  "last checked Xm ago" freshness label in Settings → Assistant. */
   authLastProbed = $state<number | null>(null);
 
+  /** CLI session ids already warned about an unkeepable background task, so the
+   *  bg-task notice fires once per session, not once per turn (#62 fix B). */
+  private bgTaskWarnedSessions = new Set<string>();
+
   /** Per-conversation streaming state, keyed by Rift convoId. One entry per
    *  open chat tab. The store's UI-facing `messages` / `streaming` / `activity`
    *  / etc. getters delegate to `activeTab`; event handlers route by
@@ -885,13 +889,18 @@ class AssistantStore {
           tab?.onDone();
           // B: the turn backgrounded a Bash task. In headless -p mode the CLI
           // kills that shell ~5s after the turn and never re-invokes the model,
-          // so a "I'll report when it lands" promise can't be kept. Warn once so
-          // the user knows to ask explicitly rather than wait for a phantom reply.
+          // so a "I'll report when it lands" promise can't be kept. Warn once per
+          // session (not per turn) so a model that repeatedly backgrounds work
+          // doesn't spam a 9s toast every turn.
           if (p?.bg_task) {
-            notify.warn("Background task won't auto-report", {
-              detail: "This turn started a task in the background, but Rift can't notify you when it finishes. Send a message to ask how it went.",
-              timeoutMs: 9000,
-            });
+            const key = sid ?? "__active__";
+            if (!this.bgTaskWarnedSessions.has(key)) {
+              this.bgTaskWarnedSessions.add(key);
+              notify.warn("Background task won't auto-report", {
+                detail: "This turn started a task in the background, but Rift can't notify you when it finishes. Send a message to ask how it went.",
+                timeoutMs: 9000,
+              });
+            }
           }
         },
       ),
