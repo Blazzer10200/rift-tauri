@@ -77,6 +77,19 @@ pub struct TurnPerf {
     /// each to a concrete lever. None when `ttft_text_ms` is absent (no reply).
     #[serde(default)]
     pub dominant_cause: Option<String>,
+
+    // ── CLI self-reported timing (result-frame, server-side truth) ───────────
+    // The CLI stamps its OWN timing on the result frame: `ttft_ms` (turn-start →
+    // first model token, the API's true latency) and `duration_api_ms` (total
+    // wall-time spent in API calls). These are the model's cost, measured by the
+    // CLI, independent of anything Rift does. Surfacing them lets the AI Health
+    // pane separate "model API time" from "Rift overhead" (= duration_ms minus
+    // cli_api_ms) instead of attributing the whole turn to one or the other.
+    // `serde(default)` so pre-existing NDJSON lines deserialize as None.
+    #[serde(default)]
+    pub cli_ttft_ms: Option<u64>,
+    #[serde(default)]
+    pub cli_api_ms: Option<u64>,
 }
 
 /// Decompose a turn's first-reply wait into its largest contributor. Pure so it
@@ -466,6 +479,8 @@ mod tests {
             pre_text_tool_ms: None,
             was_cold: None,
             dominant_cause: None,
+            cli_ttft_ms: None,
+            cli_api_ms: None,
         };
         serde_json::to_string(&r).unwrap()
     }
@@ -495,6 +510,8 @@ mod tests {
             pre_text_tool_ms: None,
             was_cold: None,
             dominant_cause: cause.map(|c| c.to_string()),
+            cli_ttft_ms: None,
+            cli_api_ms: None,
         };
         serde_json::to_string(&r).unwrap()
     }
@@ -520,6 +537,8 @@ mod tests {
             pre_text_tool_ms: None,
             was_cold: Some(was_cold),
             dominant_cause: None,
+            cli_ttft_ms: None,
+            cli_api_ms: None,
         };
         serde_json::to_string(&r).unwrap()
     }

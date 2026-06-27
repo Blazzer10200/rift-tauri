@@ -2410,6 +2410,12 @@ fn record_turn_perf(
         usage.and_then(|u| u.get("cache_creation_input_tokens")).and_then(|x| x.as_u64());
     let cost_usd = v.get("total_cost_usd").and_then(|x| x.as_f64());
     let result_subtype = v.get("subtype").and_then(|s| s.as_str()).map(|s| s.to_owned());
+    // CLI self-reported timing (server-side truth, independent of Rift): `ttft_ms`
+    // = turn-start → first model token (the API's real latency), `duration_api_ms`
+    // = total wall-time in API calls. Lets the Health pane attribute the model's
+    // share vs Rift's. Best-effort — absent on older CLIs or error frames.
+    let cli_ttft_ms = v.get("ttft_ms").and_then(|x| x.as_u64());
+    let cli_api_ms = v.get("duration_api_ms").and_then(|x| x.as_u64());
 
     let cache_hit_rate = match (cache_read_tokens, input_tokens) {
         (Some(r), Some(i)) if r + i > 0 => Some(r as f64 / (r + i) as f64),
@@ -2442,6 +2448,8 @@ fn record_turn_perf(
         pre_text_tool_ms: pre_text_tool,
         was_cold: Some(was_cold),
         dominant_cause,
+        cli_ttft_ms,
+        cli_api_ms,
     };
 
     // Structured bus event — DiagStage::Log so it rides the normal 200/s cap,
@@ -2456,6 +2464,19 @@ fn record_turn_perf(
         fields,
     );
     diagnostics::perf::append_turn_perf(rec);
+
+    // Latency attribution at a glance: the CLI's own API time vs Rift's wall-clock.
+    // `overhead = duration - cli_api` is everything NOT spent in the model API
+    // (Rift IPC, tool execution, stdin/stdout plumbing). A small overhead next to
+    // a large cli_api proves the turn's cost is the model, not Rift.
+    if let Some(api) = cli_api_ms {
+        let dur = turn_start.elapsed().as_millis() as i64;
+        let overhead = dur - api as i64;
+        log::info!(
+            "turn-attrib: cli_api={api}ms cli_ttft={}ms rift_wall={dur}ms non_api_overhead={overhead}ms session={stream_sid}",
+            cli_ttft_ms.map(|v| v as i64).unwrap_or(-1),
+        );
+    }
 }
 
 /// A rejected credential (401) arrives either as a stdout error-result frame
