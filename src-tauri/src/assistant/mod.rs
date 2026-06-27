@@ -19,6 +19,7 @@ pub mod config;
 pub mod convo_store;
 pub mod env_checks;
 pub mod git_local;
+pub mod local_llm;
 pub mod mcp_server;
 pub mod news;
 pub mod nothink;
@@ -54,6 +55,9 @@ pub use env_checks::*;
 // R6 split (2026-06-09): one-shot headless spawns (enhance / title) in
 // `oneshot.rs`. Glob re-export for the __cmd__ items.
 pub use oneshot::*;
+// Local-LLM commands (test/list/context/optimize) split out of oneshot.rs
+// (2026-06-27). Glob re-export for the __cmd__ items.
+pub use local_llm::*;
 // "What's new in AI" feed (Workspace page): deterministic changelog+npm fetch +
 // opt-in AI digest in `news.rs`. Glob re-export for the __cmd__ items.
 pub use news::*;
