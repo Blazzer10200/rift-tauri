@@ -49,6 +49,11 @@
     p90_ttft_text_cold_ms: number | null;
     cache_hit_rate: number | null;
     total_output_tokens: number;
+    // Latency attribution: model API time (avg_cli_api_ms) vs what Rift adds on
+    // top (p50_non_api_overhead_ms = duration - cli_api). Null until turns carry
+    // the CLI's server-side timing. Answers "is the wait Rift or the model".
+    p50_non_api_overhead_ms: number | null;
+    avg_cli_api_ms: number | null;
     cost_by_day: [string, number][];
     latency_p90_by_day: [string, number | null][];
     by_model: ModelPerfStats[];
@@ -236,6 +241,19 @@
       return "This looks like the Anthropic API being slow, not your Rift setup — it usually passes.";
     }
     return null;
+  });
+  // Model-vs-Rift split (cont.219): the single most reassuring fact when a turn
+  // "drags" — most of the wait is the model thinking, not Rift. Reads the CLI's
+  // own API time (avg_cli_api_ms) against the overhead Rift adds on top
+  // (p50_non_api_overhead_ms). Only shown once both exist AND the model clearly
+  // dominates (≥2× overhead), so the claim is always true for this user's data.
+  const splitAttribution = $derived.by((): { model: string; rift: string; pct: number } | null => {
+    const api = perfStats?.avg_cli_api_ms;
+    const overhead = perfStats?.p50_non_api_overhead_ms;
+    if (api == null || overhead == null || api <= 0) return null;
+    if (api < overhead * 2) return null;
+    const pct = Math.round((api / (api + overhead)) * 100);
+    return { model: fmtMs(api), rift: fmtMs(overhead), pct };
   });
   // Show the cold-start aside only when warm is genuinely faster than cold
   // (≥2s gap) so "keeping a chat going stays fast" is a true claim, not hollow
@@ -754,6 +772,11 @@
                setup — the single most reassuring thing to surface. -->
           {#if latencyAttribution}
             <p class="ah-attrib"><Wifi size={13} strokeWidth={1.9} />{latencyAttribution}</p>
+          {/if}
+          <!-- cont.219: model-vs-Rift split — proves the wait is the model, not
+               Rift's plumbing, on the user's own turns. -->
+          {#if splitAttribution}
+            <p class="ah-attrib subtle"><Gauge size={13} strokeWidth={1.9} />Of a typical reply, about {splitAttribution.pct}% is Claude thinking ({splitAttribution.model}); Rift's own overhead adds just {splitAttribution.rift}. The wait is the model, not the app.</p>
           {/if}
           <!-- G1: cold-start shown as the one-time warm-up it is, never as a
                problem with the user's setup. Only when warm is meaningfully

@@ -238,6 +238,17 @@ pub struct TurnPerfStats {
     pub cache_hit_rate: Option<f64>,
     /// Σ output tokens across all turns (a rough throughput proxy).
     pub total_output_tokens: u64,
+    /// Median per-turn NON-API overhead (ms) = duration - cli_api: what Rift adds
+    /// on top of the model's own API time (IPC, tool exec, plumbing). The honest
+    /// answer to "is the latency Rift or the model" — a small value next to a
+    /// large `avg_cli_api_ms` proves the wait is the model. None until turns carry
+    /// the CLI's `duration_api_ms` (post-attrib history).
+    #[serde(default)]
+    pub p50_non_api_overhead_ms: Option<u64>,
+    /// Mean model-API time (ms) over turns that reported it — the model's share,
+    /// to read against `p50_non_api_overhead_ms`. None below any sample.
+    #[serde(default)]
+    pub avg_cli_api_ms: Option<u64>,
     /// Per-day cost buckets (UTC "YYYY-MM-DD" → usd), most-recent first, ≤30 days.
     pub cost_by_day: Vec<(String, f64)>,
     /// Per-day p90 first-reply latency (UTC "YYYY-MM-DD" → ms), most-recent
@@ -291,6 +302,14 @@ fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
     let mut ttft_text_warm: Vec<u64> = Vec::new();
     let mut ttft_text_cold: Vec<u64> = Vec::new();
     let mut durations: Vec<u64> = Vec::new();
+    // Non-API overhead per turn = duration_ms - cli_api_ms (Rift wall-clock minus
+    // the model's own API time, as the CLI measures it). What Rift adds: IPC, tool
+    // execution, stdin/stdout plumbing. Only collected when a turn carries both
+    // numbers (post-attrib history); clamped at 0 (a turn whose tool work overlaps
+    // API streaming can read slightly negative — that's not "negative overhead").
+    let mut non_api_overhead: Vec<u64> = Vec::new();
+    let mut cli_api_sum: u64 = 0;
+    let mut cli_api_count: usize = 0;
     let mut cache_read_sum: u64 = 0;
     let mut input_sum: u64 = 0;
     let mut total_output: u64 = 0;
@@ -324,6 +343,13 @@ fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
         }
         if let Some(v) = rec.duration_ms {
             durations.push(v);
+        }
+        // Non-API overhead: only when the turn carried both its wall-clock and the
+        // CLI's API time. saturating_sub clamps the rare overlap-negative to 0.
+        if let (Some(dur), Some(api)) = (rec.duration_ms, rec.cli_api_ms) {
+            non_api_overhead.push(dur.saturating_sub(api));
+            cli_api_sum = cli_api_sum.saturating_add(api);
+            cli_api_count += 1;
         }
         if let (Some(r), Some(i)) = (rec.cache_read_tokens, rec.input_tokens) {
             cache_read_sum = cache_read_sum.saturating_add(r);
@@ -366,6 +392,14 @@ fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
     let warm_turns_measured = ttft_text_warm.len();
     let cold_turns_measured = ttft_text_cold.len();
     durations.sort_unstable();
+    non_api_overhead.sort_unstable();
+    // Mean model-API time over turns that reported it — pairs with the overhead
+    // p50 so the UI can say "model X ms vs Rift Y ms" at a glance.
+    let avg_cli_api_ms = if cli_api_count > 0 {
+        Some(cli_api_sum / cli_api_count as u64)
+    } else {
+        None
+    };
 
     let cache_hit_rate = if cache_read_sum + input_sum > 0 {
         Some(cache_read_sum as f64 / (cache_read_sum + input_sum) as f64)
@@ -430,6 +464,8 @@ fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
         p90_ttft_text_cold_ms: percentile(&ttft_text_cold, 0.90, 1),
         cache_hit_rate,
         total_output_tokens: total_output,
+        p50_non_api_overhead_ms: percentile(&non_api_overhead, 0.50, 1),
+        avg_cli_api_ms,
         cost_by_day,
         latency_p90_by_day,
         by_model,
