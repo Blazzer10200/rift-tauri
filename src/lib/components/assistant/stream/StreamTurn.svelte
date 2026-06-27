@@ -71,20 +71,6 @@
   // stall). Freeze the clock, calm the chrome, and say so plainly.
   const awaitingInput = $derived(liveTool?.kind === "ask");
 
-  // The head is the TURN-level status only: "Working…" live, "Worked for Xs"
-  // when done. It must NOT say "Thinking…" — and the StreamThinking block only
-  // renders once thinking is DONE (the collapsible "Thought for Xs"). While
-  // active, the live thinking state is already shown by the head + the footer's
-  // rotating verb (which includes "Thinking…"); rendering the active block too
-  // duplicated that label. Thinking-in-progress is the footer's job, not a block.
-  const headLabel = $derived(
-    !streaming
-      ? `Worked for ${fmtDur(turn.totalSecs)}`
-      : awaitingInput
-        ? "Waiting for you"
-        : "Working…"
-  );
-
   // Live footer meta — spec's `Unfurling… 5s · 312 tokens`. 1s ticker drives
   // elapsed + tokens; both pull from the assistant store (turnStartedAt +
   // liveOutputTokens already maintained by streaming.ts, no backend work).
@@ -101,6 +87,27 @@
   });
   const liveTokens = $derived.by(() =>
     streaming && assistant.liveOutputTokens > 0 ? assistant.liveOutputTokens : null,
+  );
+
+  // The head is the TURN-level status: "Working…" live, "Worked for Xs" done.
+  // EXCEPTION — a thinking block that's active before any tool/text lands: Opus
+  // omits thinking text, so that 6-8s gap otherwise shows only "Working…" with
+  // no signal of what's happening → reads as a hang ("everything is slow"). Say
+  // "Thinking…" plainly here so the gap reads as the model reasoning. Once a tool
+  // or token lands, `thinkingNow` falls false and the head returns to "Working…"
+  // (the footer verb + work rows take over). The done collapsible "Thought for
+  // Xs" is still the StreamThinking block below.
+  const thinkingNow = $derived(
+    streaming && !!turn.thinking?.active && !liveTool && liveTokens == null,
+  );
+  const headLabel = $derived(
+    !streaming
+      ? `Worked for ${fmtDur(turn.totalSecs)}`
+      : awaitingInput
+        ? "Waiting for you"
+        : thinkingNow
+          ? "Thinking…"
+          : "Working…"
   );
 
   // Live footer verb: a pending tool drives the real action word ("Reading X");

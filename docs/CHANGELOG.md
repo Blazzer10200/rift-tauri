@@ -2,24 +2,23 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.52.0 — Voice mode overhaul
+## v0.52.1 — A faster, sharper assistant
 
-> Dictation got a real, responsive feel: a live mic meter that actually reacts to your voice, a keyboard shortcut that works the way you'd expect, and hands-free auto-stop.
+> The assistant felt slow and worked one step at a time. Two root causes, both fixed: it was thinking on every turn even when thinking was off, and it was never told to use its tools in parallel.
 
-### You can see your voice now
-- **A real audio meter.** The mic button's waveform used to be a fixed animation that looked the same whether you were talking or silent. It's now driven by your actual microphone level — the bars rise and fall with your voice, so you can tell at a glance that Rift is hearing you. (Works on both the built-in Web Speech engine and on-device Whisper.) When the line goes quiet it settles into a gentle idle pulse rather than freezing.
+### Speed
+- **No more silent "thinking" pause.** A turn that didn't carry the thinking setting was defaulting to thinking-on, so every reply sat through a 6–8s hidden reasoning pass before any text appeared (on Opus the thinking is invisible, so it just looked frozen). The default now matches the rest of the app — thinking is off unless you turn it on — and a clear **"Thinking…"** label shows during the pause when it is on, so it never reads as a hang.
+- **Tools now run in parallel.** The assistant was making tool calls one at a time — read a file, wait, read the next, wait — which felt slow on anything multi-step. It now batches independent calls (opening several files, running independent searches or checks) into a single round-trip, so multi-step work moves at a noticeably faster clip.
 
-### Ctrl+D to dictate — tap or hold
-- **A dictation keyboard shortcut.** Press **Ctrl+D** (Cmd+D on Mac) to start and stop dictation without reaching for the mic button.
-- **Tap or hold, whichever fits.** A quick tap toggles dictation on and off hands-free. Press and *hold* instead and it works like push-to-talk — it records while you hold the key and stops the moment you let go. One shortcut, both styles.
+### Sharper edits
+- **Edits fit your codebase.** New code now follows the surrounding file's naming, formatting, and comment style instead of imposing its own, sticks to exactly what you asked for (no surprise refactors of nearby code), and stops adding unrequested explanatory comments.
 
-### Hands-free auto-stop
-- **A "stopping soon" countdown.** When you turn on "Auto-stop on silence," a small countdown now appears next to the mic in the last couple of seconds before it ends, so the auto-stop never catches you off guard.
-
-### Smaller things
-- **Transcript cleanup keeps working.** The optional "clean up transcript" pass (punctuation, capitalization) was pinned to a model Anthropic has since retired; it now runs on a current model, so cleanup keeps working. The setting is renamed from the old model name to simply "Clean up transcript."
+### Quieter internals
+- **No more update-check error spam.** On some installs the updater logged the same "couldn't locate manifest" error every few seconds (hundreds of identical lines a day); it now logs the condition once and stays quiet.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.52.0** — Voice mode overhaul: a real mic meter driven by your actual voice level (Web Speech + on-device Whisper), **Ctrl+D** to dictate (tap to toggle or hold for push-to-talk), a "stopping soon" countdown for auto-stop-on-silence, and transcript cleanup moved onto a current model.
 
 - **v0.51.3** — Haiku 4.5 removed from the model picker (Anthropic pulled it); anything pinned to Haiku falls back to Sonnet, older Haiku chats still render. Reversible kill-switch, same as Fable.
 - **v0.51.2** — A correctness batch from a three-pass audit: background-task promises that never resolved, the plan/Tasks card surviving a reload, the model-picker flyout keyboard behavior, prompt-enhance timeouts, cross-chat state leaks, clean stop-mid-turn records, and a pile of smaller reactivity fixes.

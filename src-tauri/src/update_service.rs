@@ -64,6 +64,14 @@ struct Inner {
     /// `check` can surface "updater unavailable — reinstall" instead of a false
     /// "up to date" that hides a dead updater.
     init_error: Option<String>,
+    /// True once we've logged the current `init_error` at ERROR. A broken-install
+    /// / missing-manifest failure won't self-heal mid-session, but the periodic
+    /// background check calls `check()` every ~10-30s — without this guard each
+    /// poll re-logged the same "updater unavailable" ERROR, flooding rift.log
+    /// (645 identical lines over 2 days in the field). Log it once; demote the
+    /// repeats to debug. Reset whenever the manager recovers so a genuinely new
+    /// failure logs again.
+    reason_logged: bool,
 }
 
 pub struct UpdateService {
@@ -92,7 +100,7 @@ impl UpdateService {
             }
         };
         Self {
-            inner: Mutex::new(Inner { mgr, pending: None, downloaded: false, download_epoch: 0, init_error }),
+            inner: Mutex::new(Inner { mgr, pending: None, downloaded: false, download_epoch: 0, init_error, reason_logged: false }),
         }
     }
 
@@ -121,6 +129,7 @@ impl UpdateService {
                             log::info!("update check: manager recovered on retry");
                             g.mgr = Some(m.clone());
                             g.init_error = None;
+                            g.reason_logged = false;
                             m
                         }
                         recheck => {
@@ -131,8 +140,18 @@ impl UpdateService {
                                     .clone()
                                     .unwrap_or_else(|| "update source unavailable".to_string()),
                             };
+                            // Log the unavailable-updater reason ONCE at ERROR; a
+                            // broken-install failure won't self-heal mid-session, so
+                            // the ~10-30s background poll would otherwise flood the
+                            // log with identical lines. Repeats go to debug.
+                            let first_log = !g.reason_logged || g.init_error.as_deref() != Some(reason.as_str());
                             g.init_error = Some(reason.clone());
-                            log::error!("update check: updater unavailable — {reason}");
+                            g.reason_logged = true;
+                            if first_log {
+                                log::error!("update check: updater unavailable — {reason} (suppressing repeats this session)");
+                            } else {
+                                log::debug!("update check: updater still unavailable — {reason}");
+                            }
                             // Distinguish a blocked network from a broken install —
                             // a firewalled R2 feed isn't a reinstall problem.
                             let low = reason.to_ascii_lowercase();
