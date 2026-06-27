@@ -817,6 +817,15 @@ fn handle_request(req: RpcRequest, roots: &[PathBuf]) -> Option<RpcResponse> {
                     "mcp tool call",
                     serde_json::json!({ "tool": name, "dur_ms": tool_dur_ms, "ok": tool_ok }),
                 );
+                // Phase 5: feed the same sample into the metrics registry — a
+                // tool-call counter + a latency histogram the health panel reads
+                // without re-scanning events. The rich event above stays the
+                // queryable record; this is the cheap running aggregate.
+                crate::diagnostics::metrics::incr("mcp.tool_calls", 1);
+                crate::diagnostics::metrics::record_ms("mcp.tool_ms", tool_dur_ms);
+                if !tool_ok {
+                    crate::metric!("mcp.tool_errors");
+                }
             }
             match res {
                 Ok(text) => Ok(json!({

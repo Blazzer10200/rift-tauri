@@ -1430,6 +1430,14 @@ async fn dispatch_turn(
 /// scrubs + rate-limits. Resource "warm_pool" so the console can isolate the
 /// latency-critical path the cont.219 hunt had to hand-probe.
 fn emit_dispatch(session_id: &str, outcome: &str, model: &str, key: &warm_pool::SpawnKey) {
+    // Phase 5: also bump a per-outcome counter via the metric! primitive — gives
+    // the health panel a running warm-hit total without re-scanning the ring.
+    match outcome {
+        "hit" => crate::metric!("warm_pool.hit"),
+        "cold" => crate::metric!("warm_pool.cold"),
+        "signature_drain" => crate::metric!("warm_pool.drain"),
+        _ => {}
+    }
     crate::diagnostics::emit_with_fields(
         crate::diagnostics::DiagStage::Log,
         crate::diagnostics::DiagLevel::Info,
