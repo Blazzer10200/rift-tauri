@@ -6,7 +6,6 @@
   import { workspace } from "../../state/workspace.svelte";
   import { notify } from "../../state/toast.svelte";
   import type { PermissionMode } from "../../state/assistant/types";
-  import Markdown from "./Markdown.svelte";
   import { modelFamily } from "../../state/assistant/helpers";
   import { requestPrewarm, resetPrewarmDedup } from "../../state/assistant/prewarm";
   import { fuzzyScore, isFileDrag, attachImageFiles, summarizeAttach, attachTextFiles, summarizeTextAttach } from "./composer/helpers";
@@ -21,6 +20,8 @@
   import SettingsMenu from "./composer/SettingsMenu.svelte";
   import CtxRing from "./composer/CtxRing.svelte";
   import PermMenu from "./composer/PermMenu.svelte";
+  import PreviewPanel from "./composer/PreviewPanel.svelte";
+  import QuickChips from "./composer/QuickChips.svelte";
   import {
     EFFORT_OPTIONS, MODEL_OPTIONS, MODE_OPTIONS,
     effortStopsFor, clampEffortIdx, permToneFor,
@@ -1152,14 +1153,7 @@
     {/if}
 
     {#if previewing && draft.trim().length > 0}
-      <div class="preview-panel" role="region" aria-label="Message preview">
-        <div class="preview-head">
-          <Eye size={12} />
-          <span class="preview-title">Preview</span>
-          <span class="preview-sub">rendered Markdown</span>
-        </div>
-        <div class="preview-body"><Markdown text={draft} /></div>
-      </div>
+      <PreviewPanel {draft} />
     {/if}
 
     {#if slashOpen && slashFiltered.length > 0}
@@ -1180,13 +1174,7 @@
     {/if}
 
     {#if hero && draft.length === 0 && !streaming && attachments.length === 0}
-      <div class="quick-chips">
-        {#each quickStarts as s (s.title)}
-          <button class="quick-chip" type="button" onclick={() => pickChip(s.prompt)}>
-            <span class="qc-ic"><s.icon size={14}/></span>{s.title}
-          </button>
-        {/each}
-      </div>
+      <QuickChips {quickStarts} onPick={pickChip} />
     {/if}
 
     <div class="composer" class:hero={hero} class:streaming={streaming} class:enchanting={enhancing} data-mode={mode}>
@@ -1591,29 +1579,8 @@
   }
 
   /* Hero mode — home surface. The composer is the centerpiece: a larger,
-     more rounded card with stack-aware quick-start chips floating above it on
-     the column's transparent background (mockup `.quick-chips`). */
-  .quick-chips {
-    display: flex; flex-wrap: wrap; gap: 7px;
-    padding: 0 2px 12px;
-  }
-  .quick-chip {
-    display: inline-flex; align-items: center; gap: 7px;
-    height: 28px; padding: 0 12px 0 10px;
-    border-radius: 8px;
-    font: inherit; font-size: 12px; color: var(--fg-muted);
-    background: transparent; border: 1px solid var(--border);
-    cursor: pointer;
-    transition: background var(--dur-fast, 140ms), color var(--dur-fast, 140ms),
-                border-color var(--dur-fast, 140ms),
-                transform var(--dur-fast, 140ms) var(--ease-page, ease-out);
-  }
-  .qc-ic { display: inline-flex; color: var(--fg-faint); flex: none; transition: color var(--dur-fast, 140ms); }
-  .quick-chip:hover { background: var(--surface-hover); color: var(--fg-2); border-color: var(--border-strong); transform: translateY(-1px); }
-  .quick-chip:hover .qc-ic { color: var(--accent); }
-  .quick-chip:active { transform: translateY(0) scale(0.97); }
-  @media (prefers-reduced-motion: reduce) { .quick-chip { transition: none; } }
-
+     more rounded card with stack-aware quick-start chips floating above it.
+     Chip styles moved to composer/QuickChips.svelte. */
   .composer.hero .composer-box { border-radius: 16px; padding: 3px; }
   .composer.hero textarea { font-size: 14.5px; line-height: 1.55; padding: 11px 12px 11px 14px; min-height: 30px; letter-spacing: -0.003em; }
   /* Keep the hero placeholder in lockstep with the hero textarea so the ghost
@@ -1942,53 +1909,10 @@
   /* Pending-rail styles moved to composer/QueueRail.svelte (C3). */
 
   /* Slash + mention popover styles moved to composer/SlashMenu.svelte +
-     composer/MentionPopover.svelte (C6). slash-in stays — .preview-panel
-     below still uses it. */
-  @keyframes slash-in {
-    from { opacity: 0; transform: translateY(4px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
+     composer/MentionPopover.svelte (C6). */
+  /* Draft preview panel styles moved to composer/PreviewPanel.svelte. */
 
   /* Prompt-enhancer panel styles moved to composer/EnhanceBar.svelte (C5). */
-  /* Draft preview (eye) — same glass panel as enhance, neutral chrome. */
-  .preview-panel {
-    position: absolute;
-    bottom: calc(100% + 8px);
-    left: 0;
-    width: 100%;
-    box-sizing: border-box;
-    background: color-mix(in oklch, var(--surface) 88%, transparent);
-    backdrop-filter: blur(14px) saturate(135%);
-    -webkit-backdrop-filter: blur(14px) saturate(135%);
-    border: 1px solid var(--border-strong);
-    border-radius: 14px;
-    box-shadow:
-      0 18px 44px -8px oklch(0 0 0 / 0.55),
-      inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
-    padding: 12px;
-    z-index: 10;
-    animation: slash-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-  .preview-head {
-    display: flex; align-items: center; gap: 7px;
-    margin-bottom: 8px;
-    color: var(--fg-muted);
-  }
-  .preview-title { font-size: var(--fs-sm); font-weight: 600; color: var(--fg); }
-  .preview-sub {
-    font-size: 10px; font-weight: 500;
-    color: var(--fg-faint);
-    margin-left: auto;
-    letter-spacing: 0.02em;
-  }
-  .preview-body {
-    font-size: var(--fs-md);
-    line-height: 1.55;
-    color: var(--fg);
-    max-height: 280px;
-    overflow-y: auto;
-    padding: 2px 4px;
-  }
 
   /* ── Magic "enchanting" state ─────────────────────────────────────────
      While the wand call is in flight, the effect lands on the message itself:

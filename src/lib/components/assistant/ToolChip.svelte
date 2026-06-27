@@ -18,6 +18,8 @@
   import { untrack } from "svelte";
   import Markdown from "./Markdown.svelte";
   import { basename } from "./toolCaption";
+  import AgentCard from "./toolchip/AgentCard.svelte";
+  import TodoCard from "./toolchip/TodoCard.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
   const reducedMotion =
@@ -517,38 +519,17 @@
 
 <div class="chip" data-status={tool.status} data-category={category} data-variant={variant} class:as-card={isCard} class:is-ask={isAskUser}>
   {#if isAgent}
-    <!-- Agent card head — bigger, badge-led, no chevron toggle (always open). -->
-    <div class="agent-head">
-      <span class="agent-icon"><Bot size={14} /></span>
-      <span class="agent-pill">{agentSubtype}</span>
-      {#if agentDescription}
-        <span class="agent-desc">{agentDescription}</span>
-      {/if}
-      {#if durationLabel}
-        <span class="chip-duration mono" use:tooltip={"Wall-clock duration"}>{durationLabel}</span>
-      {/if}
-      <span class="chip-status" aria-label={tool.status === "pending" ? "Running" : tool.status === "error" ? "Error" : "Done"}>
-        {#if tool.status === "pending"}<Loader2 size={12} class="chip-spin" />
-        {:else if tool.status === "error"}<AlertCircle size={12} />
-        {:else}<CheckCircle2 size={12} />{/if}
-      </span>
-    </div>
+    <AgentCard
+      {agentSubtype}
+      {agentDescription}
+      {agentPrompt}
+      {agentResult}
+      isError={tool.isError ?? false}
+      status={tool.status}
+      {durationLabel}
+    />
   {:else if isTodoWrite}
-    <!-- TodoWrite card head — counts summary + status. -->
-    <div class="todo-head">
-      <span class="agent-icon"><ListChecks size={13} /></span>
-      <span class="todo-title">Tasks</span>
-      <span class="todo-counts mono">
-        <span class="todo-count done" use:tooltip={"completed"}>{todoCounts.done}</span>
-        <span class="todo-sep">/</span>
-        <span class="todo-count total" use:tooltip={"total"}>{todoCounts.total}</span>
-      </span>
-      <span class="chip-status" aria-label={tool.status === "pending" ? "Running" : tool.status === "error" ? "Error" : "Done"}>
-        {#if tool.status === "pending"}<Loader2 size={11} class="chip-spin" />
-        {:else if tool.status === "error"}<AlertCircle size={11} />
-        {:else}<CheckCircle2 size={11} />{/if}
-      </span>
-    </div>
+    <TodoCard {todoItems} {todoCounts} status={tool.status} />
   {:else if isAskUser}
     <!-- AskUser card head — purple-ish meta tone, "Question" pill + status. -->
     <div class="ask-head">
@@ -598,45 +579,7 @@
     </button>
   {/if}
 
-  {#if isAgent && expanded}
-    <div class="agent-body">
-      {#if agentPrompt}
-        <div class="agent-prompt-wrap">
-          <span class="agent-field-label">prompt</span>
-          <blockquote class="agent-prompt">{agentPrompt}</blockquote>
-        </div>
-      {/if}
-      <div class="agent-field-label">{tool.isError ? "error" : tool.status === "pending" ? "working…" : "result"}</div>
-      {#if tool.status === "pending" && !tool.result}
-        <div class="agent-pending">
-          <span class="dots" aria-hidden="true"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>
-          <span>Agent running…</span>
-        </div>
-      {:else if tool.isError}
-        <pre class="result error">{tool.result ?? ""}</pre>
-      {:else if agentResult}
-        <div class="agent-result"><Markdown text={agentResult.text} /></div>
-        {#if agentResult.truncated > 0}
-          <div class="agent-field-label">+{agentResult.truncated.toLocaleString()} more chars truncated</div>
-        {/if}
-      {/if}
-    </div>
-  {:else if isTodoWrite && expanded}
-    <div class="todo-body">
-      <ul class="todo-list">
-        {#each todoItems as item, i (i + item.content)}
-          <li class="todo-item" data-status={item.status}>
-            <span class="todo-box" aria-hidden="true">
-              {#if item.status === "completed"}<CheckCircle2 size={12} />
-              {:else if item.status === "in_progress"}<Loader2 size={12} class="todo-spin" />
-              {:else}<Circle size={12} />{/if}
-            </span>
-            <span class="todo-content">{item.content}</span>
-          </li>
-        {/each}
-      </ul>
-    </div>
-  {:else if isAskUser && expanded}
+  {#if isAskUser && expanded}
     <div class="ask-body">
       {#if askAnswered}
         <!-- Final state — show the model's tool_result, which already
@@ -1211,158 +1154,6 @@
   }
   .chip.as-card[data-category="meta"] {
     border-left-color: color-mix(in oklab, var(--accent) 55%, var(--border));
-  }
-
-  /* Agent head */
-  .agent-head {
-    display: flex; align-items: center; gap: 9px;
-    padding: 8px 12px;
-    border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
-    background: color-mix(in oklab, var(--accent) 8%, transparent);
-  }
-  .agent-icon {
-    display: inline-flex;
-    color: var(--accent-hover);
-    flex-shrink: 0;
-  }
-  .agent-pill {
-    display: inline-flex; align-items: center;
-    padding: 2px 9px;
-    border-radius: 999px;
-    background: color-mix(in oklab, var(--accent) 22%, transparent);
-    border: 1px solid color-mix(in oklab, var(--accent) 40%, var(--border));
-    color: var(--accent-hover);
-    font-size: 10.5px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    font-family: var(--font-mono, monospace);
-    flex-shrink: 0;
-  }
-  .agent-desc {
-    flex: 1; min-width: 0;
-    color: var(--fg-2);
-    font-size: 12px;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  .agent-body {
-    padding: 10px 14px 12px;
-    display: flex; flex-direction: column;
-    gap: 8px;
-  }
-  .agent-field-label {
-    font-size: 9.5px;
-    text-transform: lowercase;
-    letter-spacing: 0.04em;
-    color: var(--fg-muted);
-    font-weight: 600;
-  }
-  .agent-prompt-wrap { display: flex; flex-direction: column; gap: 4px; }
-  .agent-prompt {
-    margin: 0;
-    padding: 8px 12px;
-    border-left: 2px solid color-mix(in oklab, var(--accent) 50%, transparent);
-    background: color-mix(in oklch, var(--bg-elev-1) 80%, transparent);
-    color: var(--fg-2);
-    font-size: 11.5px;
-    line-height: 1.5;
-    font-style: italic;
-    border-radius: 0 4px 4px 0;
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    max-height: 180px;
-    overflow-y: auto;
-  }
-  .agent-result {
-    padding: 4px 0;
-    font-size: 12.5px;
-    line-height: 1.55;
-  }
-  .agent-pending {
-    display: inline-flex; align-items: center; gap: 8px;
-    color: var(--fg-muted);
-    font-size: 11.5px;
-    font-style: italic;
-  }
-  .agent-pending .dots { display: inline-flex; gap: 3px; }
-  .agent-pending .dot {
-    width: 5px; height: 5px;
-    border-radius: 50%;
-    background: var(--accent);
-    animation: agent-dot 1.1s ease-in-out infinite;
-  }
-  .agent-pending .dot:nth-child(2) { animation-delay: 0.15s; }
-  .agent-pending .dot:nth-child(3) { animation-delay: 0.3s; }
-  @keyframes agent-dot {
-    0%, 60%, 100% { opacity: 0.3; transform: scale(0.85); }
-    30% { opacity: 1; transform: scale(1); }
-  }
-
-  /* Todo head + checklist */
-  .todo-head {
-    display: flex; align-items: center; gap: 8px;
-    padding: 6px 11px;
-    border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
-    background: color-mix(in oklab, var(--accent) 6%, transparent);
-  }
-  .todo-head .agent-icon { color: var(--accent); }
-  .todo-title {
-    color: var(--fg-2);
-    font-weight: 600;
-    font-size: 11px;
-    letter-spacing: 0.01em;
-  }
-  .todo-counts {
-    display: inline-flex; align-items: center; gap: 3px;
-    margin-left: auto;
-    margin-right: 4px;
-    font-size: 10.5px;
-    font-variant-numeric: tabular-nums;
-  }
-  .todo-count.done { color: var(--accent-hover); font-weight: 600; }
-  .todo-count.total { color: var(--fg-muted); }
-  .todo-sep { color: var(--fg-faint); }
-  .todo-body { padding: 8px 12px 10px; }
-  .todo-list {
-    list-style: none;
-    margin: 0; padding: 0;
-    display: flex; flex-direction: column;
-    gap: 3px;
-  }
-  .todo-item {
-    display: grid;
-    grid-template-columns: 18px 1fr;
-    align-items: start;
-    gap: 8px;
-    padding: 3px 4px;
-    border-radius: 4px;
-    font-size: 12px;
-    line-height: 1.45;
-    color: var(--fg-2);
-    /* Transition (not animation) — safe with mutateStreaming rebuild. */
-    transition: color 200ms ease-out, opacity 200ms ease-out;
-  }
-  .todo-box {
-    display: inline-flex; align-items: center; justify-content: center;
-    color: var(--fg-faint);
-    padding-top: 1px;
-    transition: color 200ms ease-out;
-  }
-  .todo-content {
-    word-wrap: break-word;
-    transition: color 200ms ease-out, text-decoration-color 200ms ease-out;
-  }
-  .todo-item[data-status="completed"] .todo-box { color: var(--accent-hover); }
-  .todo-item[data-status="completed"] .todo-content {
-    color: var(--fg-muted);
-    text-decoration: line-through;
-    text-decoration-color: color-mix(in oklch, var(--fg-muted) 60%, transparent);
-  }
-  .todo-item[data-status="in_progress"] .todo-box { color: var(--accent); }
-  .todo-item[data-status="in_progress"] .todo-content { color: var(--fg); font-weight: 500; }
-  .todo-item[data-status="pending"] .todo-content { color: var(--fg-2); }
-  .todo-box :global(.todo-spin) {
-    animation: chip-spin 1.1s linear infinite;
-    color: var(--accent);
   }
 
   /* ── AskUser card ──────────────────────────────────────────────────────
