@@ -2,6 +2,19 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.62.0 — Honest about where the time goes
+
+> This one settles the question of why a reply sometimes feels slow. Short version: it's almost always Claude thinking, not Rift — and now the app proves it instead of asking you to take our word. Plus a real reliability fix to the "is it stuck?" indicator.
+
+### What you'll notice
+- **No more false "stuck" warnings while Claude is thinking.** On the newest Claude models, a deep reasoning pass streams silently (no visible tokens) — and Rift's "still working?" watchdog mistook that silence for a hang, flashing "Waiting on the model · 45s" while the header still said "Thinking…". The two contradicted each other. Now the watchdog knows an active think isn't a stall, so the indicator stays honest.
+- **AI Health now shows model-vs-Rift timing.** The Speed & efficiency card adds one plain-English line, computed from your own replies: *"about 93% is Claude thinking (17.0s); Rift's own overhead adds just 1.4s. The wait is the model, not the app."* It only appears when the model genuinely dominates, so it's always true for your data — the honest answer to "why did that take a while?"
+
+### Under the hood
+- **Rift now records the CLI's own server-side timing.** Every reply, the Claude CLI reports its true time-to-first-token and total API time; Rift was discarding both and measuring only its own wall-clock. Now it captures them, logs a per-turn attribution line (model time vs Rift's plumbing overhead), and feeds the AI Health pane — so latency questions are answered from data, not guesswork.
+- **Measured, not assumed.** This release came out of a latency hunt: instrumented per-tool gaps (all model think-time), and a head-to-head against the bare CLI confirming Rift's warm pool turns a ~13s cold start into near-zero and adds nothing on top. The drag you feel is the model reasoning — the same on any Claude client.
+- **Verified.** Full backend suite (112 tests) + 2 new tests for the timing math, type checks clean, and the new AI Health line confirmed rendering correctly in the running app.
+
 ## v0.61.0 — Honest, detailed tool display + a faster path
 
 > This one is about Rift *showing its work* clearly. When the assistant reads, searches, and runs things, you now see exactly what happened — and a couple of quiet speed wins land too. Nothing you do changes.
@@ -16,16 +29,9 @@
 - **Two latency trims.** The "thinking off" fast path now reuses one pooled network connection instead of opening a fresh one every request, and Rift checks the Claude CLI's capabilities once at startup instead of on your first message — shaving a possible multi-second stall off the very first reply.
 - **Verified live.** Full test suite, type checks, and a real run of the app all pass clean; the new tool-row summary was confirmed rendering correctly in the running app.
 
-## v0.60.0 — Spring cleaning
-
-> No new buttons in this one — it's a deep tidy-up of Rift's own code so the app stays fast to build on and easy to keep correct. Nothing you do changes; everything that worked before works identically, now on a leaner, better-organized foundation. The version jumps to 0.60 to mark how much ground this pass covered.
-
-### Under the hood
-- **Cleared out the dead weight.** Removed code and files that nothing used anymore — leftover helpers whose UI was retired long ago, an old chart routine replaced by the current one, orphaned scaffold icons, and a stray setup script — plus a big sweep of build/scratch clutter. Every removal was independently double-checked so nothing live got cut.
-- **Broke up the biggest files.** Several of Rift's largest, hardest-to-navigate source files (the message bubble, the composer, the tool chips, and two backend modules) were split into focused, single-purpose pieces — moved over exactly as-is, with no change to how anything looks or behaves. This makes future fixes safer and quicker.
-- **Verified top to bottom.** The whole test suite, type checks, and a live run of the real app all pass clean — the rendered chat, tool calls, and composer were confirmed pixel-identical to before.
-
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.60.0** — Spring cleaning: a deep tidy-up of Rift's own code (dead-code sweep + splitting the biggest source files into focused pieces), no behavior change, verified pixel-identical top to bottom.
 
 - **v0.53.0** — Instant first reply: the first message of a new chat is now warm too. Rift quietly spins up a ready Claude process in the background and adopts it the moment you send, so the cold-start pause (re-loading your global config/hooks/tools, often 9–10s) is already paid. The warm pool grew 3→6 with a wider "still active" window, and a process leak on retirement was fixed.
 
