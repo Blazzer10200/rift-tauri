@@ -46,10 +46,12 @@
     if (steerFlashTimer) clearTimeout(steerFlashTimer);
     if (undoTimer) clearTimeout(undoTimer);
     pttRelease();
+    dictKeyHeld = false;
+    dictStartedRecording = false;
     // RR10: pttRelease only stops a held PTT; in tap-to-toggle mode pttActive is
     // false while recording, so closing this tab would orphan the live mic
     // (recording=true, events firing into a destroyed tab). Stop any recording
-    // this tab owns.
+    // this tab owns. (Same orphan risk for a Ctrl+D tap-toggle — same guard.)
     if (stt.recording && stt.targetTabId === tabId) void stt.cancel();
     // RR9: bump the seq UNCONDITIONALLY so any pending enhance callback (incl.
     // one still in the network round-trip before onRequestId populated the id)
@@ -637,8 +639,75 @@
       void stt.stop();
     }
   }
+  // Ctrl/Cmd+D dictation — tap vs hold, resolved on release:
+  //   • quick tap (< HOLD_MS held) → toggle mode: starts now, next tap stops.
+  //   • hold (≥ HOLD_MS) → push-to-talk: records while held, release stops.
+  // Recording starts on keydown either way (instant feedback); the gesture is
+  // only classified on keyup, so the two models share one start path.
+  const DICT_HOLD_MS = 400;
+  let dictKeyDownAt = 0;
+  let dictKeyHeld = false;
+  // True only when THIS Ctrl+D press started the recording — so releasing a
+  // hold stops the right session and a tap that began a *new* recording can
+  // latch into toggle mode without the keyup immediately killing it.
+  let dictStartedRecording = false;
+  function dictKeydown(e: KeyboardEvent): boolean {
+    if (!((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "d"))
+      return false;
+    e.preventDefault(); // always — kills the browser's Ctrl+D bookmark
+    if (e.repeat || dictKeyHeld) return true; // swallow auto-repeat while held
+    if (micBusy || stt.transcribing) return true;
+    // The press is now "engaged" regardless of branch — record the time so a
+    // stale value from an earlier press can never leak into this release.
+    dictKeyHeld = true;
+    dictKeyDownAt = performance.now();
+    if (stt.recording) {
+      // Already recording (a prior tap latched it on) → this press stops it.
+      // dictStartedRecording=false so the keyup won't double-stop.
+      dictStartedRecording = false;
+      void toggleMic();
+      return true;
+    }
+    if (!micAvailable) {
+      dictKeyHeld = false;
+      return true;
+    }
+    // Fresh start; tap-vs-hold is classified on keyup.
+    dictStartedRecording = true;
+    void toggleMic();
+    return true;
+  }
+  function dictRelease() {
+    if (!dictKeyHeld) return;
+    dictKeyHeld = false;
+    const heldMs = performance.now() - dictKeyDownAt;
+    const startedThisPress = dictStartedRecording;
+    dictStartedRecording = false;
+    // Only a HOLD that STARTED a recording this press stops on release (push-to-
+    // talk). A tap leaves it on (toggle — next tap stops). A press that stopped
+    // an already-running recording started nothing, so it never re-stops here.
+    // Don't gate on stt.recording: a fast hold can release before stt.start()
+    // flips recording=true, and stt.stop() is idempotent for that window.
+    if (startedThisPress && heldMs >= DICT_HOLD_MS) {
+      void stt.stop();
+      void tick().then(() => { autosize(); ta?.focus(); });
+    }
+  }
   function onKeyUp(e: KeyboardEvent) {
+    // Classify the Ctrl+D gesture on the "d" keyup only. (Not on Control/Meta —
+    // releasing the modifier first while D is still held must NOT end a hold.)
+    if (e.key.toLowerCase() === "d") dictRelease();
     if (e.key !== " ") return;
+    pttRelease();
+  }
+  // Window blur mid-hold: we can't see the keyup, so force-stop a held Ctrl+D
+  // (don't leave the mic running on focus-loss) and release any held Space PTT.
+  function onWindowBlur() {
+    if (dictKeyHeld) {
+      dictKeyHeld = false;
+      dictStartedRecording = false;
+      if (stt.recording && stt.targetTabId === tabId) void stt.stop();
+    }
     pttRelease();
   }
   // Voice command "send it" — the stt store commits the draft then raises the
@@ -759,13 +828,8 @@
       else void runEnhance();
       return;
     }
-    // Ctrl/Cmd+D — toggle dictation (start/stop), mirroring the mic button. The
-    // browser binds Ctrl+D to "bookmark", so preventDefault even when STT is off.
-    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "d") {
-      e.preventDefault();
-      if (micAvailable && !micBusy && !stt.transcribing) void toggleMic();
-      return;
-    }
+    // Ctrl/Cmd+D — tap-toggle or hold-to-talk dictation (see dictKeydown).
+    if (dictKeydown(e)) return;
     if (pttKeydown(e)) return;
     // Permission-mode menu nav (mirrors the settings-menu nav below).
     if (permOpen) {
@@ -1004,7 +1068,7 @@
   }
 </script>
 
-<svelte:window onkeyup={onKeyUp} onblur={pttRelease} />
+<svelte:window onkeyup={onKeyUp} onblur={onWindowBlur} />
 
 <div class="composer-wrap" data-model={modelFamily(assistant.effectiveModel)}>
   <QueueRail
