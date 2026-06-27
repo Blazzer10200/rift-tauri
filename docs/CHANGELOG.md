@@ -2,18 +2,18 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.53.0 — Instant first reply
+## v0.60.0 — Spring cleaning
 
-> The very first message in a new chat used to be the slowest one — every fresh chat paid the full cold start (loading your Claude setup, hooks, and config) before a single word appeared, often 9–10 seconds of staring at nothing. Now Rift warms a process up *before* you hit send, so the first reply starts as fast as every reply after it.
+> No new buttons in this one — it's a deep tidy-up of Rift's own code so the app stays fast to build on and easy to keep correct. Nothing you do changes; everything that worked before works identically, now on a leaner, better-organized foundation. The version jumps to 0.60 to mark how much ground this pass covered.
 
-### Speed
-- **The first turn is now warm too.** When you open a fresh chat with a folder set, Rift quietly spins up a ready Claude process in the background and parks it. The moment you send, that process is adopted instantly — the cold-start cost (re-loading your global `~/.claude` config, hooks, and tools) is already paid, so the reply begins right away instead of after a long pause. If you change the model or settings before sending, the spare is discarded and you get a normal cold start — never worse than before. It also steps aside automatically when you're near a usage limit, so it never spends your budget on a reply you didn't ask for.
-- **More chats stay warm at once.** The warm-process pool grew from 3 to 6 and the "you're still active" window widened, so juggling several chats or pausing to read a long answer no longer drops you back to a cold start on your next message.
-
-### Reliability
-- **Fixed a process leak in the warm pool.** When a warm process was retired — because you changed the model, it went idle, or the app updated — the underlying Claude process could survive in the background instead of shutting down, slowly accumulating until you restarted Rift. All three retirement paths now shut the process down for real.
+### Under the hood
+- **Cleared out the dead weight.** Removed code and files that nothing used anymore — leftover helpers whose UI was retired long ago, an old chart routine replaced by the current one, orphaned scaffold icons, and a stray setup script — plus a big sweep of build/scratch clutter. Every removal was independently double-checked so nothing live got cut.
+- **Broke up the biggest files.** Several of Rift's largest, hardest-to-navigate source files (the message bubble, the composer, the tool chips, and two backend modules) were split into focused, single-purpose pieces — moved over exactly as-is, with no change to how anything looks or behaves. This makes future fixes safer and quicker.
+- **Verified top to bottom.** The whole test suite, type checks, and a live run of the real app all pass clean — the rendered chat, tool calls, and composer were confirmed pixel-identical to before.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.53.0** — Instant first reply: the first message of a new chat is now warm too. Rift quietly spins up a ready Claude process in the background and adopts it the moment you send, so the cold-start pause (re-loading your global config/hooks/tools, often 9–10s) is already paid. The warm pool grew 3→6 with a wider "still active" window, and a process leak on retirement was fixed.
 
 - **v0.52.1** — A faster, sharper assistant: stopped a silent 6–8s "thinking" pause on every reply (thinking now defaults off, with a clear "Thinking…" label when it's on), made the assistant batch independent tool calls in parallel instead of one-at-a-time, tightened edits to match your codebase and stay in scope, and silenced repetitive update-check error spam.
 
