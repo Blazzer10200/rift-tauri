@@ -665,6 +665,13 @@
   const silenceCountdown = $derived(
     stt.targetTabId === tabId ? stt.silenceRemaining : null,
   );
+  // Dictation availability — gates both the mic button render and the Ctrl+D
+  // shortcut so they stay in lockstep.
+  const micAvailable = $derived(
+    stt.config.enabled &&
+      ((stt.config.engine === "web_speech" && stt.supported) ||
+        (stt.config.engine === "whisper" && stt.backendAvailable)),
+  );
   async function toggleMic() {
     if (micBusy) return;
     micBusy = true;
@@ -750,6 +757,13 @@
       if (enhancing) return;
       if (enhancedPreview) acceptEnhanced();
       else void runEnhance();
+      return;
+    }
+    // Ctrl/Cmd+D — toggle dictation (start/stop), mirroring the mic button. The
+    // browser binds Ctrl+D to "bookmark", so preventDefault even when STT is off.
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "d") {
+      e.preventDefault();
+      if (micAvailable && !micBusy && !stt.transcribing) void toggleMic();
       return;
     }
     if (pttKeydown(e)) return;
@@ -1228,10 +1242,7 @@
           >
             <Paperclip size={15} />
           </button>
-          {#if stt.config.enabled && (
-            (stt.config.engine === "web_speech" && stt.supported) ||
-            (stt.config.engine === "whisper" && stt.backendAvailable)
-          )}
+          {#if micAvailable}
           <button
             class="cbtn ic micbtn"
             class:recording={stt.recording}
@@ -1243,8 +1254,8 @@
               stt.recording ? "Stop recording" :
               stt.transcribing ? "Transcribing…" :
               stt.config.engine === "whisper"
-                ? "Dictate — Whisper (local) · or hold Space"
-                : "Dictate — Web Speech · or hold Space"
+                ? "Dictate — Whisper (local) · Ctrl+D or hold Space"
+                : "Dictate — Web Speech · Ctrl+D or hold Space"
             }
             aria-label={stt.recording ? "Stop recording" : "Start recording"}
           >
