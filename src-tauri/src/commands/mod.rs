@@ -53,6 +53,14 @@ pub async fn query_turn_perf() -> Result<crate::diagnostics::perf::TurnPerfStats
         .map_err(|e| format!("query_turn_perf: {e}"))
 }
 
+/// Phase 4 — snapshot of the process-global metrics registry (counters +
+/// timing histograms recorded via `metric!` / `timed!`). In-memory, session-
+/// scoped; cheap synchronous read under a mutex, no file I/O.
+#[tauri::command]
+pub fn query_metrics() -> crate::diagnostics::metrics::MetricsSnapshot {
+    crate::diagnostics::metrics::snapshot()
+}
+
 /// #37 Route A — spawn a second native window so a session can live on a
 /// separate monitor. Same app URL, unique `window-<n>` label (matched by the
 /// `secondary-window` capability glob). Each window boots its own store and

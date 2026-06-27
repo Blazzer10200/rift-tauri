@@ -22,6 +22,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
+pub mod metrics;
 pub mod perf;
 
 const BUS_CAPACITY: usize = 4096;
