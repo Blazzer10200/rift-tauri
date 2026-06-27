@@ -137,6 +137,17 @@
       {/if}
     </div>
 
+    <div class="dc-health" role="group" aria-label="Subsystem health">
+      {#each diagnostics.health as h (h.key)}
+        <button type="button" class="dc-hpill {h.level}" class:active={diagnostics.resourceFilter === h.key}
+          disabled={h.level === "idle"}
+          onclick={() => (diagnostics.resourceFilter = diagnostics.resourceFilter === h.key ? "" : h.key)}
+          use:tooltip={`${h.label}: ${h.detail}`}>
+          <span class="dc-hdot"></span>{h.label}
+        </button>
+      {/each}
+    </div>
+
     <div class="dc-body" bind:this={scrollEl} onscroll={onScroll}>
       {#if total === 0}
         <div class="dc-empty">
@@ -204,6 +215,22 @@
   .dc-lv.on { color: var(--fg); background: var(--surface-hover); border-color: var(--accent, oklch(0.72 0.15 163)); }
   .dc-res { font-size: var(--fs-xs); padding: 5px 8px; background: var(--field); color: var(--fg);
     border: 1px solid var(--field-border); border-radius: var(--radius); max-width: 160px; }
+
+  /* ── Subsystem health strip (Phase 3) ── */
+  .dc-health { display: flex; align-items: center; gap: 6px; padding: 7px 14px; flex: none;
+    border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .dc-hpill { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); font-weight: 500;
+    padding: 3px 9px 3px 7px; border: 1px solid var(--field-border); background: var(--field);
+    color: var(--fg-muted); border-radius: 999px; cursor: pointer; }
+  .dc-hpill:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg); }
+  .dc-hpill:disabled { opacity: 0.45; cursor: default; }
+  .dc-hpill.active { border-color: var(--accent, oklch(0.72 0.15 163)); color: var(--fg); }
+  .dc-hdot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--fg-muted); }
+  .dc-hpill.ok   .dc-hdot { background: oklch(0.72 0.15 163); }
+  .dc-hpill.warn .dc-hdot { background: oklch(0.78 0.14 75); }
+  .dc-hpill.bad  .dc-hdot { background: oklch(0.68 0.19 20); }
+  .dc-hpill.warn { color: oklch(0.8 0.1 75); }
+  .dc-hpill.bad  { color: oklch(0.74 0.15 20); }
 
   .dc-body { flex: 1; overflow-y: auto; overflow-x: hidden; font-family: var(--font-mono, ui-monospace, monospace);
     font-size: 11.5px; line-height: 1.4; }

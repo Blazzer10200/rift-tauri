@@ -14,6 +14,7 @@
  */
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { scrubUser } from "$lib/utils/redact";
+import { rollUpHealth, overallHealth } from "./diagnosticsHealth";
 
 export type DiagStage = "log" | "system";
 export type DiagLevel = "trace" | "debug" | "info" | "warn" | "error";
@@ -64,6 +65,11 @@ class DiagnosticsStore {
     for (const e of this.events) if (e.resource) set.add(e.resource);
     return [...set].sort();
   });
+
+  /** Phase 3: per-subsystem green/amber/red roll-up over the live ring. */
+  health = $derived(rollUpHealth(this.events));
+  /** Worst subsystem level — one dot for the console header. */
+  overall = $derived(overallHealth(this.health));
 
   /** The events actually shown, after level/resource/text filters. */
   filtered = $derived.by(() => {
