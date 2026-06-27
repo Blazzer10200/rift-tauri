@@ -1341,10 +1341,17 @@ async fn dispatch_turn(
                 // send sees it. The reader loop clears it on `result` (M6).
                 g.turn_in_progress.store(true, Ordering::Release);
                 g.last_used = std::time::Instant::now();
-                emit_dispatch(&session_id, "hit", &model, &key);
                 Some((g.turn_tx.clone(), g.turn_in_progress.clone()))
             }
         };
+        // Emit the warm-hit AFTER releasing the WarmChild lock above: emit_dispatch
+        // calls warm_pool::pool_size() which locks the WARM_CHILDREN registry, and
+        // acquiring the registry lock while holding a WarmChild guard inverts the
+        // lock order the rest of the pool uses (registry → child) — a deadlock
+        // hazard + extra contention on the hottest path. `reuse.is_some()` ⇒ hit.
+        if reuse.is_some() {
+            emit_dispatch(&session_id, "hit", &model, &key);
+        }
         // `user_line` is moved into the TurnCmd only on the reuse path; on every
         // fall-through (mismatch / dead-on-send) it's recovered so the cold path
         // below still has it. `user_line` stays a binding the cold call consumes.

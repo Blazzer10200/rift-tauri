@@ -195,11 +195,36 @@ case "$cmd" in
     # tiny after an interrupted shot) without a reload.
     post reset-viewport "{}"
     ;;
+  diag)
+    # Pull the live diagnostics store (events + per-subsystem health) as TEXT in
+    # one call — no UI navigation, no screenshot. Reads the dev-only
+    # window.__riftDiag hook the diagnostics store installs on init(). `$1` =
+    # how many recent events to show (default 25). The store must have been
+    # inited (open Settings once, or it inits on first listen) for the hook to
+    # exist; a null hook prints a hint.
+    n="${1:-25}"
+    js="(() => { const d = window.__riftDiag; if(!d) return JSON.stringify({error:'__riftDiag not present — open Settings once so diagnostics.init() runs, or confirm a dev build'}); return JSON.stringify({stats:d.stats(), health:d.health(), recent:d.recent($n)}); })()"
+    resp="$(post eval "$(jq -nc --arg js "$js" '{js:$js}')")"
+    printf '%s' "$resp" | jq -r '
+      (.result // .value // .) as $v |
+      ($v | if type=="string" then fromjson else . end) as $d |
+      if $d.error then "diag: " + $d.error
+      else
+        "[diag] " + (($d.stats.total // 0)|tostring) + " events · overall=" + ($d.stats.overall // "?")
+          + " · live=" + (($d.stats.live // false)|tostring)
+          + (if ($d.stats.dropped // 0) > 0 then " · " + ($d.stats.dropped|tostring) + " dropped" else "" end),
+        "[health]",
+        ($d.health[]? | "  " + (.level|ascii_upcase) + " " + .key + " — " + .detail),
+        "[recent " + (($d.recent|length)|tostring) + "]",
+        ($d.recent[]? | "  " + (.at|.[11:23]) + " " + (.level|ascii_upcase) + " [" + (.resource // "—") + "] " + .message
+          + (if (.fields|type)=="object" and (.fields|length)>0 then " " + (.fields|tojson) else "" end))
+      end'
+    ;;
   shutdown)
     curl -sS -X POST "$API/shutdown" 2>/dev/null || true
     ;;
   *)
-    echo "usage: $0 [-t main|browser] {health|targets|look|act|state|page|ax|console|eval|type|click|wait|shot|shot-sel|batch|key|reload|reset-viewport|shutdown} ..." >&2
+    echo "usage: $0 [-t main|browser] {health|targets|look|act|state|page|ax|console|eval|type|click|wait|shot|shot-sel|batch|key|reload|reset-viewport|diag|shutdown} ..." >&2
     exit 2
     ;;
 esac

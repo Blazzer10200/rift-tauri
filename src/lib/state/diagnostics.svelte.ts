@@ -93,6 +93,32 @@ class DiagnosticsStore {
     this.#unlisten = await listen<DiagEvent>("diag://event", (e) => this.#push(e.payload));
     this.live = true;
     this.#hookErrors();
+    this.#exposeDevHook();
+  }
+
+  /**
+   * DEV-ONLY: expose a read-only snapshot on `window.__riftDiag` so the live
+   * event stream + health roll-up can be pulled programmatically (CDP / the
+   * `c.sh diag` helper) WITHOUT navigating to the console UI or screenshotting.
+   * Returns plain data, never the reactive store. No-op in production builds.
+   */
+  #exposeDevHook() {
+    if (!import.meta.env.DEV || typeof window === "undefined") return;
+    (window as unknown as { __riftDiag?: unknown }).__riftDiag = {
+      /** Last `n` events (default 40), newest last, as plain rows. */
+      recent: (n = 40) =>
+        this.events.slice(-n).map((e) => ({
+          at: e.at,
+          level: e.level,
+          resource: e.resource,
+          message: e.message,
+          fields: e.fields,
+        })),
+      /** Per-subsystem health verdicts (same roll-up the strip renders). */
+      health: () => this.health.map((h) => ({ key: h.key, level: h.level, detail: h.detail, count: h.count })),
+      /** Counts: total in ring, dropped off tail, whether the listener is live. */
+      stats: () => ({ total: this.events.length, dropped: this.dropped, live: this.live, overall: this.overall }),
+    };
   }
 
   dispose() {
@@ -142,7 +168,7 @@ class DiagnosticsStore {
   #append(ev: DiagEvent) {
     // Reassign (not mutate) so Svelte 5 tracks the change.
     const next = this.events.length >= RING_CAP
-      ? (this.dropped++, this.events.slice(this.events.length - RING_CAP + 1))
+      ? (this.dropped++, this.events.slice(1))   // drop oldest (index 0), not a tail-splice
       : this.events.slice();
     next.push(ev);
     this.events = next;

@@ -2,6 +2,21 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.63.0 — The app can tell you where it hurts
+
+> When something's slow, broken, or just behaving oddly, Rift can now *show you where* instead of leaving you guessing. A new diagnostics console surfaces what every part of the app is doing in real time, with a colour-coded health read-out per subsystem — built so problems get found fast.
+
+### What you'll notice
+- **A live diagnostics console.** Settings → About → Tools & help → **"Open diagnostics console"** opens a real-time stream of what Rift is doing under the hood — the warm-CLI pool, tool calls, updates, speech, usage checks, and more. Filter by level or source, search the text, pause the stream, and copy it all out for a bug report. Paths are username-scrubbed, so it's safe to share.
+- **At-a-glance health.** A row of pills across the top shows each subsystem as green / amber / red — e.g. *"Warm pool: 100% warm-hit"* or *"MCP tools: p50 12ms"* — so you can see in one glance whether everything's healthy or where to look. Click a pill to filter the stream to just that area.
+- **Frontend errors no longer vanish.** A UI error that used to disappear into the console now shows up in the diagnostics stream, so a glitch leaves a trace you can actually find.
+
+### Under the hood
+- **The whole app is now instrumented.** Eight subsystems emit structured, queryable events with real timing — warm-pool hit/miss, per-tool durations, update stages, speech model-load + inference, usage state, corporate-cert loading. The plumbing for this already existed and emitted into the void; this release connects it end-to-end and gives it a UI.
+- **A reusable metrics primitive.** New `metric!` / `timed!` building blocks make future instrumentation a one-liner instead of hand-rolled code — so the app keeps getting more self-aware over time at near-zero cost.
+- **Zero latency cost.** A self-review caught one risky spot where the new instrumentation touched the hot reply path; it was moved out of the critical section before shipping. The warm-reply path stays as fast as it was (0–2ms to first token).
+- **Verified.** Full backend suite (116 tests), frontend type-checks clean (4132 files), 13 new unit tests for the health + metrics math, and the console + health strip confirmed working live in the running app.
+
 ## v0.62.0 — Honest about where the time goes
 
 > This one settles the question of why a reply sometimes feels slow. Short version: it's almost always Claude thinking, not Rift — and now the app proves it instead of asking you to take our word. Plus a real reliability fix to the "is it stuck?" indicator.
@@ -15,21 +30,9 @@
 - **Measured, not assumed.** This release came out of a latency hunt: instrumented per-tool gaps (all model think-time), and a head-to-head against the bare CLI confirming Rift's warm pool turns a ~13s cold start into near-zero and adds nothing on top. The drag you feel is the model reasoning — the same on any Claude client.
 - **Verified.** Full backend suite (112 tests) + 2 new tests for the timing math, type checks clean, and the new AI Health line confirmed rendering correctly in the running app.
 
-## v0.61.0 — Honest, detailed tool display + a faster path
-
-> This one is about Rift *showing its work* clearly. When the assistant reads, searches, and runs things, you now see exactly what happened — and a couple of quiet speed wins land too. Nothing you do changes.
-
-### What you'll notice
-- **Tool rows name what actually ran.** A batch that mixed reading and searching used to collapse into a vague "Ran 6 steps." Now it reads what it did, biggest-first — e.g. **"Searched 2 · read 1"** — so you can tell at a glance whether the assistant is using the right tools. File-listing and filename-pattern searches also get their own folder icons instead of blurring into the plain search/file glyphs.
-- **Answered question cards look clean.** When the assistant asks you to pick between options, the answered card now shows tidy question + answer chips instead of a raw text dump.
-- **Delegated helpers read honestly.** A handed-off sub-task now shows a clear "working…" state with a short note that it runs in its own context, and its result lands in place when done — no more dead "running…" with nothing to click.
-
-### Under the hood
-- **Sub-agents get the same discipline.** When the assistant hands work to a helper agent, it now passes along the same rules it follows itself — search with the right tools, work in parallel, return tight results — so delegated work doesn't fall back to slow, noisy patterns.
-- **Two latency trims.** The "thinking off" fast path now reuses one pooled network connection instead of opening a fresh one every request, and Rift checks the Claude CLI's capabilities once at startup instead of on your first message — shaving a possible multi-second stall off the very first reply.
-- **Verified live.** Full test suite, type checks, and a real run of the app all pass clean; the new tool-row summary was confirmed rendering correctly in the running app.
-
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.61.0** — Honest, detailed tool display: tool rows name what actually ran ("Searched 2 · read 1"), tidy answered-question chips, delegated-helper states read honestly; plus a pooled fast-path connection and boot-time CLI capability check.
 
 - **v0.60.0** — Spring cleaning: a deep tidy-up of Rift's own code (dead-code sweep + splitting the biggest source files into focused pieces), no behavior change, verified pixel-identical top to bottom.
 

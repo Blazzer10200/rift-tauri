@@ -96,6 +96,9 @@
       <div class="dc-title">
         <Radio size={14} class={diagnostics.live ? "dc-live" : "dc-dead"} />
         <span>Diagnostics</span>
+        {#if diagnostics.overall !== "idle"}
+          <span class="dc-overall {diagnostics.overall}" use:tooltip={`Overall: ${diagnostics.overall}`}></span>
+        {/if}
         <span class="dc-count">{total}{total !== diagnostics.events.length ? ` / ${diagnostics.events.length}` : ""}</span>
         {#if diagnostics.dropped > 0}
           <span class="dc-drop" use:tooltip={"Events dropped off the ring tail"}>+{diagnostics.dropped} dropped</span>
@@ -190,6 +193,10 @@
   .dc-title { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); font-weight: 600; color: var(--fg); }
   :global(.dc-live) { color: var(--accent, oklch(0.72 0.15 163)); }
   :global(.dc-dead) { color: var(--fg-muted); opacity: 0.5; }
+  .dc-overall { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .dc-overall.ok   { background: oklch(0.72 0.15 163); }
+  .dc-overall.warn { background: oklch(0.78 0.14 75); }
+  .dc-overall.bad  { background: oklch(0.68 0.19 20); }
   .dc-count { font-size: var(--fs-xs); color: var(--fg-muted); font-variant-numeric: tabular-nums; font-weight: 500; }
   .dc-drop { font-size: var(--fs-xs); color: oklch(0.7 0.13 50); font-weight: 500; }
 
