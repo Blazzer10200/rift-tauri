@@ -55,11 +55,13 @@ Key properties:
 | File | Role |
 |---|---|
 | `turn.rs` | Live-turn nervous system: session registry, CLI spawn, stream/permission/error event emit, steer/stop, per-turn env snapshot. The hot file. |
-| `mcp_server.rs` | stdio JSON-RPC MCP server: `read_file` / `list_dir` / `grep` + `git_*` + bridge-gated `ask_user` / `open_browser` / `notify`. Workspace-scoped, trust-gated. |
+| `mcp_server.rs` | stdio JSON-RPC MCP server: `read_file` / `list_dir` / `grep` + `git_*` + the bridge-gated UI tools (dispatched from here, implemented in `mcp_bridge.rs`). Workspace-scoped, trust-gated. |
+| `mcp_bridge.rs` | The bridge-gated UI MCP tools — `ask_user` / `open_browser` / `notify` + the loopback `bridge_call` round-trip. Split out of `mcp_server.rs` (v0.60.0). |
 | `git_local.rs` | Hardened `run_git` (no shell, args pre-split, env stripped, non-interactive) + path/message validators. Backs the `git_*` MCP tools in `mcp_server.rs` (there is no `commands/git.rs`). |
 | `bridge.rs` | Loopback TCP UI bridge (127.0.0.1, ephemeral port, 192-bit token) so MCP tools can round-trip `ask_user`/`open_browser`/`notify` through the running webview. |
 | `convo_store.rs` | On-disk conversation persistence + export. |
-| `oneshot.rs` | One-off CLI calls (prompt-enhance, title) outside the live turn loop. |
+| `oneshot.rs` | One-off CLI calls (prompt-enhance, title, usage-analyze) outside the live turn loop. |
+| `local_llm.rs` | Local-LLM endpoint commands (test / list-models / context-probe / optimize) — talk to a LiteLLM proxy or raw Ollama. Split out of `oneshot.rs` (v0.60.0). |
 | `warm_pool.rs` | Persistent per-session CLI child (warm process) so subsequent turns skip cold-start; idle-evicts, transparently respawns on dead pipe. |
 | `projects.rs` | Named folder aliases with include/exclude file scoping (`assistant_list/save/delete_project`); validates globs via the shared `glob_to_regex`. |
 | `permission.rs` · `ask_user.rs` · `config.rs` · `workspace.rs` · `auth_update.rs` · `cli_install.rs` · `cli_caps.rs` · `env_checks.rs` · `nothink.rs` | permission plumbing · UI-ask registry · per-turn config (effort/model clamps) · workspace roots · auth probe · CLI install detection · CLI capability probe · environment preflight · thinking-flag handling. |
