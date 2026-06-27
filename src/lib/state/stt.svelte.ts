@@ -271,9 +271,8 @@ class SttStore {
       await sub("stt://level", () =>
         listen<{ rms: number }>("stt://level", (ev) => {
           // Whisper-only channel — web_speech drives `level` from its own
-          // AnalyserNode. Normalize: speech RMS sits ~0.02..0.25, so scale to
-          // fill the meter without clipping quiet voices.
-          this.level = Math.min(1, ev.payload.rms * 4);
+          // AnalyserNode. Both feed through pushLevel for matched smoothing.
+          this.pushLevel(ev.payload.rms);
         }),
       );
       await sub("stt://error", () =>
@@ -555,6 +554,19 @@ class SttStore {
     this.stopWebMeter();
   }
 
+  // ---- Level meter --------------------------------------------------------
+
+  /** Normalize + smooth a raw RMS reading into `level` (0..1). Asymmetric
+   *  smoothing — snap up on speech onset (attack), ease down on silence
+   *  (release) — so the bars feel responsive but don't strobe. Shared by both
+   *  the whisper event and the web_speech AnalyserNode so they behave alike. */
+  private pushLevel(rawRms: number) {
+    const target = Math.min(1, rawRms * 4);
+    const prev = this.level;
+    const k = target > prev ? 0.6 : 0.25; // fast attack, slow release
+    this.level = prev + (target - prev) * k;
+  }
+
   // ---- Web-speech level meter ---------------------------------------------
 
   /** Open a mic AnalyserNode and poll its RMS into `level` on a rAF loop.
@@ -588,7 +600,7 @@ class SttStore {
         let sumSq = 0;
         for (let i = 0; i < buf.length; i++) sumSq += buf[i] * buf[i];
         const rms = Math.sqrt(sumSq / buf.length);
-        this.level = Math.min(1, rms * 4);
+        this.pushLevel(rms);
         this.meterRaf = requestAnimationFrame(tick);
       };
       this.meterRaf = requestAnimationFrame(tick);
