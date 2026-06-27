@@ -20,6 +20,7 @@ pub mod convo_store;
 pub mod env_checks;
 pub mod git_local;
 pub mod local_llm;
+pub mod mcp_bridge;
 pub mod mcp_server;
 pub mod news;
 pub mod nothink;
