@@ -210,7 +210,10 @@ export async function send(store: AssistantStore, prompt: string) {
       thinkingEffort: sendEffort,
       thinkingEnabled: store.thinkingEnabled,
       permissionMode: store.permissionMode,
-      priorContextSummary: null,
+      // priorContextSummary is intentionally omitted (defaults to None backend-
+      // side): the CLI does compaction natively in-process now, so Rift never
+      // re-injects a prior-conversation summary. The backend keeps the param as a
+      // forward-compat hook (turn.rs Phase C) — don't re-add a hard-coded null here.
       // Per-tab root: each pane/window runs its turns in its own folder. Only
       // read on the first turn backend-side (then pinned per-session).
       root: store.effectiveRoot(tab),

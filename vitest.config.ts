@@ -25,6 +25,12 @@ export default mergeConfig(
         "**/node_modules/**",
         "**/src-tauri/**",
         "**/dist/**",
+        // Stale agent worktrees under .claude/worktrees/ carry their own
+        // (un-synced) tsconfig.json whose `extends: ./.svelte-kit/tsconfig.json`
+        // can't resolve, so vitest's file crawl crashed transforming files there
+        // and reported them as "failed test files" (no real test failure — 728/728
+        // pass). Don't let a parallel-workflow worktree pollute the test run.
+        "**/.claude/**",
       ],
     },
   }),

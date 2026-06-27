@@ -8,6 +8,7 @@
   import type { PermissionMode } from "../../state/assistant/types";
   import Markdown from "./Markdown.svelte";
   import { modelFamily } from "../../state/assistant/helpers";
+  import { requestPrewarm, resetPrewarmDedup } from "../../state/assistant/prewarm";
   import { fuzzyScore, isFileDrag, attachImageFiles, summarizeAttach, attachTextFiles, summarizeTextAttach } from "./composer/helpers";
   import { quickStartsFor } from "./composer/quickStarts";
   import AttachmentsRow from "./composer/AttachmentsRow.svelte";
@@ -222,8 +223,31 @@
       enhanceOriginal = null;
       enhanceStatus = null;
       enhanceMeta = null;
+      // #67: drop the pre-warm dedup latch so the newly-focused fresh tab can
+      // request its own spare even if its signature matches the prior tab's.
+      resetPrewarmDedup();
     });
   });
+
+  // #67 pre-warming: request a warm `claude` spare for a FRESH tab before the
+  // user sends, so the first turn skips cold-boot + the SessionStart-hook tax.
+  // Reads the picker signature + tab so it re-arms when any of them change; the
+  // debounce + per-signature dedup inside requestPrewarm keep it cheap (no spawn
+  // on a started convo, no root, while streaming, or for an identical spare).
+  $effect(() => {
+    // Touch the signature inputs so the effect re-runs on any change.
+    void tabId;
+    void assistant.effectiveModel;
+    void assistant.thinkingEffort;
+    void assistant.thinkingEnabled;
+    void assistant.permissionMode;
+    void tab?.convoCreatedAt;
+    void tab?.workspaceRoot;
+    void assistant.workspace.current;
+    void assistant.auth?.pill;
+    requestPrewarm(assistant);
+  });
+
   function refreshMention() {
     mentionState = detectMention();
     if (mentionState && assistant.workspaceFiles.length === 0) {

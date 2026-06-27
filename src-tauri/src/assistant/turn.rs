@@ -16,6 +16,7 @@ use tokio::io::BufReader;
 use tokio::sync::{mpsc, oneshot};
 
 use super::warm_pool;
+use super::warm_pool::kill_child_tree;
 
 use super::auth_update::assistant_auth_probe;
 use super::cli_install::{claude_command, resolve_claude_exe};
@@ -108,6 +109,8 @@ fn get_session_pid(session_id: &str) -> Option<u32> {
 /// (`RIFT_MCP_SERVER=1`) that holds an exclusive lock on `current/`, so a
 /// `/T` tree-kill is required to release Velopack's swap target. `app.exit(0)`
 /// is `std::process::exit` (skips `Drop`), so `kill_on_drop` never reaps these.
+/// The per-PID `kill_child_tree` now lives in `warm_pool` (shared by this sweep,
+/// the signature-drain, idle-evict, and shutdown-drain).
 pub(crate) fn kill_all_session_children() {
     // Enhance one-shots parent the same lock-holding MCP child — sweep them too.
     super::oneshot::kill_all_enhance_children();
@@ -118,25 +121,7 @@ pub(crate) fn kill_all_session_children() {
     })
     .unwrap_or_default();
     for pid in pids {
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            let _ = std::process::Command::new("taskkill")
-                .args(["/F", "/T", "/PID", &pid.to_string()])
-                .creation_flags(CREATE_NO_WINDOW)
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-        }
-        #[cfg(unix)]
-        {
-            let _ = std::process::Command::new("kill")
-                .args(["-TERM", &pid.to_string()])
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status();
-        }
+        kill_child_tree(pid);
     }
 }
 
@@ -537,6 +522,81 @@ pub async fn assistant_send(
     permission_mode: Option<String>,
     prior_context_summary: Option<String>,
     root: Option<String>,
+) -> Result<(), String> {
+    run_or_prewarm(
+        app, window, prompt, session_id, is_first_turn, model, attachments,
+        dyslexia_mode, thinking_effort, thinking_enabled, permission_mode,
+        prior_context_summary, root, false,
+    ).await
+}
+
+/// #67 pre-warming: spawn a warm `claude` child for a chat tab BEFORE the user
+/// hits send, so the first real turn skips the cold-boot + (full-config) the
+/// ~6.3s SessionStart-hook tax measured in the cont.214 spike. The spare is a
+/// NORMAL warm child registered under the tab's already-minted `session_id` —
+/// no separate spare pool, no adoption codepath. When the real `assistant_send`
+/// arrives, `dispatch_turn` finds it by session_id and reuses it via the
+/// existing warm path IF the SpawnKey matches (model/effort/perm/root/etc.); a
+/// mismatch (the user changed the picker before sending) drains it + cold-spawns
+/// exactly as today — never worse than no pre-warm.
+///
+/// Cheap + idempotent: returns Ok immediately (no spawn) when a warm child
+/// already exists for the session, the prompt would be tool-less (no root +
+/// not full-config), or plan usage is hot. NEVER runs a model turn — it only
+/// pays the process spawn + init handshake, then parks. The frontend triggers
+/// it debounced on tab-ready-with-root; see prewarm.ts.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn assistant_prewarm(
+    app: AppHandle,
+    window: tauri::Window,
+    session_id: String,
+    model: Option<String>,
+    thinking_effort: Option<String>,
+    thinking_enabled: Option<bool>,
+    permission_mode: Option<String>,
+    root: Option<String>,
+) -> Result<(), String> {
+    // A spare for a session that already has a live warm child is pure waste —
+    // bail before doing any work (cheap registry read, no child lock).
+    if warm_pool::get(&session_id).is_some() {
+        return Ok(());
+    }
+    // Cost guard: don't speculatively spawn (and re-run the user's SessionStart
+    // hooks + handshake) when the plan's rolling window is nearly spent. None =
+    // unknown (API-key users, no fetch yet) → allow; only skip on a KNOWN-hot
+    // window so the common case never loses pre-warm to missing data.
+    if let Some(snap) = crate::usage::limits::cached_snapshot() {
+        let hot = snap.five_hour.as_ref().map(|w| w.utilization).unwrap_or(0.0) >= 90.0
+            || snap.seven_day.as_ref().map(|w| w.utilization).unwrap_or(0.0) >= 95.0;
+        if hot {
+            log::debug!("assistant_prewarm: skipped for {session_id} — plan usage hot");
+            return Ok(());
+        }
+    }
+    run_or_prewarm(
+        app, window, String::new(), session_id, /*is_first_turn*/ true, model,
+        /*attachments*/ None, /*dyslexia*/ None, thinking_effort, thinking_enabled,
+        permission_mode, /*prior_context_summary*/ None, root, true,
+    ).await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_or_prewarm(
+    app: AppHandle,
+    window: tauri::Window,
+    prompt: String,
+    session_id: String,
+    is_first_turn: bool,
+    model: Option<String>,
+    attachments: Option<Vec<AssistantAttachment>>,
+    dyslexia_mode: Option<bool>,
+    thinking_effort: Option<String>,
+    thinking_enabled: Option<bool>,
+    permission_mode: Option<String>,
+    prior_context_summary: Option<String>,
+    root: Option<String>,
+    prewarm: bool,
 ) -> Result<(), String> {
     // #220: validate session_id is a canonical UUID (8-4-4-4-12 lowercase hex)
     // BEFORE any use. Renderer-supplied — must not flow into CLI args or
@@ -1159,12 +1219,15 @@ pub async fn assistant_send(
     if dyslexia_mode.unwrap_or(false) {
         reminder_parts.push("Dyslexia-friendly mode + voice-to-text are enabled for this user. Phonetic typos (e.g. \"wair\"/\"where\", \"nite\"/\"night\"), letter-swap typos (b/d, p/q), and slurred-speech transcription artifacts are expected. Interpret the most likely intended meaning charitably and proceed; only ask for clarification when meaning is genuinely ambiguous. Don't comment on spelling/grammar unless the user asks.".into());
     }
-    // Phase C: seed the next CLI session with the prior conversation's
-    // summary after a compaction remint. Frontend tracks
-    // `pendingCompactionSummary` and passes it on the FIRST send into the
-    // newly-minted session; the summary lives inside <system-reminder> so
-    // the cached system-prompt prefix stays stable. Cleared after the send
-    // returns — never persists across turns.
+    // Phase C (forward-compat seam — currently never populated): seed the next
+    // CLI session with a prior-conversation summary after a Rift-side compaction
+    // remint, via a <system-reminder> so the cached system-prompt prefix stays
+    // stable. The frontend hard-codes `priorContextSummary: null` (send.ts) — the
+    // CLI now does compaction NATIVELY in-process (its own `compact_boundary`
+    // event, surfaced by streaming.ts::appendCliCompaction) and the warm child
+    // carries context across turns, so Rift never needs to re-inject it. This
+    // block stays as a validated, capped hook in case a future Rift-driven remint
+    // path wants it; until a caller passes a non-empty summary it's a no-op.
     if let Some(s) = prior_context_summary.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
         reminder_parts.push(format!(
             "Prior conversation summary (compacted; the CLI session this turn runs against is fresh — this summary IS your context for what came before):\n{s}"
@@ -1206,6 +1269,14 @@ pub async fn assistant_send(
         trust_level: trust_level.clone(),
         addendum_ptr: addendum.as_ptr() as usize,
     };
+
+    // #67 pre-warm path: spawn the child, run the init handshake, and PARK it in
+    // the warm pool with NO first turn. The real `assistant_send` that follows
+    // reuses it via `dispatch_turn`'s existing warm path. Returns as soon as the
+    // child is registered (the handshake completes inside the reader loop).
+    if prewarm {
+        return prewarm_spawn(app, window_label, session_id, key, cmd, _mcp_guard, model);
+    }
 
     // Dispatch through the warm pool: reuse a live child whose key matches, else
     // cold-spawn one and keep it warm. `_mcp_guard` outlives the process via the
@@ -1327,9 +1398,18 @@ async fn dispatch_turn(
                 }
             }
             None => {
-                // Signature mismatch → drop the old child so the cold spawn below
-                // replaces it cleanly (its reader loop exits when turn_tx drops).
+                // Signature mismatch → drain the old child so the cold spawn below
+                // replaces it cleanly. The old reader loop holds a `turn_tx` clone
+                // (via its WarmChild), so dropping the registry entry does NOT make
+                // its `recv()` return None — we must reap the old child by PID, or
+                // it leaks until the 30-min idle-evict. Kill BEFORE cold_spawn's
+                // set_session_pid overwrites the SESSION_PIDS entry.
+                let old_pid = warm_pool::pid_of(&session_id);
                 warm_pool::remove_if(&session_id, &arc);
+                if let Some(p) = old_pid {
+                    kill_child_tree(p);
+                    log::info!("warm_pool: drained + reaped old child pid={p} for {session_id} (signature change)");
+                }
                 user_line
             }
         };
@@ -1419,6 +1499,7 @@ async fn cold_spawn_and_run(
         key,
         turn_in_progress: turn_in_progress.clone(),
         last_used: std::time::Instant::now(),
+        pid: turn_pid,
     }));
     warm_pool::insert(&session_id, warm.clone());
 
@@ -1443,13 +1524,15 @@ async fn cold_spawn_and_run(
         stderr,
         steer_rx,
         turn_rx,
-        first_turn,
+        first_turn: Some(first_turn),
         session_id: session_id.clone(),
         turn_pid,
         turn_in_progress: turn_in_progress.clone(),
         warm: warm.clone(),
         steer_tx,
         mcp_guard,
+        app: app.clone(),
+        window_label: window_label.clone(),
         is_first_turn,
         model,
         effort,
@@ -1470,6 +1553,95 @@ async fn cold_spawn_and_run(
     }
 }
 
+/// #67 pre-warm: cold-spawn a `claude` child, register it in the warm pool with
+/// NO first turn, start its long-lived reader loop (which runs the init
+/// handshake then PARKS on `turn_rx`), and return IMMEDIATELY. The next real
+/// `assistant_send` for this session reuses the parked child via the normal
+/// warm path. A structural twin of `cold_spawn_and_run` minus the first turn +
+/// the `done_rx.await` — the spare never runs a model turn until a real send
+/// arrives. Synchronous (no `.await`) so the trigger returns instantly; the
+/// handshake + any spawn failure plays out inside the spawned reader loop (a
+/// dead spare just leaves the pool empty → the real send cold-respawns).
+#[allow(clippy::too_many_arguments)]
+fn prewarm_spawn(
+    app: AppHandle,
+    window_label: String,
+    session_id: String,
+    key: warm_pool::SpawnKey,
+    mut cmd: tokio::process::Command,
+    mcp_guard: Option<McpConfigGuard>,
+    model: String,
+) -> Result<(), String> {
+    // Make sure the idle-evict sweeper is running so an unadopted spare ages out
+    // on the same timers as any warm child (idempotent).
+    warm_pool::ensure_evictor();
+
+    let effort = key.effort_level.clone();
+    let model_log = model.clone();
+    let turn_start = std::time::Instant::now();
+    let mut child = cmd.spawn().map_err(|e| format!("prewarm spawn `claude`: {e}"))?;
+    let turn_pid = child.id();
+    if let Some(pid) = turn_pid {
+        set_session_pid(&session_id, pid);
+    } else {
+        log::warn!("prewarm_spawn: child PID unavailable for session {session_id} (process already exited?)");
+    }
+
+    // A1: same take()+guard as the cold path — None means the child died between
+    // spawn and now.
+    let Some(stdin) = child.stdin.take() else {
+        let _ = child.start_kill();
+        clear_session_pid(&session_id);
+        return Err("prewarm: claude stdin unavailable — process killed".into());
+    };
+    let stdout = child.stdout.take().ok_or_else(|| "prewarm: claude stdout missing".to_string())?;
+    let stderr = child.stderr.take().ok_or_else(|| "prewarm: claude stderr missing".to_string())?;
+
+    // Steer channel registered for the spare's whole life (the first real turn
+    // rides this same registration — no re-register on adoption).
+    let (steer_tx, steer_rx) = mpsc::unbounded_channel::<SteerMsg>();
+    register_steer_tx(&session_id, steer_tx.clone());
+
+    let (turn_tx, turn_rx) = mpsc::unbounded_channel::<warm_pool::TurnCmd>();
+    // A spare is IDLE from birth: no turn in progress. (A racing real send sees
+    // turn_in_progress=false and reuses it via dispatch_turn's warm path.)
+    let turn_in_progress = Arc::new(std::sync::atomic::AtomicBool::new(false));
+
+    let warm = Arc::new(std::sync::Mutex::new(warm_pool::WarmChild {
+        turn_tx: turn_tx.clone(),
+        key,
+        turn_in_progress: turn_in_progress.clone(),
+        last_used: std::time::Instant::now(),
+        pid: turn_pid,
+    }));
+    warm_pool::insert(&session_id, warm.clone());
+
+    // Reader loop with first_turn: None → handshake then park.
+    tokio::spawn(run_turn_loop(RunCtx {
+        child,
+        stdin,
+        stdout,
+        stderr,
+        steer_rx,
+        turn_rx,
+        first_turn: None,
+        session_id: session_id.clone(),
+        turn_pid,
+        turn_in_progress,
+        warm,
+        steer_tx,
+        mcp_guard,
+        app,
+        window_label,
+        is_first_turn: true,
+        model,
+        effort,
+        turn_start,
+    }));
+    log::info!("prewarm_spawn: spare warm child spawned + parked for session {session_id} (model={model_log})");
+    Ok(())
+}
+
 /// Everything the long-lived reader loop owns for one warm child. Bundled into
 /// a struct so `run_turn_loop` takes a single arg (clippy + readability).
 struct RunCtx {
@@ -1479,13 +1651,20 @@ struct RunCtx {
     stderr: tokio::process::ChildStderr,
     steer_rx: mpsc::UnboundedReceiver<SteerMsg>,
     turn_rx: mpsc::UnboundedReceiver<warm_pool::TurnCmd>,
-    first_turn: warm_pool::TurnCmd,
+    /// The first turn to run, or `None` for a #67 pre-warm spare: the loop runs
+    /// the init handshake then parks on `turn_rx` for the real first turn.
+    first_turn: Option<warm_pool::TurnCmd>,
     session_id: String,
     turn_pid: Option<u32>,
     turn_in_progress: Arc<std::sync::atomic::AtomicBool>,
     warm: Arc<std::sync::Mutex<warm_pool::WarmChild>>,
     steer_tx: mpsc::UnboundedSender<SteerMsg>,
     mcp_guard: Option<McpConfigGuard>,
+    /// App handle + window label used ONLY to surface a handshake-write failure
+    /// (the per-turn app/window ride each TurnCmd). For a pre-warm spare there's
+    /// no turn to error yet, so an init failure just logs + tears the child down.
+    app: AppHandle,
+    window_label: String,
     is_first_turn: bool,
     model: String,
     effort: String,
@@ -1541,39 +1720,50 @@ async fn run_turn_loop(mut ctx: RunCtx) {
         }
     });
 
+    // The first turn (if any) is in hand; pre-warm spares start with None and
+    // park on turn_rx after the handshake. Take it out of ctx so a handshake
+    // failure can consume its `done` channel.
+    let mut current: Option<warm_pool::TurnCmd> = ctx.first_turn.take();
+
     // 1) initialize handshake — ONCE per process. Required so the CLI routes
     //    permission asks over the control channel as `can_use_tool`. A write
-    //    failure here means the child is already dead.
+    //    failure here means the child is already dead. For a real first turn we
+    //    surface the error to its `done` channel + emit to its window; for a
+    //    pre-warm spare (current == None) there's no turn yet, so we emit to the
+    //    fallback app/window and just tear the child down (the next real send
+    //    cold-respawns cleanly — a dead spare is invisible to the user).
     const INIT: &[u8] = b"{\"type\":\"control_request\",\"request_id\":\"rift-init\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}\n";
-    if let Err(e) = stdin.write_all(INIT).await {
-        let _ = ctx.first_turn.app.emit_to(&ctx.first_turn.window_label, ERROR_EVENT, serde_json::json!({
-            "session_id": ctx.session_id, "message": format!("write initialize: {e}"),
+    let init_result = match stdin.write_all(INIT).await {
+        Ok(()) => stdin.flush().await.map_err(|e| format!("flush initialize: {e}")),
+        Err(e) => Err(format!("write initialize: {e}")),
+    };
+    if let Err(msg) = init_result {
+        let (app_err, win_err) = match current.as_ref() {
+            Some(t) => (&t.app, t.window_label.as_str()),
+            None => (&ctx.app, ctx.window_label.as_str()),
+        };
+        let _ = app_err.emit_to(win_err, ERROR_EVENT, serde_json::json!({
+            "session_id": ctx.session_id, "message": msg.clone(),
         }));
-        let _ = ctx.first_turn.done.send(Err(format!("write initialize: {e}")));
-        loop_cleanup(&ctx.session_id, ctx.turn_pid, &ctx.steer_tx, &ctx.warm, &mut ctx.child).await;
-        stderr_handle.abort();
-        drop(ctx.mcp_guard);
-        return;
-    }
-    // A flush error means the init envelope never reached the child's stdin pipe
-    // — the handshake will never complete and the turn would hang silently.
-    // Surface it the same way the write_all failure above does. (#31)
-    if let Err(e) = stdin.flush().await {
-        let _ = ctx.first_turn.app.emit_to(&ctx.first_turn.window_label, ERROR_EVENT, serde_json::json!({
-            "session_id": ctx.session_id, "message": format!("flush initialize: {e}"),
-        }));
-        let _ = ctx.first_turn.done.send(Err(format!("flush initialize: {e}")));
+        if let Some(t) = current.take() {
+            let _ = t.done.send(Err(msg));
+        }
         loop_cleanup(&ctx.session_id, ctx.turn_pid, &ctx.steer_tx, &ctx.warm, &mut ctx.child).await;
         stderr_handle.abort();
         drop(ctx.mcp_guard);
         return;
     }
 
-    // The first turn is in hand; subsequent ones arrive on turn_rx.
-    let mut current: Option<warm_pool::TurnCmd> = Some(ctx.first_turn);
     let mut handshake_done = false;
-    let cold_first = ctx.is_first_turn;
-    let mut first_turn_flag = ctx.is_first_turn;
+    // A pre-warm spare starts with NO in-hand turn (`current == None`): its real
+    // first turn arrives on `turn_rx` and is, latency-wise, a WARM reuse (the
+    // process is already spawned + handshaked), so it must NOT inherit the cold
+    // `ctx.turn_start` (which is the spare-spawn instant, possibly minutes old) —
+    // that would log a bogus multi-minute TTFT. Gate the cold-first timing on
+    // whether we actually hold a first turn here.
+    let has_inhand_first = current.is_some();
+    let cold_first = ctx.is_first_turn && has_inhand_first;
+    let mut first_turn_flag = ctx.is_first_turn && has_inhand_first;
 
     'turns: loop {
         // Park for a turn if we don't have one in hand.
@@ -1600,6 +1790,19 @@ async fn run_turn_loop(mut ctx: RunCtx) {
         let user_line = turn.user_line;
 
         let turn_start = if first_turn_flag { ctx.turn_start } else { std::time::Instant::now() };
+
+        // #67: a pre-warm spare started with NO in-hand first turn; the FIRST
+        // turn it ever runs is the adopted real send. If that adopted turn hits
+        // EOF before any output, the spare had silently died while parked — but
+        // there's no user-visible prior turn here, so (like DeadOnReuse) we
+        // retry it cold instead of surfacing a spawn-failure error. This guard
+        // is true only on the spare's first adopted turn (handshake not yet
+        // done + never had an in-hand turn); after the first turn completes the
+        // handshake, normal warm semantics resume.
+        let spare_first_adopt = !has_inhand_first && !handshake_done;
+        if spare_first_adopt {
+            log::info!("warm_pool: pre-warm spare ADOPTED by first real turn, session={stream_sid} (warm-start, cold-boot skipped)");
+        }
 
         // Per-turn run: stream NDJSON until result/eof/fatal.
         let outcome = stream_one_turn(StreamCtx {
@@ -1671,11 +1874,24 @@ async fn run_turn_loop(mut ctx: RunCtx) {
                 // args, user stop, lost --resume). Disambiguate via exit status +
                 // the stderr tail, exactly like the old post-wait path.
                 warm_pool::remove_if(&ctx.session_id, &ctx.warm);
-                let status = ctx.child.wait().await.ok();
+                // #67: a spare that died while parked surfaces as EOF on its first
+                // adopted turn. Unless it's an AUTH/resume failure (a real,
+                // user-actionable error the cold respawn would just repeat), retry
+                // it cold like DeadOnReuse — the user never sees the dead spare.
                 let stderr_buf = {
                     let g = match stderr_tail.lock() { Ok(g) => g, Err(p) => p.into_inner() };
                     g.clone()
                 };
+                if spare_first_adopt
+                    && !is_auth_rejection(&stderr_buf)
+                    && !stderr_buf.contains("No conversation found with session ID:")
+                {
+                    log::info!("warm_pool: pre-warm spare {stream_sid} died while parked — silent cold retry");
+                    let _ = ctx.child.wait().await;
+                    let _ = done.send(Err(RETRY_COLD_SENTINEL.into()));
+                    break 'turns;
+                }
+                let status = ctx.child.wait().await.ok();
                 emit_turn_end_error(
                     &app_out, &win_label, &stream_sid, cold_first, status, &stderr_buf, done,
                 ).await;

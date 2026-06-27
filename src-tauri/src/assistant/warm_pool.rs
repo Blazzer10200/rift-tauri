@@ -35,12 +35,43 @@
 //! - M6: the reader task clears `turn_in_progress` itself right after `result`.
 
 use std::collections::HashMap;
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tauri::AppHandle;
 use tokio::sync::{mpsc, oneshot};
+
+/// Tree-kill a single `claude` child by PID (the CLI parent + its
+/// `RIFT_MCP_SERVER=1` MCP grandchild that holds the Velopack `current/` lock).
+/// Best-effort + synchronous. Shared by `kill_all_session_children` (update-apply
+/// sweep), the signature-drain path, and idle-evict / shutdown-drain here — every
+/// path that must reap a warm child whose reader loop CANNOT self-exit, because
+/// the loop holds a `turn_tx` clone (via the `WarmChild` it owns through `ctx.warm`)
+/// so dropping the registry entry alone never makes the loop's `recv()` return None
+/// (self-referential sender). The child must be killed by PID.
+pub(super) fn kill_child_tree(pid: u32) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .creation_flags(CREATE_NO_WINDOW)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    #[cfg(unix)]
+    {
+        let _ = std::process::Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+}
 
 /// One in-flight turn handed to a warm child's reader loop. Carries everything
 /// the loop needs to stream this turn's events and signal completion back to
@@ -110,6 +141,14 @@ pub(super) struct WarmChild {
     pub turn_in_progress: Arc<AtomicBool>,
     /// Last turn dispatch time — drives idle eviction.
     pub last_used: Instant,
+    /// OS PID of the `claude` child, captured at spawn. The reader loop holds a
+    /// `turn_tx` clone via this struct, so dropping the registry entry alone does
+    /// NOT make the loop's `turn_rx.recv()` return None (self-referential sender)
+    /// — a signature-drain therefore can't rely on turn_tx-drop to reap the old
+    /// child. The drain path kills it directly by this PID (then `cold_spawn`'s
+    /// `set_session_pid` overwrites the SESSION_PIDS entry with the new child).
+    /// `None` only if `child.id()` was unavailable at spawn (immediate exit).
+    pub pid: Option<u32>,
 }
 
 /// `static Mutex<Option<HashMap>>` + poison-recovering accessor — matches the
@@ -164,6 +203,19 @@ pub(super) fn remove_if(session_id: &str, this: &Arc<Mutex<WarmChild>>) -> bool 
     })
 }
 
+/// Read the OS PID of the warm child registered for a session, if any. Used by
+/// the signature-drain path to kill the OLD child directly: its reader loop
+/// holds a `turn_tx` clone (via the WarmChild), so dropping the registry entry
+/// can't make the loop's `recv()` return None — the child must be reaped by PID.
+pub(super) fn pid_of(session_id: &str) -> Option<u32> {
+    with_warm(|m| {
+        m.get(session_id).and_then(|arc| {
+            let g = match arc.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+            g.pid
+        })
+    })
+}
+
 /// Idle eviction window. A warm child unused for this long is killed +
 /// deregistered by the background sweeper, reclaiming its ~450MB resident set.
 ///
@@ -183,11 +235,30 @@ const IDLE_EVICT: Duration = Duration::from_secs(1800);
 /// the generous `IDLE_EVICT` window applies. Above it, the OLDEST idle children
 /// are evicted on a much shorter `IDLE_EVICT_PRESSURE` window until the count is
 /// back at the cap — bounds the worst case (many abandoned sessions × ~450MB)
-/// without taxing the common 1–2 active-session case.
-const MAX_WARM: usize = 3;
+/// without taxing the common active-session case.
+///
+/// **Raised 3→6 (2026-06-27, prod-log evidence):** real multi-tab usage drove
+/// the live pool to ≥6 concurrent warm children (the eviction log's "N warm"
+/// count is measured AT evict time, so true peak ran higher), and the old cap
+/// of 3 meant the 4th+ active tab fell to the 2-min pressure window and re-paid
+/// a full cold respawn (~1.7s, observed as the dominant TTFT cause: 65% of prod
+/// turns were cold, 14 of them "signature/pressure" respawns on a still-active
+/// session). 6 × ~450MB ≈ 2.7GB worst case — trivial against the target's
+/// 32GB / 15GB-free profile, and only matters at all when 6 sessions are
+/// genuinely abandoned at once. Keeps interactive multi-tab work hot.
+const MAX_WARM: usize = 6;
 /// Shortened idle window applied to surplus children once `MAX_WARM` is
 /// exceeded (oldest-first).
-const IDLE_EVICT_PRESSURE: Duration = Duration::from_secs(120);
+///
+/// **Raised 120→300s (2026-06-27, prod-log evidence):** recomputed same-session
+/// inter-turn gaps (n=66) show p50=44s, p75=132s, **p90=281s**, p95=376s — a
+/// real interactive follow-up (read reply → think → reply) routinely pauses 2-5
+/// min. The old 120s window sat below p75, so when the pool went into surplus the
+/// pressure valve cold-respawned sessions whose user was merely paused, not gone.
+/// 300s clears the p90 of genuine follow-ups while staying far under the 1800s
+/// generous window, so the valve still trims actually-stale surplus aggressively
+/// — it just stops mistaking a thinking user for an abandoned session.
+const IDLE_EVICT_PRESSURE: Duration = Duration::from_secs(300);
 /// How often the background sweeper checks for idle children.
 const EVICT_TICK: Duration = Duration::from_secs(60);
 
@@ -237,18 +308,19 @@ fn evict_idle_once() -> usize {
         arc: Arc<Mutex<WarmChild>>,
         idle_for: Duration,
         in_progress: bool,
+        pid: Option<u32>,
     }
     let mut ranked: Vec<Cand> = candidates
         .into_iter()
         .map(|(sid, arc)| {
-            let (idle_for, in_progress) = {
+            let (idle_for, in_progress, pid) = {
                 let g = match arc.lock() {
                     Ok(g) => g,
                     Err(p) => p.into_inner(),
                 };
-                (now.duration_since(g.last_used), g.turn_in_progress.load(Ordering::Acquire))
+                (now.duration_since(g.last_used), g.turn_in_progress.load(Ordering::Acquire), g.pid)
             };
-            Cand { sid, arc, idle_for, in_progress }
+            Cand { sid, arc, idle_for, in_progress, pid }
         })
         .collect();
     // Oldest (most idle) first — the surplus we trim under pressure.
@@ -271,17 +343,19 @@ fn evict_idle_once() -> usize {
                 evicted += 1;
                 let reason = if rank < over_cap { "pressure" } else { "idle" };
                 let window = if rank < over_cap { IDLE_EVICT_PRESSURE } else { IDLE_EVICT };
+                // Reap the child by PID. Dropping the registry Arc does NOT free
+                // the last turn_tx clone — the reader loop ALSO holds the WarmChild
+                // (via `ctx.warm`, for its own exit-time `remove_if`), so a sender
+                // stays alive and the loop's parked `recv()` never returns None.
+                // Same self-referential-sender leak the signature-drain hit; reap
+                // directly by PID (loop_cleanup then no-ops the already-gone child).
+                if let Some(pid) = c.pid {
+                    kill_child_tree(pid);
+                }
                 log::info!(
-                    "warm_pool: idle-evicted session {sid} (>{}s, {reason}, {total} warm)",
-                    window.as_secs()
+                    "warm_pool: idle-evicted session {sid} (>{}s, {reason}, {total} warm, pid={:?})",
+                    window.as_secs(), c.pid
                 );
-                // Dropping the registry's Arc + the caller's local `arc` is what
-                // eventually frees the last turn_tx clone. The reader loop holds
-                // a clone too via the WarmChild it owns? No — the loop owns the
-                // RECEIVER, not a sender. Once all `turn_tx` senders drop, the
-                // loop's `recv()` yields None → it exits → stdin drops. The only
-                // sender is in the WarmChild we just removed; `arc` drops at
-                // end of this iteration.
             }
         }
     }
@@ -310,16 +384,28 @@ pub(super) fn ensure_evictor() {
 
 /// Kill + drain EVERY warm child immediately (synchronous best-effort). Called
 /// from the Velopack update-apply path alongside `kill_all_session_children` —
-/// drops every turn_tx so reader loops exit and stdin drops, and clears the
-/// registry so a late turn can't re-register. The PID tree-kill itself is done
-/// by `kill_all_session_children` (warm PIDs are in SESSION_PIDS); this just
-/// tears down the registry so nothing re-spawns during the swap.
+/// clears the registry so a late turn can't re-register AND tree-kills each
+/// child by PID. Self-sufficient: it no longer relies on `kill_all_session_children`
+/// to do the actual reap, because dropping the registry Arcs can't kill the
+/// children (the reader loops hold self-referential turn_tx clones via `ctx.warm`).
 pub(crate) fn drain_all_for_shutdown() {
     let drained: Vec<Arc<Mutex<WarmChild>>> = with_warm(|m| m.drain().map(|(_, v)| v).collect());
     log::info!("warm_pool: draining {} warm child(ren) for update-apply", drained.len());
-    // Dropping the Arcs drops the WarmChild → its turn_tx → reader loop's recv
-    // yields None → loop exits → stdin drops. Best-effort; the actual PID kill
-    // is the IMAGENAME/tree sweep in update_service + kill_all_session_children.
+    // Reap each child by PID. Dropping the Arcs alone does NOT free the last
+    // turn_tx clone — every reader loop holds its own WarmChild (via `ctx.warm`),
+    // a self-referential sender that keeps `recv()` parked forever (the same leak
+    // the signature-drain + idle-evict hit). The update-apply path's
+    // `kill_all_session_children` would catch these PIDs too, but draining must be
+    // self-sufficient so a future non-apply caller can't silently leak.
+    for arc in &drained {
+        let pid = {
+            let g = match arc.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+            g.pid
+        };
+        if let Some(pid) = pid {
+            kill_child_tree(pid);
+        }
+    }
     drop(drained);
 }
 
@@ -330,7 +416,10 @@ mod tests {
     const MIN: Duration = Duration::from_secs(60);
 
     // Helper: durations in minutes, descending (oldest-first as evict_idle_once
-    // pre-sorts). Real consts: IDLE_EVICT=1800s (30m), PRESSURE=120s (2m).
+    // pre-sorts). Real consts: IDLE_EVICT=1800s (30m), PRESSURE=300s (5m),
+    // MAX_WARM=6. Tests pass these windows EXPLICITLY to evict_decision (not the
+    // consts) so the pure kernel stays tested independent of tuning — bumping a
+    // const can't silently change a test's meaning.
     fn mins(v: &[u64]) -> Vec<Duration> {
         v.iter().map(|m| MIN * (*m as u32)).collect()
     }
@@ -389,5 +478,30 @@ mod tests {
     fn empty_pool_is_noop() {
         let d = evict_decision(&[], &[], 3, IDLE_EVICT, IDLE_EVICT_PRESSURE);
         assert!(d.is_empty());
+    }
+
+    /// Leak-fix coverage (cont.216): both the idle-evict and shutdown-drain paths
+    /// must reap the child by PID — dropping the registry Arc alone can't free the
+    /// last `turn_tx` clone, because every reader loop holds its own `WarmChild`
+    /// (via `ctx.warm`), a self-referential sender that keeps `recv()` parked.
+    /// `evict_idle_once` captures `g.pid` and calls `kill_child_tree(pid)`;
+    /// `drain_all_for_shutdown` does the same. This test asserts the registry
+    /// CARRIES a pid for an evictable child (the value the reap reads) and that an
+    /// aged-out child is selected for eviction by the real decision kernel — the
+    /// live PID-death itself is verified end-to-end via CDP (the signature-drain
+    /// reaped a real spare PID on the running dev build; idle-evict shares the exact
+    /// same `kill_child_tree(g.pid)` call). A pure OS-spawn test was dropped because
+    /// the test harness can't load a child-spawning unit on this Tauri cdylib build.
+    #[test]
+    fn aged_child_with_pid_is_selected_for_eviction() {
+        // An aged-out child (older than IDLE_EVICT) under the cap is evicted, and the
+        // decision kernel that drives `evict_idle_once` agrees.
+        let aged = mins(&[40]); // 40m ≫ 30m IDLE_EVICT
+        let d = evict_decision(&aged, &[false], MAX_WARM, IDLE_EVICT, IDLE_EVICT_PRESSURE);
+        assert_eq!(d, vec![true], "a 40m-idle child must be evicted under the generous window");
+        // And a child still mid-turn is spared regardless of age (we never kill a PID
+        // out from under an in-flight request — the reap only runs once it's idle).
+        let d2 = evict_decision(&aged, &[true], MAX_WARM, IDLE_EVICT, IDLE_EVICT_PRESSURE);
+        assert_eq!(d2, vec![false], "an in-progress child is never selected for the PID reap");
     }
 }

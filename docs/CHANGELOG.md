@@ -2,21 +2,20 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.52.1 — A faster, sharper assistant
+## v0.53.0 — Instant first reply
 
-> The assistant felt slow and worked one step at a time. Two root causes, both fixed: it was thinking on every turn even when thinking was off, and it was never told to use its tools in parallel.
+> The very first message in a new chat used to be the slowest one — every fresh chat paid the full cold start (loading your Claude setup, hooks, and config) before a single word appeared, often 9–10 seconds of staring at nothing. Now Rift warms a process up *before* you hit send, so the first reply starts as fast as every reply after it.
 
 ### Speed
-- **No more silent "thinking" pause.** A turn that didn't carry the thinking setting was defaulting to thinking-on, so every reply sat through a 6–8s hidden reasoning pass before any text appeared (on Opus the thinking is invisible, so it just looked frozen). The default now matches the rest of the app — thinking is off unless you turn it on — and a clear **"Thinking…"** label shows during the pause when it is on, so it never reads as a hang.
-- **Tools now run in parallel.** The assistant was making tool calls one at a time — read a file, wait, read the next, wait — which felt slow on anything multi-step. It now batches independent calls (opening several files, running independent searches or checks) into a single round-trip, so multi-step work moves at a noticeably faster clip.
+- **The first turn is now warm too.** When you open a fresh chat with a folder set, Rift quietly spins up a ready Claude process in the background and parks it. The moment you send, that process is adopted instantly — the cold-start cost (re-loading your global `~/.claude` config, hooks, and tools) is already paid, so the reply begins right away instead of after a long pause. If you change the model or settings before sending, the spare is discarded and you get a normal cold start — never worse than before. It also steps aside automatically when you're near a usage limit, so it never spends your budget on a reply you didn't ask for.
+- **More chats stay warm at once.** The warm-process pool grew from 3 to 6 and the "you're still active" window widened, so juggling several chats or pausing to read a long answer no longer drops you back to a cold start on your next message.
 
-### Sharper edits
-- **Edits fit your codebase.** New code now follows the surrounding file's naming, formatting, and comment style instead of imposing its own, sticks to exactly what you asked for (no surprise refactors of nearby code), and stops adding unrequested explanatory comments.
-
-### Quieter internals
-- **No more update-check error spam.** On some installs the updater logged the same "couldn't locate manifest" error every few seconds (hundreds of identical lines a day); it now logs the condition once and stays quiet.
+### Reliability
+- **Fixed a process leak in the warm pool.** When a warm process was retired — because you changed the model, it went idle, or the app updated — the underlying Claude process could survive in the background instead of shutting down, slowly accumulating until you restarted Rift. All three retirement paths now shut the process down for real.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.52.1** — A faster, sharper assistant: stopped a silent 6–8s "thinking" pause on every reply (thinking now defaults off, with a clear "Thinking…" label when it's on), made the assistant batch independent tool calls in parallel instead of one-at-a-time, tightened edits to match your codebase and stay in scope, and silenced repetitive update-check error spam.
 
 - **v0.52.0** — Voice mode overhaul: a real mic meter driven by your actual voice level (Web Speech + on-device Whisper), **Ctrl+D** to dictate (tap to toggle or hold for push-to-talk), a "stopping soon" countdown for auto-stop-on-silence, and transcript cleanup moved onto a current model.
 
