@@ -18,6 +18,7 @@
   import { untrack } from "svelte";
   import Markdown from "./Markdown.svelte";
   import { basename } from "./toolCaption";
+  import { parseAskUserResult } from "./stream/streamModel";
   import AgentCard from "./toolchip/AgentCard.svelte";
   import TodoCard from "./toolchip/TodoCard.svelte";
 
@@ -83,6 +84,11 @@
   const askRequestId = $derived(isAskUser ? assistant.askUserRequestIdFor(tool.id) : null);
   // Answered iff the tool_result has landed (status === "done").
   const askAnswered = $derived(isAskUser && tool.status === "done");
+  // Parse the backend's "Q:/A:" answered text into structured pairs so the
+  // answered card renders clean question + answer-chip rows instead of a raw
+  // <pre> dump. Falls back to the <pre> when parse yields nothing (dismissal /
+  // unparseable text).
+  const answeredPairs = $derived(askAnswered ? parseAskUserResult(tool.result) : []);
 
   function toggleAskMulti(qi: number, oi: number) {
     const cur = askMultiSet[qi] ?? new Set<number>();
@@ -582,9 +588,23 @@
   {#if isAskUser && expanded}
     <div class="ask-body">
       {#if askAnswered}
-        <!-- Final state — show the model's tool_result, which already
-             contains "Q:/A:" rows formatted by tool_ask_user::format_*. -->
-        {#if tool.result}
+        <!-- Final state — parse the model's "Q:/A:" tool_result into clean
+             question + answer-chip rows; fall back to the raw text on a
+             dismissal or anything unparseable. -->
+        {#if answeredPairs.length > 0}
+          <div class="ask-answered">
+            {#each answeredPairs as pair, pi (pi)}
+              <div class="ask-answered-row">
+                <div class="ask-answered-q">{pair.question}</div>
+                <div class="ask-answered-a">
+                  {#each pair.answers as ans, ai (ai)}
+                    <span class="ask-answered-chip">{ans}</span>
+                  {/each}
+                </div>
+              </div>
+            {/each}
+          </div>
+        {:else if tool.result}
           <pre class="ask-result">{tool.result}</pre>
         {:else}
           <div class="ask-empty">(no answer recorded)</div>
@@ -1369,6 +1389,35 @@
     text-align: right;
   }
 
+  .ask-answered {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .ask-answered-row {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .ask-answered-q {
+    font-size: 12px;
+    color: var(--fg-2);
+    line-height: 1.4;
+  }
+  .ask-answered-a {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  .ask-answered-chip {
+    padding: 2px 9px;
+    border-radius: 5px;
+    background: color-mix(in oklch, var(--ask) 14%, transparent);
+    border: 1px solid color-mix(in oklch, var(--ask) 30%, var(--border));
+    color: color-mix(in oklch, var(--ask) 55%, var(--fg));
+    font-size: 11.5px;
+    font-weight: 600;
+  }
   .ask-result {
     margin: 0;
     padding: 8px 10px;

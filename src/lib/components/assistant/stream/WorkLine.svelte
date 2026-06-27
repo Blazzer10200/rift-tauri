@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronDown, FileText, Search, Terminal, Wrench } from "lucide-svelte";
+  import { ChevronDown, FileText, FolderSearch, FolderTree, Search, Terminal, Wrench } from "lucide-svelte";
   import { groupNames, VERB_PAST, VERB_ING, type StreamTool, type TKind } from "./streamModel";
 
   let { tools }: { tools: StreamTool[] } = $props();
@@ -8,8 +8,16 @@
   const ICONS: Partial<Record<TKind, typeof FileText>> = {
     read: FileText, grep: Search, shell: Terminal, mcp: Wrench,
   };
-  const lead = $derived(tools[0]?.kind ?? "mcp");
-  const Icon = $derived(ICONS[lead] ?? Wrench);
+  // Glob (filename patterns) and list_dir (directory listing) collapse into the
+  // grep/read kinds, so the kind map can't tell them apart. Key the lead icon
+  // off the tool NAME for those two so the collapsed line shows a folder glyph
+  // instead of a bare magnifier / file — matches ToolChip's per-tool icons.
+  const NAME_ICONS: Record<string, typeof FileText> = {
+    Glob: FolderSearch, list_dir: FolderTree,
+  };
+  const leadTool = $derived(tools[0]);
+  const lead = $derived(leadTool?.kind ?? "mcp");
+  const Icon = $derived(NAME_ICONS[leadTool?.name ?? ""] ?? ICONS[lead] ?? Wrench);
   const anyActive = $derived(tools.some((t) => t.status === "pending"));
   const summary = $derived(groupNames(tools));
 </script>

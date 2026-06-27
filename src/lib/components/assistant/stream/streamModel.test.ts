@@ -255,12 +255,14 @@ describe("groupNames — names on the collapsed work row", () => {
     expect(groupNames(ts)).toBe("Ran 1 command");
   });
 
-  it("mixed kinds fall back to the count summary", () => {
+  it("mixed kinds get a dominant-first per-kind breakdown", () => {
     const ts = toolsOf([
       tool("Read", "done", { file_path: "/a/a.ts" }),
+      tool("Read", "done", { file_path: "/a/b.ts" }),
+      tool("Grep", "done", { pattern: "foo" }),
       tool("Bash", "done", { command: "ls" }),
     ]);
-    expect(groupNames(ts)).toBe("Ran 2 steps");
+    expect(groupNames(ts)).toBe("Read 2 · searched 1 · ran 1");
   });
 
   it("grep names its pattern target", () => {

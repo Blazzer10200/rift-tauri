@@ -179,6 +179,14 @@ pub fn run() {
                     log::info!("assistant: startup sweep deleted {} retired JSONL(s)", deleted);
                 }
             });
+            // Warm the CLI-capabilities cache at boot. The first turn calls
+            // CliCaps::active(), which on a cold cache shells out to probe
+            // `claude --version` (up to a 5s block) — that cost landed on the
+            // user's first message's TTFT. Priming it here moves the probe off
+            // the hot path so the first turn hits the cached value.
+            tauri::async_runtime::spawn_blocking(|| {
+                let _ = assistant::cli_caps::CliCaps::active();
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

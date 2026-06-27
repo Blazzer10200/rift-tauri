@@ -371,6 +371,14 @@ function segmentWork(tools: StreamTool[]): WorkSeg[] {
   return segs;
 }
 
+// Lower-case verb phrase per kind for a mixed-kind breakdown ("read 3 · searched
+// 2 · ran 1"). Keeps the same vocabulary as VERB_PAST but count-friendly.
+const KIND_VERB: Record<TKind, string> = {
+  read: "read", grep: "searched", edit: "edited", create: "created", shell: "ran",
+  agent: "delegated", web: "searched the web", fetch: "fetched", test: "tested",
+  lint: "checked", mcp: "called", plan: "planned", ask: "asked",
+};
+
 function groupSummary(tools: StreamTool[]): string {
   const kinds = new Set(tools.map((t) => t.kind));
   const n = tools.length;
@@ -381,7 +389,17 @@ function groupSummary(tools: StreamTool[]): string {
     if (k === "grep") return n > 1 ? `Searched ${n} times` : "Searched the repo";
     if (k === "mcp") return `Ran ${n} tool${n > 1 ? "s" : ""}`;
   }
-  return `Ran ${n} steps`;
+  // Mixed kinds: name what actually ran, dominant-first ("read 4 · searched 2 ·
+  // ran 1"), instead of a flat "Ran N steps". Cap at 3 segments + a tail count.
+  const counts = new Map<TKind, number>();
+  for (const t of tools) counts.set(t.kind, (counts.get(t.kind) ?? 0) + 1);
+  const ordered = [...counts].sort((a, b) => b[1] - a[1]);
+  const segs = ordered.slice(0, 3).map(([k, c]) => `${KIND_VERB[k]} ${c}`);
+  const restKinds = ordered.slice(3);
+  const restCount = restKinds.reduce((s, [, c]) => s + c, 0);
+  const tail = restCount > 0 ? ` · +${restCount} more` : "";
+  const body = segs.join(" · ");
+  return body.charAt(0).toUpperCase() + body.slice(1) + tail;
 }
 
 // Names-on-rows summary: instead of "Read 2 files", show "Read layout.ts,

@@ -29,6 +29,22 @@ use tokio::net::{TcpListener, TcpStream};
 
 static SHIM: OnceLock<u16> = OnceLock::new();
 
+/// One pooled HTTP client for all shim→upstream requests. `reqwest::Client::new()`
+/// per request opened a fresh connection (no keep-alive) on every /v1/messages
+/// call — pure handshake overhead on the hot streaming path. A shared client
+/// reuses connections across turns. Built lazily so a TLS-init failure can't
+/// panic at module load.
+static UPSTREAM: OnceLock<reqwest::Client> = OnceLock::new();
+
+fn upstream_client() -> &'static reqwest::Client {
+    UPSTREAM.get_or_init(|| {
+        reqwest::Client::builder()
+            .pool_idle_timeout(Duration::from_secs(90))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
 /// Loopback base URL (`http://127.0.0.1:<port>`) to hand the CLI as
 /// `ANTHROPIC_BASE_URL`, or `None` until the listener has bound.
 pub fn shim_base_url() -> Option<String> {
@@ -210,7 +226,7 @@ async fn handle_conn(mut stream: TcpStream) -> Result<(), String> {
     }
 
     let url = format!("{target}{}", req.path);
-    let mut rb = reqwest::Client::new().request(
+    let mut rb = upstream_client().request(
         reqwest::Method::from_bytes(req.method.as_bytes())
             .map_err(|e| format!("bad method: {e}"))?,
         &url,

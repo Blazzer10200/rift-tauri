@@ -2,6 +2,20 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.61.0 — Honest, detailed tool display + a faster path
+
+> This one is about Rift *showing its work* clearly. When the assistant reads, searches, and runs things, you now see exactly what happened — and a couple of quiet speed wins land too. Nothing you do changes.
+
+### What you'll notice
+- **Tool rows name what actually ran.** A batch that mixed reading and searching used to collapse into a vague "Ran 6 steps." Now it reads what it did, biggest-first — e.g. **"Searched 2 · read 1"** — so you can tell at a glance whether the assistant is using the right tools. File-listing and filename-pattern searches also get their own folder icons instead of blurring into the plain search/file glyphs.
+- **Answered question cards look clean.** When the assistant asks you to pick between options, the answered card now shows tidy question + answer chips instead of a raw text dump.
+- **Delegated helpers read honestly.** A handed-off sub-task now shows a clear "working…" state with a short note that it runs in its own context, and its result lands in place when done — no more dead "running…" with nothing to click.
+
+### Under the hood
+- **Sub-agents get the same discipline.** When the assistant hands work to a helper agent, it now passes along the same rules it follows itself — search with the right tools, work in parallel, return tight results — so delegated work doesn't fall back to slow, noisy patterns.
+- **Two latency trims.** The "thinking off" fast path now reuses one pooled network connection instead of opening a fresh one every request, and Rift checks the Claude CLI's capabilities once at startup instead of on your first message — shaving a possible multi-second stall off the very first reply.
+- **Verified live.** Full test suite, type checks, and a real run of the app all pass clean; the new tool-row summary was confirmed rendering correctly in the running app.
+
 ## v0.60.0 — Spring cleaning
 
 > No new buttons in this one — it's a deep tidy-up of Rift's own code so the app stays fast to build on and easy to keep correct. Nothing you do changes; everything that worked before works identically, now on a leaner, better-organized foundation. The version jumps to 0.60 to mark how much ground this pass covered.
@@ -36,7 +50,5 @@
 - **v0.35.0** — A reliability pass on the quiet edges: a stuck turn surfaces instead of hanging forever (dead-pipe detection + retry on a fresh process), the auto-updater recovers from a poisoned internal lock, CLI-update checks read as "Checking…" instead of a stale result, and git-timeout kills are scoped to git.
 
 - **v0.31.2–v0.34.0** — Windows that stay in sync (multi-window, one per monitor; conversation list synced across all), **Use my full Claude Code config** (inherit your global `~/.claude` setup), a ground-up Workspace redesign + adopt-an-existing-folder, and a project editor that tells you what's wrong (live glob validation, plain-English errors).
-
-- **v0.27.0–v0.31.1** — Projects + Workspace era: named folder aliases with include/exclude scoping + a merged **Workspace** home, glob matching that actually works (`**` spans folders), AI Health (your own Claude coaches your plan), a 145-finding hardening pass, accessibility polish, the activity stats panel, and finished split-view.
 
 - **v0.20.7–v0.26.3** — Foundation era (detail via `git log`): full redesign port (all 7 surfaces to spec) + stream design language, the warm-CLI process (first reply ~1400ms → ~5ms after, 30-min idle survival, transparent respawn), honest API-stall watchdog, interactive `ask_user` cards, context ring, sub-agent activity dock, latency auto-scale, per-project chat scoping.
