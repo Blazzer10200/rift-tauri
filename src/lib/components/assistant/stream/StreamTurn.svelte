@@ -135,7 +135,14 @@
   // then. Tiers: 0 normal · 1 soft (≥20s) · 2 strong (≥60s) · 3 wedged (≥150s,
   // approaching the backend's auto-end). Keep in lockstep w/ turn.rs's ceiling.
   const stallLevel = $derived.by(() => {
-    if (!streaming || liveTool || liveTokens != null || liveSecs == null) return 0;
+    // Active thinking is NOT a stall — Opus 4.8/4.7 ship thinking.display
+    // "omitted", so a real reasoning pass streams only a signature (no text, no
+    // token count), leaving liveTokens null for the whole think. Without this
+    // guard the watchdog escalated to "Waiting on the model" while the head was
+    // still showing "Thinking…" — the model was working, but the footer read as
+    // a 45s hang. thinkingNow gates the head; gate the stall on it too so the
+    // two never contradict.
+    if (!streaming || liveTool || liveTokens != null || liveSecs == null || thinkingNow) return 0;
     if (liveSecs >= 150) return 3;
     if (liveSecs >= 60) return 2;
     if (liveSecs >= 20) return 1;
