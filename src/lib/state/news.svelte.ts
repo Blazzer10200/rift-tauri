@@ -2,7 +2,7 @@
 // fetch-on-launch, throttle to once / 6h, persist to localStorage so the page
 // paints from cache instantly then refreshes in the background, bounded retry.
 //
-// Two tiers (see docs/design/workspace-activity-news.md + assistant/news.rs):
+// Two tiers (see assistant/news.rs; design brief retired — git log):
 //  - Tier 1 (`items`): deterministic Claude Code release feed (free, no LLM).
 //  - Tier 2 (`digest`): opt-in AI summary of recent Anthropic + Claude Code news.
 

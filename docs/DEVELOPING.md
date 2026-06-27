@@ -175,6 +175,8 @@ The tag-driven `release.yml` now **runs the full test suite (`cargo test` + `sve
 - `pwsh scripts/smoke-turn.ps1 -Model haiku` — **before** tagging, prove a real Claude turn still completes end-to-end (spawns `claude` with Rift's exact turn flags against a throwaway folder; ~a cent of quota). Covers the live-turn check that CDP can't.
 - `pwsh scripts/ship-watch.ps1` — **after** `git push --tags`, blocks on the release run and reports green/red (exit-status mirrors the run). Replaces the manual "confirm CI landed next session" step.
 
+CI runs on the self-hosted `proxmox-win` runner. When a tagged release sits `queued` and never starts, or the **Verify published** step red-X's a release that actually shipped, see [`RUNNER-RUNBOOK.md`](RUNNER-RUNBOOK.md) for the diagnose/unstick steps.
+
 ---
 
 ## 5. Configuration & environment variables

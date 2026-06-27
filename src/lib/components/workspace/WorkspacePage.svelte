@@ -560,7 +560,11 @@
 <style>
   .sb-main { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
   .sb-scroll { flex: 1; min-height: 0; overflow-y: auto; }
-  .sb-wrap { max-width: 1200px; margin: 0 auto; padding: 20px 40px 20px; display: flex; flex-direction: column; gap: 14px; }
+  /* Fill the scroll viewport so the dashboard fits one screen: head + act-band
+     stay fixed, .dash absorbs the remainder and scrolls per-column. height:100%
+     caps the wrap to the viewport so .dash (flex:1; min-height:0) is bounded and
+     its columns scroll internally rather than pushing a page scrollbar. */
+  .sb-wrap { max-width: 1200px; height: 100%; margin: 0 auto; padding: 20px 40px 20px; display: flex; flex-direction: column; gap: 14px; }
 
   /* ── Header ─────────────────────────────────────────────────────────────── */
   .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
@@ -608,6 +612,8 @@
   .range button.on { background: var(--surface-active); color: var(--fg); }
 
   /* ── Activity band (full width, horizontal) ────────────────────────────── */
+  /* head + act-band hold their natural height; .dash takes the rest (below). */
+  .head, .act-band { flex: none; }
   .act-band { min-width: 0; }
   .act-card { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 22px;
     padding: 18px 20px; border-radius: var(--radius-2xl); border: 1px solid var(--border); background: var(--bg-elev-1); }
@@ -629,10 +635,15 @@
   .act-state.err { color: var(--danger); }
 
   /* ── Row 2 — Projects · News (two balanced columns) ────────────────────── */
-  .dash { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; align-items: start; }
+  /* .dash absorbs the leftover height; each column scrolls internally so the
+     page itself never scrolls (the unwanted page scrollbar fix). align-items
+     stretch lets both columns claim full row height for their inner scroll. */
+  .dash { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 28px; align-items: stretch; }
   @media (max-width: 1080px) { .dash { grid-template-columns: minmax(0, 1fr); gap: 24px; } }
-  .col { min-width: 0; }
-  .news-col { min-width: 0; }
+  .col, .news-col { min-width: 0; min-height: 0; overflow-y: auto; }
+  /* breathing room so the last card isn't flush against the scroll edge */
+  .col, .news-col { padding-bottom: 4px; }
 
   .hero { display: flex; flex-direction: column; gap: 5px; }
   .hero-num { display: flex; align-items: baseline; gap: 10px; }
