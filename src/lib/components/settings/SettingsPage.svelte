@@ -7,6 +7,7 @@
     FolderOpen, Copy, Check, Eye, EyeOff, Mic, Accessibility as A11yIcon,
     CircleCheck, RotateCcw, Trash2, ArrowUpCircle, Loader2,
     SlidersHorizontal, Bot, KeyRound, Wrench, Keyboard, Download, ShieldCheck,
+    Activity,
   } from "lucide-svelte";
   import { appConfigDir, appLogDir } from "@tauri-apps/api/path";
   import { confirm } from "@tauri-apps/plugin-dialog";
@@ -24,6 +25,8 @@
   import { environment } from "../../state/environment.svelte";
   import { scrubUser } from "$lib/utils/redact";
   import { tooltip } from "$lib/actions/tooltip";
+  import { diagnostics } from "../../state/diagnostics.svelte";
+  import DiagnosticsConsole from "../diagnostics/DiagnosticsConsole.svelte";
   import Select from "../Select.svelte";
   import PageHero from "../shared/PageHero.svelte";
 
@@ -88,6 +91,7 @@
 
   let diagCopied = $state(false);
   let diagCopiedTimer: ReturnType<typeof setTimeout> | null = null;
+  let diagConsoleOpen = $state(false);
 
   async function loadAboutPaths() {
     try { configDir = await appConfigDir(); } catch (e) { console.warn("appConfigDir failed", e); }
@@ -275,6 +279,7 @@
     }).catch((e) => console.warn("assistantStore.init failed", e)); // F160: no unhandled rejection
     void stt.init();
     void loadAboutPaths();
+    void diagnostics.init().catch((e) => console.warn("diagnostics.init failed", e));
     void cliUpdate.maybeCheck();
     void environment.refresh(); // fresh probe each time Settings opens — tools may have just been installed
 
@@ -867,6 +872,10 @@
               <span class="st-about-ic"><RefreshCw size={15} /></span>
               <span class="st-about-body"><span class="st-about-t">Check for updates</span><span class="st-about-s">Compare against the latest GitHub release</span></span>
             </button>
+            <button class="st-about-row" type="button" onclick={() => (diagConsoleOpen = true)}>
+              <span class="st-about-ic"><Activity size={15} /></span>
+              <span class="st-about-body"><span class="st-about-t">Open diagnostics console</span><span class="st-about-s">Live event stream — filter, search, and export. Username-scrubbed.</span></span>
+            </button>
             <button class="st-about-row" type="button" onclick={copyDiagnostic}>
               <span class="st-about-ic">{#if diagCopied}<Check size={15} />{:else}<Copy size={15} />{/if}</span>
               <span class="st-about-body"><span class="st-about-t">{diagCopied ? "Copied to clipboard" : "Copy diagnostic"}</span><span class="st-about-s">Version, platform, and paths — username-scrubbed</span></span>
@@ -887,6 +896,10 @@
 
   </div>
 </div>
+
+{#if diagConsoleOpen}
+  <DiagnosticsConsole onclose={() => (diagConsoleOpen = false)} />
+{/if}
 
 <style>
   .sb-main { position: relative; overflow: hidden; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; background: var(--bg); color: var(--fg); }
