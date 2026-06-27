@@ -43,7 +43,7 @@
   // RR2 unmount hygiene — the Composer is destroyed when its tab/split-pane
   // closes (parent gates rendering on tab presence). Without this, pending
   // timers fire on torn-down $state, a PTT hold leaves the mic recording on the
-  // global stt singleton, and an in-flight enhance keeps billing a Haiku spawn.
+  // global stt singleton, and an in-flight enhance keeps billing a CLI spawn.
   onDestroy(() => {
     if (steerFlashTimer) clearTimeout(steerFlashTimer);
     if (undoTimer) clearTimeout(undoTimer);
@@ -60,7 +60,7 @@
     // is invalidated; cancel the backend subprocess only once we have the id.
     // The old `enhancing && enhanceRequestId` guard skipped cancellation in the
     // window between `enhancing = true` and the async onRequestId callback,
-    // leaking a billed Haiku spawn when a split-pane closed mid-init.
+    // leaking a billed CLI spawn when a split-pane closed mid-init.
     if (enhancing) {
       enhanceSeq++;
       if (enhanceRequestId) assistant.cancelEnhance(enhanceRequestId);
@@ -480,7 +480,7 @@
   }
 
   // ── Prompt enhancer (wand) ───────────────────────────────────────────────
-  // One-shot Haiku rewrite of the current draft into a clearer prompt. Result
+  // One-shot Sonnet rewrite of the current draft into a clearer prompt. Result
   // shows as an editable preview above the composer — Accept drops it into the
   // textarea, Discard dismisses. Never auto-sends, never overwrites silently.
   let enhancing = $state(false);

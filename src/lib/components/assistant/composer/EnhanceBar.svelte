@@ -191,7 +191,7 @@
 <style>
   /* ── Prompt enhancer preview ─────────────────────────────────────────
      Glass panel above the composer (mirrors .slash-menu positioning) holding
-     the Haiku-rewritten draft. Accent reads from --model-color so it matches
+     the model-rewritten draft. Accent reads from --model-color so it matches
      the active model's hue like the rest of the composer chrome. */
   .enhance-panel {
     position: absolute;

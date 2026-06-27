@@ -17,6 +17,12 @@
 - **Zero latency cost.** A self-review caught one risky spot where the new instrumentation touched the hot reply path; it was moved out of the critical section before shipping. The warm-reply path stays as fast as it was (0–2ms to first token).
 - **Verified.** Full backend suite (116 tests), frontend type-checks clean (4132 files), 13 new unit tests for the health + metrics math, and the console + health strip confirmed working live in the running app.
 
+### Enhance-prompt wand — sharper, faster, more faithful
+- **Better at messy input.** The ✨ wand's rewrite instructions were reworked around its real job — a *translation layer* for anyone who isn't a confident prompt-writer. It now explicitly recovers intent from typos, dictation artifacts, run-on or fragmented phrasing, and non-native grammar, fixes the mechanics silently, and never copies your errors into the result. Built with accessibility in mind.
+- **Won't over-inflate your ask.** Added worked examples and a hard restraint rule so a one-line draft becomes at most a tight paragraph — never a phantom multi-point spec the request never implied. Faithfulness over embellishment.
+- **Snappier.** The rewrite now runs at medium reasoning effort instead of the CLI default — it's a short, bounded task, so the long hidden high-effort pre-pass (part of the "why is the wand slow sometimes" feel) is gone.
+- **Doc cleanup.** Fixed stale "Haiku" references throughout the enhance path — the wand has run on Sonnet for a while; the comments now say so.
+
 ## v0.62.0 — Honest about where the time goes
 
 > This one settles the question of why a reply sometimes feels slow. Short version: it's almost always Claude thinking, not Rift — and now the app proves it instead of asking you to take our word. Plus a real reliability fix to the "is it stuck?" indicator.
