@@ -2,40 +2,28 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.51.3 — Haiku 4.5 removed
+## v0.52.0 — Voice mode overhaul
 
-- **Haiku 4.5 removed from the model picker.** Anthropic pulled Haiku 4.5, so it's no longer an option. Any chat or workspace that had Haiku pinned now falls back to Sonnet automatically; older conversations that used Haiku still display correctly. (Done as a reversible kill-switch, mirroring how Fable was handled — one flag restores it if it ever returns.)
+> Dictation got a real, responsive feel: a live mic meter that actually reacts to your voice, a keyboard shortcut that works the way you'd expect, and hands-free auto-stop.
 
-## v0.51.2 — Correctness fixes
+### You can see your voice now
+- **A real audio meter.** The mic button's waveform used to be a fixed animation that looked the same whether you were talking or silent. It's now driven by your actual microphone level — the bars rise and fall with your voice, so you can tell at a glance that Rift is hearing you. (Works on both the built-in Web Speech engine and on-device Whisper.) When the line goes quiet it settles into a gentle idle pulse rather than freezing.
 
-> A bug-fix batch from a three-pass audit (background-task promises, the model picker, the Tasks/plan card, prompt-enhance, dictation, stop-mid-turn, and a pile of smaller reactivity fixes). No new features — just things behaving the way they should.
+### Ctrl+D to dictate — tap or hold
+- **A dictation keyboard shortcut.** Press **Ctrl+D** (Cmd+D on Mac) to start and stop dictation without reaching for the mic button.
+- **Tap or hold, whichever fits.** A quick tap toggles dictation on and off hands-free. Press and *hold* instead and it works like push-to-talk — it records while you hold the key and stops the moment you let go. One shortcut, both styles.
 
-- **Background tasks no longer leave you waiting on a reply that never comes.** When the assistant ran a slow command "in the background" and said it would report back when it finished, that report could never arrive — Rift runs each turn as a one-shot, so there's nothing left listening once the turn ends (and the background command actually gets killed seconds later). The assistant is now told to run slow work in the foreground instead, so the result lands in the same reply. As a backstop, if a turn still kicks off a background task, you'll get a one-time heads-up — *"Background task won't auto-report — send a message to ask how it went"* — instead of silence (now shown once per chat, not once per turn).
+### Hands-free auto-stop
+- **A "stopping soon" countdown.** When you turn on "Auto-stop on silence," a small countdown now appears next to the mic in the last couple of seconds before it ends, so the auto-stop never catches you off guard.
 
-- **Your plan/checklist no longer disappears when you reopen a chat.** A plan the assistant built during a turn (the Tasks card) would vanish from the conversation after closing and reopening Rift — the card had nothing to render from once the live data was gone. The card now carries its own contents, so it survives a reload intact.
-- **The model picker's "More models" flyout behaves with the keyboard.** Arrowing onto a previous-generation model opened the flyout (good), but arrowing back to a current model left it stuck open. It now opens and closes as your cursor moves, and still responds to hover and the toggle as before.
-- **Cleaner tool readout during planning.** The newer Claude CLI's task-management calls (list/get/stop/output) no longer show up as stray generic tool chips in the chat — they're folded into the plan flow.
-- **Accurate "earlier steps" count under a collapsed sub-agent.** The "+N earlier steps" trail no longer counts a step that's still in progress, so the number matches what actually finished.
-- **Prompt enhancement can't hang forever anymore.** "Enhance prompt" now has a 90-second safety timeout (matching the other background helpers). If the Claude CLI stalls mid-enhance, the panel stops cleanly instead of spinning indefinitely — and the background process is shut down so it can't keep running (or billing) after you've moved on.
-- **Switching chats no longer drags one chat's state into another.** Quick tab-switches used to leak transient composer state across chats — an in-flight "Enhance" started in one chat could pop up over a different one (and Accepting it would overwrite the wrong draft), and the prompt-recall cursor / open menus carried over too. Switching chats now resets all of that cleanly.
-- **Dictation no longer fights the Enhance refine box.** Typing a refine directive in the Enhance panel while dictation was running could yank your cursor back to the main box on every interim transcript. The textarea now only refocuses when it actually had focus.
-- **Stopping a turn mid-thought leaves a clean record.** Pressing Stop while Claude was thinking or running a tool used to persist a chip stuck forever on "thinking…"/"running…" in that conversation's history. Stopped turns now settle those chips to a finished state.
-- **Multiple-choice answers survive a streaming question.** If you picked an answer to the first question of a multi-question prompt while later questions were still streaming in, your selection could get wiped. Selections are now preserved as more questions arrive.
-- **Smaller polish:** the code-block Copy button no longer gets stuck on "Copied" after a fast double-click; expanding a long code block stays expanded if the message re-renders; dictation cancel/stop is tighter; and reopening the app restores the focused split-pane to the right conversation.
-
-## v0.51.1 — Live sub-agent activity
-
-> A focused hotfix that overhauls the sub-agent panel so you can actually see what Claude's helper agents are doing, and stops it from overlapping the chat.
-
-### You can see what sub-agents are doing now
-- **A live "now doing" line per agent.** When Claude delegates work to a helper agent, the panel shows what it's touching *right now* in plain language — "Reading config.json," "Searching for…," "Thinking…" — with a live cue, instead of a meaningless checkmark and a green bar.
-- **A recent-steps trail.** A finished agent shows the actual actions it took ("Searched for X · Read Y · +2 earlier steps") so you can tell what it accomplished at a glance, without expanding anything.
-- **The panel header reads as alive.** "Working · 2 agents active" with a pulse while running, settling to "2 finished" when done.
-
-### No more overlap
-- **The chat no longer slides under the panel.** When the sub-agent card is open it reserves space, so wide messages stop getting clipped behind it. It releases that space the moment you minimize the panel back to its pill, and steps aside on narrow windows.
+### Smaller things
+- **Transcript cleanup keeps working.** The optional "clean up transcript" pass (punctuation, capitalization) was pinned to a model Anthropic has since retired; it now runs on a current model, so cleanup keeps working. The setting is renamed from the old model name to simply "Clean up transcript."
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.51.3** — Haiku 4.5 removed from the model picker (Anthropic pulled it); anything pinned to Haiku falls back to Sonnet, older Haiku chats still render. Reversible kill-switch, same as Fable.
+- **v0.51.2** — A correctness batch from a three-pass audit: background-task promises that never resolved, the plan/Tasks card surviving a reload, the model-picker flyout keyboard behavior, prompt-enhance timeouts, cross-chat state leaks, clean stop-mid-turn records, and a pile of smaller reactivity fixes.
+- **v0.51.1** — Sub-agent panel overhaul: a live "now doing" line per helper agent, a recent-steps trail, an alive header, and no more overlapping the chat.
 
 - **v0.51.0** — A faster assistant + a redesigned picker: fixed the "everything is slow" regression (a flipped permission default was parking every tool on an approval the UI never showed), turned extended thinking off by default, rebuilt the model + effort picker in Rift's design language (identity icons, a "More models" flyout, an honest Low→X-High effort dial), and revived the Tasks/Plan panel after a CLI tool-rename broke its allow-list.
 
