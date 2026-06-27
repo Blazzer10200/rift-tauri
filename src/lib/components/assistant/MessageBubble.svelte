@@ -6,14 +6,16 @@
     typeof window !== "undefined" &&
     window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
   import { assistant, type Block, type ChatMessage } from "../../state/assistant.svelte";
-  import { GitCommit, Clock, RotateCcw } from "lucide-svelte";
+  import { RotateCcw } from "lucide-svelte";
   import Markdown from "./Markdown.svelte";
   import EditDiff from "./EditDiff.svelte";
   import ToolChip from "./ToolChip.svelte";
   import PermissionBar from "./PermissionBar.svelte";
   import { isInlineDiffTool, shortToolName, parseTextBlock, reconcileSplitHeaders, mergeSplitProse, statusOf, nodeKind,
-    formatBoundaryAt, formatDuration, formatDurationMs, groupDurationMs, elapsedFor, summarizeGroup, shortModel, lineDelta,
+    formatDuration, formatDurationMs, groupDurationMs, elapsedFor, summarizeGroup, shortModel,
     coalesceToolGroups, numberActions, type TimelineUnit } from "./bubble/helpers";
+  import BoundaryBlock from "./bubble/BoundaryBlock.svelte";
+  import TurnSummary from "./bubble/TurnSummary.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
   import { portal } from "$lib/actions/portal";
@@ -105,7 +107,6 @@
           | undefined)
       : undefined,
   );
-  let boundaryExpanded = $state(false);
 
   // Terminal stop reason, surfaced only once the turn settles. max_tokens =
   // output truncated at the cap; refusal = model declined. Normal completions
@@ -161,51 +162,6 @@
       ? (message.costUsd > 0 && message.costUsd < 0.01 ? "<$0.01" : `$${message.costUsd.toFixed(2)}`)
       : null,
   );
-
-  // ── TurnSummary — caps a completed assistant turn that touched files.
-  // Stats derive from the turn's own Edit/Write/MultiEdit blocks (same line
-  // diff as EditDiff), duration from summed block work-time, cost from the
-  // message. Edits are ALREADY applied (per-tool, via PermissionBar) — so this
-  // is an honest recap + mode consequence, not a fake turn-level Apply/Undo.
-  const turnStats = $derived.by(() => {
-    if (isUser) return { files: 0, adds: 0, dels: 0, firstEditId: null as string | null, firstEditFile: null as string | null };
-    const files = new Set<string>();
-    let adds = 0, dels = 0, firstEditId: string | null = null, firstEditFile: string | null = null;
-    for (const b of message.blocks) {
-      if (b.type !== "tool") continue;
-      const name = b.name.replace(/^mcp__rift__/, "");
-      const inp = (b.input ?? {}) as Record<string, unknown>;
-      const fp = typeof inp.file_path === "string" ? inp.file_path
-        : typeof inp.notebook_path === "string" ? inp.notebook_path : null;
-      if (name === "Edit" || name === "NotebookEdit") {
-        const d = lineDelta(inp.old_string, inp.new_string); adds += d.adds; dels += d.dels;
-        if (fp) { files.add(fp); firstEditId ??= b.id; firstEditFile ??= fp; }
-      } else if (name === "MultiEdit" && Array.isArray(inp.edits)) {
-        for (const e of inp.edits as Array<Record<string, unknown>>) {
-          const d = lineDelta(e?.old_string, e?.new_string); adds += d.adds; dels += d.dels;
-        }
-        if (fp) { files.add(fp); firstEditId ??= b.id; firstEditFile ??= fp; }
-      } else if (name === "Write") {
-        const c = inp.content; adds += typeof c === "string" && c.length > 0 ? c.split("\n").length : 0;
-        if (fp) { files.add(fp); firstEditId ??= b.id; firstEditFile ??= fp; }
-      }
-    }
-    return { files: files.size, adds, dels, firstEditId, firstEditFile };
-  });
-  const turnDurationMs = $derived.by(() => {
-    let ms = 0;
-    for (const b of message.blocks) {
-      if ((b.type === "thinking" || b.type === "tool") && b.durationMs != null) ms += b.durationMs;
-    }
-    return ms;
-  });
-  const autoApplied = $derived(
-    assistant.permissionMode === "acceptEdits" ||
-    assistant.permissionMode === "bypassPermissions" ||
-    assistant.permissionMode === "auto",
-  );
-  const bypassApplied = $derived(assistant.permissionMode === "bypassPermissions");
-  const showSummary = $derived(!isUser && !streaming && turnStats.files > 0);
 
   // Walk the message's blocks → flat TimelineUnit list. Step headers in
   // prose become dividers; everything else becomes a node on the chain.
@@ -287,63 +243,8 @@
   });
 </script>
 
-{#if isSystem && boundaryBlock && boundaryBlock.source === "cli"}
-  {@const hasPct =
-    typeof boundaryBlock.ctxPctBefore === "number" &&
-    typeof boundaryBlock.ctxPctEstAfter === "number"}
-  <div class="boundary boundary-cli" data-role="system">
-    <span class="boundary-line" aria-hidden="true"></span>
-    <span
-      class="boundary-pill"
-      use:tooltip={"Claude Code automatically summarized older messages to free up the context window. The conversation continues normally — nothing on screen was deleted."}
-    >
-      <Sparkles size={11} />
-      <span>Conversation compacted{boundaryBlock.trigger === "manual" ? " · manual" : ""}</span>
-      {#if hasPct}
-        <span class="boundary-meta mono">
-          Ctx {Math.round(boundaryBlock.ctxPctBefore ?? 0)}% → {Math.round(boundaryBlock.ctxPctEstAfter ?? 0)}%
-        </span>
-      {/if}
-    </span>
-    <span class="boundary-line" aria-hidden="true"></span>
-  </div>
-{:else if isSystem && boundaryBlock}
-  {@const isCompacting = boundaryBlock.streaming === true}
-  {@const showBody = isCompacting || boundaryExpanded}
-  <div class="boundary" data-role="system" class:streaming={isCompacting}>
-    <button
-      type="button"
-      class="boundary-head"
-      onclick={() => (boundaryExpanded = !boundaryExpanded)}
-      aria-expanded={boundaryExpanded}
-      disabled={isCompacting}
-      use:tooltip={isCompacting ? "Summarizing…" : `Click to ${boundaryExpanded ? "hide" : "show"} the compaction summary`}
-    >
-      <span class="boundary-line" aria-hidden="true"></span>
-      <span class="boundary-pill">
-        <Sparkles size={11} />
-        {#if isCompacting}
-          <span class="live-dot" aria-label="Compacting" use:tooltip={"Summarizing in progress"}></span>
-          <span>Compacting · {boundaryBlock.archivedCount} message{boundaryBlock.archivedCount === 1 ? "" : "s"} · {boundaryBlock.summary.length.toLocaleString()} chars</span>
-        {:else}
-          <span>Conversation compacted · {boundaryBlock.archivedCount} message{boundaryBlock.archivedCount === 1 ? "" : "s"} archived</span>
-          {#if typeof boundaryBlock.ctxPctBefore === "number" && typeof boundaryBlock.ctxPctEstAfter === "number"}
-            <span class="boundary-meta mono" use:tooltip={"Context window utilization — pre-compact → estimated post-compact"}>
-              Ctx {Math.round(boundaryBlock.ctxPctBefore)}% → est {Math.round(boundaryBlock.ctxPctEstAfter)}%
-            </span>
-          {/if}
-          <span class="boundary-meta mono">
-            ${boundaryBlock.costUsd.toFixed(4)} · {boundaryBlock.summaryModel} · {formatBoundaryAt(boundaryBlock.at)}
-          </span>
-          <ChevronDown size={11} class="chev" />
-        {/if}
-      </span>
-      <span class="boundary-line" aria-hidden="true"></span>
-    </button>
-    {#if showBody && boundaryBlock.summary.length > 0}
-      <div class="boundary-body"><Markdown text={boundaryBlock.summary} /></div>
-    {/if}
-  </div>
+{#if isSystem && boundaryBlock}
+  <BoundaryBlock {boundaryBlock} />
 {:else}
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="bubble" data-role={message.role} data-model={modelFamily} data-streaming={streaming ? "true" : null} oncontextmenu={onBubbleContext}>
@@ -580,27 +481,8 @@
         </div>
       {/if}
 
-      {#if showSummary}
-        <div class="turn-summary" data-auto={autoApplied ? "true" : null} class:mode-bypass={bypassApplied} in:fade={{ duration: reducedMotion ? 0 : 160 }}>
-          <div class="ts-stats">
-            {#if autoApplied}
-              <span class="ts-applied" class:danger={bypassApplied}><Check size={13} />Applied automatically</span>
-            {:else}
-              <span class="ts-item"><GitCommit size={13} />{turnStats.files} file{turnStats.files === 1 ? "" : "s"} changed</span>
-            {/if}
-            <span class="ts-stat mono"><span class="ts-add">+{turnStats.adds}</span>{#if turnStats.dels > 0}<span class="ts-del">−{turnStats.dels}</span>{/if}</span>
-            {#if turnDurationMs > 0}
-              <span class="ts-dot" aria-hidden="true"></span>
-              <span class="ts-item mono"><Clock size={12} />{formatDuration(turnDurationMs)}</span>
-            {/if}
-            {#if costLabel}<span class="ts-dot" aria-hidden="true"></span><span class="ts-cost mono" use:tooltip={"Total cost of this turn"}>{costLabel}</span>{/if}
-          </div>
-          <div class="ts-actions">
-            {#if autoApplied}
-              <span class="ts-mode" class:mode-bypass={bypassApplied} use:tooltip={bypassApplied ? "All tools ran without prompting (bypass permissions)" : "Edits were applied without prompting (permission mode)"}><RotateCcw size={12} />{bypassApplied ? "bypass" : "auto"}</span>
-            {/if}
-          </div>
-        </div>
+      {#if !isUser && !streaming}
+        <TurnSummary {message} {costLabel} />
       {/if}
 
     </div>
@@ -629,18 +511,6 @@
 {/if}
 
 <style>
-  .boundary {
-    width: 100%;
-    padding: 8px 4px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-  .boundary-cli {
-    flex-direction: row;
-    align-items: center;
-    gap: 10px;
-  }
   .stop-notice {
     display: flex;
     align-items: center;
@@ -675,70 +545,6 @@
   .stop-notice-btn:hover {
     background: color-mix(in oklab, var(--accent) 20%, transparent);
     border-color: color-mix(in oklab, var(--accent) 50%, var(--border));
-  }
-  .boundary-head {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: none;
-    border: 0;
-    padding: 0;
-    color: inherit;
-    cursor: pointer;
-    width: 100%;
-  }
-  .boundary-line {
-    flex: 1;
-    height: 1px;
-    background: linear-gradient(to right,
-      transparent,
-      color-mix(in oklch, var(--border) 80%, transparent),
-      color-mix(in oklab, var(--accent) 30%, transparent) 50%,
-      color-mix(in oklch, var(--border) 80%, transparent),
-      transparent);
-  }
-  .boundary-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 5px 12px;
-    border-radius: 999px;
-    background: color-mix(in oklch, var(--bg-elev-1) 86%, transparent);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    border: 1px solid color-mix(in oklab, var(--accent) 25%, var(--border));
-    box-shadow: 0 4px 14px -4px color-mix(in oklab, var(--accent) 25%, transparent);
-    font-size: 11px;
-    color: var(--fg-muted);
-    white-space: nowrap;
-    transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
-  }
-  .boundary-head:not(:disabled):hover .boundary-pill {
-    background: color-mix(in oklch, var(--bg-elev-1) 95%, transparent);
-    border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
-    transform: translateY(-1px);
-  }
-  .boundary-pill :global(svg) { color: var(--accent); }
-  .boundary-pill :global(.chev) {
-    transition: transform 120ms ease;
-    opacity: 0.6;
-  }
-  .boundary-head[aria-expanded="true"] :global(.chev) {
-    transform: rotate(180deg);
-  }
-  .boundary-meta {
-    opacity: 0.55;
-    font-size: 10px;
-  }
-  .boundary-body {
-    margin: 4px 24px 0;
-    padding: 10px 14px;
-    background: color-mix(in oklch, var(--bg-elev-1) 60%, transparent);
-    border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
-    border-radius: 10px;
-    font-size: 12.5px;
-    line-height: 1.55;
-    color: var(--fg-2);
   }
   .bubble {
     display: grid;
@@ -1452,65 +1258,6 @@
   .bubble[data-streaming="true"] .content {
     -webkit-mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 1.1em), rgba(0, 0, 0, 0.55) 100%);
     mask-image: linear-gradient(180deg, #000 0, #000 calc(100% - 1.1em), rgba(0, 0, 0, 0.55) 100%);
-  }
-
-  /* ── TurnSummary — caps a file-touching assistant turn ─────────────────── */
-  .turn-summary {
-    display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    flex-wrap: wrap;
-    margin-top: 12px; padding: 9px 13px;
-    background: color-mix(in oklab, var(--surface) 72%, transparent);
-    backdrop-filter: blur(8px) saturate(1.1);
-    -webkit-backdrop-filter: blur(8px) saturate(1.1);
-    border: 1px solid color-mix(in oklab, var(--fg) 9%, transparent);
-    border-radius: 11px;
-    font-size: var(--fs-sm);
-    box-shadow: 0 1px 2px rgba(0,0,0,0.18), inset 0 1px 0 color-mix(in oklab, var(--fg) 5%, transparent);
-  }
-  .turn-summary[data-auto="true"] {
-    background: var(--accent-soft);
-    border-color: color-mix(in oklab, var(--accent) 28%, var(--border));
-  }
-  /* bypass permissions = dangerous → amber, matching the composer bypass pill */
-  .turn-summary.mode-bypass {
-    background: color-mix(in srgb, var(--warn) 9%, transparent);
-    border-color: color-mix(in oklab, var(--warn) 42%, var(--border));
-  }
-  .ts-stats { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; color: var(--fg-muted); }
-  .ts-item { display: inline-flex; align-items: center; gap: 6px; }
-  .ts-item :global(svg) { color: var(--fg-subtle); }
-  .ts-applied { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-weight: 600; }
-  .ts-applied :global(svg) { color: var(--accent); }
-  .ts-applied.danger, .ts-applied.danger :global(svg) { color: var(--warn); }
-  .ts-stat { display: inline-flex; gap: 6px; font-variant-numeric: tabular-nums; }
-  .ts-add { color: var(--ok); }
-  .ts-del { color: var(--danger); }
-  .ts-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--fg-faint); }
-  /* Cost — quiet prominence: a soft accent-tinted chip lifts it above the muted
-     stat row without shouting (it's the one number worth glancing at). */
-  .ts-cost {
-    display: inline-flex; align-items: center;
-    padding: 1px 7px; border-radius: 6px;
-    font-size: 11px; font-variant-numeric: tabular-nums;
-    color: color-mix(in oklab, var(--accent) 78%, var(--fg));
-    background: color-mix(in oklab, var(--accent) 9%, transparent);
-    cursor: default;
-  }
-  .ts-actions { display: flex; align-items: center; gap: 8px; }
-  .ts-mode {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 2px 8px; border-radius: 999px;
-    font-size: 10px; font-weight: 600; font-family: var(--font-mono);
-    color: var(--accent);
-    border: 1px solid var(--ghost-border);
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
-    white-space: nowrap;
-  }
-  .ts-mode :global(svg) { color: inherit; }
-  .ts-mode.mode-bypass {
-    color: var(--warn);
-    border-color: color-mix(in oklab, var(--warn) 42%, transparent);
-    background: color-mix(in srgb, var(--warn) 12%, transparent);
   }
 
   /* Cross-link flash — pinged by Review-diff + the dock Steps stream. */

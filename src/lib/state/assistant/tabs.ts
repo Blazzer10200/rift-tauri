@@ -19,7 +19,7 @@ import { notify } from "../toast.svelte";
 
 /** Subset of AssistantStore the tab/pane lifecycle touches. Structural —
  *  mirrors the live public surface of AssistantStore. */
-export type TabsHost = {
+type TabsHost = {
   // ── $state fields (stay on store) ──
   openTabs: string[];
   panes: PaneState[];

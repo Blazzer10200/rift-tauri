@@ -9,7 +9,7 @@ export type QuickStart = {
   prompt: string;
 };
 
-export type Stack = "fivem" | "node" | "rust" | "python" | "go" | "generic";
+type Stack = "fivem" | "node" | "rust" | "python" | "go" | "generic";
 
 // Generic — work on any stack. Fallback when no distinctive marker is found.
 const GENERIC: QuickStart[] = [

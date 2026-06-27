@@ -157,35 +157,9 @@ export function topModel(stats: ConvoStat[]): string | null {
   return m.length > 0 && m[0].messages > 0 ? m[0].label : null;
 }
 
-/** Per-day cells for the last `days` calendar days ending today (gap-filled
- *  with zeros). `leadPad` is the weekday slot (0=Sun … 6=Sat) of the earliest
- *  day, so a 7-row column grid aligns the first column to the right weekday. */
-export function heatmap(stats: ConvoStat[], days: number, now: number): { cells: DayCell[]; leadPad: number; max: number } {
-  const today = localDayIndex(now);
-  const first = today - (days - 1);
-  const byDay = new Map<number, DayCell>();
-  for (let d = first; d <= today; d++) {
-    byDay.set(d, { day: d, ms: d * DAY_MS, messages: 0, toolCalls: 0, cost: 0, sessions: 0 });
-  }
-  for (const s of stats) {
-    const d = localDayIndex(s.updatedAt);
-    const cell = byDay.get(d);
-    if (!cell) continue;
-    cell.messages += s.messages;
-    cell.toolCalls += s.toolCalls;
-    cell.cost += s.costUsd;
-    cell.sessions += 1;
-  }
-  const cells = [...byDay.values()];
-  let max = 0;
-  for (const c of cells) if (c.messages > max) max = c.messages;
-  const leadPad = new Date(first * DAY_MS).getDay();
-  return { cells, leadPad, max };
-}
-
 /** Dense per-day series for a column bar chart — last `days` calendar days
- *  ending today, gap-filled with zeros, oldest→newest. Unlike `heatmap` this is
- *  a flat run (no weekday padding) meant to be drawn as side-by-side bars. */
+ *  ending today, gap-filled with zeros, oldest→newest. A flat run (no weekday
+ *  padding) meant to be drawn as side-by-side bars. */
 export function dailySeries(stats: ConvoStat[], days: number, now: number): { cells: DayCell[]; max: number } {
   const today = localDayIndex(now);
   const first = today - (days - 1);

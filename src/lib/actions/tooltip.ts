@@ -7,7 +7,7 @@
 // re-introducing a tooltip later is a single-file change.
 // (The old `.tip` glass styles were swept from app.css 2026-06-15.)
 
-export type TooltipOpts =
+type TooltipOpts =
   | string
   | {
       text: string;

@@ -24,7 +24,7 @@ import type {
 
 /** Subset of TabState fields the save plumbing reads/writes. Structural —
  *  no class import, matches the live $state fields declared on TabState. */
-export type SaveableTab = {
+type SaveableTab = {
   messages: ChatMessage[];
   saveTimer: ReturnType<typeof setTimeout> | null;
   convoTitle: string | null;
@@ -41,7 +41,7 @@ export type SaveableTab = {
 
 /** Wider tab shape needed by loadConversation — adds the fields it resets
  *  when re-hydrating from disk. Structural; must remain a subset of TabState. */
-export type LoadableTab = SaveableTab & {
+type LoadableTab = SaveableTab & {
   tasks: { id: string; content: string; status: "pending" | "in_progress" | "completed" }[];
   sessionCwd: string | null;
   workspaceRoot: string | null;
@@ -53,7 +53,7 @@ export type LoadableTab = SaveableTab & {
 };
 
 /** Subset of AssistantStore that persistence touches. */
-export type PersistenceHost = {
+type PersistenceHost = {
   conversations: ConversationMeta[];
   tabs: Map<string, SaveableTab>;
   currentConvoId: string | null;
@@ -97,7 +97,7 @@ export async function refreshConversations(host: PersistenceHost): Promise<void>
 // chat created or removed here shows up there without a reload. Fire-and-forget
 // — a failed broadcast just means the other window refreshes on its next own
 // action, never blocks the mutation that triggered it.
-export function broadcastConvosChanged(): void {
+function broadcastConvosChanged(): void {
   let label = "main";
   try { label = getCurrentWindow().label; } catch { /* non-Tauri / SSR */ }
   void invoke("broadcast_convos_changed", { originLabel: label }).catch(() => {});

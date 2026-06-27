@@ -52,7 +52,7 @@ export type StreamTool = {
   steps?: string[]; task?: string; result?: string | null; // agent
 };
 
-export type StreamBlock =
+type StreamBlock =
   | { type: "say"; text: string }
   | { type: "tool"; tool: StreamTool }
   | { type: "steer"; text: string };

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   type ConvoStat,
   filterRange, summarize, streaks, peakHour, perModel, topModel,
-  heatmap, intensity, funFact, fmtCompact, fmtCost, fmtInt, hourLabel, modelLabel, localDayIndex,
+  intensity, funFact, fmtCompact, fmtCost, fmtInt, hourLabel, modelLabel, localDayIndex,
 } from "./statsHelpers";
 
 const DAY = 86_400_000;
@@ -103,18 +103,6 @@ describe("perModel / topModel", () => {
   it("topModel returns the busiest model's label", () => {
     expect(topModel(stats)).toBe("Opus 4.8");
     expect(topModel([])).toBeNull();
-  });
-});
-
-describe("heatmap", () => {
-  it("gap-fills the window and lands activity on the right day", () => {
-    const { cells, leadPad, max } = heatmap([daysAgo(0, { messages: 5 }), daysAgo(3, { messages: 2 })], 7, NOW);
-    expect(cells.length).toBe(7);
-    expect(cells[cells.length - 1].messages).toBe(5); // today is the last cell
-    expect(cells[cells.length - 4].messages).toBe(2);
-    expect(max).toBe(5);
-    expect(leadPad).toBeGreaterThanOrEqual(0);
-    expect(leadPad).toBeLessThanOrEqual(6);
   });
 });
 

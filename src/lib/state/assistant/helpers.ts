@@ -3,7 +3,6 @@
 // localStorage prefs + pure transforms. Safe to import anywhere.
 
 import type { ChatMessage, ModelFamily, ModelSel, PermissionMode, ThinkingEffort } from "./types";
-import { captionForTool } from "$lib/components/assistant/toolCaption";
 
 const MODEL_SELS: readonly ModelSel[] = [
   "sonnet", "opus", "claude-opus-4-7", "haiku", "claude-fable-5",
@@ -218,81 +217,6 @@ export function messagesHaveContextSignals(messages: ChatMessage[]): boolean {
   return false;
 }
 
-/** A live, in-flight unit of work for a tab: a pending Bash shell or an
- *  agent spawn that hasn't reported a result yet. */
-export type LiveActivityItem = {
-  id: string;
-  kind: "shell" | "agent" | "tool" | "thinking";
-  label: string;
-  /** Sub-label: agent subagentType, the tool name for generic tools, or null. */
-  sub: string | null;
-  startedAt: number;
-};
-
-/** Agent-launching tool names — surfaced via agentSpawns, so the generic
- *  pending-tool branch skips them to avoid double-listing. */
-const AGENT_TOOL_NAMES = new Set(["Task", "Agent"]);
-
-/** First line of a shell command, trimmed + capped at 60 chars for compact
- *  display. Shared by the Activity panel rows and the composer live pills. */
-export function firstLine(cmd: string): string {
-  const line = (cmd.split("\n")[0] ?? "").trim();
-  return line.length > 60 ? line.slice(0, 59) + "…" : line;
-}
-
-/** Display label for a shell command: drops leading `cd <path> &&`/`;` hops
- *  (the harness prefixes most commands with one, which made every rail row
- *  read `cd "C:/…`) and middle-truncates so the tail survives. */
-export function shellLabel(cmd: string): string {
-  let c = (cmd.split("\n")[0] ?? "").trim();
-  for (let prev = ""; prev !== c; ) {
-    prev = c;
-    c = c.replace(/^cd\s+(?:"[^"]*"|'[^']*'|[^\s;&|]+)\s*(?:&&|;)\s*/, "").trim();
-  }
-  if (!c) c = (cmd.split("\n")[0] ?? "").trim();
-  return c.length > 60 ? c.slice(0, 38) + "…" + c.slice(-21) : c;
-}
-
-/** Live "what's running now" for a tab: pending Bash shells + in-flight agent
- *  spawns (no completedAt), sorted by start time. Single source of truth so
- *  the ActivityPanel (full rows) and the composer live pills (counts only)
- *  can never disagree. `fallbackTs` stands in for a shell block that's missing
- *  a startedAt (legacy records). */
-export function liveActivity(
-  messages: ChatMessage[],
-  agentSpawns: { id: string; subagentType: string; description: string; startedAt: number; completedAt: number | null }[],
-  fallbackTs: number,
-): LiveActivityItem[] {
-  const out: LiveActivityItem[] = [];
-  for (const m of messages) {
-    for (const b of m.blocks) {
-      // Active reasoning → a single "Thinking…" row so the panel isn't blank
-      // during the (often long) pre-tool think.
-      if (b.type === "thinking" && b.status === "active") {
-        out.push({ id: `${m.id}:think`, kind: "thinking", label: "Thinking…", sub: null, startedAt: b.startedAt });
-        continue;
-      }
-      if (b.type !== "tool" || b.status !== "pending") continue;
-      // Agent launches ride agentSpawns below — skip here to avoid double-list.
-      // Same for a forking skill once it's been promoted to a spawn (a matching
-      // agentSpawn id exists); a non-forking skill has no spawn and still shows.
-      if (AGENT_TOOL_NAMES.has(b.name) || agentSpawns.some((a) => a.id === b.id)) continue;
-      if (b.name === "Bash") {
-        const cmd = typeof b.input.command === "string" ? b.input.command : "";
-        out.push({ id: b.id, kind: "shell", label: shellLabel(cmd) || "shell", sub: null, startedAt: b.startedAt ?? fallbackTs });
-      } else {
-        // Read/Edit/Grep/Glob/Write/WebFetch/… — the previously invisible
-        // majority. Friendly caption matching the transcript rail.
-        out.push({ id: b.id, kind: "tool", label: captionForTool(b.name, b.input), sub: null, startedAt: b.startedAt ?? fallbackTs });
-      }
-    }
-  }
-  for (const a of agentSpawns) {
-    if (a.completedAt != null) continue;
-    out.push({ id: a.id, kind: "agent", label: a.description, sub: a.subagentType, startedAt: a.startedAt });
-  }
-  return out.sort((x, y) => x.startedAt - y.startedAt);
-}
 
 /** Compact token count for the live turn readout (Claude-Code style: "1.2k"). */
 export function fmtTokens(n: number): string {

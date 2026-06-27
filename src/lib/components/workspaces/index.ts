@@ -14,14 +14,14 @@ import AiHealthPage from "../ai-health/AiHealthPage.svelte";
 // matches what each icon export looks like and stays compatible w/ Svelte 5
 // runes-mode without the explicit `Component<...>` constraint that rejects
 // them. Same pattern right-pane/index.ts used (PanelIcon).
-export type WorkspaceIcon = typeof Activity;
+type WorkspaceIcon = typeof Activity;
 
 // Registry components have heterogeneous prop shapes; widening to Component
 // lets WorkspaceShell pick the right shape per-entry.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type WorkspaceComponent = Component<any, any, string>;
+type WorkspaceComponent = Component<any, any, string>;
 
-export type WorkspaceDef = {
+type WorkspaceDef = {
   component: WorkspaceComponent;
   title: string;
   icon: WorkspaceIcon;
