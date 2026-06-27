@@ -629,6 +629,64 @@ mod tests {
         assert_eq!(s.by_model[1].turn_count, 1);
     }
 
+    // Record carrying the CLI's server-side timing (duration + cli_api) so the
+    // non-API overhead aggregation can be exercised.
+    fn rec_attrib(duration_ms: u64, cli_api_ms: u64) -> String {
+        let r = TurnPerf {
+            ts_start_ms: 1_700_000_000_000,
+            ttft_thinking_ms: None,
+            ttft_text_ms: Some(2000),
+            duration_ms: Some(duration_ms),
+            input_tokens: Some(100),
+            output_tokens: Some(100),
+            cache_read_tokens: None,
+            cache_create_tokens: None,
+            cost_usd: Some(0.01),
+            cache_hit_rate: None,
+            session_id: "s".into(),
+            result_subtype: Some("success".into()),
+            model: Some("opus".into()),
+            effort: Some("smart".into()),
+            ttft_first_line_ms: None,
+            pre_text_tool_ms: None,
+            was_cold: Some(false),
+            dominant_cause: None,
+            cli_ttft_ms: Some(2500),
+            cli_api_ms: Some(cli_api_ms),
+        };
+        serde_json::to_string(&r).unwrap()
+    }
+
+    #[test]
+    fn aggregate_non_api_overhead_split() {
+        // Three turns: overhead = duration - cli_api → 1500, 1300, 1100.
+        // p50 (median) = 1300; avg cli_api = (15000+18000+16000)/3 = 16333.
+        let lines = vec![
+            rec_attrib(16_500, 15_000),
+            rec_attrib(19_300, 18_000),
+            rec_attrib(17_100, 16_000),
+            // A turn WITHOUT cli_api must not pollute the overhead stats.
+            rec(Some(500), Some(9999), Some(900), Some(100)),
+        ];
+        let s = aggregate(lines.into_iter());
+        assert_eq!(s.total_turns, 4);
+        assert_eq!(s.p50_non_api_overhead_ms, Some(1300));
+        assert_eq!(s.avg_cli_api_ms, Some((15_000 + 18_000 + 16_000) / 3));
+    }
+
+    #[test]
+    fn aggregate_non_api_overhead_absent_without_cli_api() {
+        // No turn carries cli_api → both attribution stats stay None (the UI then
+        // hides the model-vs-Rift line rather than inventing a number).
+        let lines = vec![
+            rec(Some(500), Some(2000), Some(900), Some(100)),
+            rec(Some(300), Some(1000), Some(800), Some(200)),
+        ];
+        let s = aggregate(lines.into_iter());
+        assert_eq!(s.p50_non_api_overhead_ms, None);
+        assert_eq!(s.avg_cli_api_ms, None);
+    }
+
     #[test]
     fn classify_fast_turn_is_none() {
         // Under the fast floor → no culprit even if a phase is nominally largest.
