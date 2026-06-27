@@ -9,7 +9,7 @@
 //     backend round-trips. Settings persisted via `stt_get/set_config`.
 //
 //   • engine="whisper" — Rust-side cpal mic capture, webrtc-vad gating,
-//     whisper.cpp inference, optional Claude Haiku polish. Driven over
+//     whisper.cpp inference, optional Claude cleanup polish. Driven over
 //     Tauri IPC (`stt_start_recording` / `stt_stop_recording`); partial +
 //     final text arrives via `stt://partial` / `stt://final` events. The
 //     same `composeDraft` path feeds them into the composer so the live-
@@ -143,9 +143,16 @@ class SttStore {
    *  fires before the pane-focus onclick bubbles). Composers gate their
    *  sendRequested handler on this so "send it" only fires the right pane. */
   targetTabId = $state<string | null>(null);
-  /** True while the Haiku polish of a finished dictation is in flight. */
+  /** Live mic input level, 0..1 normalized — drives the composer waveform meter.
+   *  Whisper feeds it from `stt://level`; web_speech from a browser AnalyserNode. */
+  level = $state(0);
+  /** Seconds until auto-stop fires, surfaced only in the last few seconds of
+   *  silence as a "stopping soon" cue. null when auto-stop is off or speech is
+   *  recent. */
+  silenceRemaining = $state<number | null>(null);
+  /** True while the cleanup polish of a finished dictation is in flight. */
   polishing = $state(false);
-  /** Restore-point after a Haiku polish: full draft before/after, so the user
+  /** Restore-point after a cleanup polish: full draft before/after, so the user
    *  can flip back to the raw transcript. Cleared on typing or timeout. */
   polishUndo = $state<{ committed: string; original: string } | null>(null);
 
@@ -163,7 +170,7 @@ class SttStore {
   private lastSpeechAt = 0;
   private silenceTimer: ReturnType<typeof setInterval> | null = null;
   private polishUndoTimer: ReturnType<typeof setTimeout> | null = null;
-  // Monotonic token guarding the in-flight Haiku polish. Bumped to invalidate a
+  // Monotonic token guarding the in-flight cleanup polish. Bumped to invalidate a
   // polish whose result/shimmer should no longer land (user typed, or the
   // visual cap elapsed) — see polishWebSpeechFinal / cancelPolish (#40a/#40b).
   private polishGuard = 0;
@@ -182,6 +189,11 @@ class SttStore {
   private stopInFlight = false;
   private restartToken = 0;
   private unlisten: UnlistenFn[] = [];
+  // Web-speech level meter: getUserMedia → AudioContext → AnalyserNode polled on
+  // a rAF loop (web_speech has no Rust audio path, so the meter is browser-side).
+  private meterCtx: AudioContext | null = null;
+  private meterStream: MediaStream | null = null;
+  private meterRaf: number | null = null;
 
   destroy() {
     for (const fn of this.unlisten) fn();
@@ -195,11 +207,12 @@ class SttStore {
       clearTimeout(this.polishUndoTimer);
       this.polishUndoTimer = null;
     }
-    // Invalidate any in-flight Haiku polish so its result/shimmer can't land in
+    // Invalidate any in-flight cleanup polish so its result/shimmer can't land in
     // the post-HMR store (capTimer is a local timeout; the guard bump stops the
     // awaited swap).
     this.polishGuard++;
     this.polishing = false;
+    this.stopWebMeter();
   }
 
   async init() {
@@ -253,6 +266,14 @@ class SttStore {
             this.recording = false;
             this.transcribing = false;
           }
+        }),
+      );
+      await sub("stt://level", () =>
+        listen<{ rms: number }>("stt://level", (ev) => {
+          // Whisper-only channel — web_speech drives `level` from its own
+          // AnalyserNode. Normalize: speech RMS sits ~0.02..0.25, so scale to
+          // fill the meter without clipping quiet voices.
+          this.level = Math.min(1, ev.payload.rms * 4);
         }),
       );
       await sub("stt://error", () =>
@@ -419,6 +440,7 @@ class SttStore {
       this.recording = true;
       this.transcribing = false;
       this.startSilenceWatch();
+      void this.startWebMeter();
     };
     r.onresult = (e) => this.onResult(e);
     r.onerror = (e) => this.onError(e);
@@ -511,6 +533,7 @@ class SttStore {
       this.recording = false;
       this.transcribing = false;
       this.whisperStartInvoked = false;
+      this.level = 0;
       this.clearTranscribeTimer();
       return;
     }
@@ -529,6 +552,66 @@ class SttStore {
     this.transcribing = false;
     this.recognition = null;
     this.clearTranscribeTimer();
+    this.stopWebMeter();
+  }
+
+  // ---- Web-speech level meter ---------------------------------------------
+
+  /** Open a mic AnalyserNode and poll its RMS into `level` on a rAF loop.
+   *  web_speech recognition holds its own mic capture; this is a separate
+   *  getUserMedia stream purely for visualization. Torn down by stopWebMeter. */
+  private async startWebMeter() {
+    if (this.meterCtx) return; // already running
+    try {
+      const constraints: MediaStreamConstraints = {
+        audio: this.config.input_device
+          ? { deviceId: { ideal: this.config.input_device } }
+          : true,
+      };
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      // Recording may have ended while permission/getUserMedia was in flight.
+      if (!this.recording) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      const ctx = new AudioContext();
+      const src = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      src.connect(analyser);
+      this.meterStream = stream;
+      this.meterCtx = ctx;
+      const buf = new Float32Array(analyser.fftSize);
+      const tick = () => {
+        if (!this.meterCtx) return;
+        analyser.getFloatTimeDomainData(buf);
+        let sumSq = 0;
+        for (let i = 0; i < buf.length; i++) sumSq += buf[i] * buf[i];
+        const rms = Math.sqrt(sumSq / buf.length);
+        this.level = Math.min(1, rms * 4);
+        this.meterRaf = requestAnimationFrame(tick);
+      };
+      this.meterRaf = requestAnimationFrame(tick);
+    } catch (e) {
+      // Non-fatal — recognition still works without the visual meter.
+      console.warn("[stt] level meter unavailable:", e);
+    }
+  }
+
+  private stopWebMeter() {
+    if (this.meterRaf !== null) {
+      cancelAnimationFrame(this.meterRaf);
+      this.meterRaf = null;
+    }
+    if (this.meterStream) {
+      this.meterStream.getTracks().forEach((t) => t.stop());
+      this.meterStream = null;
+    }
+    if (this.meterCtx) {
+      void this.meterCtx.close().catch(() => {});
+      this.meterCtx = null;
+    }
+    this.level = 0;
   }
 
   // ---- Whisper-only management ops ----------------------------------------
@@ -635,13 +718,21 @@ class SttStore {
     if (!secs) return;
     if (this.config.engine === "web_speech" && !this.config.show_interim) return;
     this.lastSpeechAt = Date.now();
+    // Surface the countdown only in the final stretch so it reads as a warning,
+    // not a perpetual timer. ≤5s auto-stop → last 2s; longer → last 3s.
+    const showUnder = Math.min(secs <= 5 ? 2 : 3, secs);
     this.silenceTimer = setInterval(() => {
       if (!this.recording) return;
-      if (Date.now() - this.lastSpeechAt >= secs * 1000) {
+      const elapsedMs = Date.now() - this.lastSpeechAt;
+      if (elapsedMs >= secs * 1000) {
+        this.silenceRemaining = null;
         this.clearSilenceWatch();
         void this.stop();
+        return;
       }
-    }, 500);
+      const remaining = Math.ceil((secs * 1000 - elapsedMs) / 1000);
+      this.silenceRemaining = remaining <= showUnder ? remaining : null;
+    }, 250);
   }
 
   private clearSilenceWatch() {
@@ -649,9 +740,10 @@ class SttStore {
       clearInterval(this.silenceTimer);
       this.silenceTimer = null;
     }
+    this.silenceRemaining = null;
   }
 
-  // ---- Haiku-polish undo -----------------------------------------------------
+  // ---- Cleanup-polish undo ---------------------------------------------------
 
   /** Arm the raw-transcript restore point. Auto-expires. */
   private setPolishUndo(committed: string, original: string) {
@@ -660,7 +752,7 @@ class SttStore {
     this.polishUndoTimer = setTimeout(() => (this.polishUndo = null), 15000);
   }
 
-  /** Flip the draft back to the raw (pre-Haiku) transcript. */
+  /** Flip the draft back to the raw (pre-cleanup) transcript. */
   revertPolish() {
     const u = this.polishUndo;
     this.polishUndo = null;
@@ -704,7 +796,7 @@ class SttStore {
       this.pendingSend = false;
       if (this.config.cleanup_enabled && /\*{2,}/.test(this.finalText)) {
         // Engine-masked profanity that decensor() couldn't resolve (fully
-        // masked, no leading letter) only gets restored by the Haiku pass —
+        // masked, no leading letter) only gets restored by the cleanup pass —
         // polish first so "send it" doesn't ship asterisks.
         void this.polishWebSpeechFinal().then(() => (this.sendRequested = true));
       } else {
@@ -787,14 +879,15 @@ class SttStore {
     this.recognition = null;
     this.clearTranscribeTimer();
     this.clearSilenceWatch();
-    // Web Speech finals never got the Haiku polish (Whisper-only until now) —
+    this.stopWebMeter();
+    // Web Speech finals never got the cleanup polish (Whisper-only until now) —
     // run it post-commit so punctuation lands and any leftover engine-masked
     // profanity ("******") gets restored from context. Skipped when a voice
     // command is about to send — the text is leaving now.
     if (commit && !this.sendRequested) void this.polishWebSpeechFinal();
   }
 
-  /** Haiku cleanup for a finished Web Speech dictation. Replaces the dictated
+  /** Claude cleanup for a finished Web Speech dictation. Replaces the dictated
    *  tail of the draft only if the user hasn't sent, cancelled, or typed over
    *  it while the polish was in flight. Any failure leaves the raw transcript
    *  — same never-lose-the-transcript contract as the Whisper path. */
@@ -804,7 +897,7 @@ class SttStore {
     if (!this.config.cleanup_enabled || raw.split(/\s+/).length < 3) return;
     const committed = this.composeDraft(raw, "");
     // Non-blocking: the raw transcript is already committed to the draft and
-    // is immediately editable/sendable. The Haiku pass is cosmetic, so it must
+    // is immediately editable/sendable. The cleanup pass is cosmetic, so it must
     // NOT raise `transcribing` (that disables the mic + blocks the composer,
     // which read as "loading forever"). `polishing` drives only the quiet
     // textarea shimmer; the result swaps in below only if the draft is
@@ -812,7 +905,7 @@ class SttStore {
     this.polishing = true;
     const token = ++this.polishGuard;
     // #40a: cap the *visual* well under the backend's 15s timeout — a slow
-    // Haiku call shouldn't pulse the committed (already-usable) transcript for
+    // cleanup call shouldn't pulse the committed (already-usable) transcript for
     // that long. The swap below still lands if the result beats the cap.
     const SHIMMER_CAP_MS = 6000;
     const capTimer = setTimeout(() => {
@@ -847,7 +940,7 @@ class SttStore {
 // ("f***", "b****") — the Web Speech API exposes no knob to turn that off, and
 // Whisper occasionally emits the same masks from its training data. Restore the
 // high-frequency unambiguous ones by (first letter, original word length);
-// unknown masks pass through for the Haiku cleanup pass to resolve from context.
+// unknown masks pass through for the Claude cleanup pass to resolve from context.
 const DECENSOR_MAP: Record<string, string> = {
   f4: "fuck", f5: "fucks", f6: "fucker", f7: "fucking",
   s4: "shit", s5: "shits", s6: "shitty",

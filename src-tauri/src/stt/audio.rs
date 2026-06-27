@@ -248,6 +248,28 @@ pub fn peek_window(ring: &AudioRing, secs: f32) -> Vec<f32> {
     q.iter().copied().skip(start).collect()
 }
 
+/// RMS amplitude (0.0..~1.0) of the most recent `secs` of audio, for driving a
+/// live input-level meter. Peek-style — never consumes. Cheap: one pass over a
+/// small tail (~50ms = 800 samples), so it's safe to poll at meter cadence.
+pub fn peek_level(ring: &AudioRing, secs: f32) -> f32 {
+    let n = (TARGET_HZ as f32 * secs) as usize;
+    let q = match ring.lock() {
+        Ok(g) => g,
+        Err(_) => return 0.0,
+    };
+    let start = q.len().saturating_sub(n);
+    let mut sum_sq = 0.0f32;
+    let mut count = 0usize;
+    for &s in q.iter().skip(start) {
+        sum_sq += s * s;
+        count += 1;
+    }
+    if count == 0 {
+        return 0.0;
+    }
+    (sum_sq / count as f32).sqrt()
+}
+
 /// Drain the entire buffer (used at finalise-on-stop).
 pub fn drain_all(ring: &AudioRing) -> Vec<f32> {
     let mut q = match ring.lock() {

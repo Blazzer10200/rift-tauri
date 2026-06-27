@@ -661,6 +661,10 @@
   // autosizer catch up. Composer focus is restored on stop so the user can
   // hit Enter without an extra click.
   let micBusy = $state(false);
+  // Auto-stop countdown — only for the pane that owns the active dictation.
+  const silenceCountdown = $derived(
+    stt.targetTabId === tabId ? stt.silenceRemaining : null,
+  );
   async function toggleMic() {
     if (micBusy) return;
     micBusy = true;
@@ -1238,20 +1242,32 @@
             use:tooltip={
               stt.recording ? "Stop recording" :
               stt.transcribing ? "Transcribing…" :
-              stt.config.engine === "whisper" ? "Dictate (Whisper, local)" : "Dictate (Web Speech)"
+              stt.config.engine === "whisper"
+                ? "Dictate — Whisper (local) · or hold Space"
+                : "Dictate — Web Speech · or hold Space"
             }
             aria-label={stt.recording ? "Stop recording" : "Start recording"}
           >
             {#if stt.transcribing}
               <Loader2 size={15} class="mic-spin" />
             {:else if stt.recording}
-              <span class="mic-wave" aria-hidden="true">
-                <span></span><span></span><span></span>
+              <span
+                class="mic-wave"
+                class:silent={stt.level < 0.04}
+                style="--lvl:{stt.level}"
+                aria-hidden="true"
+              >
+                <span></span><span></span><span></span><span></span><span></span>
               </span>
             {:else}
               <Mic size={15} />
             {/if}
           </button>
+          {#if stt.recording && silenceCountdown !== null}
+            <span class="mic-countdown" aria-hidden="true" use:tooltip={"Auto-stop on silence"}>
+              {silenceCountdown}s
+            </span>
+          {/if}
           {/if}
           {#if draft.trim().length > 0}
           <button
@@ -1667,31 +1683,62 @@
     0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--danger) 45%, transparent); }
     50%      { box-shadow: 0 0 0 6px transparent; }
   }
-  /* Live recording waveform — 3 bars w/ staggered scaleY pulses. Pure CSS;
-     no audio analyser needed for the visual cue. The .recording state on
-     .micbtn paints the bg red and forces white bars via currentColor. */
+  /* Live recording waveform — 5 bars driven by real mic amplitude. `--lvl`
+     (0..1) comes from stt.level (Whisper RMS event / web_speech AnalyserNode).
+     Per-bar weights shape a center-tall waveform; each bar's height = a floor
+     plus the level scaled by its weight, so the strip visibly reacts to voice.
+     The .recording state on .micbtn paints the bg red + white bars via
+     currentColor. */
   .mic-wave {
-    display: inline-flex; align-items: center; gap: 2px;
-    height: 12px;
+    display: inline-flex; align-items: center; gap: 1.5px;
+    height: 13px;
   }
   .mic-wave span {
-    width: 2.5px;
-    height: 100%;
-    background: currentColor;
+    width: 2px;
     border-radius: 999px;
+    background: currentColor;
     transform-origin: center;
-    animation: mic-bar 0.9s ease-in-out infinite;
+    /* min 22% tall, growing to 100% as level × per-bar weight approaches 1. */
+    height: clamp(22%, calc(22% + var(--lvl, 0) * var(--w, 1) * 78%), 100%);
+    transition: height 80ms ease-out;
   }
-  .mic-wave span:nth-child(1) { animation-delay: 0s; }
-  .mic-wave span:nth-child(2) { animation-delay: 0.15s; }
-  .mic-wave span:nth-child(3) { animation-delay: 0.3s; }
-  @keyframes mic-bar {
-    0%, 100% { transform: scaleY(0.35); }
-    50%      { transform: scaleY(1); }
+  .mic-wave span:nth-child(1) { --w: 0.55; }
+  .mic-wave span:nth-child(2) { --w: 0.85; }
+  .mic-wave span:nth-child(3) { --w: 1.1; }
+  .mic-wave span:nth-child(4) { --w: 0.85; }
+  .mic-wave span:nth-child(5) { --w: 0.55; }
+  /* No input → gentle idle breathing so a silent/blocked mic still reads as
+     live rather than frozen. */
+  .mic-wave.silent span {
+    animation: mic-idle 1.6s ease-in-out infinite;
   }
+  .mic-wave.silent span:nth-child(2) { animation-delay: 0.12s; }
+  .mic-wave.silent span:nth-child(3) { animation-delay: 0.24s; }
+  .mic-wave.silent span:nth-child(4) { animation-delay: 0.36s; }
+  .mic-wave.silent span:nth-child(5) { animation-delay: 0.48s; }
+  @keyframes mic-idle {
+    0%, 100% { height: 22%; }
+    50%      { height: 38%; }
+  }
+  /* Auto-stop countdown chip — amber "stopping soon" cue beside the mic. */
+  .mic-countdown {
+    margin-left: 2px;
+    padding: 1px 6px;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    color: var(--warn);
+    background: var(--warn-soft, color-mix(in oklab, var(--warn) 14%, transparent));
+    border-radius: 999px;
+    animation: mic-cd-pulse 1s ease-in-out infinite;
+  }
+  @keyframes mic-cd-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
   @media (prefers-reduced-motion: reduce) {
-    .mic-wave span { animation: none; transform: scaleY(0.7); }
+    .mic-wave span { transition: none; }
+    .mic-wave.silent span { animation: none; height: 30%; }
     .micbtn.recording { animation: none; }
+    .mic-countdown { animation: none; }
     :global(.mic-spin) { animation: none; }
   }
 
@@ -1938,7 +1985,7 @@
     .wandbtn.enhancing { animation: none; }
   }
 
-  /* Dictation: gentle text pulse while Haiku polishes the final transcript. */
+  /* Dictation: gentle text pulse while Claude polishes the final transcript. */
   .textarea-wrap.polishing textarea {
     animation: dictate-polish 1.2s ease-in-out infinite;
   }

@@ -24,7 +24,10 @@ sentence naturally. Do NOT rephrase, summarise, or add content. Do NOT add \
 quotes or markdown. Output only the cleaned transcript text — no tags, no \
 commentary, nothing else.";
 
-const HAIKU_MODEL: &str = "claude-haiku-4-5";
+// Transcript-cleanup model. Was claude-haiku-4-5 until Anthropic pulled Haiku
+// 4.5 (v0.51.3) — repointed to Sonnet, matching the picker's HAIKU_FALLBACK_MODEL
+// kill-switch target. Cleanup is a tiny text task, so Sonnet's cost is negligible.
+const CLEANUP_MODEL: &str = "claude-sonnet-4-6";
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Polish a raw Whisper transcript via Claude Haiku. Returns the cleaned text
@@ -63,7 +66,7 @@ pub async fn polish_with_ctx(raw: &str, ctx: &str) -> Result<String, String> {
     let system_prompt = build_system_prompt(ctx);
     cmd.arg("-p")
         .arg("--model")
-        .arg(HAIKU_MODEL)
+        .arg(CLEANUP_MODEL)
         // Pure text task: hand it an EMPTY tool allowlist so it can invoke
         // nothing. This is what makes the untrusted transcript (piped on stdin)
         // and the workspace-context system prompt safe — a prompt injection has

@@ -251,6 +251,12 @@ struct PartialPayload {
 }
 
 #[derive(Clone, Serialize)]
+struct LevelPayload {
+    /// RMS amplitude 0.0..~1.0 of the live mic input, for the meter.
+    rms: f32,
+}
+
+#[derive(Clone, Serialize)]
 struct FinalPayload {
     text: String,
     raw: String,
@@ -471,6 +477,17 @@ pub async fn stt_start_recording(
         });
     }
 
+    // Spawn the live-level meter loop (independent of show_interim) before the
+    // ring is moved into the rolling loop below.
+    {
+        let level_app = app.clone();
+        let level_ring = ring.clone();
+        let level_cancel = task_cancel.clone();
+        tokio::spawn(async move {
+            level_loop(level_app, level_ring, level_cancel).await;
+        });
+    }
+
     // Spawn rolling-window transcribe task after session is visible.
     if cfg.show_interim {
         let task_app = app.clone();
@@ -624,6 +641,26 @@ async fn rolling_window_loop(
         }
         last_emitted = scrubbed.clone();
         let _ = app.emit("stt://partial", PartialPayload { text: scrubbed });
+    }
+}
+
+/// Live input-level loop. Ticks ~12×/s, emits the RMS of the most-recent ~50ms
+/// as `stt://level` so the frontend can drive a real meter. Independent of the
+/// (1s, inference-bound) partial loop and of `show_interim` — the meter is
+/// useful even with interim text off. Cheap (one short ring peek per tick), so
+/// the fast cadence costs nothing on the inference hot path.
+async fn level_loop(app: AppHandle, ring: audio::AudioRing, cancel: CancellationToken) {
+    const TICK_MS: u64 = 80;
+    const WINDOW_SECS: f32 = 0.05;
+    let mut ticker = tokio::time::interval(std::time::Duration::from_millis(TICK_MS));
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    loop {
+        tokio::select! {
+            _ = cancel.cancelled() => return,
+            _ = ticker.tick() => {}
+        }
+        let rms = audio::peek_level(&ring, WINDOW_SECS);
+        let _ = app.emit("stt://level", LevelPayload { rms });
     }
 }
 

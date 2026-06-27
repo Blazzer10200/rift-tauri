@@ -740,8 +740,8 @@
                 </div>
               </div>
               <div class="ctl-row tight">
-                <div><div class="ctl-t">Clean with Claude Haiku</div><div class="ctl-s">Polishes the final transcript via Haiku — fixes punctuation, capitalizes proper nouns. ~200-400ms tail, ~$0.0001/utterance.</div></div>
-                <button class="toggle" class:on={stt.config.cleanup_enabled} role="switch" aria-checked={stt.config.cleanup_enabled} aria-label="Clean transcripts with Claude Haiku" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ cleanup_enabled: !stt.config.cleanup_enabled })}><span class="toggle-knob"></span></button>
+                <div><div class="ctl-t">Clean up transcript</div><div class="ctl-s">Polishes the final transcript with Claude — fixes punctuation, capitalizes proper nouns. Adds a short tail after you stop.</div></div>
+                <button class="toggle" class:on={stt.config.cleanup_enabled} role="switch" aria-checked={stt.config.cleanup_enabled} aria-label="Clean up transcript with Claude" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ cleanup_enabled: !stt.config.cleanup_enabled })}><span class="toggle-knob"></span></button>
               </div>
               <div class="ctl-row tight">
                 <div><div class="ctl-t">Beam search</div><div class="ctl-s">Higher-accuracy decode (beam width 5) instead of greedy — sharper on technical terms, ~2-4× slower. GPU recommended.</div></div>
