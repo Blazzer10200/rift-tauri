@@ -788,6 +788,7 @@ fn handle_request(req: RpcRequest, roots: &[PathBuf]) -> Option<RpcResponse> {
         "tools/call" => {
             let name = req.params.get("name").and_then(|v| v.as_str()).unwrap_or("");
             let args = req.params.get("arguments").cloned().unwrap_or(Value::Null);
+            let tool_t0 = std::time::Instant::now();
             let res = match name {
                 "read_file" => tool_read_file(&args, roots),
                 "list_dir" => tool_list_dir(&args, roots),
@@ -806,6 +807,17 @@ fn handle_request(req: RpcRequest, roots: &[PathBuf]) -> Option<RpcResponse> {
                 // tool" instead of a silent ignore + no response.
                 other => Err(format!("unknown tool: {other}")),
             };
+            let tool_dur_ms = tool_t0.elapsed().as_millis() as u64;
+            let tool_ok = res.is_ok();
+            {
+                use crate::diagnostics::{DiagLevel, DiagStage};
+                let level = if tool_ok { DiagLevel::Info } else { DiagLevel::Warn };
+                crate::diagnostics::emit_with_fields(
+                    DiagStage::Log, level, Some("mcp"), Some(file!()),
+                    "mcp tool call",
+                    serde_json::json!({ "tool": name, "dur_ms": tool_dur_ms, "ok": tool_ok }),
+                );
+            }
             match res {
                 Ok(text) => Ok(json!({
                     "content": [{ "type": "text", "text": text }]

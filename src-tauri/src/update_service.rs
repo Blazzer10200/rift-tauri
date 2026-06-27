@@ -149,6 +149,14 @@ impl UpdateService {
                             g.reason_logged = true;
                             if first_log {
                                 log::error!("update check: updater unavailable — {reason} (suppressing repeats this session)");
+                                crate::diagnostics::emit_with_fields(
+                                    crate::diagnostics::DiagStage::System,
+                                    crate::diagnostics::DiagLevel::Error,
+                                    Some("update"),
+                                    Some(file!()),
+                                    "updater unavailable",
+                                    serde_json::json!({"stage": "init", "reason": reason}),
+                                );
                             } else {
                                 log::debug!("update check: updater still unavailable — {reason}");
                             }
@@ -173,6 +181,14 @@ impl UpdateService {
             Ok(velopack::UpdateCheck::UpdateAvailable(info)) => {
                 let asset = &info.TargetFullRelease;
                 log::info!("update check: available v{}", asset.Version);
+                crate::diagnostics::emit_with_fields(
+                    crate::diagnostics::DiagStage::Log,
+                    crate::diagnostics::DiagLevel::Info,
+                    Some("update"),
+                    Some(file!()),
+                    "update available",
+                    serde_json::json!({"stage": "check", "ok": true, "version": asset.Version}),
+                );
                 let dto = UpdateInfoDto {
                     version: asset.Version.clone(),
                     release_name: asset.FileName.clone(),
@@ -207,6 +223,14 @@ impl UpdateService {
                 // Network/parse failures are surfaced so the UI can show an
                 // error card rather than a false "up to date".
                 log::error!("update check FAILED: {e}");
+                crate::diagnostics::emit_with_fields(
+                    crate::diagnostics::DiagStage::Log,
+                    crate::diagnostics::DiagLevel::Warn,
+                    Some("update"),
+                    Some(file!()),
+                    "update check failed",
+                    serde_json::json!({"stage": "check", "ok": false}),
+                );
                 // Mirror the init-failure classification (above) + add TLS/cert
                 // keywords: a corporate TLS-intercepting proxy (Zscaler etc.)
                 // presents a CA the Velopack client's bundled roots don't trust,
@@ -279,6 +303,14 @@ impl UpdateService {
             log::warn!(
                 "update download: superseded (epoch {epoch} != {}) — discarding zombie result",
                 g.download_epoch
+            );
+            crate::diagnostics::emit_with_fields(
+                crate::diagnostics::DiagStage::Log,
+                crate::diagnostics::DiagLevel::Warn,
+                Some("update"),
+                Some(file!()),
+                "download superseded",
+                serde_json::json!({"stage": "download_superseded"}),
             );
             return Ok(());
         }
@@ -392,6 +424,14 @@ impl UpdateService {
         // silent = true (no Velopack UI → unattended), restart = true (relaunch
         // after swap), no extra restart args.
         log::info!("update apply: scheduling swap for v{}", info.TargetFullRelease.Version);
+        crate::diagnostics::emit_with_fields(
+            crate::diagnostics::DiagStage::Log,
+            crate::diagnostics::DiagLevel::Info,
+            Some("update"),
+            Some(file!()),
+            "apply started",
+            serde_json::json!({"stage": "apply", "version": info.TargetFullRelease.Version}),
+        );
         mgr.wait_exit_then_apply_updates(&info, true, true, Vec::<&str>::new())
             .map_err(|e| {
                 log::error!("update apply FAILED: {e}");
@@ -449,9 +489,19 @@ impl UpdateService {
                 .stderr(std::process::Stdio::null())
                 .status()
             {
-                Err(e) => log::warn!(
-                    "update apply: taskkill sweep failed to run ({e}) — a live MCP child may block the swap"
-                ),
+                Err(e) => {
+                    log::warn!(
+                        "update apply: taskkill sweep failed to run ({e}) — a live MCP child may block the swap"
+                    );
+                    crate::diagnostics::emit_with_fields(
+                        crate::diagnostics::DiagStage::System,
+                        crate::diagnostics::DiagLevel::Error,
+                        Some("update"),
+                        Some(file!()),
+                        "apply sweep failed",
+                        serde_json::json!({"stage": "apply_sweep", "ok": false}),
+                    );
+                }
                 Ok(s) if !s.success() => log::info!(
                     "update apply: taskkill sweep exited {s} (no matching children is benign)"
                 ),

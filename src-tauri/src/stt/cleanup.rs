@@ -55,6 +55,13 @@ pub async fn polish_with_ctx(raw: &str, ctx: &str) -> Result<String, String> {
         Some(c) => c,
         None => {
             log::debug!("[stt] cleanup: claude CLI not found, returning raw transcript");
+            crate::diagnostics::emit_with_fields(
+                crate::diagnostics::DiagStage::Log,
+                crate::diagnostics::DiagLevel::Warn,
+                Some("stt"), Some(file!()),
+                "cleanup skipped: CLI not found",
+                serde_json::json!({ "ran": false, "source": "raw", "reason": "cli_not_found" }),
+            );
             return Ok(raw.to_string());
         }
     };
@@ -84,6 +91,13 @@ pub async fn polish_with_ctx(raw: &str, ctx: &str) -> Result<String, String> {
         Ok(c) => c,
         Err(e) => {
             log::warn!("[stt] cleanup spawn failed: {e}");
+            crate::diagnostics::emit_with_fields(
+                crate::diagnostics::DiagStage::Log,
+                crate::diagnostics::DiagLevel::Warn,
+                Some("stt"), Some(file!()),
+                "cleanup skipped: spawn failed",
+                serde_json::json!({ "ran": false, "source": "raw", "reason": "spawn_failed" }),
+            );
             return Ok(raw.to_string());
         }
     };
@@ -130,6 +144,13 @@ pub async fn polish_with_ctx(raw: &str, ctx: &str) -> Result<String, String> {
         Err(_) => {
             log::warn!("[stt] cleanup timed out after {}s — killing subprocess", CLEANUP_TIMEOUT.as_secs());
             let _ = child.start_kill();
+            crate::diagnostics::emit_with_fields(
+                crate::diagnostics::DiagStage::Log,
+                crate::diagnostics::DiagLevel::Warn,
+                Some("stt"), Some(file!()),
+                "cleanup timed out",
+                serde_json::json!({ "ran": true, "source": "raw", "reason": "timeout" }),
+            );
             return Ok(raw.to_string());
         }
     };

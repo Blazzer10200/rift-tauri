@@ -27,9 +27,24 @@ mod real {
         pub fn load(model_path: &Path, model_id: &str) -> Result<Self, String> {
             let params = WhisperContextParameters::default();
             let path_str = model_path.to_string_lossy().into_owned();
+            let load_t0 = std::time::Instant::now();
             let ctx = WhisperContext::new_with_params(&path_str, params)
                 .map_err(|e| format!("load whisper model '{path_str}': {e}"))?;
+            let load_ms = load_t0.elapsed().as_millis() as u64;
             log::info!("[stt] whisper model loaded: id={model_id} path={path_str}");
+            crate::diagnostics::emit_with_fields(
+                crate::diagnostics::DiagStage::Log,
+                crate::diagnostics::DiagLevel::Info,
+                Some("stt"), Some(file!()),
+                "whisper model loaded",
+                serde_json::json!({
+                    "event": "model_load",
+                    "model": model_id,
+                    "load_ms": load_ms,
+                    "ok": true,
+                    "backend": if cfg!(feature = "whisper-cuda") { "cuda" } else { "cpu" }
+                }),
+            );
             Ok(Self {
                 ctx: Arc::new(ctx),
                 model_id: model_id.to_string(),
@@ -75,9 +90,20 @@ mod real {
                 params.set_initial_prompt(initial_prompt);
             }
 
-            state
+            let infer_t0 = std::time::Instant::now();
+            let infer_res = state
                 .full(params, samples)
-                .map_err(|e| format!("whisper full: {e}"))?;
+                .map_err(|e| format!("whisper full: {e}"));
+            let infer_ms = infer_t0.elapsed().as_millis() as u64;
+            let infer_ok = infer_res.is_ok();
+            crate::diagnostics::emit_with_fields(
+                crate::diagnostics::DiagStage::Log,
+                crate::diagnostics::DiagLevel::Debug,
+                Some("stt"), Some(file!()),
+                "whisper inference",
+                serde_json::json!({ "event": "inference", "infer_ms": infer_ms, "ok": infer_ok }),
+            );
+            infer_res?;
 
             let n = state
                 .full_n_segments()

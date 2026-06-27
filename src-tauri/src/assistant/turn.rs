@@ -1341,6 +1341,7 @@ async fn dispatch_turn(
                 // send sees it. The reader loop clears it on `result` (M6).
                 g.turn_in_progress.store(true, Ordering::Release);
                 g.last_used = std::time::Instant::now();
+                emit_dispatch(&session_id, "hit", &model, &key);
                 Some((g.turn_tx.clone(), g.turn_in_progress.clone()))
             }
         };
@@ -1410,6 +1411,7 @@ async fn dispatch_turn(
                     kill_child_tree(p);
                     log::info!("warm_pool: drained + reaped old child pid={p} for {session_id} (signature change)");
                 }
+                emit_dispatch(&session_id, "signature_drain", &model, &key);
                 user_line
             }
         };
@@ -1419,7 +1421,29 @@ async fn dispatch_turn(
     }
 
     // 2) Cold path: no warm child at all — spawn one, register it, run turn 1.
+    emit_dispatch(&session_id, "cold", &model, &key);
     cold_spawn_and_run(app, window_label, session_id, key, cmd, user_line, mcp_guard, is_first_turn, model).await
+}
+
+/// Emit a structured warm-pool dispatch event (Phase 2a). `outcome` ∈
+/// "hit" | "signature_drain" | "cold" | "dead_on_send". Fire-and-forget; the bus
+/// scrubs + rate-limits. Resource "warm_pool" so the console can isolate the
+/// latency-critical path the cont.219 hunt had to hand-probe.
+fn emit_dispatch(session_id: &str, outcome: &str, model: &str, key: &warm_pool::SpawnKey) {
+    crate::diagnostics::emit_with_fields(
+        crate::diagnostics::DiagStage::Log,
+        crate::diagnostics::DiagLevel::Info,
+        Some("warm_pool"),
+        Some(file!()),
+        "dispatch",
+        serde_json::json!({
+            "outcome": outcome,
+            "session": session_id,
+            "model": model,
+            "effort": key.effort_level.as_str(),
+            "pool_size": warm_pool::pool_size(),
+        }),
+    );
 }
 
 /// Cold-spawn a fresh `claude` child, register it in the warm pool, start its

@@ -92,9 +92,38 @@ pub fn spawn_background_refresh() {
     }
     tauri::async_runtime::spawn(async {
         if let Err(e) = usage_rate_limits(None).await {
-            log::debug!("usage limits background refresh skipped: {e}");
+            // The three swallowed states (missing creds / API-key user / expired
+            // token) look identical at debug level — classify so the diagnostics
+            // console can distinguish "needs login" from "broken" at a glance.
+            let reason = classify_usage_error(&e);
+            crate::diagnostics::emit_with_fields(
+                crate::diagnostics::DiagStage::Log,
+                crate::diagnostics::DiagLevel::Debug,
+                Some("usage"),
+                Some(file!()),
+                "usage limits background refresh skipped",
+                serde_json::json!({ "reason": reason, "detail": e }),
+            );
         }
     });
+}
+
+/// Map a `read_oauth_token`/refresh error string to a stable reason enum so the
+/// diagnostics console + a future health roll-up can branch on it instead of the
+/// free-text message. Order matters: expired is checked before the generic
+/// missing-login fallback.
+fn classify_usage_error(e: &str) -> &'static str {
+    if e.contains("not available for API-key users") {
+        "api_key_user"
+    } else if e.contains("token expired") {
+        "expired"
+    } else if e.contains("could not parse") {
+        "parse_error"
+    } else if e.contains("needs a Claude subscription login") {
+        "missing_login"
+    } else {
+        "other"
+    }
 }
 
 #[derive(Deserialize)]

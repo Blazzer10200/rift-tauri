@@ -178,6 +178,12 @@ pub(super) fn get(session_id: &str) -> Option<Arc<Mutex<WarmChild>>> {
     with_warm(|m| m.get(session_id).cloned())
 }
 
+/// Current number of live warm children in the pool. Diagnostics-only (the pool
+/// has no standalone size counter — size is the registry map length).
+pub(super) fn pool_size() -> usize {
+    with_warm(|m| m.len())
+}
+
 /// Register a freshly cold-spawned warm child. Replaces any prior entry for the
 /// session (the caller has already drained the old one on a signature change).
 pub(super) fn insert(session_id: &str, child: Arc<Mutex<WarmChild>>) {

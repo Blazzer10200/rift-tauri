@@ -37,6 +37,23 @@ pub(super) fn apply_bridge_timeouts(stream: &TcpStream, read: Duration, write: D
 /// parks for minutes while the user decides; the fire-and-forget ops use
 /// seconds.
 pub(super) fn bridge_call(op: &str, extra: Value, read_timeout: Duration) -> Result<Value, String> {
+    let bridge_t0 = std::time::Instant::now();
+    let result = bridge_call_inner(op, extra, read_timeout);
+    let bridge_dur_ms = bridge_t0.elapsed().as_millis() as u64;
+    let bridge_ok = result.is_ok();
+    {
+        use crate::diagnostics::{DiagLevel, DiagStage};
+        let level = if bridge_ok { DiagLevel::Info } else { DiagLevel::Warn };
+        crate::diagnostics::emit_with_fields(
+            DiagStage::Log, level, Some("bridge"), Some(file!()),
+            "bridge round-trip",
+            serde_json::json!({ "op": op, "dur_ms": bridge_dur_ms, "ok": bridge_ok }),
+        );
+    }
+    result
+}
+
+fn bridge_call_inner(op: &str, extra: Value, read_timeout: Duration) -> Result<Value, String> {
     let port_s = std::env::var("RIFT_BRIDGE_PORT")
         .map_err(|_| "RIFT_BRIDGE_PORT not set on this MCP child".to_string())?;
     let token = std::env::var("RIFT_BRIDGE_TOKEN")

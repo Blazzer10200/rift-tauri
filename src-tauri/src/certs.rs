@@ -22,11 +22,24 @@ pub fn corp_pem_path() -> Option<&'static PathBuf> {
 
 fn extract_corporate_roots() -> Option<PathBuf> {
     let result = rustls_native_certs::load_native_certs();
+    let skipped = result.errors.len();
     for err in &result.errors {
         log::warn!("corp-certs: skipped one cert: {err}");
     }
     if result.certs.is_empty() {
         log::info!("corp-certs: no certs from Windows store — NODE_EXTRA_CA_CERTS will not be set");
+        // Zero corporate roots silently breaks every HTTPS call behind a Zscaler/
+        // proxy MITM. Surface it as a structured event (warn) so the console flags
+        // it instead of it hiding in an info line. Dual-write: keep the log:: above
+        // for rift.log (corp-TLS is debugged offline from the log file).
+        crate::diagnostics::emit_with_fields(
+            crate::diagnostics::DiagStage::Log,
+            crate::diagnostics::DiagLevel::Warn,
+            Some("certs"),
+            Some(file!()),
+            "no corporate roots loaded from Windows store",
+            serde_json::json!({ "certs_loaded": 0, "skipped": skipped, "pem_written": false }),
+        );
         return None;
     }
     // Encode each DER cert as PEM.
@@ -49,6 +62,17 @@ fn extract_corporate_roots() -> Option<PathBuf> {
         "corp-certs: wrote {} root(s) to {}",
         result.certs.len(),
         path.display()
+    );
+    // Dual-write: the log:: above persists to rift.log; this event surfaces the
+    // same count (loaded/skipped/written) live in the console + feeds the health
+    // roll-up (0 loaded behind a proxy = the silent-HTTPS-break signal).
+    crate::diagnostics::emit_with_fields(
+        crate::diagnostics::DiagStage::Log,
+        crate::diagnostics::DiagLevel::Info,
+        Some("certs"),
+        Some(file!()),
+        "corporate roots loaded",
+        serde_json::json!({ "certs_loaded": result.certs.len(), "skipped": skipped, "pem_written": true }),
     );
     Some(path)
 }
