@@ -200,6 +200,8 @@
 .ob-fields { display: flex; flex-direction: column; gap: 20px; }
 .ob-field { display: flex; flex-direction: column; gap: 9px; }
 .ob-flabel { font-size: 10px; font-weight: 600; letter-spacing: 0.07em; text-transform: uppercase; color: var(--fg-faint); }
+/* Second install option (npm fallback) — extra top gap to separate the two copy blocks. */
+.ob-flabel--alt { margin-top: 4px; }
 .ob-field-hint { font-size: var(--fs-xs); color: var(--fg-muted); line-height: 1.5; }
 
 /* segmented control */

@@ -1,12 +1,13 @@
 <script lang="ts">
   import {
     Sparkles, FolderOpen,
-    ExternalLink, X, Folder, FolderGit2, GitBranch, ChevronRight, ChevronDown,
+    X, Folder, FolderGit2, GitBranch, ChevronRight, ChevronDown,
     Compass, MessageSquare, Shield, Zap, BarChart3,
   } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import RiftLogo from "$lib/components/shell/RiftLogo.svelte";
   import StatsPanel from "$lib/components/home/StatsPanel.svelte";
+  import ClaudeConnect from "$lib/components/onboarding/ClaudeConnect.svelte";
   import { leafName, shortPath } from "$lib/components/shell/tabsbar/helpers";
   import { greeting } from "$lib/components/workspace/welcomeShared";
 
@@ -89,37 +90,15 @@
 
 <div class="welcome">
   {#if needsAuth}
-    <div class="wel-inner narrow">
+    <div class="wel-inner narrow auth-connect">
       <div class="wel-hero">
         <div class="wel-mark"><Sparkles size={26} /></div>
-        <h1 class="wel-title">Set up Claude</h1>
-        <p class="wel-sub">The Assistant needs the Claude Code CLI logged in, or an API key configured in Settings.</p>
       </div>
-      <div class="auth-actions">
-        <button
-          class="auth-btn primary"
-          type="button"
-          disabled={assistant.loginInProgress}
-          onclick={() => assistant.startLogin()}
-        >
-          {assistant.loginInProgress ? "Signing in…" : "Sign in"}
-        </button>
-        <button
-          class="auth-btn"
-          type="button"
-          disabled={assistant.authChecking || assistant.loginInProgress}
-          onclick={() => assistant.recheckAuth()}
-        >
-          {assistant.authChecking ? "Checking…" : "Re-check"}
-        </button>
-      </div>
-      <div class="auth-help">
-        <a href="https://claude.com/download" target="_blank" rel="noreferrer">
-          Download Claude Code <ExternalLink size={11}/>
-        </a>
-        <span class="dim">— or run <code>claude login</code> in a terminal, then Re-check.</span>
-        <p class="muted">Or open <strong>Settings → Assistant</strong> and paste an <code>sk-ant-api03-…</code> key.</p>
-      </div>
+      <!-- Full guided connect (CLI install w/ copy buttons, OAuth + Console
+           sign-in, API-key paste, auto-poll, Re-check) — the same component the
+           onboarding flow uses, so a user who skipped setup isn't dead-ended on
+           a weaker screen. -->
+      <ClaudeConnect standalone />
     </div>
   {:else if hasRoot}
     <div class="wel-inner home-launchpad">
@@ -311,15 +290,6 @@
     0%, 100% { transform: scale(1); }
     50%      { transform: scale(1.04); }
   }
-  .wel-title {
-    margin: 1px 0 0;
-    font-size: 26px; font-weight: 680;
-    letter-spacing: -0.02em; color: var(--fg); line-height: 1.12;
-  }
-  .wel-sub {
-    margin: 4px 0 0; max-width: 480px;
-    font-size: var(--fs-md); line-height: 1.55; color: var(--fg-muted);
-  }
 
   /* ── Warm launchpad — greeting · quick-chips · new-to-rift ─────────────── */
   /* spec-margined children, so the .wel-inner column gap is dropped here. */
@@ -505,52 +475,14 @@
   }
   .welcome-foot :global(svg) { color: var(--fg-subtle); flex: none; }
 
-  /* ── Auth actions (needsAuth path) — live Sign-in + Re-check ───────────── */
-  .auth-actions {
-    display: flex; justify-content: center; gap: 8px;
+  /* ── needsAuth path — hosts the shared ClaudeConnect (onboarding) component.
+     Constrain its width + center it so the onboarding-flavored card reads as a
+     focused setup panel on the welcome surface. ─────────────────────────────── */
+  .auth-connect {
+    gap: 14px;
+    text-align: left;
+    max-width: 440px;
   }
-  .auth-btn {
-    font: inherit; font-size: var(--fs-sm); font-weight: 600;
-    padding: 7px 16px; border-radius: 8px; cursor: pointer;
-    border: 1px solid var(--ghost-border);
-    background: var(--bg-elev-1); color: var(--fg);
-    transition: background 140ms ease, border-color 140ms ease, opacity 140ms ease;
-  }
-  .auth-btn:hover:not(:disabled) {
-    background: var(--surface-hover); border-color: var(--border);
-  }
-  .auth-btn.primary {
-    background: var(--accent); border-color: var(--accent);
-    color: var(--accent-fg);
-  }
-  .auth-btn.primary:hover:not(:disabled) {
-    background: color-mix(in oklab, var(--accent) 88%, white);
-  }
-  .auth-btn:disabled { opacity: 0.6; cursor: default; }
-
-  /* ── Auth-help block (needsAuth path) ──────────────────────────────────── */
-  .auth-help {
-    margin-top: 0;
-    text-align: center;
-    font-size: var(--fs-sm);
-    color: var(--fg-muted);
-  }
-  .auth-help a {
-    color: var(--accent);
-    text-decoration: none;
-    display: inline-flex; align-items: center; gap: 4px;
-  }
-  .auth-help a:hover { text-decoration: underline; }
-  .auth-help .dim { color: var(--fg-subtle); }
-  .auth-help .muted { font-size: var(--fs-xs); margin: 8px 0 0; }
-  .auth-help code {
-    font-family: var(--font-mono, monospace);
-    font-size: 0.88em;
-    padding: 1px 5px;
-    background: var(--code-bg);
-    border: 1px solid var(--code-border);
-    border-radius: 4px;
-    color: var(--code-fg);
-  }
+  .auth-connect .wel-mark { margin: 0 auto; }
 </style>
 

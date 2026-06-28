@@ -54,7 +54,13 @@
   }
 
   function onEscape(e: KeyboardEvent) {
-    if (e.key === "Escape") { e.preventDefault(); onDone(); }
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    // Esc on step 1 dismisses the flow; on later steps it walks back a step so a
+    // reflexive Escape (cancel a field edit, dismiss a tooltip) can't blow away
+    // the whole setup. Skip is still one click via the rail-footer link.
+    if (step === 1) onDone();
+    else back();
   }
 
   // ── Open-project step ──

@@ -8,6 +8,10 @@
   import { invoke } from "@tauri-apps/api/core";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { assistant } from "$lib/state/assistant.svelte";
+  // Self-import so the ob-* classes resolve wherever this mounts — including the
+  // Assistant welcome's needs-auth screen, where the onboarding flow may never
+  // have mounted to load the stylesheet.
+  import "$lib/styles/onboarding.css";
   import {
     Terminal, UserCheck, BadgeCheck, CheckCircle2, AlertCircle, Loader2,
     RefreshCw, Copy, Check, KeyRound, LogIn,
@@ -35,12 +39,15 @@
   let status = $state<AuthStatus | null>(null);
   let error = $state<string | null>(null);
   let copied = $state(false);
+  let copiedNpm = $state(false);
   let showApiKey = $state(false);
   let apiKeyDraft = $state("");
   let savingKey = $state(false);
 
-  type Props = { onConnectedChange?: (connected: boolean) => void };
-  const { onConnectedChange }: Props = $props();
+  // standalone = mounted outside the onboarding rail (e.g. the welcome needs-auth
+  // screen): drop the "Step 2" eyebrow + onboarding-specific copy.
+  type Props = { onConnectedChange?: (connected: boolean) => void; standalone?: boolean };
+  const { onConnectedChange, standalone = false }: Props = $props();
 
   const connected = $derived(
     !!status && status.cliPresent && (status.loggedIn || status.apiKeyConfigured),
@@ -70,15 +77,28 @@
   });
   onDestroy(() => {
     if (poll) clearInterval(poll);
+    if (copyTimer) clearTimeout(copyTimer);
+    if (copyTimerNpm) clearTimeout(copyTimerNpm);
   });
 
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
+  let copyTimerNpm: ReturnType<typeof setTimeout> | null = null;
   async function copyCmd() {
     try {
       await navigator.clipboard.writeText(INSTALL_CMD);
       copied = true;
       if (copyTimer) clearTimeout(copyTimer);
       copyTimer = setTimeout(() => (copied = false), 1600);
+    } catch (e) {
+      error = `Copy failed: ${String(e)}`;
+    }
+  }
+  async function copyCmdNpm() {
+    try {
+      await navigator.clipboard.writeText(INSTALL_CMD_NPM);
+      copiedNpm = true;
+      if (copyTimerNpm) clearTimeout(copyTimerNpm);
+      copyTimerNpm = setTimeout(() => (copiedNpm = false), 1600);
     } catch (e) {
       error = `Copy failed: ${String(e)}`;
     }
@@ -108,7 +128,7 @@
 </script>
 
 <header class="ob-head">
-  <span class="ob-eyebrow">Step 2 · Connect Claude</span>
+  {#if !standalone}<span class="ob-eyebrow">Step 2 · Connect Claude</span>{/if}
   <h1 class="ob-title">Connect Claude</h1>
   <p class="ob-sub">Rift runs the <code>claude</code> CLI under the hood — your auth, your billing. Finish here, or anytime in Settings → Assistant.</p>
 </header>
@@ -159,7 +179,14 @@
           {#if copied}<Check size={13} /> Copied{:else}<Copy size={13} /> Copy{/if}
         </button>
       </div>
-      <p class="ob-hint"><span>Already use npm? <code>{INSTALL_CMD_NPM}</code> works too. Rift detects either install automatically. More options at <button type="button" class="ob-link" onclick={() => void openUrl(CLI_DOCS_URL).catch((e) => console.warn("openUrl failed", e))}>docs.claude.com/en/docs/claude-code</button>.</span></p>
+      <span class="ob-flabel ob-flabel--alt">Or, if PowerShell blocks scripts — install with npm</span>
+      <div class="ob-copy-block">
+        <span class="ob-copy-cmd">{INSTALL_CMD_NPM}</span>
+        <button type="button" class="ob-copy-btn" class:ok={copiedNpm} onclick={copyCmdNpm}>
+          {#if copiedNpm}<Check size={13} /> Copied{:else}<Copy size={13} /> Copy{/if}
+        </button>
+      </div>
+      <p class="ob-hint"><span>Rift detects either install automatically. After installing, <strong>relaunch Rift</strong> (or click Re-check) — PATH changes only take effect on restart. More options at <button type="button" class="ob-link" onclick={() => void openUrl(CLI_DOCS_URL).catch((e) => console.warn("openUrl failed", e))}>docs.claude.com/en/docs/claude-code</button>.</span></p>
     </div>
   {:else if !connected}
     <div class="ob-input-row">
@@ -185,7 +212,7 @@
           {#if savingKey}<Loader2 size={14} class="spin" />{:else}<KeyRound size={14} />{/if} Save key
         </button>
       </div>
-      <p class="ob-hint"><span>Bills per-token to your Anthropic Console account. API-key turns run the CLI bare — your personal Claude config (<code>%USERPROFILE%\.claude</code>), MCP servers, and CLAUDE.md won't load.</span></p>
+      <p class="ob-hint"><span>Bills per-token to your Anthropic Console account. Rift's built-in tools still work — only the Claude CLI's own personal config (<code>%USERPROFILE%\.claude</code> settings, MCP servers, CLAUDE.md) is bypassed on key turns.</span></p>
     {/if}
   {:else}
     <div class="ob-connbar"><span class="dot"></span> Claude is connected and ready — you're set.</div>
