@@ -133,8 +133,7 @@ pub(super) fn patterns_for_root(cfg: &AssistantConfig, root: &std::path::Path) -
     // (already-canonical) value directly against the resolved turn root.
     let target = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     for p in &cfg.projects {
-        let stored = std::fs::canonicalize(&p.root).unwrap_or_else(|_| p.root.clone());
-        if stored == target {
+        if p.root == target {
             return (p.include.clone(), p.exclude.clone());
         }
     }
@@ -203,6 +202,9 @@ pub fn assistant_save_project(
 #[tauri::command]
 pub fn assistant_delete_project(id: String) -> Result<Vec<ProjectDto>, String> {
     let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    if !is_valid_id(&id) {
+        return Err(format!("invalid project id: {id}"));
+    }
     let mut cfg = load_config();
     let before = cfg.projects.len();
     cfg.projects.retain(|p| p.id != id);

@@ -35,6 +35,7 @@ function capSpawns(list: TabState["agentSpawns"]): TabState["agentSpawns"] {
 // syncs in one conversation don't keep stealing the dock.
 const DESIGN_DOCK_OPENED = new WeakSet<TabState>();
 const DESIGN_WRITE_METHODS = new Set(["create_project", "write_files", "finalize_plan"]);
+const SUPPRESSED_TOOL_NAMES = new Set(["ToolSearch", "TaskList", "TaskGet", "TaskStop", "TaskOutput"]);
 
 /** Called at the start of every send(). Clears per-turn pacer / thinking
  *  / dedupe state and flips streaming on. */
@@ -473,8 +474,7 @@ function appendToolUse(tab: TabState, block: { id: string; name: string; input?:
   // (TaskList/TaskGet/TaskStop/TaskOutput — newer CLI). TaskCreate/TaskUpdate
   // drive the plan card above; these four are informational and would otherwise
   // render as noisy generic tool chips in the main bubble.
-  const DENY = new Set(["ToolSearch", "TaskList", "TaskGet", "TaskStop", "TaskOutput"]);
-  if (DENY.has(block.name)) return;
+  if (SUPPRESSED_TOOL_NAMES.has(block.name)) return;
   if (
     block.name === "DesignSync" &&
     !DESIGN_DOCK_OPENED.has(tab) &&
@@ -631,25 +631,23 @@ function mutateAgent(tab: TabState, agentId: string, fn: (blocks: Block[]) => Bl
  *  assistant/user envelope maps straight to appended/filled blocks. */
 function applySubAgentFrame(tab: TabState, agentId: string, env: StreamEnvelope) {
   if (env.type === "assistant") {
+    const now = Date.now();
+    const newBlocks: Block[] = [];
     for (const block of env.message?.content ?? []) {
       if (block.type === "text" && typeof block.text === "string" && block.text.length > 0) {
-        const text = block.text;
-        mutateAgent(tab, agentId, (blocks) => [...blocks, { type: "text", text }]);
+        newBlocks.push({ type: "text", text: block.text });
       } else if (block.type === "thinking") {
         const text = typeof block.thinking === "string" ? block.thinking : "";
         const hasSignature = typeof block.signature === "string" && block.signature.length > 0;
-        mutateAgent(tab, agentId, (blocks) => [
-          ...blocks,
-          { type: "thinking", text, hasSignature, startedAt: Date.now(), durationMs: null, status: "done" },
-        ]);
+        newBlocks.push({ type: "thinking", text, hasSignature, startedAt: now, durationMs: null, status: "done" });
       } else if (block.type === "tool_use") {
         const { id, name } = block;
         const input = block.input ?? {};
-        mutateAgent(tab, agentId, (blocks) => [
-          ...blocks,
-          { type: "tool", id, name, input, result: null, isError: false, status: "pending", startedAt: Date.now() },
-        ]);
+        newBlocks.push({ type: "tool", id, name, input, result: null, isError: false, status: "pending", startedAt: now });
       }
+    }
+    if (newBlocks.length > 0) {
+      mutateAgent(tab, agentId, (blocks) => [...blocks, ...newBlocks]);
     }
   } else if (env.type === "user") {
     for (const block of env.message?.content ?? []) {
@@ -926,6 +924,7 @@ export function onStreamDone(tab: TabState) {
       tab.lastError = `Blank response — CLI emitted ${lines.length} line(s): ${fingerprint}.${tail}`;
     }
   }
+  finalizeInflightBlocks(tab);
   tab.streaming = false;
   tab.streamingMsgId = null;
   tab.streamingMsgIdx = null;

@@ -149,8 +149,14 @@ pub(super) fn is_valid_session_id(s: &str) -> bool {
 pub(super) fn save_session_cwd(id: &str, cwd: &Path) {
     if let Ok(p) = session_cwd_path(id) {
         let s = cwd.to_string_lossy();
-        if let Err(e) = std::fs::write(&p, s.as_bytes()) {
+        let tmp = p.with_extension("cwd.tmp");
+        if let Err(e) = std::fs::write(&tmp, s.as_bytes()) {
             log::warn!("assistant: save session cwd {}: {e}", p.display());
+            return;
+        }
+        if let Err(e) = std::fs::rename(&tmp, &p) {
+            let _ = std::fs::remove_file(&tmp);
+            log::warn!("assistant: save session cwd rename {}: {e}", p.display());
         }
     }
 }
@@ -187,8 +193,14 @@ fn session_model_path(id: &str) -> Result<PathBuf, String> {
 
 pub(super) fn save_session_model(id: &str, model: &str) {
     if let Ok(p) = session_model_path(id) {
-        if let Err(e) = std::fs::write(&p, model.as_bytes()) {
+        let tmp = p.with_extension("model.tmp");
+        if let Err(e) = std::fs::write(&tmp, model.as_bytes()) {
             log::warn!("assistant: save session model {}: {e}", p.display());
+            return;
+        }
+        if let Err(e) = std::fs::rename(&tmp, &p) {
+            let _ = std::fs::remove_file(&tmp);
+            log::warn!("assistant: save session model rename {}: {e}", p.display());
         }
     }
 }

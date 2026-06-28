@@ -78,6 +78,15 @@ fn validate_ref(kind: &str, s: &str) -> Result<String, String> {
     if s.starts_with('-') {
         return Err(format!("invalid {kind}: must not start with '-'"));
     }
+    if s.starts_with('.') || s.ends_with('.') {
+        return Err(format!("invalid {kind} `{s}`: must not start or end with '.'"));
+    }
+    if s.contains("..") {
+        return Err(format!("invalid {kind} `{s}`: must not contain '..'"));
+    }
+    if s.ends_with(".lock") {
+        return Err(format!("invalid {kind} `{s}`: must not end with '.lock'"));
+    }
     if !s.bytes().all(|b| {
         b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'/' | b'-')
     }) {

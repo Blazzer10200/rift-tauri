@@ -12,6 +12,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
+use super::cli_caps::CliCaps;
 use super::cli_install::claude_command;
 use super::config::{
     effective_trust_level, is_valid_model_name, load_config, DEFAULT_MODEL,
@@ -234,10 +235,8 @@ names), then output the rewritten prompt. Keep lookups minimal."
         // Medium effort: the rewrite is a short, bounded task — high effort (the
         // CLI default) buys a long hidden pre-pass that reads as "the wand is
         // slow" and can over-deliberate on Sonnet 4.6. Mirrors the interactive
-        // turn's `--effort medium` default (turn.rs). Unconditional like the
-        // other oneshot flags — the bundled CLI is modern.
+        // turn's `--effort medium` default (turn.rs).
         .arg("--effort").arg("medium")
-        .arg("--disable-slash-commands")
         .arg("--permission-mode").arg("bypassPermissions")
         // One-shot: never persist this throwaway rewrite to the session store.
         .arg("--no-session-persistence")
@@ -248,6 +247,8 @@ names), then output the rewritten prompt. Keep lookups minimal."
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    let caps = CliCaps::active();
+    if caps.disable_slash_commands { cmd.arg("--disable-slash-commands"); }
 
     // Tool + cwd wiring differs by mode. The guard cleans up the per-request MCP
     // config file after the child exits (held until this fn returns).
@@ -270,7 +271,7 @@ names), then output the rewritten prompt. Keep lookups minimal."
                 Some(McpConfigGuard(p))
             }
             Err(e) => {
-                log::warn!("assistant: enhance grounding unavailable, using context-free: {e}");
+                log::warn!("oneshot: enhance grounding unavailable, using context-free: {e}");
                 cmd.arg("--strict-mcp-config")
                     .arg("--tools").arg("")
                     .current_dir(std::env::temp_dir());

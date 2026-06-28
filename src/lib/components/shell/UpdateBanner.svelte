@@ -78,7 +78,7 @@
         // it the banner reads the stale pre-update version and re-appears even on
         // a clean update ("says updating, goes right back to the notification").
         onAct: async () => { if (await cliUpdate.runUpdate()) await assistant.refreshAuth(); },
-        onDismiss: () => { cliUpdate.dismissed = cliUpdate.latest; },
+        onDismiss: () => cliUpdate.dismiss(),
       });
     }
     return out;

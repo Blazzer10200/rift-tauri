@@ -597,7 +597,7 @@
     background: color-mix(in oklab, var(--accent) 14%, transparent);
   }
   :global(.settings-menu .think-toggle .tt-text) { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
-  :global(.settings-menu .think-toggle .tt-name) { font-size: var(--sm-row); font-weight: 600; color: var(--fg); }
+  :global(.settings-menu .think-toggle .tt-name) { font-size: var(--sm-title); font-weight: 600; color: var(--fg); }
   :global(.settings-menu .think-toggle .tt-sub) { font-size: var(--sm-sub); color: var(--fg-faint); }
   /* iOS-style switch — off=neutral track, on=accent track + knob right. */
   :global(.settings-menu .think-toggle .tt-switch) {

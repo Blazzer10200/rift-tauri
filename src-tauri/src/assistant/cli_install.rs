@@ -515,6 +515,13 @@ pub(super) fn active_cli_version() -> Option<(u64, u64, u64)> {
             Ok(g) => g,
             Err(p) => p.into_inner(),
         };
+        // Double-check: a concurrent caller may have already written the cache
+        // for this exe while we were probing. Mirrors resolve_claude_exe:429-433.
+        if let Some((cached_exe, cached_ver)) = g.as_ref() {
+            if *cached_exe == exe {
+                return *cached_ver;
+            }
+        }
         *g = Some((exe, ver));
     }
     ver

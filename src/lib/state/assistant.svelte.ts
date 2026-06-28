@@ -1320,7 +1320,10 @@ class AssistantStore {
   loadConversation(id: string) { return persistLoad(this, id); }
   deleteConversation(id: string) { return persistDelete(this, id); }
   async deleteAllConversations() {
-    if (this.streaming) await this.stop();
+    for (const id of this.openTabs) {
+      const t = this.tabs.get(id);
+      if (t?.streaming) await this.stop(id);
+    }
     await persistDeleteAll(this);
     await this.newTab();
   }

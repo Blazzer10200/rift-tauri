@@ -217,7 +217,7 @@ pub(super) fn tool_notify(args: &Value) -> Result<String, String> {
     let title: String = title.chars().take(200).collect();
     let mut extra = json!({ "title": title });
     if let Some(d) = args.get("detail").and_then(|v| v.as_str()) {
-        let detail: String = d.chars().take(2000).collect();
+        let detail: String = d.chars().take(500).collect();
         extra["detail"] = Value::from(detail);
     }
     if let Some(s) = args.get("severity").and_then(|v| v.as_str()) {

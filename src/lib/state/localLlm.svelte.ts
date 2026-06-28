@@ -18,7 +18,7 @@ type LocalLlmDto = {
  *  `num_ctx === null` means it falls back to Ollama's 4096 default (the silent
  *  truncation that breaks agentic edits). `is_ollama === false` = non-Ollama
  *  endpoint (LiteLLM); the page then hides Ollama-specific guidance. */
-export type LocalCtxInfo = {
+type LocalCtxInfo = {
   is_ollama: boolean;
   model: string;
   num_ctx: number | null;
@@ -31,7 +31,7 @@ export type LocalCtxInfo = {
 /** Below this, Rift's prompt + tools + open files don't fit → the model loses
  *  its instructions mid-turn and stalls / refuses edits. Matches the backend
  *  optimize floor. */
-export const MIN_USABLE_CTX = 8192;
+const MIN_USABLE_CTX = 8192;
 
 class LocalLlmStore {
   enabled = $state(false);

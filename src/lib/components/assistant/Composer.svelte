@@ -93,6 +93,7 @@
   // the parent (AssistantPane) gates Composer rendering on tab presence.
   const tab = $derived(assistant.tabFor(tabId));
   const draft = $derived(tab?.draft ?? "");
+  const hasDraft = $derived(draft.trim().length > 0);
   const attachments = $derived(tab?.attachments ?? []);
   const textAttachments = $derived(tab?.textAttachments ?? []);
   const queue = $derived(tab?.queue ?? []);
@@ -791,15 +792,6 @@
       micBusy = false;
     }
   }
-  // Live autosize while transcription is streaming in.
-  $effect(() => {
-    if (stt.recording || stt.transcribing) {
-      const _v = draft;
-      void _v;
-      void tick().then(autosize);
-    }
-  });
-
   // ── Image paste ─────────────────────────────────────────────────────────
   // Captures any image item on the clipboard when pasted into the textarea.
   // Reads as ArrayBuffer → base64 → stages on the assistant store for the
@@ -1026,14 +1018,13 @@
   //   streaming + empty      → Stop (kill the running turn)
   //   streaming + draft      → Queue (append to message queue)
   const mode = $derived.by<"send" | "stop" | "queue">(() => {
-    const hasDraft = draft.trim().length > 0;
     if (streaming && !hasDraft) return "stop";
     if (streaming && hasDraft) return "queue";
     return "send";
   });
   const canFire = $derived(
     mode === "stop" ||
-      ((draft.trim().length > 0 || attachments.length > 0) &&
+      ((hasDraft || attachments.length > 0) &&
         (assistant.auth?.pill === "green" || assistant.auth?.pill === "yellow")),
   );
 
@@ -1161,7 +1152,7 @@
       </div>
     {/if}
 
-    {#if previewing && draft.trim().length > 0}
+    {#if previewing && hasDraft}
       <PreviewPanel {draft} />
     {/if}
 
@@ -1365,7 +1356,7 @@
             </span>
           {/if}
           {/if}
-          {#if draft.trim().length > 0}
+          {#if hasDraft}
           <button
             class="cbtn ic enhance wandbtn reveal"
             class:enhancing
@@ -1409,7 +1400,7 @@
           {/if}
         </div>
 
-        <LivePills tab={tab ?? null} {queue} {streaming} {composerFocused} />
+        <LivePills {queue} {composerFocused} />
 
         <div class="cbar-r">
           {#if localLlm.enabled}

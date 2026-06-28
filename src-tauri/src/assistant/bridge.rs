@@ -187,7 +187,9 @@ async fn handle_conn(
         // RR10: the protocol is one request per connection (bridge_call opens a
         // fresh TCP stream per call). Close after the first authed dispatch so an
         // unauthenticated local process can't hold a Tokio task open by streaming
-        // malformed lines (the parse-error `continue` never reaches the token gate).
+        // malformed lines (parse errors get a response + continue, but the next
+        // valid-JSON line with a wrong token still hits the gate above and shuts
+        // down the connection immediately).
         break;
     }
     Ok(())

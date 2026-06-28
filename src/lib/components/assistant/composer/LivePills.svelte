@@ -6,20 +6,13 @@
   // (telemetry snapshot + Activity dock toggle — the cluster already reads it
   // pervasively, per the brief's QueueRail precedent).
   import { ListPlus } from "lucide-svelte";
-  import type { ChatMessage } from "../../../state/assistant/types";
   import { tooltip } from "$lib/actions/tooltip";
 
-  type AgentSpawnLike = { id: string; subagentType: string; description: string; startedAt: number; completedAt: number | null };
-
   let {
-    tab,
     queue,
-    streaming,
     composerFocused,
   }: {
-    tab: { messages: ChatMessage[]; agentSpawns: AgentSpawnLike[]; activity: { turnStartedAt: number | null } } | null;
     queue: { id: string; text: string }[];
-    streaming: boolean;
     composerFocused: boolean;
   } = $props();
 

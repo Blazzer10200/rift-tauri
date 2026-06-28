@@ -76,6 +76,7 @@ type PersistenceHost = {
   ensureTab(convoId: string, cliSessionId: string): LoadableTab;
   closeTab(id: string): Promise<void>;
   dropTab(id: string): void;
+  pruneTabUi(id: string): void;
 };
 
 // Monotonic load token per host — guards loadConversation against a stale-IPC
@@ -93,15 +94,21 @@ export async function refreshConversations(host: PersistenceHost): Promise<void>
   }
 }
 
+// Computed once at module init — window label is static for the window lifetime.
+const _windowLabel = (() => {
+  try { return getCurrentWindow().label; } catch { return "main"; }
+})();
+const _tabsStorageKey = _windowLabel === "main"
+  ? "rift.ui.tabs.v1"
+  : `rift.ui.tabs.${_windowLabel}.v1`;
+
 // #37 cross-window sync: after THIS window mutates the shared conversation store
 // (save / delete / rename), tell every other window to re-pull its list so a
 // chat created or removed here shows up there without a reload. Fire-and-forget
 // — a failed broadcast just means the other window refreshes on its next own
 // action, never blocks the mutation that triggered it.
 function broadcastConvosChanged(): void {
-  let label = "main";
-  try { label = getCurrentWindow().label; } catch { /* non-Tauri / SSR */ }
-  void invoke("broadcast_convos_changed", { originLabel: label }).catch(() => {});
+  void invoke("broadcast_convos_changed", { originLabel: _windowLabel }).catch(() => {});
 }
 
 /** Derive a human-friendly title from the first user message. #145: takes the
@@ -394,12 +401,10 @@ export async function deleteAllConversations(host: PersistenceHost): Promise<voi
     }
   }
   try {
-    for (const id of ids) {
-      await invoke("assistant_delete_conversation", { id });
-    }
+    await Promise.all(ids.map((id) => invoke("assistant_delete_conversation", { id })));
     // Wipe to a clean slate — drop every open tab + reset active-convo fields.
     // dropTab (not closeTab) since there's no neighbor worth picking after a purge.
-    for (const id of [...host.openTabs]) host.dropTab(id);
+    for (const id of [...host.openTabs]) { host.dropTab(id); host.pruneTabUi(id); }
     host.openTabs = [];
     host.currentConvoId = null;
     host.currentCliSessionId = null;
@@ -422,11 +427,9 @@ export async function deleteAllConversations(host: PersistenceHost): Promise<voi
 // #37: namespace the open-tabs record per window label. Two windows share the
 // same web origin, so a single key would let them stomp each other's tab list.
 // The `main` window keeps the legacy key for backward compat; secondary windows
-// (`window-<n>`) get a per-label suffix.
+// (`window-<n>`) get a per-label suffix. Key is cached at module init.
 export function tabsStorageKey(): string {
-  let label = "main";
-  try { label = getCurrentWindow().label; } catch { /* non-Tauri / SSR */ }
-  return label === "main" ? "rift.ui.tabs.v1" : `rift.ui.tabs.${label}.v1`;
+  return _tabsStorageKey;
 }
 
 export function persistTabs(host: PersistenceHost): void {

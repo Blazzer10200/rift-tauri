@@ -133,7 +133,7 @@ export function requestPrewarm(store: AssistantStore): void {
       lastFiredKey = null;
       console.debug("assistant_prewarm failed (first turn will be cold):", e);
     });
-  }, PREWARM_DEBOUNCE_MS);
+  }, delay);
 }
 
 /** Drop the dedup latch — call when the active tab/session changes so the next

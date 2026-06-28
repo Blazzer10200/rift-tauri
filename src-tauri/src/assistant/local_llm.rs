@@ -6,7 +6,9 @@
 
 use serde_json::Value;
 
-use super::config::{is_valid_local_model_name, load_config, save_config, CONFIG_WRITE_LOCK};
+use super::config::{
+    is_valid_local_base_url, is_valid_local_model_name, load_config, save_config, CONFIG_WRITE_LOCK,
+};
 
 /// Read a response body, capped at 256KB. A hostile/misconfigured proxy could
 /// stream an unbounded body into `.text()` and OOM us. Every probe's real body is
@@ -55,8 +57,8 @@ pub async fn assistant_test_local_llm() -> Result<LocalTestResult, String> {
         .local_llm_base_url
         .as_deref()
         .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or("No base URL configured")?
+        .filter(|s| !s.is_empty() && is_valid_local_base_url(s))
+        .ok_or("No (valid) base URL configured")?
         .trim_end_matches('/')
         .to_string();
     let model = cfg
@@ -164,8 +166,8 @@ pub async fn assistant_list_local_models() -> Result<Vec<String>, String> {
         .local_llm_base_url
         .as_deref()
         .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or("No base URL configured")?
+        .filter(|s| !s.is_empty() && is_valid_local_base_url(s))
+        .ok_or("No (valid) base URL configured")?
         .trim_end_matches('/')
         .to_string();
     let local_key = crate::secrets::get(crate::secrets::LOCAL_LLM_API_KEY)
@@ -246,8 +248,8 @@ pub async fn assistant_local_model_context() -> Result<LocalCtxInfo, String> {
         .local_llm_base_url
         .as_deref()
         .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or("No base URL configured")?
+        .filter(|s| !s.is_empty() && is_valid_local_base_url(s))
+        .ok_or("No (valid) base URL configured")?
         .trim_end_matches('/')
         .to_string();
     let model = cfg
@@ -342,8 +344,8 @@ pub async fn assistant_optimize_local_model(target_ctx: Option<u64>) -> Result<S
         .local_llm_base_url
         .as_deref()
         .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or("No base URL configured")?
+        .filter(|s| !s.is_empty() && is_valid_local_base_url(s))
+        .ok_or("No (valid) base URL configured")?
         .trim_end_matches('/')
         .to_string();
     let from = cfg
