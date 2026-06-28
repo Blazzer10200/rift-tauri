@@ -5,7 +5,7 @@
   // ←/→ effort nudges); this child renders, handles clicks, and owns the
   // pointer-drag slider. Derives re-compute here from the shared modelMatrix
   // + assistant store — same pure helpers the parent uses, so they can't drift.
-  import { Check, HelpCircle, ChevronRight, Layers } from "lucide-svelte";
+  import { Check, HelpCircle, ChevronRight, Layers, Plus } from "lucide-svelte";
   import { tick } from "svelte";
   import { assistant } from "../../../state/assistant.svelte";
   import { uiPrefs } from "../../../state/ui-prefs.svelte";
@@ -14,8 +14,8 @@
   import { tooltip } from "$lib/actions/tooltip";
   import { effortIdxFromX } from "./helpers";
   import {
-    EFFORT_OPTIONS, MODEL_OPTIONS, currentModels, legacyModels, modelShortcut,
-    effortStopsFor, clampEffortIdx,
+    MODEL_OPTIONS, currentModels, legacyModels, modelShortcut,
+    dialStopsFor, dialIdFor, clampEffortIdx,
     type ModelOpt,
   } from "./modelMatrix";
 
@@ -75,47 +75,55 @@
   });
 
   const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === assistant.effectiveModel));
-  const currentEffort = $derived(EFFORT_OPTIONS.find((e) => e.id === assistant.thinkingEffort) ?? EFFORT_OPTIONS[2]);
-  const effortApplies = $derived(currentModel?.effort ?? true);
-  const effortStops = $derived(effortStopsFor(currentModel));
-  const effortIdx = $derived(
+  // ── Thinking dial (one control: Off · Low · Medium · High · Max) ──────────
+  // The dial is a pure projection over the store's (thinkingEnabled,
+  // thinkingEffort) pair — `dialIdFor` reads them, `assistant.setThinkingDial`
+  // writes both. Rungs truncate at the model's effort ceiling; Off-only for
+  // models with no effort capability (Haiku).
+  const dialStops = $derived(dialStopsFor(currentModel));
+  const dialApplies = $derived(dialStops.length > 1); // a model with on-rungs
+  const dialId = $derived(dialIdFor(assistant.thinkingEnabled, assistant.thinkingEffort));
+  const dialIdx = $derived(
     Math.min(
-      Math.max(0, EFFORT_OPTIONS.findIndex((e) => e.id === assistant.thinkingEffort)),
-      Math.max(0, effortStops.length - 1),
+      Math.max(0, dialStops.findIndex((s) => s.id === dialId)),
+      Math.max(0, dialStops.length - 1),
     ),
   );
-  const stops = $derived(effortStops.length);
-  const effortPct = $derived(stops > 1 ? (effortIdx / (stops - 1)) * 100 : 0);
-  function setEffortByIdx(i: number) {
-    const c = clampEffortIdx(effortStops, i);
-    if (effortStops[c]) assistant.setThinkingEffort(effortStops[c].id);
+  const currentDial = $derived(dialStops[dialIdx] ?? dialStops[0]);
+  const stops = $derived(dialStops.length);
+  const effortPct = $derived(stops > 1 ? (dialIdx / (stops - 1)) * 100 : 0);
+  function setDialByIdx(i: number) {
+    const c = clampEffortIdx(dialStops, i);
+    const s = dialStops[c];
+    if (!s) return;
+    if (s.effort === null) assistant.setThinkingDial(false);
+    else assistant.setThinkingDial(true, s.effort);
   }
-  // Plain-language summary of what the current model + effort selection actually
-  // does — so users aren't guessing what a mode gets them into.
+  // Plain-language summary of what the current model + thinking selection
+  // actually does — so users aren't guessing what a mode gets them into.
   const modelCaption = $derived.by(() => {
     const m = currentModel;
     if (!m) return "";
-    if (!m.effort) return `${m.label} ${m.version} answers right away — it doesn't use extended-thinking effort modes.`;
-    if (!assistant.thinkingEnabled) return `${m.label} ${m.version} replies without extended thinking — fastest, no reasoning step.`;
-    return currentEffort.hint;
+    if (!m.effort) return `${m.label} ${m.version} answers right away — it doesn't use extended thinking.`;
+    return currentDial.hint;
   });
-  // Pointer-drag the slider: map clientX → nearest stop. Pointer-capture on the
+  // Pointer-drag the dial: map clientX → nearest stop. Pointer-capture on the
   // track keeps move/up flowing even when the cursor leaves the row.
   let effortTrackEl: HTMLDivElement | null = $state(null);
   let draggingEffort = $state(false);
-  function effortIdxFromClientX(clientX: number): number {
-    if (!effortTrackEl) return effortIdx;
-    return effortIdxFromX(clientX, effortTrackEl.getBoundingClientRect(), effortStops.length);
+  function dialIdxFromClientX(clientX: number): number {
+    if (!effortTrackEl) return dialIdx;
+    return effortIdxFromX(clientX, effortTrackEl.getBoundingClientRect(), dialStops.length);
   }
   function startEffortDrag(e: PointerEvent) {
     e.preventDefault();
     draggingEffort = true;
-    setEffortByIdx(effortIdxFromClientX(e.clientX));
+    setDialByIdx(dialIdxFromClientX(e.clientX));
     effortTrackEl?.setPointerCapture?.(e.pointerId);
   }
   function moveEffortDrag(e: PointerEvent) {
     if (!draggingEffort) return;
-    setEffortByIdx(effortIdxFromClientX(e.clientX));
+    setDialByIdx(dialIdxFromClientX(e.clientX));
   }
   function endEffortDrag() { draggingEffort = false; }
 
@@ -161,7 +169,8 @@
       <span class="pi-text">
         <span class="pi-name">
           <span class="model-name">{m.label} {m.version}</span>
-          {#if m.limited}<span class="pi-tag accent">Limited</span>
+          {#if m.id === assistant.sessionPinnedModel && assistant.sessionModelDiverged}<span class="pi-tag session">this chat</span>
+          {:else if m.limited}<span class="pi-tag accent">Limited</span>
           {:else if m.suffix}<span class="pi-tag">{m.suffix}</span>{/if}
         </span>
         <span class="pi-sub">{m.blurb}</span>
@@ -216,50 +225,51 @@
     </div>
   {/if}
 
-  {#if effortApplies}
-    <div class="rift-menu-divider"></div>
-    <button
-      type="button"
-      class="rift-menu-row toggle-row"
-      onmousedown={(e) => { e.preventDefault(); assistant.toggleThinking(); }}
-      role="menuitemcheckbox"
-      aria-checked={assistant.thinkingEnabled}
-    >
-      <span class="rift-menu-row-body">
-        <span class="rift-menu-row-t">Extended thinking</span>
-        <span class="rift-menu-row-d">{assistant.thinkingEnabled ? "Reasons before replying" : "Off — replies immediately, faster"}</span>
+  {#if assistant.sessionModelDiverged}
+    {@const pinned = MODEL_OPTIONS.find((m) => m.id === assistant.sessionPinnedModel)}
+    {@const picked = currentModel}
+    <div class="session-note" role="note">
+      <span class="sn-text">
+        This chat runs on <strong>{pinned ? `${pinned.label} ${pinned.version}` : assistant.sessionPinnedModel}</strong>.
+        Switching models only applies to a new chat.
       </span>
-      <span class="rift-toggle" class:on={assistant.thinkingEnabled} aria-hidden="true">
-        <span class="rift-toggle-knob"></span>
-      </span>
-    </button>
+      <button
+        type="button"
+        class="sn-action"
+        onmousedown={(e) => { e.preventDefault(); void assistant.newChatWithModel((picked ?? pinned!).id); onRequestClose(); }}
+      >
+        <Plus size={12} /> New chat in {picked ? picked.label : "this model"}
+      </button>
+    </div>
   {/if}
-  {#if effortApplies && assistant.thinkingEnabled}
-    <div class="effort-head" class:ultra={currentEffort.id === "ultra"}>
-      <span class="effort-head-k">Effort</span>
-      <span class="effort-head-v" aria-live="polite">{currentEffort.label}</span>
+
+  {#if dialApplies}
+    <div class="rift-menu-divider"></div>
+    <div class="effort-head" class:ultra={currentDial.id === "max"}>
+      <span class="effort-head-k">Thinking</span>
+      <span class="effort-head-v" aria-live="polite">{currentDial.label}</span>
       <button
         type="button"
         role="menuitem"
         class="effort-help"
-        use:tooltip={currentEffort.hint}
+        use:tooltip={currentDial.hint}
         onmousedown={(e) => e.preventDefault()}
-        aria-label="What does effort do?"
+        aria-label="What does thinking do?"
       ><HelpCircle size={12} /></button>
     </div>
     <div
       class="effort-slider"
       class:active={activeKind === "effort"}
-      class:ultra={currentEffort.id === "ultra"}
+      class:ultra={currentDial.id === "max"}
       class:dragging={draggingEffort}
       role="slider"
       tabindex="0"
-      aria-label="Effort"
-      onkeydown={(e) => { if (e.key === 'ArrowRight') { e.preventDefault(); setEffortByIdx(effortIdx + 1); } else if (e.key === 'ArrowLeft') { e.preventDefault(); setEffortByIdx(effortIdx - 1); } }}
+      aria-label="Thinking"
+      onkeydown={(e) => { if (e.key === 'ArrowRight') { e.preventDefault(); setDialByIdx(dialIdx + 1); } else if (e.key === 'ArrowLeft') { e.preventDefault(); setDialByIdx(dialIdx - 1); } }}
       aria-valuemin={1}
       aria-valuemax={stops}
-      aria-valuenow={effortIdx + 1}
-      aria-valuetext={currentEffort.label}
+      aria-valuenow={dialIdx + 1}
+      aria-valuetext={currentDial.label}
     >
       <div
         class="effort-track"
@@ -270,43 +280,44 @@
         onpointerup={endEffortDrag}
         onpointercancel={endEffortDrag}
       >
-        <div class="effort-fill" style="width: {effortPct}%"></div>
-        {#each effortStops as e, i (e.id)}
+        <div class="effort-fill" class:off={dialIdx === 0} style="width: {effortPct}%"></div>
+        {#each dialStops as s, i (s.id)}
           <button
             type="button"
             class="effort-notch"
-            class:on={i <= effortIdx}
-            class:cur={i === effortIdx}
-            class:ultra={e.id === "ultra"}
+            class:on={i <= dialIdx}
+            class:cur={i === dialIdx}
+            class:ultra={s.id === "max"}
+            class:off={s.id === "off"}
             style="left: {stops > 1 ? (i / (stops - 1)) * 100 : 0}%"
-            use:tooltip={e.hint}
-            aria-label={e.label}
-            onmousedown={(ev) => { ev.preventDefault(); setEffortByIdx(i); }}
+            use:tooltip={s.hint}
+            aria-label={s.label}
+            onmousedown={(ev) => { ev.preventDefault(); setDialByIdx(i); }}
           ></button>
         {/each}
         <div class="effort-knob" style="left: {effortPct}%"></div>
       </div>
       <div class="effort-ticks">
-        {#each effortStops as e, i (e.id)}
+        {#each dialStops as s, i (s.id)}
           <button
             type="button"
             class="effort-tick"
-            class:cur={i === effortIdx}
-            class:done={i < effortIdx}
+            class:cur={i === dialIdx}
+            class:done={i < dialIdx}
             style="left: {stops > 1 ? (i / (stops - 1)) * 100 : 0}%"
             tabindex="-1"
             aria-hidden="true"
-            onmousedown={(ev) => { ev.preventDefault(); setEffortByIdx(i); }}
-          >{e.label}</button>
+            onmousedown={(ev) => { ev.preventDefault(); setDialByIdx(i); }}
+          >{s.label}</button>
         {/each}
       </div>
     </div>
   {/if}
-  <p class="model-caption" class:warn={effortApplies && assistant.thinkingEnabled && currentEffort.id === "ultra"}>{modelCaption}</p>
+  <p class="model-caption" class:warn={dialApplies && currentDial.id === "max"}>{modelCaption}</p>
 
   <div class="rift-menu-hint">
     <span><kbd>1–{MODEL_OPTIONS.length}</kbd>model</span>
-    {#if effortApplies}<span><kbd>←→</kbd>effort</span>{/if}
+    {#if dialApplies}<span><kbd>←→</kbd>thinking</span>{/if}
     <span><kbd>↵</kbd>pick</span>
     <span><kbd>Esc</kbd>close</span>
   </div>
@@ -464,6 +475,39 @@
     background: color-mix(in oklab, var(--accent) 14%, transparent);
     border: 1px solid color-mix(in oklab, var(--accent) 35%, transparent);
   }
+  /* "this chat" tag — marks the model the active session is pinned to when the
+     picker selection has drifted ahead of it. Neutral (not accent) so the
+     accent stays on the user's current pick. */
+  :global(.settings-menu .pi-tag.session) {
+    margin-left: auto; font-size: 9px; font-weight: 600; letter-spacing: 0.03em;
+    color: var(--fg-muted); padding: 2px 6px; border-radius: 999px;
+    background: color-mix(in oklab, var(--fg) 8%, transparent);
+    border: 1px solid color-mix(in oklab, var(--fg) 14%, transparent);
+  }
+  /* Pinned-session divergence note — honest "switch applies to a new chat"
+     surface with a one-click "New chat in <model>" action. */
+  .session-note {
+    display: flex; flex-direction: column; gap: 7px;
+    margin: 4px 6px; padding: 9px 11px;
+    border-radius: 10px;
+    background: color-mix(in oklab, var(--accent) 7%, var(--bg-inset));
+    border: 1px solid color-mix(in oklab, var(--accent) 20%, var(--border));
+  }
+  .session-note .sn-text { font-size: 11px; line-height: 1.45; color: var(--fg-muted); }
+  .session-note .sn-text strong { color: var(--fg); font-weight: 650; }
+  .session-note .sn-action {
+    display: inline-flex; align-items: center; gap: 5px; align-self: flex-start;
+    padding: 4px 10px; border-radius: 8px;
+    background: color-mix(in oklab, var(--accent) 16%, transparent);
+    border: 1px solid color-mix(in oklab, var(--accent) 38%, var(--border));
+    color: color-mix(in oklab, var(--accent) 92%, var(--fg));
+    font: inherit; font-size: 11px; font-weight: 600; cursor: pointer;
+    transition: background 140ms ease, color 140ms ease;
+  }
+  .session-note .sn-action:hover {
+    background: color-mix(in oklab, var(--accent) 28%, transparent);
+    color: color-mix(in oklab, var(--accent) 98%, white);
+  }
   /* Blurb wraps to two lines instead of a hard ellipsis — the wider panel fits
      every current blurb on one line, but wrapping guarantees nothing is ever
      clipped mid-word as the row content grows. */
@@ -512,35 +556,7 @@
   :global(.settings-menu .model-row:hover .model-num),
   :global(.settings-menu .model-row.active .model-num) { color: var(--fg-muted); }
 
-  /* Extended-thinking toggle row — title/desc pulled onto the shared scale so it
-     reads identically to the model rows above it. */
-  :global(.settings-menu .toggle-row) { align-items: center; padding: 8px 9px; gap: 9px; }
-  :global(.settings-menu .toggle-row .rift-menu-row-body) { gap: 2px; }
-  :global(.settings-menu .toggle-row .rift-menu-row-t) {
-    font-size: var(--sm-title); font-weight: 600; color: var(--fg-2); line-height: 1.2; letter-spacing: -0.005em;
-  }
-  :global(.settings-menu .toggle-row:hover .rift-menu-row-t) { color: var(--fg); }
-  :global(.settings-menu .toggle-row .rift-menu-row-d) {
-    font-size: var(--sm-sub); font-weight: 450; color: var(--fg-faint); line-height: 1.4;
-  }
-  :global(.settings-menu .rift-toggle) {
-    position: relative; flex-shrink: 0; align-self: center;
-    width: 30px; height: 17px; border-radius: 999px;
-    background: color-mix(in oklch, var(--fg-faint) 38%, transparent);
-    border: 1px solid var(--border);
-    transition: background 160ms ease, border-color 160ms ease;
-  }
-  :global(.settings-menu .rift-toggle.on) { background: var(--accent); border-color: transparent; }
-  :global(.settings-menu .rift-toggle-knob) {
-    position: absolute; top: 1px; left: 1px;
-    width: 13px; height: 13px; border-radius: 999px;
-    background: oklch(0.97 0 0);
-    box-shadow: 0 1px 2px oklch(0 0 0 / 0.4);
-    transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-  :global(.settings-menu .rift-toggle.on .rift-toggle-knob) { transform: translateX(13px); }
-
-  /* Effort slider — stepped tier rail (Low→X-High), stops = EFFORT_OPTIONS. */
+  /* Thinking dial — stepped tier rail (Off→Max), stops = DIAL_STOPS. */
   :global(.settings-menu .effort-head) {
     display: flex; align-items: center; gap: 8px;
     padding: 10px 9px 4px;
@@ -610,6 +626,16 @@
   :global(.settings-menu .effort-slider.ultra .effort-fill) {
     box-shadow: 0 0 14px color-mix(in oklab, var(--accent) 60%, transparent),
                 inset 0 1px 0 oklch(1 0 0 / 0.22);
+  }
+  /* Off rung (dial at index 0) — neutral, no accent glow, so "thinking off"
+     reads as a quiet state rather than a lit tier. The knob still sits at the
+     left edge over the bare track. */
+  :global(.settings-menu .effort-fill.off) {
+    background: color-mix(in oklab, var(--fg-faint) 55%, transparent);
+    box-shadow: none;
+  }
+  :global(.settings-menu .effort-slider:has(.effort-fill.off) .effort-knob) {
+    border-color: var(--fg-faint);
   }
   :global(.settings-menu .effort-notch) {
     position: absolute; top: 50%; width: 5px; height: 5px; padding: 0;

@@ -23,8 +23,8 @@
   import PreviewPanel from "./composer/PreviewPanel.svelte";
   import QuickChips from "./composer/QuickChips.svelte";
   import {
-    EFFORT_OPTIONS, MODEL_OPTIONS, MODE_OPTIONS,
-    effortStopsFor, clampEffortIdx, permToneFor,
+    MODEL_OPTIONS, MODE_OPTIONS,
+    dialStopsFor, dialIdFor, clampEffortIdx, permToneFor,
     type ModelOpt, type ModeOpt,
   } from "./composer/modelMatrix";
   import { stt } from "../../state/stt.svelte";
@@ -318,31 +318,39 @@
   // Current model row — drives the composer's bottom-right pill label.
   const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === assistant.effectiveModel));
 
-  // Effort derives the parent still needs (pill label, settingsRows, onKey
-  // ←/→) — same matrix helpers SettingsMenu uses, so they can't drift.
-  const currentEffort = $derived(EFFORT_OPTIONS.find((e) => e.id === assistant.thinkingEffort) ?? EFFORT_OPTIONS[2]);
-  const effortApplies = $derived(currentModel?.effort ?? true);
-  const effortStops = $derived(effortStopsFor(currentModel));
-  const effortIdx = $derived(
+  // Thinking-dial derives the parent still needs (pill label, settingsRows,
+  // onKey ←/→) — same matrix helpers SettingsMenu uses, so they can't drift.
+  // The dial is a projection over (thinkingEnabled, thinkingEffort); see
+  // modelMatrix DIAL_STOPS.
+  const dialStops = $derived(dialStopsFor(currentModel));
+  const dialApplies = $derived(dialStops.length > 1);
+  const currentDialId = $derived(dialIdFor(assistant.thinkingEnabled, assistant.thinkingEffort));
+  const currentDial = $derived(dialStops.find((s) => s.id === currentDialId) ?? dialStops[0]);
+  const dialIdx = $derived(
     Math.min(
-      Math.max(0, EFFORT_OPTIONS.findIndex((e) => e.id === assistant.thinkingEffort)),
-      Math.max(0, effortStops.length - 1),
+      Math.max(0, dialStops.findIndex((s) => s.id === currentDialId)),
+      Math.max(0, dialStops.length - 1),
     ),
   );
-  function setEffortByIdx(i: number) {
-    const c = clampEffortIdx(effortStops, i);
-    if (effortStops[c]) assistant.setThinkingEffort(effortStops[c].id);
+  function setDialByIdx(i: number) {
+    const c = clampEffortIdx(dialStops, i);
+    const s = dialStops[c];
+    if (!s) return;
+    if (s.effort === null) assistant.setThinkingDial(false);
+    else assistant.setThinkingDial(true, s.effort);
   }
-  // Switching to a lower-ceiling model (e.g. Ultracode → Sonnet) must pull the
+  // Switching to a lower-ceiling model (e.g. Max/Opus → Sonnet) must pull the
   // stored effort down to that model's max, so we never send xhigh/ultracode to
-  // a model that rejects it.
+  // a model that rejects it. (setModel already clamps on pick; this guards the
+  // case where the model changed by another path.)
   $effect(() => {
-    if (!effortApplies || effortStops.length === 0) return;
-    if (!effortStops.some((e) => e.id === assistant.thinkingEffort)) {
-      assistant.setThinkingEffort(effortStops[effortStops.length - 1].id);
+    if (!dialApplies) return;
+    if (assistant.thinkingEnabled && !dialStops.some((s) => s.effort === assistant.thinkingEffort)) {
+      const top = dialStops[dialStops.length - 1];
+      if (top.effort) assistant.setThinkingDial(true, top.effort);
     }
   });
-  // Caption + pointer-drag slider live in composer/SettingsMenu.svelte (C7).
+  // Caption + pointer-drag dial live in composer/SettingsMenu.svelte (C7).
 
   // Permission-mode picker — option table in modelMatrix.ts (C7).
   const currentMode = $derived(MODE_OPTIONS.find((m) => m.id === assistant.permissionMode) ?? MODE_OPTIONS[4]);
@@ -370,7 +378,7 @@
     | { kind: "effort" };
   const settingsRows = $derived.by<SettingsRow[]>(() => {
     const rows: SettingsRow[] = MODEL_OPTIONS.map((m) => ({ kind: "model" as const, model: m }));
-    if (effortApplies && effortStops.length > 0) rows.push({ kind: "effort" });
+    if (dialApplies) rows.push({ kind: "effort" });
     return rows;
   });
   // Re-seed the cursor to the current model row whenever the panel opens.
@@ -938,10 +946,10 @@
         settingsIdx = (settingsIdx - 1 + n) % n;
         return;
       }
-      // ←/→ drives the effort slider when the cursor is parked on it.
+      // ←/→ drives the thinking dial when the cursor is parked on it.
       if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && cur?.kind === "effort") {
         e.preventDefault();
-        setEffortByIdx(effortIdx + (e.key === "ArrowRight" ? 1 : -1));
+        setDialByIdx(dialIdx + (e.key === "ArrowRight" ? 1 : -1));
         return;
       }
       // Digit 1–N jumps straight to that model row.
@@ -1220,7 +1228,7 @@
         {:else if draft.length === 0 && !streaming && attachments.length === 0}
           <span class="placeholder-ghost static" aria-hidden="true">Ask {localLlm.askLabel} · <span class="ph-k">/</span> for commands · <span class="ph-k">@</span> to mention a file{#if stt.config.enabled} · <span class="ph-k">Ctrl+D</span> to dictate{/if}</span>
         {:else if streaming && draft.length === 0}
-          <span class="placeholder-ghost static" aria-hidden="true">Type to queue for after this turn · <span class="ph-k">/stop</span> halts</span>
+          <span class="placeholder-ghost static" aria-hidden="true"><span class="ph-k">Enter</span> queues · <span class="ph-k">Alt+Enter</span> steers this turn · <span class="ph-k">/stop</span> halts</span>
         {:else if attachments.length > 0 && draft.length === 0}
           <span class="placeholder-ghost static" aria-hidden="true">Ask about the image…</span>
         {/if}
@@ -1250,7 +1258,7 @@
           use:tooltip={mode === "stop"
             ? { text: "Halt the current turn", kbd: "Esc" }
             : mode === "queue"
-            ? { text: "Queue after current turn", kbd: "Enter" }
+            ? { text: "Queue after current turn — or Alt+Enter to steer it into this turn", kbd: "Enter" }
             : { text: "Send", kbd: "Enter" }}
         >
           <span class="icon-stack">
@@ -1428,24 +1436,24 @@
             type="button"
             class="model-pill"
             class:open={settingsOpen}
-            class:ultra={effortApplies && assistant.thinkingEffort === "ultra"}
+            class:ultra={dialApplies && currentDialId === "max"}
             data-model={currentModel ? modelFamily(currentModel.id) : ""}
             bind:this={modelWrap}
             onclick={() => { settingsOpen = !settingsOpen; permOpen = false; void tick().then(() => ta?.focus()); }}
             aria-haspopup="listbox"
             aria-expanded={settingsOpen}
-            aria-label="Model & thinking depth"
-            use:tooltip={effortApplies
-              ? `Model · thinking depth\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel} · ${currentEffort.label}`
+            aria-label="Model & thinking"
+            use:tooltip={dialApplies
+              ? `Model · thinking\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel} · Thinking ${currentDial.label}`
               : `Model\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel} · no extended thinking`}
           >
             <span class="model-dot" aria-hidden="true"></span>
             <span class="pill-label">{currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel}</span>
-            {#if effortApplies}
-              <span class="pill-effort">· {currentEffort.label}</span>
+            {#if dialApplies}
+              <span class="pill-effort" class:thinkoff={currentDialId === "off"}>· {currentDialId === "off" ? "No thinking" : currentDial.label}</span>
             {/if}
-            {#if effortApplies && assistant.thinkingEffort === "ultra"}
-              <span class="pill-ultra" aria-hidden="true" use:tooltip={"Ultracode — max reasoning + autonomous workflows"}><Sparkles size={11} /></span>
+            {#if dialApplies && currentDialId === "max"}
+              <span class="pill-ultra" aria-hidden="true" use:tooltip={"Max — deepest reasoning + autonomous workflows"}><Sparkles size={11} /></span>
             {/if}
             <ChevronUp size={13} class="pill-chev" />
           </button>
@@ -2101,8 +2109,10 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  /* Effort label trails the model name (mock `.pill-effort`). */
+  /* Thinking label trails the model name (mock `.pill-effort`). */
   .pill-effort { font-size: 11px; font-weight: 500; color: var(--fg-faint); line-height: 1; white-space: nowrap; }
+  /* "No thinking" reads a touch quieter than an active level. */
+  .pill-effort.thinkoff { opacity: 0.72; font-style: italic; }
   /* Permission-mode dot — one consistent at-a-glance signal for all five
      modes (the pill's text-tint only covered ask/bypass). Colored per mode:
      ask=accent, edit=ok, plan=blue, auto=accent, bypass=warn. */

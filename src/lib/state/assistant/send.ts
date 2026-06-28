@@ -67,6 +67,13 @@ export async function send(store: AssistantStore, prompt: string) {
     tab.convoCreatedAt = Date.now();
     tab.convoTitle = null;
   }
+  // Capture the model this session pins to backend-side on its first turn — the
+  // backend ignores a later picker switch on a resumed session, so this is the
+  // model the running turns truly use (drives the picker's "this session" tag +
+  // "New chat in <model>" honesty). Only set once, on the first turn.
+  if (isFirstTurn && !tab.pinnedModel) {
+    tab.pinnedModel = store.effectiveModel;
+  }
   // A real turn — advance the sidebar's activity clock. Tab-switch auto-saves
   // deliberately don't touch this, so opening a chat no longer reshuffles.
   tab.lastActivityAt = Date.now();
@@ -234,17 +241,15 @@ export function drainQueue(store: AssistantStore, tab: TabState | null) {
   // only drainQueue→send reaches — gating here would deadlock the queue behind
   // a stale error forever. send() clears lastError before anything visible.
   if (!tab || tab !== store.activeTab || tab.streaming || tab.queue.length === 0) return;
-  // Rail-v2: steer-mode chips don't start turns — they ride the next one
-  // (flushSteerChips injects them at its first stream line). Fire the first
-  // queue-mode chip; if the rail is ALL steer chips there is no next turn to
-  // ride, so degrade the head to a normal send — the queue can never strand.
-  // RR7: PEEK the head, don't pop yet. Popping here (before the microtask) left
-  // a window where closeTab could read tab.queue.length for its "N discarded"
-  // toast AFTER the item was already removed but BEFORE the microtask could
-  // re-queue it — undercounting by one and silently dropping the in-flight item
-  // when dropTab removed the tab first. The item now stays in the queue until
-  // the microtask actually sends it, so closeTab's count is always accurate.
-  const next = tab.queue.find((q) => q.mode !== "steer") ?? tab.queue[0];
+  // Fire the head of the queue as the next turn. The queue order IS the send
+  // order (drag-to-reorder in the rail). RR7: PEEK the head, don't pop yet.
+  // Popping here (before the microtask) left a window where closeTab could read
+  // tab.queue.length for its "N discarded" toast AFTER the item was already
+  // removed but BEFORE the microtask could re-queue it — undercounting by one
+  // and silently dropping the in-flight item when dropTab removed the tab first.
+  // The item now stays in the queue until the microtask actually sends it, so
+  // closeTab's count is always accurate.
+  const next = tab.queue[0];
   // #148: capture the active convo at peek time; if the user switches tabs OR
   // a new turn starts before the microtask fires, leave the head queued and
   // bail. The next completion or tab activation re-drains — never a silent strand.
@@ -383,29 +388,6 @@ export async function steer(
 export function removeQueued(store: AssistantStore, id: string, tabId?: string) {
   const tab = tabId ? store.tabFor(tabId) : store.activeTab;
   if (tab) tab.queue = tab.queue.filter((q) => q.id !== id);
-}
-
-/** Rail-v2: inject every steer-mode chip into the just-started turn, in queue
- *  order. Called via TabState.onTurnStarted (first stream line — the backend
- *  steer registry is guaranteed live by then). Chips that miss the turn fall
- *  back to the queue inside steer(), losing their steer mark — correct, since
- *  the turn they were aimed at is gone. */
-export function flushSteerChips(store: AssistantStore, tab: TabState | null) {
-  if (!tab || !tab.streaming) return;
-  const chips = tab.queue.filter((q) => q.mode === "steer");
-  if (chips.length === 0) return;
-  tab.queue = tab.queue.filter((q) => q.mode !== "steer");
-  // Resolve this tab's convoId (Map key) so steer() targets THIS tab even if
-  // the user switched panes — mirrors handleTurnComplete's reverse lookup.
-  let tabId: string | null = null;
-  for (const [cid, t] of store.tabs) {
-    if (t === tab) { tabId = cid; break; }
-  }
-  void (async () => {
-    for (const c of chips) {
-      await steer(store, c.text, tabId);
-    }
-  })();
 }
 
 /** Client-side slash commands. Returns true if input was consumed. */

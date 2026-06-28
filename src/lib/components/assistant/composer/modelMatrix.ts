@@ -74,16 +74,63 @@ export const modelShortcut = (id: ModelSel) => MODEL_OPTIONS.findIndex((m) => m.
 export const currentModels = MODEL_OPTIONS.filter((m) => !m.legacy);
 export const legacyModels = MODEL_OPTIONS.filter((m) => m.legacy);
 
-/** The slider's allowed tiers — EFFORT_OPTIONS truncated at the model's
- *  ceiling. A prefix slice, so an index into it equals the absolute tier index. */
-export function effortStopsFor(m: ModelOpt | undefined): EffortOpt[] {
-  if (!m?.effort) return [];
-  const cap = EFFORT_OPTIONS.findIndex((e) => e.id === m.maxEffort);
-  return EFFORT_OPTIONS.slice(0, cap >= 0 ? cap + 1 : EFFORT_OPTIONS.length);
+// ── Thinking dial ──────────────────────────────────────────────────────────
+// One control replacing the old `Extended thinking` toggle + separate effort
+// slider (two controls for one concept). Each rung is a single thinking level:
+// Off = no extended thinking (nothink shim, fastest); Low..Max = thinking on at
+// a rising effort budget. This is a PURE UI PROJECTION over the store's existing
+// `thinkingEnabled` (bool) + `thinkingEffort` (tier) — the dial reads/writes
+// those two fields, so the send-path contract + the effortToFlag 3-file lockstep
+// are untouched. Each on-rung maps to a DISTINCT CLI effort flag (none→low,
+// smart→medium, deep→high, ultra→xhigh), so the redundant `quick`/Medium+ rung
+// is intentionally not exposed here — `quick` stays a valid tier for back-compat
+// (old stored prefs / the legacy slider tests) but the dial collapses it away.
+export type DialId = "off" | "low" | "medium" | "high" | "max";
+export type DialStop = {
+  id: DialId;
+  label: string;
+  hint: string;
+  /** null = Off (thinking disabled). Otherwise the ThinkingEffort tier this
+   *  rung selects when thinking is on. */
+  effort: ThinkingEffort | null;
+};
+// Off lives at index 0; the on-rungs follow in rising order. `effort` ties each
+// on-rung to the canonical tier so the dial never invents a flag the CLI lacks.
+export const DIAL_STOPS: DialStop[] = [
+  { id: "off",    label: "Off",    effort: null,    hint: "Off — replies immediately, no reasoning step. Fastest." },
+  { id: "low",    label: "Low",    effort: "none",  hint: "Low — minimal reasoning before replying. Quick lookups & small edits." },
+  { id: "medium", label: "Medium", effort: "smart", hint: "Medium — balanced reasoning + fast responses. The recommended default for everyday work." },
+  { id: "high",   label: "High",   effort: "deep",  hint: "High — heavier reasoning and more thorough tool use, for complex tasks where quality matters more than speed." },
+  { id: "max",    label: "Max",    effort: "ultra", hint: "Max — deepest reasoning + autonomous multi-agent workflows. Claude orchestrates fleets of subagents for the most exhaustive answer." },
+];
+
+/** The dial rungs a model actually supports. Models with no effort capability
+ *  (Haiku) get only `Off` — they can't extend-think at all. Otherwise the rungs
+ *  are truncated at the model's effort ceiling: Sonnet (max "deep") stops at
+ *  High, Opus/Fable (max "ultra") reach Max. Off is always present. */
+export function dialStopsFor(m: ModelOpt | undefined): DialStop[] {
+  if (!m?.effort) return [DIAL_STOPS[0]];
+  const capIdx = EFFORT_OPTIONS.findIndex((e) => e.id === m.maxEffort);
+  return DIAL_STOPS.filter(
+    (s) => s.effort === null
+      || (capIdx >= 0 && EFFORT_OPTIONS.findIndex((e) => e.id === s.effort) <= capIdx),
+  );
 }
 
-/** Clamp an index into `stops` (pure half of setEffortByIdx). */
-export function clampEffortIdx(stops: EffortOpt[], i: number): number {
+/** Project the store's (thinkingEnabled, thinkingEffort) pair onto a dial rung.
+ *  Off when thinking is disabled. When on, the rung whose `effort` tier matches
+ *  — `quick` (the collapsed-away rung) maps to "medium" since both send the same
+ *  CLI flag, so an old `quick` pref reads as Medium on the dial. */
+export function dialIdFor(enabled: boolean, effort: ThinkingEffort): DialId {
+  if (!enabled) return "off";
+  if (effort === "quick") return "medium"; // quick + smart both → medium flag
+  const stop = DIAL_STOPS.find((s) => s.effort === effort);
+  return stop ? stop.id : "medium";
+}
+
+/** Clamp an index into a stops array (pure half of setEffortByIdx /
+ *  setDialByIdx). Only the length matters, so it accepts any stop list. */
+export function clampEffortIdx(stops: readonly unknown[], i: number): number {
   const max = Math.max(0, stops.length - 1);
   return Math.min(max, Math.max(0, i));
 }

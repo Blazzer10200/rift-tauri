@@ -150,7 +150,6 @@ import {
 import {
   send as sendImpl,
   drainQueue as sendDrainQueue,
-  flushSteerChips as sendFlushSteerChips,
   stop as sendStop,
   steer as sendSteer,
   removeQueued as sendRemoveQueued,
@@ -229,6 +228,14 @@ export class TabState {
    *  (its saved model scopes to this tab) and on explicit pick; null = follow
    *  the global default. Opening a chat no longer rewrites the new-chat default. */
   modelOverride = $state<ModelSel | null>(null);
+  /** The model this session is actually PINNED to backend-side — captured on the
+   *  first send (and hydrated from disk on resume). The backend ignores a picker
+   *  switch on a resumed session (thinking-block signatures are model-bound,
+   *  turn.rs load_session_model), so this is the model the running turns truly
+   *  use. `modelOverride` can drift ahead of it when the user switches the picker
+   *  mid-chat; the picker surfaces the divergence + offers "New chat in <model>".
+   *  null = first turn hasn't run yet (no pin), so a switch still takes effect. */
+  pinnedModel = $state<ModelSel | null>(null);
   /** #30: cwd the CLI session is pinned to (resumed convos keep their original
    *  folder). Hydrated on disk-load; null = no pin known / fresh tab. The tabs
    *  bar badges the active tab when this differs from workspace.current. */
@@ -242,11 +249,12 @@ export class TabState {
   workspaceRoot = $state<string | null>(null);
   promptHistory = $state<string[]>([]);
   /** Outbound message queue for THIS tab. send() pushes here when the tab is
-   *  already streaming; onDone() pops the next one. Per-tab so a queued msg
-   *  in Tab A can't drain into Tab B if the user switches mid-turn.
-   *  Rail-v2: `mode: "steer"` chips don't start turns — they inject into the
-   *  next turn at its first stream line (flushSteerChips). Absent = "queue". */
-  queue = $state<{ id: string; text: string; mode?: "queue" | "steer" }[]>([]);
+   *  already streaming; onDone() pops the next one (queue order = send order,
+   *  drag-to-reorder in the rail). Per-tab so a queued msg in Tab A can't drain
+   *  into Tab B if the user switches mid-turn. To redirect the RUNNING turn,
+   *  the rail's "Send now" promotes a chip via steer() — that's a live inject,
+   *  not a queue mode. */
+  queue = $state<{ id: string; text: string }[]>([]);
   /** Per-tab composer draft. Was store-level before split-pane v2 — moved
    *  here so each pane can compose into its own tab concurrently w/o the
    *  focus-change stash/restore dance dropping characters under fast typing.
@@ -319,9 +327,6 @@ export class TabState {
   /** Wall-clock of the most recent `stream_event` arrival. Null between turns.
    *  Used to compute `maxStreamGapMs` on the in-flight TurnRecord. */
   lastStreamEventAt: number | null = null;
-  /** One-shot latch so onTurnStarted fires on exactly the first stream line
-   *  of each turn. Reset in beginTurn. */
-  turnStartNotified = false;
   dockAutoOpenedThisConvo = false;
   /** Id of the single inline plan block appended this turn (TaskCreate/TodoWrite).
    *  The newer CLI emits one TaskCreate per item, so instead of one block per
@@ -338,10 +343,6 @@ export class TabState {
   onTodoApplied?: (tab: TabState, opensDock: boolean) => void;
   /** Fired on onDone — store handles scheduleSave + queue drain. */
   onTurnComplete?: (tab: TabState) => void;
-  /** Fired once per turn, on its first stream line — by then the backend's
-   *  steer registry is live, so the store flushes steer-mode queue chips
-   *  into the now-running turn. */
-  onTurnStarted?: (tab: TabState) => void;
   /** Fired when an ask_user card has sat unanswered past the nudge window —
    *  the turn (and CLI subprocess) is blocked on it. Store routes to a toast. */
   onAskUserStale?: (tab: TabState) => void;
@@ -489,7 +490,7 @@ class AssistantStore {
   get lastModelId(): string | null { return this.activeTab?.lastModelId ?? null; }
   get promptHistory(): string[] { return this.activeTab?.promptHistory ?? []; }
   get queue() { return this.activeTab?.queue ?? []; }
-  set queue(v: { id: string; text: string; mode?: "queue" | "steer" }[]) {
+  set queue(v: { id: string; text: string }[]) {
     if (this.activeTab) this.activeTab.queue = v;
   }
 
@@ -591,7 +592,6 @@ class AssistantStore {
       this.ui.tasksUpdatedAt = Date.now();
     };
     tab.onTurnComplete = (t) => this.handleTurnComplete(t);
-    tab.onTurnStarted = (t) => sendFlushSteerChips(this, t);
     tab.onAskUserStale = (t) => askUserStaleNudge(this, t);
   }
 
@@ -755,6 +755,21 @@ class AssistantStore {
    *  onboarding read `model` — the new-chat default. (ui-audit #5) */
   get effectiveModel(): ModelSel { return this.activeTab?.modelOverride ?? this.model; }
 
+  /** The model the active chat is PINNED to backend-side (the model its first
+   *  turn ran against), or null if no turn has run yet. A picker switch on a
+   *  pinned session changes the UI label but the running turns keep using this
+   *  model (turn.rs load_session_model) — the picker surfaces it + offers a
+   *  "New chat in <model>". */
+  get sessionPinnedModel(): ModelSel | null { return this.activeTab?.pinnedModel ?? null; }
+
+  /** True when the picker selection has drifted ahead of the running pinned
+   *  model — i.e. the user switched the model mid-chat and the switch won't take
+   *  effect until a new chat. Drives the picker's honest "this session" notice. */
+  get sessionModelDiverged(): boolean {
+    const pinned = this.sessionPinnedModel;
+    return pinned !== null && pinned !== this.effectiveModel;
+  }
+
   setModel(v: ModelSel) {
     const prev = this.effectiveModel;
     if (prev === v && this.model === v) return;
@@ -787,6 +802,31 @@ class AssistantStore {
     saveThinkingEnabled(v, this.workspace.current);
     const midConvo = (this.activeTab?.messages.length ?? 0) > 0;
     this.telemetry.event("thinking.toggle", { to: v, midConvo });
+    if (midConvo) this.cacheBustHint("thinking");
+  }
+
+  /** Set the unified thinking dial. Writes BOTH backing fields atomically:
+   *  `enabled` (the master switch) + the chosen effort tier (only meaningful
+   *  when on). Off keeps the last effort tier stored so flipping back on
+   *  restores it — but a dial rung always carries an explicit tier, so the
+   *  on-rungs never leave a stale tier behind. One write per change keeps the
+   *  warm-pool cache-bust to a single hint instead of two. */
+  setThinkingDial(enabled: boolean, effort?: ThinkingEffort) {
+    const nextEffort = effort ?? this.thinkingEffort;
+    const changed = this.thinkingEnabled !== enabled || this.thinkingEffort !== nextEffort;
+    if (!changed) return;
+    const prevEnabled = this.thinkingEnabled;
+    const prevEffort = this.thinkingEffort;
+    this.thinkingEnabled = enabled;
+    saveThinkingEnabled(enabled, this.workspace.current);
+    if (nextEffort !== prevEffort) {
+      this.thinkingEffort = nextEffort;
+      saveEffort(nextEffort, this.workspace.current);
+    }
+    const midConvo = (this.activeTab?.messages.length ?? 0) > 0;
+    this.telemetry.event("thinking.dial", {
+      enabled, effort: nextEffort, fromEnabled: prevEnabled, fromEffort: prevEffort, midConvo,
+    });
     if (midConvo) this.cacheBustHint("thinking");
   }
 
@@ -1289,6 +1329,17 @@ class AssistantStore {
    *  render before the first send; convoCreatedAt stays null so send() still
    *  flags isFirstTurn=true and the CLI gets --session-id, not --resume. */
   newTab() { return tabsNewTab(this); }
+
+  /** Start a fresh chat pinned to `id`. The honest answer to "I picked a new
+   *  model mid-conversation": a resumed session is pinned to the model it was
+   *  created with (thinking-block signatures are model-bound — see turn.rs
+   *  load_session_model), so a picker switch can only take effect in a NEW
+   *  chat. This mints that new tab and sets the model up front so its first
+   *  turn runs against the user's pick. */
+  async newChatWithModel(id: ModelSel) {
+    await this.newTab();
+    this.setModel(id);
+  }
 
   /** Clear the active conversation in place (Claude Code `/clear` semantics):
    *  flush the old convo to History, re-key the same tab/pane to a fresh empty

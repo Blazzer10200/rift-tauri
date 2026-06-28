@@ -50,6 +50,7 @@ type LoadableTab = SaveableTab & {
   resetUsage(): void;
   promptHistory: string[];
   dockAutoOpenedThisConvo: boolean;
+  pinnedModel: ModelSel | null;
 };
 
 /** Subset of AssistantStore that persistence touches. */
@@ -338,6 +339,11 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     // ui-audit #5: the saved model scopes to THIS tab only — opening an old
     // chat must not rewrite the global new-chat default (or toast about it).
     tab.modelOverride = asModelSel(convo.model);
+    // A resumed convo is pinned backend-side to the model it was created with
+    // (turn.rs load_session_model), so its saved model IS its pinned model —
+    // hydrate it so the picker's "this session" tag + "New chat in <model>"
+    // honesty works on reopened chats too.
+    tab.pinnedModel = asModelSel(convo.model);
   } catch (e) {
     host.lastError = `Failed to load conversation: ${String(e)}`;
     // ensureTab already registered a half-built TabState under `id`; evict it so

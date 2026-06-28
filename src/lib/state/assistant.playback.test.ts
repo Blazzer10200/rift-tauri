@@ -679,50 +679,42 @@ describe("playback — steer", () => {
   });
 });
 
-describe("playback — steer-mode chips (Rail-v2)", () => {
-  it("drain skips steer chips, then flushes them into the new turn at its first stream line", async () => {
+describe("playback — unified queue (one model: type → queue, Send-now → steer)", () => {
+  it("drains the queue head as the next turn, in queue order", async () => {
     const { tab } = readyStore();
     await assistant.send("first");
-    feed(tab, [textDelta("reply one")]); // turn 1's first line — latch fires with no steer chips
+    feed(tab, [textDelta("reply one")]);
 
-    // Steer chip ahead of a queue-mode chip: drain must NOT fire it as a turn.
-    tab.queue = [{ id: "sc1", text: "watch the edge cases", mode: "steer" }];
-    await assistant.send("second"); // streaming → queued behind the steer chip
-    expect(tab.queue.map((q) => q.text)).toEqual(["watch the edge cases", "second"]);
+    // Two follow-ups typed while busy → both queue, in order.
+    await assistant.send("second");
+    await assistant.send("third");
+    expect(tab.queue.map((q) => q.text)).toEqual(["second", "third"]);
 
     tab.onDone();
     await settle();
 
-    // The queue-mode chip became turn 2; the steer chip stayed parked.
+    // Head ("second") became turn 2; "third" stays queued.
     expect(tab.streaming).toBe(true);
     expect(assistant.telemetry.turns).toHaveLength(2);
     expect(assistant.telemetry.turns[1].promptPreview).toBe("second");
-    expect(tab.queue.map((q) => q.text)).toEqual(["watch the edge cases"]);
-
-    // Turn 2's first stream line → steer chip injects into the running turn.
-    mockInvoke.mockClear();
-    feed(tab, [textDelta("turn two begins")]);
-    await settle();
-    expect(mockInvoke).toHaveBeenCalledWith(
-      "assistant_steer",
-      expect.objectContaining({ text: "watch the edge cases" }),
-    );
-    expect(tab.queue).toHaveLength(0);
+    expect(tab.queue.map((q) => q.text)).toEqual(["third"]);
   });
 
-  it("an all-steer queue degrades its head to a normal send so it can't strand", async () => {
+  it("Send-now steers a parked chip into the running turn and drops it", async () => {
     const { tab } = readyStore();
     await assistant.send("go");
     feed(tab, [textDelta("working")]);
-    tab.queue = [{ id: "sc1", text: "only a steer", mode: "steer" }];
+    tab.queue = [{ id: "c1", text: "actually focus on tests" }];
     mockInvoke.mockClear();
 
-    tab.onDone();
+    // Rail "Send now" promotes the chip via steer() while the turn runs.
+    await assistant.steer("actually focus on tests", null);
+    assistant.removeQueued("c1");
     await settle();
 
     expect(mockInvoke).toHaveBeenCalledWith(
-      "assistant_send",
-      expect.objectContaining({ prompt: "only a steer" }),
+      "assistant_steer",
+      expect.objectContaining({ text: "actually focus on tests" }),
     );
     expect(tab.queue).toHaveLength(0);
   });
