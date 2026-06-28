@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Send, Square, X, Mic, Loader2, Wand2, Paperclip,
-    Sparkles, Eye, ChevronUp, Undo2, Cpu } from "lucide-svelte";
+    Sparkles, Eye, ChevronUp, Undo2, Cpu, Brain } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { localLlm } from "../../state/localLlm.svelte";
   import { workspace } from "../../state/workspace.svelte";
@@ -24,7 +24,7 @@
   import QuickChips from "./composer/QuickChips.svelte";
   import {
     MODEL_OPTIONS, MODE_OPTIONS,
-    dialStopsFor, dialIdFor, clampEffortIdx, permToneFor,
+    effortStopsFor, effortIdxFor, clampEffortIdx, permToneFor,
     type ModelOpt, type ModeOpt,
   } from "./composer/modelMatrix";
   import { stt } from "../../state/stt.svelte";
@@ -325,32 +325,30 @@
   // onKey ←/→) — same matrix helpers SettingsMenu uses, so they can't drift.
   // The dial is a projection over (thinkingEnabled, thinkingEffort); see
   // modelMatrix DIAL_STOPS.
-  const dialStops = $derived(dialStopsFor(currentModel));
-  const dialApplies = $derived(dialStops.length > 1);
-  const currentDialId = $derived(dialIdFor(assistant.thinkingEnabled, assistant.thinkingEffort));
-  const currentDial = $derived(dialStops.find((s) => s.id === currentDialId) ?? dialStops[0]);
-  const dialIdx = $derived(
-    Math.min(
-      Math.max(0, dialStops.findIndex((s) => s.id === currentDialId)),
-      Math.max(0, dialStops.length - 1),
-    ),
-  );
-  function setDialByIdx(i: number) {
-    const c = clampEffortIdx(dialStops, i);
-    const s = dialStops[c];
-    if (!s) return;
-    if (s.effort === null) assistant.setThinkingDial(false);
-    else assistant.setThinkingDial(true, s.effort);
+  // Effort + thinking are two INDEPENDENT controls now (the bar pill mirrors the
+  // SettingsMenu split). The slider projects ONLY thinkingEffort; thinking on/off
+  // is its own flag. See modelMatrix EFFORT_STOPS.
+  const effortStops = $derived(effortStopsFor(currentModel));
+  const dialApplies = $derived(effortStops.length > 0);
+  const thinkingOn = $derived(assistant.thinkingEnabled);
+  const currentEffort = $derived(effortStops[effortIdxFor(effortStops, assistant.thinkingEffort)] ?? effortStops[0]);
+  const effortIdx = $derived(effortIdxFor(effortStops, assistant.thinkingEffort));
+  function setEffortByIdx(i: number) {
+    const c = clampEffortIdx(effortStops, i);
+    const s = effortStops[c];
+    if (!s?.effort) return;
+    assistant.setThinkingEffort(s.effort);
   }
   // Switching to a lower-ceiling model (e.g. Max/Opus → Sonnet) must pull the
   // stored effort down to that model's max, so we never send xhigh/ultracode to
   // a model that rejects it. (setModel already clamps on pick; this guards the
-  // case where the model changed by another path.)
+  // case where the model changed by another path.) Runs regardless of the
+  // thinking toggle — effort is sent on every turn.
   $effect(() => {
     if (!dialApplies) return;
-    if (assistant.thinkingEnabled && !dialStops.some((s) => s.effort === assistant.thinkingEffort)) {
-      const top = dialStops[dialStops.length - 1];
-      if (top.effort) assistant.setThinkingDial(true, top.effort);
+    if (!effortStops.some((s) => s.effort === assistant.thinkingEffort)) {
+      const top = effortStops[effortStops.length - 1];
+      if (top?.effort) assistant.setThinkingEffort(top.effort);
     }
   });
   // Caption + pointer-drag dial live in composer/SettingsMenu.svelte (C7).
@@ -949,10 +947,10 @@
         settingsIdx = (settingsIdx - 1 + n) % n;
         return;
       }
-      // ←/→ drives the thinking dial when the cursor is parked on it.
+      // ←/→ drives the effort slider when the cursor is parked on it.
       if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && cur?.kind === "effort") {
         e.preventDefault();
-        setDialByIdx(dialIdx + (e.key === "ArrowRight" ? 1 : -1));
+        setEffortByIdx(effortIdx + (e.key === "ArrowRight" ? 1 : -1));
         return;
       }
       // Digit 1–N jumps straight to that model row.
@@ -1439,23 +1437,26 @@
             type="button"
             class="model-pill"
             class:open={settingsOpen}
-            class:ultra={dialApplies && currentDialId === "max"}
+            class:ultra={dialApplies && currentEffort?.id === "max"}
             data-model={currentModel ? modelFamily(currentModel.id) : ""}
             bind:this={modelWrap}
             onclick={() => { settingsOpen = !settingsOpen; permOpen = false; void tick().then(() => ta?.focus()); }}
             aria-haspopup="listbox"
             aria-expanded={settingsOpen}
-            aria-label="Model & thinking"
+            aria-label="Model, effort & thinking"
             use:tooltip={dialApplies
-              ? `Model · thinking\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel} · Thinking ${currentDial.label}`
+              ? `Model · effort · thinking\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel} · ${currentEffort?.label} effort · Thinking ${thinkingOn ? "on" : "off"}`
               : `Model\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel} · no extended thinking`}
           >
             <span class="model-dot" aria-hidden="true"></span>
             <span class="pill-label">{currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel}</span>
             {#if dialApplies}
-              <span class="pill-effort" class:thinkoff={currentDialId === "off"}>· {currentDialId === "off" ? "No thinking" : currentDial.label}</span>
+              <span class="pill-effort" class:dim={!thinkingOn}>· {thinkingOn ? currentEffort?.label : "Fast"}</span>
             {/if}
-            {#if dialApplies && currentDialId === "max"}
+            {#if dialApplies && thinkingOn}
+              <span class="pill-think" aria-hidden="true" use:tooltip={"Thinking on — reasons before replying (slower)"}><Brain size={11} /></span>
+            {/if}
+            {#if dialApplies && currentEffort?.id === "max"}
               <span class="pill-ultra" aria-hidden="true" use:tooltip={"Max — deepest reasoning + autonomous workflows"}><Sparkles size={11} /></span>
             {/if}
             <ChevronUp size={13} class="pill-chev" />
@@ -2112,10 +2113,12 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  /* Thinking label trails the model name (mock `.pill-effort`). */
+  /* Effort label trails the model name (mock `.pill-effort`). */
   .pill-effort { font-size: 11px; font-weight: 500; color: var(--fg-faint); line-height: 1; white-space: nowrap; }
-  /* "No thinking" reads a touch quieter than an active level. */
-  .pill-effort.thinkoff { opacity: 0.72; font-style: italic; }
+  /* Thinking off → "Fast" reads quieter (the effort level isn't live). */
+  .pill-effort.dim { opacity: 0.72; }
+  /* Thinking-on marker — accent brain glyph, only present when thinking is on. */
+  .pill-think { display: inline-grid; place-items: center; color: var(--accent); }
   /* Permission-mode dot — one consistent at-a-glance signal for all five
      modes (the pill's text-tint only covered ask/bypass). Colored per mode:
      ask=accent, edit=ok, plan=blue, auto=accent, bypass=warn. */

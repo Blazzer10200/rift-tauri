@@ -5,7 +5,7 @@
   // ←/→ effort nudges); this child renders, handles clicks, and owns the
   // pointer-drag slider. Derives re-compute here from the shared modelMatrix
   // + assistant store — same pure helpers the parent uses, so they can't drift.
-  import { Check, HelpCircle, ChevronRight, Layers, Plus } from "lucide-svelte";
+  import { Check, HelpCircle, ChevronRight, Layers, Plus, Brain } from "lucide-svelte";
   import { tick } from "svelte";
   import { assistant } from "../../../state/assistant.svelte";
   import { uiPrefs } from "../../../state/ui-prefs.svelte";
@@ -15,7 +15,7 @@
   import { effortIdxFromX } from "./helpers";
   import {
     MODEL_OPTIONS, currentModels, legacyModels, modelShortcut,
-    dialStopsFor, dialIdFor, clampEffortIdx,
+    effortStopsFor, effortIdxFor, clampEffortIdx,
     type ModelOpt,
   } from "./modelMatrix";
 
@@ -75,55 +75,53 @@
   });
 
   const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === assistant.effectiveModel));
-  // ── Thinking dial (one control: Off · Low · Medium · High · Max) ──────────
-  // The dial is a pure projection over the store's (thinkingEnabled,
-  // thinkingEffort) pair — `dialIdFor` reads them, `assistant.setThinkingDial`
-  // writes both. Rungs truncate at the model's effort ceiling; Off-only for
-  // models with no effort capability (Haiku).
-  const dialStops = $derived(dialStopsFor(currentModel));
-  const dialApplies = $derived(dialStops.length > 1); // a model with on-rungs
-  const dialId = $derived(dialIdFor(assistant.thinkingEnabled, assistant.thinkingEffort));
-  const dialIdx = $derived(
-    Math.min(
-      Math.max(0, dialStops.findIndex((s) => s.id === dialId)),
-      Math.max(0, dialStops.length - 1),
-    ),
-  );
-  const currentDial = $derived(dialStops[dialIdx] ?? dialStops[0]);
-  const stops = $derived(dialStops.length);
-  const effortPct = $derived(stops > 1 ? (dialIdx / (stops - 1)) * 100 : 0);
-  function setDialByIdx(i: number) {
-    const c = clampEffortIdx(dialStops, i);
-    const s = dialStops[c];
-    if (!s) return;
-    if (s.effort === null) assistant.setThinkingDial(false);
-    else assistant.setThinkingDial(true, s.effort);
+  // ── Effort + Thinking: two INDEPENDENT controls ───────────────────────────
+  // The v0.65.0 merged dial made "high effort, thinking OFF" impossible (any
+  // rung > Off forced thinking on → 6-40s silent stalls on Opus). Split back:
+  //  • Thinking = a plain on/off toggle (default off), `assistant.toggleThinking`.
+  //  • Effort   = a slider over `thinkingEffort` ONLY, usable on or off,
+  //               `assistant.setThinkingEffort`. Rungs truncate at the model's
+  //               effort ceiling; empty for models with no effort (Haiku).
+  const effortStops = $derived(effortStopsFor(currentModel));
+  const dialApplies = $derived(effortStops.length > 0); // a model with effort
+  const thinkingOn = $derived(assistant.thinkingEnabled);
+  const effortIdx = $derived(effortIdxFor(effortStops, assistant.thinkingEffort));
+  const currentEffort = $derived(effortStops[effortIdx] ?? effortStops[0]);
+  const stops = $derived(effortStops.length);
+  const effortPct = $derived(stops > 1 ? (effortIdx / (stops - 1)) * 100 : 0);
+  function setEffortByIdx(i: number) {
+    const c = clampEffortIdx(effortStops, i);
+    const s = effortStops[c];
+    if (!s?.effort) return;
+    assistant.setThinkingEffort(s.effort);
   }
-  // Plain-language summary of what the current model + thinking selection
-  // actually does — so users aren't guessing what a mode gets them into.
+  // Plain-language summary of what the current model + selection actually does —
+  // so users aren't guessing what a mode gets them into. Effort and thinking are
+  // described separately now (thinking is the slow one; effort just tunes depth).
   const modelCaption = $derived.by(() => {
     const m = currentModel;
     if (!m) return "";
     if (!m.effort) return `${m.label} ${m.version} answers right away — it doesn't use extended thinking.`;
-    return currentDial.hint;
+    if (!thinkingOn) return `Replies immediately at ${currentEffort.label} effort. Turn on Thinking for a deeper (slower) reasoning step first.`;
+    return `Thinking on — ${currentEffort.label} effort. ${currentEffort.hint}`;
   });
   // Pointer-drag the dial: map clientX → nearest stop. Pointer-capture on the
   // track keeps move/up flowing even when the cursor leaves the row.
   let effortTrackEl: HTMLDivElement | null = $state(null);
   let draggingEffort = $state(false);
   function dialIdxFromClientX(clientX: number): number {
-    if (!effortTrackEl) return dialIdx;
-    return effortIdxFromX(clientX, effortTrackEl.getBoundingClientRect(), dialStops.length);
+    if (!effortTrackEl) return effortIdx;
+    return effortIdxFromX(clientX, effortTrackEl.getBoundingClientRect(), effortStops.length);
   }
   function startEffortDrag(e: PointerEvent) {
     e.preventDefault();
     draggingEffort = true;
-    setDialByIdx(dialIdxFromClientX(e.clientX));
+    setEffortByIdx(dialIdxFromClientX(e.clientX));
     effortTrackEl?.setPointerCapture?.(e.pointerId);
   }
   function moveEffortDrag(e: PointerEvent) {
     if (!draggingEffort) return;
-    setDialByIdx(dialIdxFromClientX(e.clientX));
+    setEffortByIdx(dialIdxFromClientX(e.clientX));
   }
   function endEffortDrag() { draggingEffort = false; }
 
@@ -245,31 +243,57 @@
 
   {#if dialApplies}
     <div class="rift-menu-divider"></div>
-    <div class="effort-head" class:ultra={currentDial.id === "max"}>
-      <span class="effort-head-k">Thinking</span>
-      <span class="effort-head-v" aria-live="polite">{currentDial.label}</span>
+    <!-- Thinking — a plain ON/OFF toggle, separate from effort. Off by default;
+         on adds a slow reasoning step (the latency the old merged dial hid). -->
+    <button
+      type="button"
+      role="menuitemcheckbox"
+      aria-checked={thinkingOn}
+      class="pop-item think-toggle"
+      class:on={thinkingOn}
+      onmousedown={(e) => { e.preventDefault(); assistant.toggleThinking(); }}
+      use:tooltip={thinkingOn
+        ? "Thinking on — the model reasons before replying. Slower, but more thorough."
+        : "Thinking off — replies immediately. Turn on for a deeper reasoning step first."}
+    >
+      <span class="tt-ic"><Brain size={15} /></span>
+      <span class="tt-text">
+        <span class="tt-name">Thinking</span>
+        <span class="tt-sub">{thinkingOn ? "Reasons first — slower, deeper" : "Replies immediately — fastest"}</span>
+      </span>
+      <span class="tt-switch" class:on={thinkingOn} aria-hidden="true"><span class="tt-knob"></span></span>
+    </button>
+
+    <!-- Effort — tunes reasoning depth. Independent of the toggle: usable whether
+         thinking is on or off. Writes ONLY thinkingEffort. -->
+    <div class="effort-head" class:ultra={currentEffort.id === "max"}>
+      <span class="effort-head-k">Effort</span>
+      <span class="effort-head-v" aria-live="polite">{currentEffort.label}</span>
+      {#if !thinkingOn}<span class="effort-head-note">applies when thinking is on</span>{/if}
       <button
         type="button"
         role="menuitem"
         class="effort-help"
-        use:tooltip={currentDial.hint}
+        use:tooltip={currentEffort.hint}
         onmousedown={(e) => e.preventDefault()}
-        aria-label="What does thinking do?"
+        aria-label="What does effort do?"
       ><HelpCircle size={12} /></button>
     </div>
     <div
       class="effort-slider"
       class:active={activeKind === "effort"}
-      class:ultra={currentDial.id === "max"}
+      class:ultra={currentEffort.id === "max"}
       class:dragging={draggingEffort}
+      class:dimmed={!thinkingOn}
       role="slider"
       tabindex="0"
-      aria-label="Thinking"
-      onkeydown={(e) => { if (e.key === 'ArrowRight') { e.preventDefault(); setDialByIdx(dialIdx + 1); } else if (e.key === 'ArrowLeft') { e.preventDefault(); setDialByIdx(dialIdx - 1); } }}
+      aria-label="Effort"
+      aria-disabled={!thinkingOn}
+      onkeydown={(e) => { if (e.key === 'ArrowRight') { e.preventDefault(); setEffortByIdx(effortIdx + 1); } else if (e.key === 'ArrowLeft') { e.preventDefault(); setEffortByIdx(effortIdx - 1); } }}
       aria-valuemin={1}
       aria-valuemax={stops}
-      aria-valuenow={dialIdx + 1}
-      aria-valuetext={currentDial.label}
+      aria-valuenow={effortIdx + 1}
+      aria-valuetext={currentEffort.label}
     >
       <div
         class="effort-track"
@@ -280,44 +304,43 @@
         onpointerup={endEffortDrag}
         onpointercancel={endEffortDrag}
       >
-        <div class="effort-fill" class:off={dialIdx === 0} style="width: {effortPct}%"></div>
-        {#each dialStops as s, i (s.id)}
+        <div class="effort-fill" style="width: {effortPct}%"></div>
+        {#each effortStops as s, i (s.id)}
           <button
             type="button"
             class="effort-notch"
-            class:on={i <= dialIdx}
-            class:cur={i === dialIdx}
+            class:on={i <= effortIdx}
+            class:cur={i === effortIdx}
             class:ultra={s.id === "max"}
-            class:off={s.id === "off"}
             style="left: {stops > 1 ? (i / (stops - 1)) * 100 : 0}%"
             use:tooltip={s.hint}
             aria-label={s.label}
-            onmousedown={(ev) => { ev.preventDefault(); setDialByIdx(i); }}
+            onmousedown={(ev) => { ev.preventDefault(); setEffortByIdx(i); }}
           ></button>
         {/each}
         <div class="effort-knob" style="left: {effortPct}%"></div>
       </div>
       <div class="effort-ticks">
-        {#each dialStops as s, i (s.id)}
+        {#each effortStops as s, i (s.id)}
           <button
             type="button"
             class="effort-tick"
-            class:cur={i === dialIdx}
-            class:done={i < dialIdx}
+            class:cur={i === effortIdx}
+            class:done={i < effortIdx}
             style="left: {stops > 1 ? (i / (stops - 1)) * 100 : 0}%"
             tabindex="-1"
             aria-hidden="true"
-            onmousedown={(ev) => { ev.preventDefault(); setDialByIdx(i); }}
+            onmousedown={(ev) => { ev.preventDefault(); setEffortByIdx(i); }}
           >{s.label}</button>
         {/each}
       </div>
     </div>
   {/if}
-  <p class="model-caption" class:warn={dialApplies && currentDial.id === "max"}>{modelCaption}</p>
+  <p class="model-caption" class:warn={dialApplies && currentEffort.id === "max"}>{modelCaption}</p>
 
   <div class="rift-menu-hint">
     <span><kbd>1–{MODEL_OPTIONS.length}</kbd>model</span>
-    {#if dialApplies}<span><kbd>←→</kbd>thinking</span>{/if}
+    {#if dialApplies}<span><kbd>←→</kbd>effort</span>{/if}
     <span><kbd>↵</kbd>pick</span>
     <span><kbd>Esc</kbd>close</span>
   </div>
@@ -556,7 +579,44 @@
   :global(.settings-menu .model-row:hover .model-num),
   :global(.settings-menu .model-row.active .model-num) { color: var(--fg-muted); }
 
-  /* Thinking dial — stepped tier rail (Off→Max), stops = DIAL_STOPS. */
+  /* Thinking toggle — a plain on/off row (separate from the effort slider). */
+  :global(.settings-menu .think-toggle) {
+    display: flex; align-items: center; gap: 10px;
+    width: 100%; padding: 8px 9px; margin-top: 2px;
+    text-align: left;
+  }
+  :global(.settings-menu .think-toggle .tt-ic) {
+    display: grid; place-items: center;
+    width: 26px; height: 26px; border-radius: 8px; flex: none;
+    color: var(--fg-faint);
+    background: color-mix(in oklab, var(--fg) 5%, transparent);
+    transition: color 0.15s, background 0.15s;
+  }
+  :global(.settings-menu .think-toggle.on .tt-ic) {
+    color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 14%, transparent);
+  }
+  :global(.settings-menu .think-toggle .tt-text) { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
+  :global(.settings-menu .think-toggle .tt-name) { font-size: var(--sm-row); font-weight: 600; color: var(--fg); }
+  :global(.settings-menu .think-toggle .tt-sub) { font-size: var(--sm-sub); color: var(--fg-faint); }
+  /* iOS-style switch — off=neutral track, on=accent track + knob right. */
+  :global(.settings-menu .think-toggle .tt-switch) {
+    flex: none; position: relative;
+    width: 34px; height: 20px; border-radius: 999px;
+    background: color-mix(in oklab, var(--fg) 16%, transparent);
+    transition: background 0.16s ease;
+  }
+  :global(.settings-menu .think-toggle .tt-switch.on) { background: var(--accent); }
+  :global(.settings-menu .think-toggle .tt-switch .tt-knob) {
+    position: absolute; top: 2px; left: 2px;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: #fff;
+    transition: transform 0.16s ease;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+  }
+  :global(.settings-menu .think-toggle .tt-switch.on .tt-knob) { transform: translateX(14px); }
+
+  /* Effort slider — stepped tier rail (Low→Max), stops = EFFORT_STOPS. */
   :global(.settings-menu .effort-head) {
     display: flex; align-items: center; gap: 8px;
     padding: 10px 9px 4px;
@@ -593,10 +653,19 @@
     transition: color 140ms ease;
   }
   :global(.settings-menu .effort-head .effort-help:hover) { color: var(--fg-muted); }
+  /* When thinking is off the effort value is informational (the backend sends
+     --effort low regardless) — quiet it and note it isn't live. */
+  :global(.settings-menu .effort-head .effort-head-note) {
+    font-size: 10px; color: var(--fg-faint); font-style: italic; line-height: 1;
+  }
   :global(.settings-menu .effort-slider) {
     padding: 14px 16px 6px; margin: 0;
-    transition: none;
+    transition: opacity 160ms ease;
   }
+  /* Dimmed = thinking off → the slider doesn't affect the wire. Still draggable
+     (the value is remembered for when thinking turns on) but visibly inert. */
+  :global(.settings-menu .effort-slider.dimmed) { opacity: 0.45; }
+  :global(.settings-menu .effort-slider.dimmed .effort-head-v) { animation: none; }
   /* Glassy capsule track — soft groove, no near-black well. A faint top sheen +
      1px inner ring read as a polished rail rather than a flat line. */
   :global(.settings-menu .effort-track) {

@@ -135,6 +135,32 @@ export function clampEffortIdx(stops: readonly unknown[], i: number): number {
   return Math.min(max, Math.max(0, i));
 }
 
+// ── Effort selector (split out from the merged dial) ─────────────────────────
+// The v0.65.0 dial fused effort + thinking into one slider, making "High effort,
+// thinking OFF" impossible (any rung > Off forced thinking on). These helpers
+// project ONLY `thinkingEffort` onto a standalone slider — the thinking on/off
+// state rides a separate toggle now. Same labels/tiers as the on-rungs of
+// DIAL_STOPS (Low=none, Medium=smart, High=deep, Max=ultra), minus the Off rung.
+export const EFFORT_STOPS: DialStop[] = DIAL_STOPS.filter((s) => s.effort !== null);
+
+/** The effort rungs a model supports — the on-rungs of `dialStopsFor`, with no
+ *  Off entry. Haiku (no effort capability) gets an empty list → no slider. */
+export function effortStopsFor(m: ModelOpt | undefined): DialStop[] {
+  if (!m?.effort) return [];
+  return dialStopsFor(m).filter((s) => s.effort !== null);
+}
+
+/** Index of the current `thinkingEffort` within a model's effort stops. `quick`
+ *  (the collapsed-away tier) reads as Medium since both send the medium flag.
+ *  Falls back to the Medium rung when the stored tier isn't in range. */
+export function effortIdxFor(stops: DialStop[], effort: ThinkingEffort): number {
+  const tier = effort === "quick" ? "smart" : effort;
+  const i = stops.findIndex((s) => s.effort === tier);
+  if (i >= 0) return i;
+  const med = stops.findIndex((s) => s.effort === "smart");
+  return med >= 0 ? med : 0;
+}
+
 // Permission-mode picker options — order matches the VS Code Claude Code menu:
 // ask → auto-edit → plan → auto → bypass. Icons echo that menu.
 // `label` = full descriptive label (menu rows). `short` = the compact bar-pill

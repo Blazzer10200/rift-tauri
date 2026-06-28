@@ -106,7 +106,7 @@
       : awaitingInput
         ? "Waiting for you"
         : thinkingNow
-          ? "Thinking…"
+          ? (liveSecs != null ? `Thinking… ${liveSecs}s` : "Thinking…")
           : "Working…"
   );
 
