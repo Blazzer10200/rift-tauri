@@ -34,6 +34,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { toast } from "./toast.svelte";
+import { humanizeError } from "../utils/humanizeError";
 
 /** Public release repo — used only to synthesize the human "View release on
  *  GitHub" link (Velopack's source doesn't return an html_url). */
@@ -268,7 +269,7 @@ class UpdateStore {
       toast.push({
         severity: "danger",
         title: this.repairing ? "Repair couldn't finish" : "Update couldn't install",
-        detail: String(e),
+        detail: humanizeError(e),
         sticky: true,
         action: { label: "Get it on GitHub", onClick: () => void this.openReleasePage() },
       });
@@ -312,7 +313,7 @@ class UpdateStore {
       toast.push({
         severity: "danger",
         title: "Repair couldn't start",
-        detail: String(e),
+        detail: humanizeError(e),
         sticky: true,
         action: { label: "Get it on GitHub", onClick: () => void this.openLatestRelease() },
       });
@@ -329,7 +330,7 @@ class UpdateStore {
       const { openUrl } = await import("@tauri-apps/plugin-opener");
       await openUrl(url);
     } catch (e) {
-      toast.push({ severity: "danger", title: "Couldn't open the release page", detail: String(e) });
+      toast.push({ severity: "danger", title: "Couldn't open the release page", detail: humanizeError(e) });
     }
   }
 
@@ -340,7 +341,7 @@ class UpdateStore {
       const { openUrl } = await import("@tauri-apps/plugin-opener");
       await openUrl(this.latestReleaseUrl);
     } catch (e) {
-      toast.push({ severity: "danger", title: "Couldn't open the releases page", detail: String(e) });
+      toast.push({ severity: "danger", title: "Couldn't open the releases page", detail: humanizeError(e) });
     }
   }
 

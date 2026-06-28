@@ -8,6 +8,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { toast, notify } from "./toast.svelte";
+import { humanizeError } from "../utils/humanizeError";
 import { browserDock } from "./browserDock.svelte";
 
 // M0 split (2026-05-26): type defs lifted to `./assistant/types`. Re-exported
@@ -1388,7 +1389,7 @@ class AssistantStore {
       this.hasApiKey = v !== null;
       await this.refreshAuth();
     } catch (e) {
-      notify.danger("Couldn't save API key", { detail: String(e) });
+      notify.danger("Couldn't save API key", { detail: humanizeError(e) });
       throw e;
     }
   }
@@ -1398,7 +1399,7 @@ class AssistantStore {
       await invoke("assistant_set_use_full_config", { value });
       this.useFullConfig = value;
     } catch (e) {
-      notify.danger("Couldn't change config setting", { detail: String(e) });
+      notify.danger("Couldn't change config setting", { detail: humanizeError(e) });
       throw e;
     }
   }
@@ -1409,7 +1410,7 @@ class AssistantStore {
       await invoke("assistant_set_max_budget_usd", { value: v });
       this.maxBudgetUsd = v;
     } catch (e) {
-      notify.danger("Couldn't set budget cap", { detail: String(e) });
+      notify.danger("Couldn't set budget cap", { detail: humanizeError(e) });
       throw e;
     }
   }
@@ -1419,7 +1420,7 @@ class AssistantStore {
       await invoke("assistant_set_trust_level", { value });
       this.trustLevel = value;
     } catch (e) {
-      notify.danger("Couldn't change trust level", { detail: String(e) });
+      notify.danger("Couldn't change trust level", { detail: humanizeError(e) });
       throw e;
     }
   }

@@ -218,13 +218,16 @@ fn validate_attachments(attachments: &[AssistantAttachment]) -> Result<(), Strin
         .sum();
     if total > ATTACHMENT_BYTES_CAP {
         return Err(format!(
-            "Attachment(s) too large: {} bytes > cap {}",
-            total, ATTACHMENT_BYTES_CAP
+            "Those images are too large to send — keep attachments under {} MB total.",
+            ATTACHMENT_BYTES_CAP / (1024 * 1024)
         ));
     }
     for a in attachments {
         if !ALLOWED_IMAGE_MIMES.contains(&a.mime.as_str()) {
-            return Err(format!("Unsupported attachment mime: {}", a.mime));
+            return Err(format!(
+                "That file type isn't supported ({}). Attach a PNG, JPEG, GIF, or WebP image.",
+                a.mime
+            ));
         }
     }
     Ok(())
