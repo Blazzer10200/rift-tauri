@@ -74,6 +74,13 @@ pub fn run() {
     // RUST_LOG controls level; default = info.
     diagnostics::LogForwarder::install();
 
+    // cont.228: reqwest uses `rustls-no-provider` (so aws-lc-rs stays out of the
+    // dep tree — we ship ring only). With no provider compiled into reqwest, it
+    // calls `CryptoProvider::get_default()` and PANICS if none is installed. Set
+    // ring as the process default here, before any TLS client is built. Idempotent
+    // and racy-safe: `install_default` returns Err if already set — we ignore it.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     // #219: install a global panic hook so async-task panics don't die silently.
     std::panic::set_hook(Box::new(|info| {
         let location = info
