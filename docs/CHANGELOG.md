@@ -2,22 +2,23 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.64.0 — Runs on your machine, not just mine
+## v0.65.0 — One dial, one queue, no surprises
 
-> A pass focused on everyone who isn't the developer: Rift now adapts to smaller laptops and scaled displays, the first-run setup no longer leaves new users stranded, error messages talk like a human, and the diagnostics console got a proper visual glow-up.
+> A simplify pass on the three things you touch every turn: choosing a model, how much the assistant thinks, and what happens when you type while it's busy. Each was quietly over-built; each is now one clear control.
 
 ### What you'll notice
-- **The window adapts to your screen.** On smaller laptops and high-DPI / 150%-scaled displays, the sidebar now auto-tucks itself away when the window gets narrow (and comes back when you widen it) so the chat keeps room. It remembers whether *you* chose to collapse it, so widening never forces open a rail you'd closed. Split-pane also stops you opening a fourth pane when it would just produce unusable slivers — with a note telling you to widen or collapse the sidebar first.
-- **First-run setup no longer dead-ends.** If you skipped setup and later can't send, the "set up Claude" screen now gives you the *full* guided connect — copy-paste install commands (PowerShell **and** an npm fallback for locked-down machines), one-click sign-in, an API-key field, and live auto-detection — instead of a stripped-down prompt. Plus a reminder to relaunch after installing so PATH changes take effect, and pressing Escape mid-setup no longer throws the whole thing away.
-- **Errors talk like a human.** When something fails — an update, a sign-in, a file that's too big — you now get plain language ("The request timed out — check your connection", "Those images are too large — keep attachments under 20 MB") instead of a raw Rust/Tauri error chain. Genuinely unknown errors still show through (cleaned up), so nothing important is hidden.
-- **A sharper diagnostics console.** The console (Settings → About → "Open diagnostics console") got a real redesign: an at-a-glance health verdict in the header, subsystem **vital-sign cards** (each showing its live status + a one-line summary), tidier colour-coded log rows, and a status bar with live/paused state and error counts. It now looks like a part of Rift, not a generic log dump.
+- **Thinking is one dial now.** The old on/off switch *plus* a separate effort slider became a single control: **Off · Low · Medium · High · Max.** "Off" replies instantly with no reasoning step; slide up for deeper thinking. The composer bar now shows your current setting at a glance (it reads "No thinking" when off), so you're never guessing whether thinking is on. It automatically caps at what each model supports.
+- **Switching models mid-chat is honest.** A chat stays on the model it started with (switching it underneath would corrupt the running reasoning), so picking a different model used to silently do nothing. Now the picker says so plainly — it tags the running model "this chat", tells you a switch only applies to a new chat, and gives you a one-click **"New chat in <model>"** to actually make the jump.
+- **One clear way to follow up while it's working.** Type while the assistant is busy and your message **queues** as a chip (drag to reorder, edit, or remove). Want to redirect the *current* reply instead? **"Send now"** on a chip, or **Alt+Enter** on your draft — both now spelled out right in the composer. The old confusing split between "queue", "steer", and a hidden per-chip mode toggle is gone.
 
 ### Under the hood
-- **Honest, reusable error handling.** A new `humanizeError` helper maps common failure shapes (timeout, TLS/proxy, DNS, auth, locked file, disk-full) to friendly guidance and scrubs your username from any leaked path; eight raw error-leak sites now route through it.
-- **A11y, already solid.** A keyboard/screen-reader review of the custom controls (effort slider, code-copy buttons, context menus) found them already accessible — no regressions introduced, nothing churned.
-- **Verified.** Type-checks clean (4134 files), 376 unit tests pass (7 new for the error humanizer), backend compiles clean, and every change was confirmed live in the running app via the dev tooling.
+- **The thinking dial is a pure presentation layer** over the existing settings — no change to how turns are sent, so nothing about speed or behavior regressed. Onboarding and the AI Health page now speak the same Off→Max vocabulary.
+- **Dead weight removed.** The retired toggle, the per-chip steer-mode plumbing, and a chunk of now-unused styling all came out.
+- **Verified.** Type-checks clean (4134 files), 376 unit tests pass, and all three changes were confirmed live in the running app (real turns, model switches, and queue/steer interactions — zero console errors).
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.64.0** — Runs on your machine, not just mine: the window adapts to smaller/scaled screens (auto-tucking sidebar + a fourth-pane guard), first-run setup no longer dead-ends (full guided connect with PowerShell + npm install paths), errors talk like a human instead of dumping a Rust/Tauri chain, and the diagnostics console got a real redesign.
 
 - **v0.63.0** — The app can tell you where it hurts: a live diagnostics console with per-subsystem green/amber/red health, full app instrumentation (8 subsystems, structured timed events), a reusable `metric!`/`timed!` primitive, and an enhance-prompt wand reworked as a faithful, faster translation layer.
 
