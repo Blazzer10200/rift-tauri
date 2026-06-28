@@ -56,7 +56,7 @@ static SESSION_STOPPED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 // Ok without killing the child, orphaning it. `into_inner()` is safe here:
 // these maps are append/remove on String keys with no cross-field invariant
 // that a panic could break.
-fn with_session_pids<R>(f: impl FnOnce(&mut HashMap<String, u32>) -> R) -> Option<R> {
+fn with_session_pids<R>(f: impl FnOnce(&mut HashMap<String, u32>) -> R) -> R {
     let mut g = match SESSION_PIDS.lock() {
         Ok(g) => g,
         Err(p) => {
@@ -65,10 +65,10 @@ fn with_session_pids<R>(f: impl FnOnce(&mut HashMap<String, u32>) -> R) -> Optio
         }
     };
     let map = g.get_or_insert_with(HashMap::new);
-    Some(f(map))
+    f(map)
 }
 
-fn with_session_stopped<R>(f: impl FnOnce(&mut HashSet<String>) -> R) -> Option<R> {
+fn with_session_stopped<R>(f: impl FnOnce(&mut HashSet<String>) -> R) -> R {
     let mut g = match SESSION_STOPPED.lock() {
         Ok(g) => g,
         Err(p) => {
@@ -77,7 +77,7 @@ fn with_session_stopped<R>(f: impl FnOnce(&mut HashSet<String>) -> R) -> Option<
         }
     };
     let set = g.get_or_insert_with(HashSet::new);
-    Some(f(set))
+    f(set)
 }
 
 fn set_session_pid(session_id: &str, pid: u32) {
@@ -100,7 +100,7 @@ fn clear_session_pid_if(session_id: &str, pid: u32) {
 }
 
 fn get_session_pid(session_id: &str) -> Option<u32> {
-    with_session_pids(|m| m.get(session_id).copied()).flatten()
+    with_session_pids(|m| m.get(session_id).copied())
 }
 
 /// Tree-kill every tracked streaming `claude` child, draining the registry.
@@ -118,8 +118,7 @@ pub(crate) fn kill_all_session_children() {
         let v: Vec<u32> = m.values().copied().collect();
         m.clear();
         v
-    })
-    .unwrap_or_default();
+    });
     for pid in pids {
         kill_child_tree(pid);
     }
@@ -133,7 +132,7 @@ fn mark_session_stopped(session_id: &str) {
 /// `false` otherwise. Used by the wait-task to disambiguate user-stop from
 /// silent CLI crash.
 fn take_session_stopped(session_id: &str) -> bool {
-    with_session_stopped(|s| s.remove(session_id)).unwrap_or(false)
+    with_session_stopped(|s| s.remove(session_id))
 }
 
 /// A mid-turn steer: a user message injected into the RUNNING turn's stdin so
@@ -204,24 +203,9 @@ fn validate_attachments(attachments: &[AssistantAttachment]) -> Result<(), Strin
     // #116: `len * 3 / 4` is approximate — pasted base64 can contain
     // whitespace/CRLF that inflates the encoded length but doesn't add to
     // decoded bytes. Strip whitespace before the divide so the cap reflects
-    // real decoded size.
-    let total: usize = attachments
-        .iter()
-        .map(|a| {
-            let trimmed_len = a
-                .data_base64
-                .bytes()
-                .filter(|b| !b.is_ascii_whitespace())
-                .count();
-            trimmed_len.saturating_mul(3) / 4
-        })
-        .sum();
-    if total > ATTACHMENT_BYTES_CAP {
-        return Err(format!(
-            "Those images are too large to send — keep attachments under {} MB total.",
-            ATTACHMENT_BYTES_CAP / (1024 * 1024)
-        ));
-    }
+    // real decoded size. MIME check runs first (O(1) per attachment) so a bad
+    // type returns before the full base64 byte scan.
+    let mut total: usize = 0;
     for a in attachments {
         if !ALLOWED_IMAGE_MIMES.contains(&a.mime.as_str()) {
             return Err(format!(
@@ -229,6 +213,18 @@ fn validate_attachments(attachments: &[AssistantAttachment]) -> Result<(), Strin
                 a.mime
             ));
         }
+        let trimmed_len = a
+            .data_base64
+            .bytes()
+            .filter(|b| !b.is_ascii_whitespace())
+            .count();
+        total = total.saturating_add(trimmed_len.saturating_mul(3) / 4);
+    }
+    if total > ATTACHMENT_BYTES_CAP {
+        return Err(format!(
+            "Those images are too large to send — keep attachments under {} MB total.",
+            ATTACHMENT_BYTES_CAP / (1024 * 1024)
+        ));
     }
     Ok(())
 }
@@ -2215,8 +2211,11 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                         continue;
                     }
                     // A `control_response` on a REUSED turn (handshake already
-                    // done) is the CLI re-acking — ignore, don't forward.
-                    if *handshake_done && !user_sent && ty == Some("control_response") {
+                    // done) is the CLI re-acking — ignore, don't forward. On a
+                    // reused turn user_sent is already true (set at init above),
+                    // so the old `!user_sent` conjunction made this dead → the
+                    // re-ack leaked to the UI. Gate on handshake_done alone.
+                    if *handshake_done && ty == Some("control_response") {
                         continue;
                     }
                     // Permission ask → resolve via the registry + UI, write the
@@ -2633,8 +2632,10 @@ pub async fn assistant_stop(
         .await
         .map_err(|e| format!("taskkill join: {e}"))?;
         match out {
-            Ok(s) if s.success() => Ok(()),
-            Ok(s) => Err(format!("taskkill exited {}", s.code().unwrap_or(-1))),
+            // A non-zero exit means the PID was already gone (the turn finished
+            // naturally before Stop landed) — the stop goal is met. Best-effort,
+            // like kill_child_tree; only a spawn failure is a real error.
+            Ok(_) => Ok(()),
             Err(e) => Err(format!("spawn taskkill: {e}")),
         }
     }
@@ -2651,8 +2652,9 @@ pub async fn assistant_stop(
         .await
         .map_err(|e| format!("kill join: {e}"))?;
         match out {
-            Ok(s) if s.success() => Ok(()),
-            Ok(s) => Err(format!("kill exited {}", s.code().unwrap_or(-1))),
+            // Non-zero exit = PID already gone (turn finished before Stop). The
+            // stop goal is met; only a spawn failure is a real error.
+            Ok(_) => Ok(()),
             Err(e) => Err(format!("spawn kill: {e}")),
         }
     }
