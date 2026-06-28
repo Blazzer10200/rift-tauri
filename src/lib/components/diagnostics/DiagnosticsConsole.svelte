@@ -85,6 +85,20 @@
   function hasFields(e: DiagEvent): boolean {
     return fieldsStr(e.fields) !== "";
   }
+
+  // ── At-a-glance summary (header) ─────────────────────────────────────────
+  // Counts of subsystems needing attention drive a one-line verdict, so the
+  // panel leads with "is anything wrong?" before the raw stream.
+  const liveSubsystems = $derived(diagnostics.health.filter((h) => h.level !== "idle"));
+  const attention = $derived(diagnostics.health.filter((h) => h.level === "warn" || h.level === "bad"));
+  const summaryLabel = $derived(
+    diagnostics.overall === "idle" ? "Standing by"
+      : attention.length === 0 ? "All systems healthy"
+      : `${attention.length} need${attention.length === 1 ? "s" : ""} attention`,
+  );
+  // Per-level row counts in the filtered view, for the footer breakdown.
+  const errCount = $derived(rows.filter((e) => e.level === "error").length);
+  const warnCount = $derived(rows.filter((e) => e.level === "warn").length);
 </script>
 
 <svelte:window onkeydown={onKey} />
@@ -94,32 +108,48 @@
   <div class="dc-panel" role="dialog" aria-label="Diagnostics console" transition:scale={{ duration: 180, start: 0.98 }}>
     <header class="dc-head">
       <div class="dc-title">
-        <Radio size={14} class={diagnostics.live ? "dc-live" : "dc-dead"} />
-        <span>Diagnostics</span>
-        {#if diagnostics.overall !== "idle"}
-          <span class="dc-overall {diagnostics.overall}" use:tooltip={`Overall: ${diagnostics.overall}`}></span>
-        {/if}
-        <span class="dc-count">{total}{total !== diagnostics.events.length ? ` / ${diagnostics.events.length}` : ""}</span>
-        {#if diagnostics.dropped > 0}
-          <span class="dc-drop" use:tooltip={"Events dropped off the ring tail"}>+{diagnostics.dropped} dropped</span>
-        {/if}
+        <span class="dc-mark" class:live={diagnostics.live}>
+          <Radio size={15} class={diagnostics.live ? "dc-live" : "dc-dead"} />
+        </span>
+        <span class="dc-titletext">
+          <span class="dc-h">Diagnostics</span>
+          <span class="dc-verdict {diagnostics.overall}">
+            <span class="dc-vdot"></span>{summaryLabel}
+          </span>
+        </span>
       </div>
       <div class="dc-actions">
         <button type="button" class="dc-btn" class:on={diagnostics.paused} onclick={() => diagnostics.togglePause()}
-          use:tooltip={diagnostics.paused ? "Resume" : "Pause"}>
+          use:tooltip={diagnostics.paused ? "Resume stream" : "Pause stream"}>
           {#if diagnostics.paused}<Play size={14} />{:else}<Pause size={14} />{/if}
         </button>
-        <button type="button" class="dc-btn" onclick={() => diagnostics.clear()} use:tooltip={"Clear"}>
+        <button type="button" class="dc-btn" onclick={() => diagnostics.clear()} use:tooltip={"Clear events"}>
           <Trash2 size={14} />
         </button>
         <button type="button" class="dc-btn" onclick={copyAll} use:tooltip={"Copy filtered view"}>
-          {#if copied}<Check size={14} />{:else}<Copy size={14} />{/if}
+          {#if copied}<Check size={14} class="dc-okicon" />{:else}<Copy size={14} />{/if}
         </button>
+        <span class="dc-sep"></span>
         <button type="button" class="dc-btn dc-close" onclick={onclose} use:tooltip={"Close (Esc)"}>
           <X size={15} />
         </button>
       </div>
     </header>
+
+    <div class="dc-vitals" role="group" aria-label="Subsystem health">
+      {#each diagnostics.health as h (h.key)}
+        <button type="button" class="dc-vital {h.level}" class:active={diagnostics.resourceFilter === h.key}
+          disabled={h.level === "idle"}
+          onclick={() => (diagnostics.resourceFilter = diagnostics.resourceFilter === h.key ? "" : h.key)}
+          use:tooltip={h.level === "idle" ? `${h.label}: no events yet` : `Filter to ${h.label}`}>
+          <span class="dc-vdot2"></span>
+          <span class="dc-vbody">
+            <span class="dc-vlabel">{h.label}</span>
+            <span class="dc-vdetail">{h.level === "idle" ? "—" : h.detail}</span>
+          </span>
+        </button>
+      {/each}
+    </div>
 
     <div class="dc-filters">
       <div class="dc-search">
@@ -129,26 +159,21 @@
       <div class="dc-levels" role="group" aria-label="Minimum level">
         {#each LEVELS as lv (lv)}
           <button type="button" class="dc-lv {lv}" class:on={diagnostics.minLevel === lv}
+            use:tooltip={`Show ${lv} and above`}
             onclick={() => (diagnostics.minLevel = lv)}>{lv}</button>
         {/each}
       </div>
-      {#if diagnostics.resources.length}
+      {#if diagnostics.resourceFilter}
+        <button type="button" class="dc-clearfilter" onclick={() => (diagnostics.resourceFilter = "")}
+          use:tooltip={"Clear source filter"}>
+          {diagnostics.resourceFilter}<X size={11} />
+        </button>
+      {:else if diagnostics.resources.length}
         <select class="dc-res" bind:value={diagnostics.resourceFilter} aria-label="Resource filter">
           <option value="">all sources</option>
           {#each diagnostics.resources as r (r)}<option value={r}>{r}</option>{/each}
         </select>
       {/if}
-    </div>
-
-    <div class="dc-health" role="group" aria-label="Subsystem health">
-      {#each diagnostics.health as h (h.key)}
-        <button type="button" class="dc-hpill {h.level}" class:active={diagnostics.resourceFilter === h.key}
-          disabled={h.level === "idle"}
-          onclick={() => (diagnostics.resourceFilter = diagnostics.resourceFilter === h.key ? "" : h.key)}
-          use:tooltip={`${h.label}: ${h.detail}`}>
-          <span class="dc-hdot"></span>{h.label}
-        </button>
-      {/each}
     </div>
 
     <div class="dc-body" bind:this={scrollEl} onscroll={onScroll}>
@@ -161,11 +186,13 @@
         {#each slice as e (e.seq)}
           <div class="dc-rowwrap">
             <button type="button" class="dc-row lvl-{e.level}" class:sys={e.stage === "system"}
+              class:open={expanded.has(e.seq)}
               onclick={() => hasFields(e) && toggleRow(e.seq)} class:has-fields={hasFields(e)}>
               <span class="dc-t">{fmtTime(e.at)}</span>
               <span class="dc-lvl">{e.level}</span>
-              <span class="dc-res-tag">{e.resource ?? "—"}</span>
+              {#if e.resource}<span class="dc-res-tag">{e.resource}</span>{/if}
               <span class="dc-msg">{e.message}</span>
+              {#if hasFields(e)}<span class="dc-chev">{expanded.has(e.seq) ? "▾" : "▸"}</span>{/if}
               {#if e.file}<span class="dc-file">{e.file}</span>{/if}
             </button>
             {#if expanded.has(e.seq) && hasFields(e)}
@@ -176,94 +203,187 @@
         <div style="height:{padBottom}px"></div>
       {/if}
     </div>
+
+    <footer class="dc-foot">
+      <span class="dc-state" class:paused={diagnostics.paused}>
+        <span class="dc-statedot"></span>{diagnostics.paused ? "Paused" : diagnostics.live ? "Live" : "Offline"}
+      </span>
+      <span class="dc-foot-sep"></span>
+      <span class="dc-stat">
+        Showing <b>{total}</b>{total !== diagnostics.events.length ? ` of ${diagnostics.events.length}` : ""}
+      </span>
+      {#if errCount > 0}<span class="dc-stat err">{errCount} error{errCount === 1 ? "" : "s"}</span>{/if}
+      {#if warnCount > 0}<span class="dc-stat warn">{warnCount} warn</span>{/if}
+      <span class="dc-foot-grow"></span>
+      {#if diagnostics.dropped > 0}
+        <span class="dc-stat drop" use:tooltip={"Oldest events rolled off the 2000-event ring"}>+{diagnostics.dropped} dropped</span>
+      {/if}
+      <span class="dc-stat dim">{liveSubsystems.length}/{diagnostics.health.length} active</span>
+    </footer>
   </div>
 </div>
 
 <style>
+  /* status palette — pulled to local vars so every dot/badge/edge agrees and a
+     theme tweak is one-line. Mirrors the app's --ok/--warn/--danger ramp. */
+  .dc-panel {
+    --dc-ok: oklch(0.74 0.15 163);
+    --dc-warn: oklch(0.80 0.14 75);
+    --dc-bad: oklch(0.69 0.19 20);
+    --dc-info: oklch(0.72 0.10 235);
+  }
+
   :global(.dc-backdrop) { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center;
-    background: oklch(0 0 0 / 0.5); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+    background: oklch(0 0 0 / 0.52); -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px); }
   .dc-dismiss { position: absolute; inset: 0; background: none; border: 0; cursor: default; }
 
-  .dc-panel { position: relative; width: min(1040px, 92vw); height: min(720px, 86vh);
-    display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius-lg, 14px); box-shadow: 0 24px 64px oklch(0 0 0 / 0.45); overflow: hidden; }
+  .dc-panel { position: relative; width: min(1080px, 93vw); height: min(740px, 88vh);
+    display: flex; flex-direction: column; background: var(--bg-elev-1, var(--surface));
+    border: 1px solid var(--border-strong, var(--border));
+    border-radius: var(--radius-2xl, 16px); box-shadow: var(--shadow-lg, 0 24px 64px oklch(0 0 0 / 0.55));
+    overflow: hidden; }
+  /* faint accent top-edge — Rift's "this surface is alive" cue */
+  .dc-panel::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 1px; pointer-events: none;
+    background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--accent) 50%, transparent) 30% 70%, transparent); }
 
+  /* ── Header ── */
   .dc-head { display: flex; align-items: center; justify-content: space-between; gap: 12px;
-    padding: 11px 14px; border-bottom: 1px solid var(--border); flex: none; }
-  .dc-title { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); font-weight: 600; color: var(--fg); }
-  :global(.dc-live) { color: var(--accent, oklch(0.72 0.15 163)); }
+    padding: 13px 16px; border-bottom: 1px solid var(--border); flex: none;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 3%, transparent), transparent); }
+  .dc-title { display: flex; align-items: center; gap: 11px; }
+  .dc-mark { display: grid; place-items: center; width: 30px; height: 30px; flex: none; border-radius: 9px;
+    background: var(--bg-inset); border: 1px solid var(--border); }
+  .dc-mark.live { background: color-mix(in oklab, var(--accent) 12%, var(--bg-inset));
+    border-color: color-mix(in oklab, var(--accent) 35%, var(--border)); }
+  :global(.dc-live) { color: var(--accent); }
   :global(.dc-dead) { color: var(--fg-muted); opacity: 0.5; }
-  .dc-overall { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }
-  .dc-overall.ok   { background: oklch(0.72 0.15 163); }
-  .dc-overall.warn { background: oklch(0.78 0.14 75); }
-  .dc-overall.bad  { background: oklch(0.68 0.19 20); }
-  .dc-count { font-size: var(--fs-xs); color: var(--fg-muted); font-variant-numeric: tabular-nums; font-weight: 500; }
-  .dc-drop { font-size: var(--fs-xs); color: oklch(0.7 0.13 50); font-weight: 500; }
+  .dc-titletext { display: flex; flex-direction: column; gap: 1px; line-height: 1.15; }
+  .dc-h { font-size: var(--fs-md); font-weight: 650; color: var(--fg); letter-spacing: -0.01em; }
+  .dc-verdict { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-xs); font-weight: 500; color: var(--fg-muted); }
+  .dc-vdot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--fg-faint); }
+  .dc-verdict.ok   { color: color-mix(in oklab, var(--dc-ok) 80%, var(--fg)); }
+  .dc-verdict.ok   .dc-vdot { background: var(--dc-ok); box-shadow: 0 0 6px color-mix(in oklab, var(--dc-ok) 60%, transparent); }
+  .dc-verdict.warn { color: color-mix(in oklab, var(--dc-warn) 75%, var(--fg)); }
+  .dc-verdict.warn .dc-vdot { background: var(--dc-warn); box-shadow: 0 0 6px color-mix(in oklab, var(--dc-warn) 55%, transparent); }
+  .dc-verdict.bad  { color: color-mix(in oklab, var(--dc-bad) 75%, var(--fg)); }
+  .dc-verdict.bad  .dc-vdot { background: var(--dc-bad); box-shadow: 0 0 6px color-mix(in oklab, var(--dc-bad) 55%, transparent); }
 
   .dc-actions { display: flex; align-items: center; gap: 4px; }
-  .dc-btn { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid var(--field-border);
-    background: var(--field); color: var(--fg-muted); border-radius: var(--radius); cursor: pointer; }
+  .dc-sep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
+  .dc-btn { width: 30px; height: 30px; display: grid; place-items: center; border: 1px solid transparent;
+    background: none; color: var(--fg-muted); border-radius: var(--radius); cursor: pointer;
+    transition: background var(--dur-fast, .14s), color var(--dur-fast, .14s), border-color var(--dur-fast, .14s); }
   .dc-btn:hover { background: var(--surface-hover); color: var(--fg); }
-  .dc-btn.on { color: var(--accent, oklch(0.72 0.15 163)); border-color: var(--accent, oklch(0.72 0.15 163)); }
-  .dc-close:hover { color: oklch(0.7 0.18 20); }
+  .dc-btn.on { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 40%, transparent);
+    background: color-mix(in oklab, var(--accent) 10%, transparent); }
+  :global(.dc-okicon) { color: var(--dc-ok, var(--ok)); }
+  .dc-close:hover { color: var(--dc-bad); background: color-mix(in oklab, var(--dc-bad) 12%, transparent); }
 
-  .dc-filters { display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+  /* ── Vital signs (subsystem health) — the overview, above the raw stream ── */
+  .dc-vitals { display: grid; grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); gap: 6px;
+    padding: 11px 14px; flex: none; border-bottom: 1px solid var(--border); background: var(--bg, transparent); }
+  .dc-vital { display: flex; align-items: center; gap: 8px; text-align: left; padding: 7px 10px;
+    border: 1px solid var(--border); background: var(--bg-inset); border-radius: var(--radius-lg, 10px);
+    cursor: pointer; min-width: 0; transition: border-color var(--dur-fast, .14s), background var(--dur-fast, .14s); }
+  .dc-vital:hover:not(:disabled) { border-color: var(--border-strong); background: var(--surface); }
+  .dc-vital:disabled { opacity: 0.5; cursor: default; }
+  .dc-vital.active { border-color: var(--accent); background: color-mix(in oklab, var(--accent) 8%, var(--bg-inset)); }
+  .dc-vdot2 { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--fg-faint); position: relative; }
+  .dc-vital.ok   .dc-vdot2 { background: var(--dc-ok); }
+  .dc-vital.warn .dc-vdot2 { background: var(--dc-warn); }
+  .dc-vital.bad  .dc-vdot2 { background: var(--dc-bad); }
+  /* gentle breathing halo on non-idle states so the eye lands on live signals */
+  .dc-vital.ok .dc-vdot2::after, .dc-vital.warn .dc-vdot2::after, .dc-vital.bad .dc-vdot2::after {
+    content: ""; position: absolute; inset: -3px; border-radius: 50%; background: inherit; opacity: 0.28;
+    animation: dc-breathe var(--pulse-live, 1.6s) ease-in-out infinite; }
+  @keyframes dc-breathe { 0%,100% { transform: scale(1); opacity: 0.28; } 50% { transform: scale(1.5); opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .dc-vital .dc-vdot2::after { animation: none; } }
+  .dc-vbody { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .dc-vlabel { font-size: var(--fs-xs); font-weight: 600; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dc-vdetail { font-size: 10.5px; color: var(--fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    font-variant-numeric: tabular-nums; }
+  .dc-vital.warn .dc-vlabel { color: color-mix(in oklab, var(--dc-warn) 70%, var(--fg)); }
+  .dc-vital.bad  .dc-vlabel { color: color-mix(in oklab, var(--dc-bad) 70%, var(--fg)); }
+
+  /* ── Filters ── */
+  .dc-filters { display: flex; align-items: center; gap: 8px; padding: 9px 14px;
     border-bottom: 1px solid var(--border); flex: none; flex-wrap: wrap; }
   .dc-search { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 180px;
-    background: var(--field); border: 1px solid var(--field-border); border-radius: var(--radius);
-    padding: 5px 9px; color: var(--fg-muted); }
+    background: var(--bg-inset); border: 1px solid var(--field-border); border-radius: var(--radius);
+    padding: 6px 10px; color: var(--fg-muted); transition: border-color var(--dur-fast, .14s); }
+  .dc-search:focus-within { border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--ring); }
   .dc-search input { flex: 1; border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-sm); outline: none; }
-  .dc-levels { display: flex; gap: 2px; }
-  .dc-lv { font-size: var(--fs-xs); text-transform: capitalize; padding: 4px 9px; border: 1px solid var(--field-border);
-    background: var(--field); color: var(--fg-muted); cursor: pointer; }
+  .dc-levels { display: flex; gap: 0; }
+  .dc-lv { font-size: var(--fs-xs); text-transform: capitalize; padding: 5px 10px; border: 1px solid var(--field-border);
+    background: var(--bg-inset); color: var(--fg-muted); cursor: pointer; font-weight: 500;
+    transition: background var(--dur-fast, .14s), color var(--dur-fast, .14s); }
+  .dc-lv:hover { color: var(--fg-2); }
   .dc-lv:first-child { border-radius: var(--radius) 0 0 var(--radius); }
   .dc-lv:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
   .dc-lv + .dc-lv { border-left: 0; }
-  .dc-lv.on { color: var(--fg); background: var(--surface-hover); border-color: var(--accent, oklch(0.72 0.15 163)); }
-  .dc-res { font-size: var(--fs-xs); padding: 5px 8px; background: var(--field); color: var(--fg);
-    border: 1px solid var(--field-border); border-radius: var(--radius); max-width: 160px; }
+  .dc-lv.on { color: var(--fg); background: var(--surface-active); border-color: color-mix(in oklab, var(--accent) 45%, var(--field-border)); position: relative; z-index: 1; }
+  .dc-res { font-size: var(--fs-xs); padding: 6px 8px; background: var(--bg-inset); color: var(--fg);
+    border: 1px solid var(--field-border); border-radius: var(--radius); max-width: 170px; }
+  .dc-clearfilter { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-xs); font-weight: 600;
+    padding: 5px 8px 5px 10px; border-radius: var(--radius); cursor: pointer; color: var(--accent);
+    border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent);
+    background: color-mix(in oklab, var(--accent) 10%, transparent); font-variant-numeric: tabular-nums; }
+  .dc-clearfilter:hover { background: color-mix(in oklab, var(--accent) 16%, transparent); }
 
-  /* ── Subsystem health strip (Phase 3) ── */
-  .dc-health { display: flex; align-items: center; gap: 6px; padding: 7px 14px; flex: none;
-    border-bottom: 1px solid var(--border); flex-wrap: wrap; }
-  .dc-hpill { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); font-weight: 500;
-    padding: 3px 9px 3px 7px; border: 1px solid var(--field-border); background: var(--field);
-    color: var(--fg-muted); border-radius: 999px; cursor: pointer; }
-  .dc-hpill:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg); }
-  .dc-hpill:disabled { opacity: 0.45; cursor: default; }
-  .dc-hpill.active { border-color: var(--accent, oklch(0.72 0.15 163)); color: var(--fg); }
-  .dc-hdot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--fg-muted); }
-  .dc-hpill.ok   .dc-hdot { background: oklch(0.72 0.15 163); }
-  .dc-hpill.warn .dc-hdot { background: oklch(0.78 0.14 75); }
-  .dc-hpill.bad  .dc-hdot { background: oklch(0.68 0.19 20); }
-  .dc-hpill.warn { color: oklch(0.8 0.1 75); }
-  .dc-hpill.bad  { color: oklch(0.74 0.15 20); }
-
+  /* ── Log body ── */
   .dc-body { flex: 1; overflow-y: auto; overflow-x: hidden; font-family: var(--font-mono, ui-monospace, monospace);
-    font-size: 11.5px; line-height: 1.4; }
-  .dc-empty { padding: 40px 16px; text-align: center; color: var(--fg-muted); font-family: var(--font-sans); font-size: var(--fs-sm); }
+    font-size: 11.5px; line-height: 1.4; background: var(--bg); }
+  .dc-empty { padding: 48px 16px; text-align: center; color: var(--fg-muted); font-family: var(--font-ui); font-size: var(--fs-sm); }
 
   .dc-rowwrap { display: block; }
-  .dc-row { display: flex; align-items: baseline; gap: 9px; width: 100%; height: 26px; padding: 0 14px;
+  .dc-rowwrap:nth-child(even) .dc-row { background: color-mix(in oklab, var(--fg) 1.5%, transparent); }
+  .dc-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 26px; padding: 0 14px;
     border: 0; border-left: 2px solid transparent; background: none; text-align: left; font: inherit;
-    color: var(--fg-2); cursor: default; white-space: nowrap; overflow: hidden; }
+    color: var(--fg-2); cursor: default; white-space: nowrap; overflow: hidden;
+    transition: background var(--dur-fast, .12s); }
   .dc-row.has-fields { cursor: pointer; }
   .dc-row:hover { background: var(--surface-hover); }
-  .dc-t { color: var(--fg-muted); flex: none; font-variant-numeric: tabular-nums; }
-  .dc-lvl { flex: none; width: 42px; text-transform: uppercase; font-size: 10px; font-weight: 700; letter-spacing: 0.03em; }
-  .dc-res-tag { flex: none; max-width: 130px; overflow: hidden; text-overflow: ellipsis; color: var(--accent, oklch(0.72 0.15 163)); opacity: 0.85; }
+  .dc-row.open { background: var(--surface-hover); }
+  .dc-t { color: var(--fg-faint); flex: none; font-variant-numeric: tabular-nums; font-size: 10.5px; }
+  /* level → pill badge */
+  .dc-lvl { flex: none; width: 46px; text-align: center; text-transform: uppercase; font-size: 9px; font-weight: 700;
+    letter-spacing: 0.04em; padding: 2px 0; border-radius: 4px; color: var(--fg-muted);
+    background: color-mix(in oklab, var(--fg) 7%, transparent); }
+  .dc-res-tag { flex: none; max-width: 120px; overflow: hidden; text-overflow: ellipsis; font-weight: 600;
+    color: color-mix(in oklab, var(--accent) 78%, var(--fg)); }
   .dc-msg { flex: 1; overflow: hidden; text-overflow: ellipsis; color: var(--fg); }
-  .dc-file { flex: none; color: var(--fg-muted); opacity: 0.7; font-size: 10.5px; }
+  .dc-chev { flex: none; color: var(--fg-faint); font-size: 9px; }
+  .dc-file { flex: none; color: var(--fg-faint); font-size: 10px; }
 
-  .lvl-warn .dc-lvl { color: oklch(0.74 0.14 75); }
-  .lvl-error .dc-lvl { color: oklch(0.68 0.19 20); }
-  .lvl-info .dc-lvl { color: var(--fg-muted); }
-  .lvl-debug .dc-lvl, .lvl-trace .dc-lvl { color: var(--fg-muted); opacity: 0.6; }
-  .dc-row.lvl-error { border-left-color: oklch(0.68 0.19 20 / 0.6); }
-  .dc-row.lvl-warn { border-left-color: oklch(0.74 0.14 75 / 0.5); }
-  .dc-row.sys { background: oklch(0.68 0.19 20 / 0.04); }
+  .lvl-warn  .dc-lvl { color: var(--dc-warn); background: color-mix(in oklab, var(--dc-warn) 16%, transparent); }
+  .lvl-error .dc-lvl { color: var(--dc-bad);  background: color-mix(in oklab, var(--dc-bad) 18%, transparent); }
+  .lvl-info  .dc-lvl { color: var(--dc-info); background: color-mix(in oklab, var(--dc-info) 14%, transparent); }
+  .lvl-debug .dc-lvl, .lvl-trace .dc-lvl { color: var(--fg-muted); opacity: 0.85; }
+  .dc-row.lvl-error { border-left-color: var(--dc-bad); }
+  .dc-row.lvl-warn  { border-left-color: color-mix(in oklab, var(--dc-warn) 70%, transparent); }
+  .dc-row.lvl-error .dc-msg { color: color-mix(in oklab, var(--dc-bad) 22%, var(--fg)); }
 
-  .dc-fields { margin: 0; padding: 6px 14px 10px 36px; background: var(--field); color: var(--fg-2);
-    font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; line-height: 1.5;
-    white-space: pre-wrap; word-break: break-word; border-left: 2px solid var(--field-border); }
+  .dc-fields { margin: 0; padding: 8px 14px 11px 50px; background: var(--bg-inset); color: var(--fg-2);
+    font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; line-height: 1.55;
+    white-space: pre-wrap; word-break: break-word; border-left: 2px solid color-mix(in oklab, var(--accent) 30%, var(--border)); }
+
+  /* ── Footer status bar ── */
+  .dc-foot { display: flex; align-items: center; gap: 10px; flex: none; padding: 7px 14px;
+    border-top: 1px solid var(--border); background: var(--bg-elev-1, var(--surface)); font-size: var(--fs-xs); }
+  .dc-state { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--accent); }
+  .dc-statedot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 7px color-mix(in oklab, var(--accent) 65%, transparent);
+    animation: dc-blink var(--pulse-live, 1.6s) ease-in-out infinite; }
+  @keyframes dc-blink { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+  @media (prefers-reduced-motion: reduce) { .dc-statedot { animation: none; } }
+  .dc-state.paused { color: var(--dc-warn); }
+  .dc-state.paused .dc-statedot { background: var(--dc-warn); box-shadow: none; animation: none; }
+  .dc-foot-sep { width: 1px; height: 13px; background: var(--border); }
+  .dc-foot-grow { flex: 1; }
+  .dc-stat { color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+  .dc-stat b { color: var(--fg-2); font-weight: 700; }
+  .dc-stat.err  { color: var(--dc-bad); font-weight: 600; }
+  .dc-stat.warn { color: var(--dc-warn); font-weight: 600; }
+  .dc-stat.drop { color: oklch(0.72 0.12 50); font-weight: 600; }
+  .dc-stat.dim { color: var(--fg-faint); }
 </style>
