@@ -2,20 +2,20 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.70.0 — Workspace + projects UI overhaul (beta-test release)
+## v0.71.0 — First-run onboarding rework
 
 ### What you'll notice
-- **Open a project in one click.** New project chips in the sidebar — click to open, drag onto a pane, or right-click to split. Opening a project into a split pane went from a ~5-step dance to a single click. The Workspace page gained Split buttons on project cards and rows too.
-- **The dashboard is now "Workspace" everywhere.** The home/dashboard surface is consistently called **Workspace** (sidebar, command palette, title bar); the chat surface is consistently **Chat**. Fixed a latent bug where "Go to Workspace" in the command palette landed you on an empty chat instead of the dashboard.
-- **The context gauge is honest on big-context models.** On 1M-context models the gauge no longer caps the readout at 200K — it reflects your real plan/model window. There's a Plan setting (defaults to the largest window) so the gauge matches what you actually have.
-- **Cleaner Workspace + AI Health.** The Workspace page lost its double-scroll (one scroll now), News collapses into a strip, and projects get a full-width hero with compact rows. AI Health stops contradicting itself — when slowness is on Anthropic's side it says so (amber "API is slow right now") instead of blaring red "action needed," and tiny <1% rows are dropped from the usage breakdown.
+- **A clearer first-run setup.** The welcome screen is lighter (the essentials, not a wall of text), and the final "Defaults" step is now a single **"How should Rift work?"** choice — pick **Cautious**, **Balanced** (recommended), or **Fast** instead of juggling three separate permission/thinking/git toggles. You can still fine-tune everything later from the composer and Settings.
+- **Better Connect step when the CLI is missing.** If the `claude` CLI isn't found, the setup now spells out exactly what to do — install it, then click Re-check (or relaunch Rift if a fresh PATH hasn't reached it yet). The most common fresh-machine snag is called out directly.
+- **Scratch-space hint.** The "open a project" step now mentions you can skip it and work in a private scratch space until you pick a folder.
 
 ### Under the hood
-- **Local-LLM TLS fix.** The local-LLM probe/test/optimize commands now route through the shared corporate-CA client like every other outbound call, so a local-LLM endpoint behind a TLS-inspecting proxy no longer silently fails its HTTPS handshake. (Surfaced by a pre-release security sweep — additive-only, no change off-proxy.)
-- **Cleanup.** Removed superseded duplicate CDP stress scripts; no source-tree dead code (clean audit).
-- **Verified.** `cargo test` 121/121, svelte-check clean (4134 files), vitest 386/386; each surface live-CDP-verified during the arc.
+- Collapsed the onboarding Defaults controls into preset cards that fan out to the same settings; removed the now-dead thinking-dial logic. Frontend-only.
+- **Verified.** svelte-check clean (4134 files), vitest 386/386; all four onboarding steps live-CDP-verified (render clean, presets switch correctly, zero console errors).
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.70.0** — Workspace + projects UI overhaul: one-click open/split projects via sidebar chips, the dashboard renamed to "Workspace" everywhere, an honest context gauge on 1M-context models, and a cleaner single-scroll Workspace + less self-contradictory AI Health. Plus a local-LLM corporate-TLS fix from a pre-release security sweep.
 
 - **v0.68.0** — Reliability + safety hardening from a four-sweep full-codebase audit: Stop now cancels a pending permission prompt and tree-kills a wedged child instantly (closed a 9-min-wedge incident), `ring` became the sole TLS provider (`aws-lc-rs` out), and the release pipeline refuses to ship a stale update feed.
 
