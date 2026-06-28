@@ -2,41 +2,26 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.63.0 — The app can tell you where it hurts
+## v0.64.0 — Runs on your machine, not just mine
 
-> When something's slow, broken, or just behaving oddly, Rift can now *show you where* instead of leaving you guessing. A new diagnostics console surfaces what every part of the app is doing in real time, with a colour-coded health read-out per subsystem — built so problems get found fast.
-
-### What you'll notice
-- **A live diagnostics console.** Settings → About → Tools & help → **"Open diagnostics console"** opens a real-time stream of what Rift is doing under the hood — the warm-CLI pool, tool calls, updates, speech, usage checks, and more. Filter by level or source, search the text, pause the stream, and copy it all out for a bug report. Paths are username-scrubbed, so it's safe to share.
-- **At-a-glance health.** A row of pills across the top shows each subsystem as green / amber / red — e.g. *"Warm pool: 100% warm-hit"* or *"MCP tools: p50 12ms"* — so you can see in one glance whether everything's healthy or where to look. Click a pill to filter the stream to just that area.
-- **Frontend errors no longer vanish.** A UI error that used to disappear into the console now shows up in the diagnostics stream, so a glitch leaves a trace you can actually find.
-
-### Under the hood
-- **The whole app is now instrumented.** Eight subsystems emit structured, queryable events with real timing — warm-pool hit/miss, per-tool durations, update stages, speech model-load + inference, usage state, corporate-cert loading. The plumbing for this already existed and emitted into the void; this release connects it end-to-end and gives it a UI.
-- **A reusable metrics primitive.** New `metric!` / `timed!` building blocks make future instrumentation a one-liner instead of hand-rolled code — so the app keeps getting more self-aware over time at near-zero cost.
-- **Zero latency cost.** A self-review caught one risky spot where the new instrumentation touched the hot reply path; it was moved out of the critical section before shipping. The warm-reply path stays as fast as it was (0–2ms to first token).
-- **Verified.** Full backend suite (116 tests), frontend type-checks clean (4132 files), 13 new unit tests for the health + metrics math, and the console + health strip confirmed working live in the running app.
-
-### Enhance-prompt wand — sharper, faster, more faithful
-- **Better at messy input.** The ✨ wand's rewrite instructions were reworked around its real job — a *translation layer* for anyone who isn't a confident prompt-writer. It now explicitly recovers intent from typos, dictation artifacts, run-on or fragmented phrasing, and non-native grammar, fixes the mechanics silently, and never copies your errors into the result. Built with accessibility in mind.
-- **Won't over-inflate your ask.** Added worked examples and a hard restraint rule so a one-line draft becomes at most a tight paragraph — never a phantom multi-point spec the request never implied. Faithfulness over embellishment.
-- **Snappier.** The rewrite now runs at medium reasoning effort instead of the CLI default — it's a short, bounded task, so the long hidden high-effort pre-pass (part of the "why is the wand slow sometimes" feel) is gone.
-- **Doc cleanup.** Fixed stale "Haiku" references throughout the enhance path — the wand has run on Sonnet for a while; the comments now say so.
-
-## v0.62.0 — Honest about where the time goes
-
-> This one settles the question of why a reply sometimes feels slow. Short version: it's almost always Claude thinking, not Rift — and now the app proves it instead of asking you to take our word. Plus a real reliability fix to the "is it stuck?" indicator.
+> A pass focused on everyone who isn't the developer: Rift now adapts to smaller laptops and scaled displays, the first-run setup no longer leaves new users stranded, error messages talk like a human, and the diagnostics console got a proper visual glow-up.
 
 ### What you'll notice
-- **No more false "stuck" warnings while Claude is thinking.** On the newest Claude models, a deep reasoning pass streams silently (no visible tokens) — and Rift's "still working?" watchdog mistook that silence for a hang, flashing "Waiting on the model · 45s" while the header still said "Thinking…". The two contradicted each other. Now the watchdog knows an active think isn't a stall, so the indicator stays honest.
-- **AI Health now shows model-vs-Rift timing.** The Speed & efficiency card adds one plain-English line, computed from your own replies: *"about 93% is Claude thinking (17.0s); Rift's own overhead adds just 1.4s. The wait is the model, not the app."* It only appears when the model genuinely dominates, so it's always true for your data — the honest answer to "why did that take a while?"
+- **The window adapts to your screen.** On smaller laptops and high-DPI / 150%-scaled displays, the sidebar now auto-tucks itself away when the window gets narrow (and comes back when you widen it) so the chat keeps room. It remembers whether *you* chose to collapse it, so widening never forces open a rail you'd closed. Split-pane also stops you opening a fourth pane when it would just produce unusable slivers — with a note telling you to widen or collapse the sidebar first.
+- **First-run setup no longer dead-ends.** If you skipped setup and later can't send, the "set up Claude" screen now gives you the *full* guided connect — copy-paste install commands (PowerShell **and** an npm fallback for locked-down machines), one-click sign-in, an API-key field, and live auto-detection — instead of a stripped-down prompt. Plus a reminder to relaunch after installing so PATH changes take effect, and pressing Escape mid-setup no longer throws the whole thing away.
+- **Errors talk like a human.** When something fails — an update, a sign-in, a file that's too big — you now get plain language ("The request timed out — check your connection", "Those images are too large — keep attachments under 20 MB") instead of a raw Rust/Tauri error chain. Genuinely unknown errors still show through (cleaned up), so nothing important is hidden.
+- **A sharper diagnostics console.** The console (Settings → About → "Open diagnostics console") got a real redesign: an at-a-glance health verdict in the header, subsystem **vital-sign cards** (each showing its live status + a one-line summary), tidier colour-coded log rows, and a status bar with live/paused state and error counts. It now looks like a part of Rift, not a generic log dump.
 
 ### Under the hood
-- **Rift now records the CLI's own server-side timing.** Every reply, the Claude CLI reports its true time-to-first-token and total API time; Rift was discarding both and measuring only its own wall-clock. Now it captures them, logs a per-turn attribution line (model time vs Rift's plumbing overhead), and feeds the AI Health pane — so latency questions are answered from data, not guesswork.
-- **Measured, not assumed.** This release came out of a latency hunt: instrumented per-tool gaps (all model think-time), and a head-to-head against the bare CLI confirming Rift's warm pool turns a ~13s cold start into near-zero and adds nothing on top. The drag you feel is the model reasoning — the same on any Claude client.
-- **Verified.** Full backend suite (112 tests) + 2 new tests for the timing math, type checks clean, and the new AI Health line confirmed rendering correctly in the running app.
+- **Honest, reusable error handling.** A new `humanizeError` helper maps common failure shapes (timeout, TLS/proxy, DNS, auth, locked file, disk-full) to friendly guidance and scrubs your username from any leaked path; eight raw error-leak sites now route through it.
+- **A11y, already solid.** A keyboard/screen-reader review of the custom controls (effort slider, code-copy buttons, context menus) found them already accessible — no regressions introduced, nothing churned.
+- **Verified.** Type-checks clean (4134 files), 376 unit tests pass (7 new for the error humanizer), backend compiles clean, and every change was confirmed live in the running app via the dev tooling.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.63.0** — The app can tell you where it hurts: a live diagnostics console with per-subsystem green/amber/red health, full app instrumentation (8 subsystems, structured timed events), a reusable `metric!`/`timed!` primitive, and an enhance-prompt wand reworked as a faithful, faster translation layer.
+
+- **v0.62.0** — Honest about where the time goes: proved slow replies are Claude thinking, not Rift (warm TTFT 0–2ms, ~93% of a turn is the API), fixed the false "stuck" watchdog during silent reasoning, and added model-vs-Rift timing to AI Health from the CLI's own server-side numbers.
 
 - **v0.61.0** — Honest, detailed tool display: tool rows name what actually ran ("Searched 2 · read 1"), tidy answered-question chips, delegated-helper states read honestly; plus a pooled fast-path connection and boot-time CLI capability check.
 
