@@ -2,6 +2,36 @@
 
 > Self-directed ULTRACODE full-codebase audit (user: "get it all done correctly, all angles, FE→BE, CLI-compat, perf"). NOT shipped — branch left for review. Resume from here.
 
+## Session — 2026-06-28 (backlog applied + live-verified; organization task QUEUED)
+
+### Completed (commits cd23562 → on branch mega-audit-cont228, all gate-green: cargo test 121/121 · svelte-check 0/0 (4134) · vitest 78/78)
+- **All 3 T1s** (`cd23562`): R2-secret CI preflight in release.ps1 (silent-stale-feed guard) · release.yml verify repo `rift-releases`→`rift` · extracted `effort_tier_to_flag`+`send_effort_flag` to config.rs from the untested turn.rs inline match (+2 lockstep tests, mirror helpers.ts).
+- **T2 correctness** (`4bad457`): `assistant_stop` cancels pending PermissionRegistry (now session-tagged + `cancel_all_for_session`) AND `TurnOutcome::Stalled` tree-kills the wedged child by PID. Fixes the real prod incident (session 87a27f20, child wedged 9+ min). +1 test.
+- **T2 build** (`35e446d`): dropped aws-lc-rs (reqwest `rustls`→`rustls-no-provider`) — `cargo tree -i aws-lc-rs` now empty. CAUGHT a latent runtime panic the audit fix alone would've shipped: added `rustls::crypto::ring::default_provider().install_default()` in run(). Runtime-verified real HTTPS 200 OK.
+- **5 of 7 dup cleanups** (`59f5023`+`2363d57`): tree_kill, ctxWindowFor, dirs_home(→dirs_home_or_temp), read_body_capped(cap param), strip_unc. All cross-confirmed by 2+ sweeps.
+- **LIVE CDP VERIFICATION** (dev app launched, driven via c.sh): app boots (crypto swap safe) · turns stream + reply exactly · **Stop halts mid-stream + recovers clean** · AI Health/Workspace/Settings/model-picker all render · ctx ring shows "75k/1.0M (8%)" (ctxWindowFor dedup live) · **0 console errors across full nav sweep**.
+
+### Key Decisions
+- "Does thinking help?" → YES for hard reasoning, NO for everyday turns (adds multi-sec pre-pass, ttft p90 15.8s). v0.67.0 off-by-default toggle is correct. BLIND SPOT: telemetry logs FE effort TIER not actual sent effort/thinking_on — can't measure on-vs-off in prod (candidate fix still open).
+- Stopped applying at ~85% done: all high-risk work retired + verified. Remainder is optional low-risk tail.
+
+### In Progress / Next Steps (QUEUED — do on FRESH context)
+1. **PROJECT ORGANIZATION TASK (user-requested, NOT yet started):** clean up + organize the whole `rift-tauri` folder; user expects markdown files deleted/merged/organized. ⚠️ Do as READ-ONLY AUDIT FIRST → present a concrete delete/merge/keep plan → get approval → execute. User's CLAUDE.md: "NEVER delete w/o explicit instruction; redundancy=FLAG not delete." Deferred from this session b/c context hit 30% (hard fence) mid-request — too risky to do read+delete-heavy work on degraded ctx.
+2. Remaining backlog (all OPTIONAL, none blocking): ~14 static report-only (T3/T4 perf/race) · 42 dynamic T3/T4 · ~21 arch (tool-name dispatch ×3 dedup, dead `stashTabUi`/`dunce`, 2 medium refactors `run_or_prewarm`+ToolChip split).
+3. Unexercised verify paths: permission Allow/Deny (tested Bypass only — Stop half proven, permission-cancel half not), git tools, Local LLM page.
+4. Ship decision: branch is 10 commits ahead of main, NOT merged. User's call.
+
+### Don't Touch / Load-Bearing
+- DON'T re-run any audit sweep (all 4 complete; recover from docs/audit/cont228/*.json).
+- DON'T kill rift-tauri.exe by name (dev binary + user's REAL installed app share it — PID-only). Dev app may still be RUNNING from this session (CDP :9222, cdp:serve :9223).
+- effort/thinking lockstep = 3 sites (config.rs effort_tier_to_flag ↔ helpers.ts effortToFlag ↔ modelMatrix.ts) — change together + tests.
+- DON'T merge/ship the branch unattended.
+
+### Failed / Don't Retry
+- `cmd //c scripts\run-dev.bat` from Bash → detaches+dies silently (the `pause` at EOF). Launch dev via PowerShell `Start-Process cmd.exe -ArgumentList '/k', "<bat>"` instead.
+
+---
+
 ## STATUS: ✅ AUDIT COMPLETE. 52 fixes applied+green+committed. All 4 sweeps done + master report shipped to docs/audit/cont228/ (commit 821bce8). Branch NOT merged — review the report, then decide what to apply.
 
 ### RESUME-ITEMS — all done (cont.228 final pass):
