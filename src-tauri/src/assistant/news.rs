@@ -33,7 +33,7 @@ const RELEASE_TAG_BASE: &str = "https://github.com/anthropics/claude-code/releas
 /// Max release entries returned to the UI — the page shows a scannable handful,
 /// not the full multi-year history.
 const MAX_ITEMS: usize = 8;
-/// Body cap for each fetched source (mirrors `oneshot::read_body_capped`). The
+/// Body cap for each fetched source (passed to `super::read_body_capped`). The
 /// npm registry document embeds every version's full package.json, so it's large
 /// (~1.2MB and growing) and — crucially — must NOT be truncated: the `time` map we
 /// parse lives deep in the doc and a cut tail makes `serde_json` fail → all dates
@@ -63,27 +63,6 @@ pub struct NewsItem {
     /// version timeline continuous).
     pub maintenance: bool,
     pub url: String,
-}
-
-/// Read a reqwest response body with a hard byte cap (mirrors
-/// `oneshot::read_body_capped`). A hostile/misbehaving endpoint could stream an
-/// unbounded body into `.text()` and OOM us.
-async fn read_body_capped(resp: reqwest::Response) -> String {
-    let mut resp = resp;
-    let mut buf: Vec<u8> = Vec::new();
-    while buf.len() < BODY_CAP {
-        match resp.chunk().await {
-            Ok(Some(chunk)) => {
-                let take = (BODY_CAP - buf.len()).min(chunk.len());
-                buf.extend_from_slice(&chunk[..take]);
-                if take < chunk.len() {
-                    break;
-                }
-            }
-            Ok(None) | Err(_) => break,
-        }
-    }
-    String::from_utf8_lossy(&buf).into_owned()
 }
 
 /// Parse the CHANGELOG markdown into (version, bullets) pairs in document order
@@ -214,7 +193,7 @@ pub async fn assistant_fetch_ai_news() -> Result<Vec<NewsItem>, String> {
     // The changelog is the load-bearing source (content). npm is enrichment
     // (dates) — if it fails we still ship the releases, just without dates.
     let changelog_md = match changelog_res {
-        Ok(resp) if resp.status().is_success() => read_body_capped(resp).await,
+        Ok(resp) if resp.status().is_success() => super::read_body_capped(resp, BODY_CAP).await,
         Ok(resp) => {
             return Err(format!(
                 "raw.githubusercontent.com returned HTTP {} for the changelog.",
@@ -225,7 +204,7 @@ pub async fn assistant_fetch_ai_news() -> Result<Vec<NewsItem>, String> {
     };
 
     let dates = match npm_res {
-        Ok(resp) if resp.status().is_success() => parse_npm_dates(&read_body_capped(resp).await),
+        Ok(resp) if resp.status().is_success() => parse_npm_dates(&super::read_body_capped(resp, BODY_CAP).await),
         // npm down/blocked is non-fatal — proceed dateless.
         _ => HashMap::new(),
     };

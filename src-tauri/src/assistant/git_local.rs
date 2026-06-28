@@ -49,24 +49,6 @@ fn truncate_bytes(s: &str, limit: usize) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(format!("{}\n… (output truncated at {} KB)", &s[..end], limit / 1024))
 }
 
-/// Strip the Windows verbatim `\\?\` prefix so a canonicalized root (which
-/// `std::fs::canonicalize` returns in `\\?\C:\…` form) compares lexically equal
-/// to a plain absolute path. No-op on non-Windows. Mirrors `strip_unc` in
-/// mcp_server.rs (kept local — git tools don't import across that boundary).
-#[cfg(windows)]
-fn strip_verbatim(p: &Path) -> PathBuf {
-    let s = p.to_string_lossy();
-    match s.strip_prefix(r"\\?\") {
-        Some(rest) => PathBuf::from(rest),
-        None => p.to_path_buf(),
-    }
-}
-
-#[cfg(not(windows))]
-fn strip_verbatim(p: &Path) -> PathBuf {
-    p.to_path_buf()
-}
-
 // ─── validation ─────────────────────────────────────────────────────────────
 
 /// Validate a ref / branch / remote name. Strict allowlist; rejects anything
@@ -127,7 +109,7 @@ pub(crate) fn validate_path(root: &Path, raw: &str) -> Result<String, String> {
         // rejected above, so this lexical check can't be defeated by traversal,
         // and it works for not-yet-existing paths (new files for `git add`) that
         // `canonicalize` can't resolve.
-        if !strip_verbatim(&p).starts_with(strip_verbatim(root)) {
+        if !super::strip_unc(&p).starts_with(super::strip_unc(root)) {
             return Err(format!("path `{raw}` is outside the workspace root"));
         }
     } else if p.components().any(|c| matches!(c, std::path::Component::Prefix(_))) {

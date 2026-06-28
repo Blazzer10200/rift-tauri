@@ -211,9 +211,9 @@ fn resolve_under_roots(path: &str, roots: &[PathBuf]) -> Result<PathBuf, String>
     let canon = std::fs::canonicalize(&candidate)
         .map_err(|_| format!("path not found or unreadable: {}", path))?;
     // Windows-friendly canonical (strip UNC prefix).
-    let canon = strip_unc(&canon);
+    let canon = super::strip_unc(&canon);
     for root in roots {
-        let root = strip_unc(root);
+        let root = super::strip_unc(root);
         if canon.starts_with(&root) {
             return Ok(canon);
         }
@@ -222,21 +222,6 @@ fn resolve_under_roots(path: &str, roots: &[PathBuf]) -> Result<PathBuf, String>
         "{} is outside the workspace root(s)",
         canon.display()
     ))
-}
-
-#[cfg(windows)]
-fn strip_unc(p: &Path) -> PathBuf {
-    let s = p.to_string_lossy();
-    if let Some(rest) = s.strip_prefix(r"\\?\") {
-        PathBuf::from(rest)
-    } else {
-        p.to_path_buf()
-    }
-}
-
-#[cfg(not(windows))]
-fn strip_unc(p: &Path) -> PathBuf {
-    p.to_path_buf()
 }
 
 // Tiny path canonicalize wrapper that works through symlinks the same way

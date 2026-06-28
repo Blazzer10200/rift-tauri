@@ -122,6 +122,48 @@ pub(super) fn dirs_home() -> Result<PathBuf, String> {
     crate::state::paths::dirs_home().map_err(|e| e.to_string())
 }
 
+/// Strip the Windows verbatim/UNC prefix (`\\?\`) so a canonicalized path (which
+/// `std::fs::canonicalize` returns as `\\?\C:\…`) compares lexically equal to a
+/// plain absolute path. No-op on non-Windows. (cont.228: was duplicated as
+/// `strip_unc` in mcp_server.rs + `strip_verbatim` in git_local.rs.)
+#[cfg(windows)]
+pub(super) fn strip_unc(p: &std::path::Path) -> PathBuf {
+    let s = p.to_string_lossy();
+    match s.strip_prefix(r"\\?\") {
+        Some(rest) => PathBuf::from(rest),
+        None => p.to_path_buf(),
+    }
+}
+
+#[cfg(not(windows))]
+pub(super) fn strip_unc(p: &std::path::Path) -> PathBuf {
+    p.to_path_buf()
+}
+
+/// Read a reqwest response body with a hard byte `cap`. A hostile/misbehaving
+/// endpoint could stream an unbounded body into `.text()` and OOM us; this stops
+/// at `cap` bytes (the surplus is dropped at the chunk boundary). Decodes lossily
+/// — callers parse JSON / plain-text diagnostics, not exact binary. (cont.228:
+/// was duplicated in local_llm.rs (256KB) + news.rs (8MB) — the cap is now the
+/// per-call knob, since npm's registry doc must NOT be truncated mid-parse.)
+pub(super) async fn read_body_capped(resp: reqwest::Response, cap: usize) -> String {
+    let mut resp = resp;
+    let mut buf: Vec<u8> = Vec::new();
+    while buf.len() < cap {
+        match resp.chunk().await {
+            Ok(Some(chunk)) => {
+                let take = (cap - buf.len()).min(chunk.len());
+                buf.extend_from_slice(&chunk[..take]);
+                if take < chunk.len() {
+                    break;
+                }
+            }
+            Ok(None) | Err(_) => break,
+        }
+    }
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
 
 /// Monotonic per-turn nonce for MCP config filenames. Prevents an outgoing
 /// turn's cleanup guard from deleting the file a same-session resume just wrote
