@@ -71,6 +71,7 @@ import {
   savePermissionMode,
   messagesHaveContextSignals,
   migrateThinkingPins,
+  ctxWindowForModelId,
 } from "./assistant/helpers";
 export { messagesHaveContextSignals } from "./assistant/helpers";
 
@@ -459,13 +460,7 @@ class AssistantStore {
 
   /** Per-tab ctx helpers. */
   ctxWindowFor(tab: TabState | null): number {
-    const model = tab?.lastModelId ?? null;
-    if (!model) return 200_000;
-    if (/\[1m\]/i.test(model)) return 1_000_000;
-    const id = model.toLowerCase();
-    if (id.includes("haiku")) return 200_000;
-    if (/sonnet-4-[56]/.test(id) || /opus-4-[678]/.test(id) || /fable-5/.test(id)) return 1_000_000;
-    return 200_000;
+    return ctxWindowForModelId(tab?.lastModelId ?? null);
   }
   ctxTokensFor(tab: TabState | null): number {
     const u = tab?.lastTurnUsage ?? null;

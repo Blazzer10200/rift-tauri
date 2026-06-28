@@ -256,6 +256,18 @@ export function fmtTokens(n: number): string {
   return String(Math.round(n));
 }
 
+/** Context-window size (tokens) for a model id. Single source for both the store's
+ *  per-tab ctx% gauge and the streaming pump's compaction pill (cont.228: was
+ *  duplicated verbatim in assistant.svelte.ts + streaming.ts). */
+export function ctxWindowForModelId(model: string | null): number {
+  if (!model) return 200_000;
+  if (/\[1m\]/i.test(model)) return 1_000_000;
+  const id = model.toLowerCase();
+  if (id.includes("haiku")) return 200_000;
+  if (/sonnet-4-[56]/.test(id) || /opus-4-[678]/.test(id) || /fable-5/.test(id)) return 1_000_000;
+  return 200_000;
+}
+
 /** Effort tiers low→high — canonical order for clamping + ladder UIs. */
 export const EFFORT_ORDER: readonly ThinkingEffort[] = [
   "none", "quick", "smart", "deep", "ultra",

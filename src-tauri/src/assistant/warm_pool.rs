@@ -52,6 +52,7 @@ use tokio::sync::{mpsc, oneshot};
 /// so dropping the registry entry alone never makes the loop's `recv()` return None
 /// (self-referential sender). The child must be killed by PID.
 pub(super) fn kill_child_tree(pid: u32) {
+    if pid == 0 { return; } // never taskkill PID 0 (meaningless / unsafe target)
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

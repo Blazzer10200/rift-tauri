@@ -17,7 +17,7 @@
 
 import type { TabState } from "../assistant.svelte";
 import type { Block, ChatMessage, StreamEnvelope, ThinkingBlock, ToolBlock } from "./types";
-import { flattenToolResult, previewToolInput } from "./helpers";
+import { ctxWindowForModelId, flattenToolResult, previewToolInput } from "./helpers";
 import { browserDock } from "../browserDock.svelte";
 
 // S124: agentSpawns appends per Task/Agent/Skill and is never reset within a
@@ -81,17 +81,6 @@ function mutateStreaming(tab: TabState, fn: (m: ChatMessage) => ChatMessage) {
   tab.messages = tab.messages.map((m) => (m.id === tab.streamingMsgId ? fn(m) : m));
 }
 
-// Mirror of assistant.ctxWindowFor() — kept local so the pump has no runtime
-// dep on the store. Converts CLI compaction token counts into ctx% for the pill.
-function ctxWindowForModel(model: string | null): number {
-  if (!model) return 200_000;
-  if (/\[1m\]/i.test(model)) return 1_000_000;
-  const id = model.toLowerCase();
-  if (id.includes("haiku")) return 200_000;
-  if (/sonnet-4-[56]/.test(id) || /opus-4-[678]/.test(id) || /fable-5/.test(id)) return 1_000_000;
-  return 200_000;
-}
-
 /** Synthesize a visible system-role boundary message for a CLI `compact_boundary`
  *  event. Inserted just before the in-flight assistant bubble (keeping
  *  streamingMsgIdx valid) so it lands at the point compaction actually fired. */
@@ -100,7 +89,7 @@ function appendCliCompaction(tab: TabState, env: StreamEnvelope) {
     (env as { compact_metadata?: { trigger?: string; pre_tokens?: number; post_tokens?: number } })
       .compact_metadata ?? {};
   const model = tab.lastModelId ?? "";
-  const w = ctxWindowForModel(model);
+  const w = ctxWindowForModelId(model);
   const pre = typeof meta.pre_tokens === "number" ? meta.pre_tokens : undefined;
   const post = typeof meta.post_tokens === "number" ? meta.post_tokens : undefined;
   const boundary: Block = {
