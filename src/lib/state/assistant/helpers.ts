@@ -2,7 +2,7 @@
 // of `src/lib/state/assistant.svelte.ts`. Zero state, zero IPC; only
 // localStorage prefs + pure transforms. Safe to import anywhere.
 
-import type { ChatMessage, ModelFamily, ModelSel, PermissionMode, ThinkingEffort } from "./types";
+import type { ChatMessage, ModelFamily, ModelSel, PermissionMode, RiftPlan, ThinkingEffort } from "./types";
 
 const MODEL_SELS: readonly ModelSel[] = [
   "sonnet", "opus", "claude-opus-4-7", "haiku", "claude-fable-5",
@@ -34,6 +34,7 @@ const MODEL_KEY = "rift.assistant.model";
 const EFFORT_KEY = "rift.assistant.thinkingEffort";
 const THINKING_KEY = "rift.assistant.thinkingEnabled";
 const PERMISSION_KEY = "rift.assistant.permissionMode";
+const PLAN_KEY = "rift.assistant.plan";
 
 // Per-workspace override keys for model + effort. A `base::<root>` key holds a
 // workspace's pinned choice; the bare global key is the baseline default for
@@ -206,6 +207,39 @@ export function savePermissionMode(v: PermissionMode) {
   }
 }
 
+const RIFT_PLANS: readonly RiftPlan[] = ["free", "pro", "max"] as const;
+
+/** The user's subscription plan (USER-SET — Anthropic exposes no plan signal for
+ *  OAuth users; see the RiftPlan type doc). Fresh installs default to `max` (1M)
+ *  because that's correct for Max/Team/Enterprise and credit-enabled Pro — the
+ *  majority of paying users. Free / uncredited-Pro users set their tier once in
+ *  Settings, capping the gauge honestly at 200K. */
+export function loadPlan(): RiftPlan {
+  try {
+    const v = typeof localStorage !== "undefined" ? localStorage.getItem(PLAN_KEY) : null;
+    if (v && (RIFT_PLANS as readonly string[]).includes(v)) return v as RiftPlan;
+  } catch {
+    /* SSR or storage disabled */
+  }
+  return "max";
+}
+
+export function savePlan(v: RiftPlan) {
+  try {
+    if (typeof localStorage !== "undefined") localStorage.setItem(PLAN_KEY, v);
+  } catch {
+    /* storage disabled */
+  }
+}
+
+/** Context-window ceiling the user's plan grants, regardless of the model's
+ *  native window. Free is hard-capped at 200K even on 1M-native models; Pro
+ *  (with usage credits) and Max get the full 1M. `ctxWindowForModelId` clamps
+ *  the model-native window down to this. */
+export function planContextCap(plan: RiftPlan): number {
+  return plan === "free" ? 200_000 : 1_000_000;
+}
+
 export function flattenToolResult(content: unknown): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
@@ -256,16 +290,31 @@ export function fmtTokens(n: number): string {
   return String(Math.round(n));
 }
 
-/** Context-window size (tokens) for a model id. Single source for both the store's
- *  per-tab ctx% gauge and the streaming pump's compaction pill (cont.228: was
- *  duplicated verbatim in assistant.svelte.ts + streaming.ts). */
-export function ctxWindowForModelId(model: string | null): number {
+/** The model's NATIVE context window (tokens), ignoring plan entitlement. Haiku
+ *  is 200K; current-gen Opus 4.8 / Sonnet 4.6 / Fable 5 are 1M. Matches the FULL
+ *  pinned ids (claude-opus-4-8 …) AND the bare aliases Rift sends to the CLI
+ *  (`opus`/`sonnet`/`fable` — see modelMatrix.ts MODEL_OPTIONS). Without the alias
+ *  arm these fell through to 200K, so the ctx gauge read ~5× too full (16% at real
+ *  3% usage) and the compaction pill's pre/post % used the wrong window. */
+export function modelNativeWindow(model: string | null): number {
   if (!model) return 200_000;
   if (/\[1m\]/i.test(model)) return 1_000_000;
   const id = model.toLowerCase();
   if (id.includes("haiku")) return 200_000;
+  if (/^(opus|sonnet|fable)$/.test(id)) return 1_000_000;
   if (/sonnet-4-[56]/.test(id) || /opus-4-[678]/.test(id) || /fable-5/.test(id)) return 1_000_000;
   return 200_000;
+}
+
+/** Effective context window for a model under the user's plan: the model's native
+ *  window clamped to the plan ceiling. A Free user on Opus → min(1M, 200K) = 200K;
+ *  a Max user → 1M. Single source of truth for the ctx% gauge (assistant.svelte.ts),
+ *  the compaction pill (streaming.ts), and the picker labels (modelMatrix.ts) — so
+ *  all three report the SAME number. `planCap` is optional for call sites that
+ *  legitimately want the raw model window; omit it = native window (no clamp). */
+export function ctxWindowForModelId(model: string | null, planCap?: number): number {
+  const native = modelNativeWindow(model);
+  return planCap !== undefined ? Math.min(native, planCap) : native;
 }
 
 /** Effort tiers low→high — canonical order for clamping + ladder UIs. */

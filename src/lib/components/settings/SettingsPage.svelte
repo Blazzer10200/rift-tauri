@@ -536,6 +536,14 @@
               <button class:on={assistantStore.trustLevel !== "readonly"} role="radio" aria-checked={assistantStore.trustLevel !== "readonly"} type="button" onclick={() => void assistantStore.setTrustLevel("standard")}>Standard</button>
             </div>
           </div>
+          <div class="ctl-row tight">
+            <div><div class="ctl-t">Plan</div><div class="ctl-s">Sets the context-window size shown in the gauge. Anthropic doesn't expose your plan to apps, so pick it here. <strong>Free</strong> caps at 200K. <strong>Pro</strong> and <strong>Max</strong> use the full 1M — note Pro only gets 1M once you enable usage credits at <code>claude.ai/settings/usage</code>.</div></div>
+            <div class="seg" role="radiogroup" aria-label="Subscription plan">
+              <button class:on={assistantStore.plan === "free"} role="radio" aria-checked={assistantStore.plan === "free"} type="button" onclick={() => assistantStore.setPlan("free")}>Free</button>
+              <button class:on={assistantStore.plan === "pro"} role="radio" aria-checked={assistantStore.plan === "pro"} type="button" onclick={() => assistantStore.setPlan("pro")}>Pro</button>
+              <button class:on={assistantStore.plan === "max"} role="radio" aria-checked={assistantStore.plan === "max"} type="button" onclick={() => assistantStore.setPlan("max")}>Max</button>
+            </div>
+          </div>
         </div>
         {:else if chatSec === "reading"}
           <div class="card">

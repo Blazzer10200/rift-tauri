@@ -14,7 +14,7 @@
   import { tooltip } from "$lib/actions/tooltip";
   import { effortIdxFromX } from "./helpers";
   import {
-    MODEL_OPTIONS, currentModels, legacyModels, modelShortcut,
+    MODEL_OPTIONS, currentModels, legacyModels, modelShortcut, modelWindowSuffix,
     effortStopsFor, effortIdxFor, clampEffortIdx,
     type ModelOpt,
   } from "./modelMatrix";
@@ -169,7 +169,7 @@
           <span class="model-name">{m.label} {m.version}</span>
           {#if m.id === assistant.sessionPinnedModel && assistant.sessionModelDiverged}<span class="pi-tag session">this chat</span>
           {:else if m.limited}<span class="pi-tag accent">Limited</span>
-          {:else if m.suffix}<span class="pi-tag">{m.suffix}</span>{/if}
+          {:else if m.suffix}<span class="pi-tag">{modelWindowSuffix(m.id, assistant.planCap)}</span>{/if}
         </span>
         <span class="pi-sub">{m.blurb}</span>
       </span>

@@ -3,7 +3,7 @@ import type { ChatMessage, ToolBlock } from "./types";
 import {
   FABLE_DISABLED, FABLE_SUNSET_MS, clampEffort, effortToFlag, fableAvailable,
   flattenToolResult, messagesHaveContextSignals, migrateThinkingPins, modelFamily,
-  previewToolInput,
+  previewToolInput, ctxWindowForModelId, modelNativeWindow, planContextCap,
 } from "./helpers";
 
 const tool = (name: string, status: ToolBlock["status"], extra: Partial<ToolBlock> = {}): ToolBlock =>
@@ -11,6 +11,47 @@ const tool = (name: string, status: ToolBlock["status"], extra: Partial<ToolBloc
 const msg = (blocks: ChatMessage["blocks"], id = "m1"): ChatMessage => ({ id, role: "assistant", blocks });
 
 afterEach(() => vi.useRealTimers());
+
+describe("context window (model × plan)", () => {
+  const MAX = planContextCap("max"); // 1M
+  const FREE = planContextCap("free"); // 200K
+
+  it("plan caps: free=200K, pro & max=1M", () => {
+    expect(planContextCap("free")).toBe(200_000);
+    expect(planContextCap("pro")).toBe(1_000_000);
+    expect(planContextCap("max")).toBe(1_000_000);
+  });
+
+  it("native window resolves the BARE aliases Rift sends to the CLI (regression: read 200K → gauge 5× too full)", () => {
+    expect(modelNativeWindow("opus")).toBe(1_000_000);
+    expect(modelNativeWindow("sonnet")).toBe(1_000_000);
+    expect(modelNativeWindow("fable")).toBe(1_000_000);
+  });
+
+  it("native window: haiku 200K, full pinned ids + [1m] suffix 1M, unknown 200K", () => {
+    expect(modelNativeWindow("haiku")).toBe(200_000);
+    expect(modelNativeWindow("claude-opus-4-8")).toBe(1_000_000);
+    expect(modelNativeWindow("claude-sonnet-4-6")).toBe(1_000_000);
+    expect(modelNativeWindow("claude-opus-4-8[1m]")).toBe(1_000_000);
+    expect(modelNativeWindow("some-future-model")).toBe(200_000);
+    expect(modelNativeWindow(null)).toBe(200_000);
+  });
+
+  it("plan cap clamps the native window: Free on Opus = 200K, Max on Opus = 1M", () => {
+    expect(ctxWindowForModelId("opus", FREE)).toBe(200_000);
+    expect(ctxWindowForModelId("opus", MAX)).toBe(1_000_000);
+    expect(ctxWindowForModelId("sonnet", FREE)).toBe(200_000);
+  });
+
+  it("omitting the plan cap returns the raw native window (no clamp)", () => {
+    expect(ctxWindowForModelId("opus")).toBe(1_000_000);
+    expect(ctxWindowForModelId("haiku")).toBe(200_000);
+  });
+
+  it("never exceeds the model's native window even on a generous plan (Haiku stays 200K on Max)", () => {
+    expect(ctxWindowForModelId("haiku", MAX)).toBe(200_000);
+  });
+});
 
 describe("fableAvailable", () => {
   it("manual kill-switch forces unavailable regardless of date", () => {

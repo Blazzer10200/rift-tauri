@@ -49,6 +49,7 @@ import type {
   ThinkingEffort,
   ModelSel,
   PermissionMode,
+  RiftPlan,
   TrustLevel,
   PermissionPromptInfo,
   PermissionSuggestion,
@@ -69,6 +70,9 @@ import {
   saveThinkingEnabled,
   loadPermissionMode,
   savePermissionMode,
+  loadPlan,
+  savePlan,
+  planContextCap,
   messagesHaveContextSignals,
   migrateThinkingPins,
   ctxWindowForModelId,
@@ -358,6 +362,11 @@ export class TabState {
    *  Lives on the store (knows nothing tab-specific); passed in via this hook
    *  so TabState doesn't grow its own copy. */
   shortToolLabel?: (name: string, input?: Record<string, unknown>) => string;
+  /** The user's plan context-window cap, read by the stream pump so the CLI
+   *  compaction pill's pre/post % match the gauge. IoC hook (the plan lives on
+   *  the store, not the tab); defaults to 1M when unwired so the pill never
+   *  over-reports if the hook is somehow absent. */
+  planCap?: () => number;
 
   constructor(cliSessionId: string) {
     this.cliSessionId = cliSessionId;
@@ -460,7 +469,13 @@ class AssistantStore {
 
   /** Per-tab ctx helpers. */
   ctxWindowFor(tab: TabState | null): number {
-    return ctxWindowForModelId(tab?.lastModelId ?? null);
+    // Prefer the model the turn ACTUALLY ran on (lastModelId), but fall back to
+    // the model the tab is about to use (its override, else the global default)
+    // on a fresh, turn-less tab — otherwise lastModelId is null and the gauge
+    // shows the 200K null-fallback even for a Max user on a 1M model, which reads
+    // as "out of line" before the first send.
+    const model = tab?.lastModelId ?? tab?.modelOverride ?? this.model;
+    return ctxWindowForModelId(model, this.planCap);
   }
   ctxTokensFor(tab: TabState | null): number {
     const u = tab?.lastTurnUsage ?? null;
@@ -603,6 +618,7 @@ class AssistantStore {
     };
     tab.onTurnComplete = (t) => this.handleTurnComplete(t);
     tab.onAskUserStale = (t) => askUserStaleNudge(this, t);
+    tab.planCap = () => this.planCap;
   }
 
   // Informational system notice (slash-command output, /help text, etc.).
@@ -687,6 +703,11 @@ class AssistantStore {
   // model/effort). `bypassPermissions` until the user picks otherwise so
   // existing behavior is unchanged. Persisted to localStorage.
   permissionMode = $state<PermissionMode>(loadPermissionMode());
+  // Subscription plan (USER-SET — no programmatic plan signal exists for OAuth
+  // users). Drives the context-window cap applied to every model's native window
+  // (see ctxWindowFor). Global, persisted; default `max` (1M). Free/uncredited-Pro
+  // users set it once in Settings to cap the gauge honestly at 200K.
+  plan = $state<RiftPlan>(loadPlan());
   ui = $state({ tasksUpdatedAt: 0, usageOpen: false });
 
   // Conversation history.
@@ -849,6 +870,20 @@ class AssistantStore {
     this.permissionMode = v;
     savePermissionMode(v);
     this.telemetry.event("permission_mode.change", { from: prev, to: v });
+  }
+
+  setPlan(v: RiftPlan) {
+    if (this.plan === v) return;
+    const prev = this.plan;
+    this.plan = v;
+    savePlan(v);
+    this.telemetry.event("plan.change", { from: prev, to: v });
+  }
+
+  /** Context-window ceiling the user's current plan grants. Derived so the gauge
+   *  recomputes when `plan` flips. */
+  get planCap(): number {
+    return planContextCap(this.plan);
   }
 
   /** One-shot-per-session-per-kind notice when model/effort flips on a tab

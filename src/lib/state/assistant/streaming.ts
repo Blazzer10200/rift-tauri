@@ -89,7 +89,7 @@ function appendCliCompaction(tab: TabState, env: StreamEnvelope) {
     (env as { compact_metadata?: { trigger?: string; pre_tokens?: number; post_tokens?: number } })
       .compact_metadata ?? {};
   const model = tab.lastModelId ?? "";
-  const w = ctxWindowForModelId(model);
+  const w = ctxWindowForModelId(model, tab.planCap?.());
   const pre = typeof meta.pre_tokens === "number" ? meta.pre_tokens : undefined;
   const post = typeof meta.post_tokens === "number" ? meta.post_tokens : undefined;
   const boundary: Block = {

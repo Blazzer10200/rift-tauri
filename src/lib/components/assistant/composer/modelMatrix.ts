@@ -4,7 +4,8 @@
 // children derive from one source and can never disagree.
 import { Hand, Code2, ClipboardList, Zap, Infinity as InfinityIcon, Gem, Feather, Sparkles, Rabbit } from "lucide-svelte";
 import type { ModelSel, PermissionMode, ThinkingEffort } from "../../../state/assistant/types";
-import { fableAvailable, haikuAvailable, MODEL_MAX_EFFORT } from "../../../state/assistant/helpers";
+import { fableAvailable, haikuAvailable, MODEL_MAX_EFFORT, ctxWindowForModelId } from "../../../state/assistant/helpers";
+import type { ModelSel as ModelSelType } from "../../../state/assistant/types";
 
 export type EffortOpt = { id: ThinkingEffort; label: string; hint: string };
 // Effort ladder mapped to the CLI's `--effort` flag (low/medium/high/xhigh) by
@@ -66,6 +67,16 @@ export const MODEL_OPTIONS: ModelOpt[] = [
 ];
 // 1-based number shortcut → model id (digit keys pick directly in the menu).
 export const modelShortcut = (id: ModelSel) => MODEL_OPTIONS.findIndex((m) => m.id === id) + 1;
+
+/** The context-window tag shown beside a model in the picker, HONEST under the
+ *  user's plan: a 1M-native model capped to 200K by a Free plan must read "200K
+ *  context", not the static "1M context" baked into MODEL_OPTIONS. Derives from
+ *  the SAME `ctxWindowForModelId` that drives the gauge + compaction pill, so all
+ *  three agree. `planCap` is the value from `assistant.planCap`. */
+export function modelWindowSuffix(id: ModelSelType, planCap: number): string {
+  const w = ctxWindowForModelId(id, planCap);
+  return w >= 1_000_000 ? "1M context" : `${Math.round(w / 1000)}K context`;
+}
 
 // Current-generation models surface in the main list; previous generations
 // (`legacy`) fold into the "More models" flyout — matching the desktop picker.
