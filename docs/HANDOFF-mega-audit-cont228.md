@@ -2,7 +2,28 @@
 
 > Self-directed ULTRACODE full-codebase audit (user: "get it all done correctly, all angles, FE→BE, CLI-compat, perf"). NOT shipped — branch left for review. Resume from here.
 
-## STATUS: 52 fixes applied + green + committed. 2 sweeps + master report in flight.
+## STATUS: ✅ AUDIT COMPLETE. 52 fixes applied+green+committed. All 4 sweeps done + master report shipped to docs/audit/cont228/ (commit 821bce8). Branch NOT merged — review the report, then decide what to apply.
+
+### RESUME-ITEMS — all done (cont.228 final pass):
+- (1) Dynamic sweep — was ALREADY complete (`w73q9ry42` finished after the handoff was written). Recovered, NOT re-run. 56 confirmed.
+- (2) Architecture sweep — prior attempt `w5bfm2b6w` genuinely died (all 7 rate-limited, 0 findings). RE-RAN solo as `w7692fdzs` → clean, 45 findings → 27 endorsed, all subsystems `minor-drift`.
+- (3) Master report — written: `docs/audit/cont228/MASTER-REPORT.md` + ISSUES.md #69 block + JSON artifacts (report-data/dynamic-result/architecture-result). Committed 821bce8.
+
+### APPLYING THE BACKLOG (cont.228 continued — all gate-green, committed on branch):
+- ✅ `cd23562` T1: R2 release preflight (release.ps1) + release.yml rift-releases→rift + effort_tier_to_flag/send_effort_flag extracted+tested (TC-001/002).
+- ✅ `4bad457` T2: assistant_stop cancels PermissionRegistry (now session-tagged, +cancel_all_for_session) + Stalled tree-kills wedged child by PID. The real prod wedge (session 87a27f20).
+- ✅ `35e446d` T2 build: dropped aws-lc-rs (reqwest→rustls-no-provider) + ring install_default in run(). Runtime-verified TLS 200 OK. Baseline: cargo test 121/121.
+
+- ✅ `59f5023` cleanup: tree_kill (oneshot→warm_pool::kill_child_tree, 3 sites) + ctxWindowFor (→helpers::ctxWindowForModelId, store+pump delegate).
+- ✅ `2363d57` cleanup: dirs_home (paths::dirs_home_or_temp) + read_body_capped (assistant::read_body_capped(resp,cap), local_llm 256K/news 8M) + strip_unc (assistant::strip_unc, mcp_server+git_local delegate). Gate: cargo test 121/121 · svelte-check 0/0 (4134) · vitest 78/78.
+
+### 5 of 7 dups done. REMAINING:
+- **tool-name dispatch ×3** (ToolChip 169-174 + streamModel.ts 87-90 + canonical toolCaption.ts) → consolidate to `summaryForTool`/`captionForTool` in toolCaption.ts. Riskier (hot render files, verb-led vs noun-led divergence) — needs CDP verify of tool chips after. NOT done.
+- **trust-gating ×2** (tools/list + tools/call) → auditor said LEAVE until a 3rd trust level appears. Skip.
+- **dead code:** stashTabUi/restoreTabUi (no-ops 8+ sites) + vestigial dunce shim (mcp_server.rs) — not yet removed.
+
+### THEN (medium, own session): run_or_prewarm ~740L → SpawnParams + resolve_spawn_params extraction (biggest readability win). Full list: docs/audit/cont228/MASTER-REPORT.md.
+
 
 ### Baseline (held green throughout): cargo check clean · svelte-check 0/0 (4134) · vitest 378/378
 
