@@ -5,8 +5,8 @@
     Compass, MessageSquare, Shield, Zap, BarChart3,
   } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
+  import { workspace } from "../../state/workspace.svelte";
   import RiftLogo from "$lib/components/shell/RiftLogo.svelte";
-  import StatsPanel from "$lib/components/home/StatsPanel.svelte";
   import ClaudeConnect from "$lib/components/onboarding/ClaudeConnect.svelte";
   import { leafName, shortPath } from "$lib/components/shell/tabsbar/helpers";
   import { greeting } from "$lib/components/workspace/welcomeShared";
@@ -83,9 +83,6 @@
   // Warm-home "New to Rift?" collapsible orientation footer (spec NewToRift).
   let newToRiftOpen = $state(false);
 
-  // Activity stats overlay — opens the (previously-orphaned) usage dashboard.
-  let statsOpen = $state(false);
-
 </script>
 
 <div class="welcome">
@@ -121,7 +118,7 @@
           <button class="greet-switch" type="button" onclick={() => void assistant.pickTabFolder(tabId)}>
             <Folder size={13} /> Switch folder
           </button>
-          <button class="greet-switch" type="button" onclick={() => (statsOpen = true)} use:tooltip={"Your activity — usage stats"}>
+          <button class="greet-switch" type="button" onclick={() => workspace.setActive("home")} use:tooltip={"Your activity — usage stats on the Workspace page"}>
             <BarChart3 size={13} /> Activity
           </button>
         </div>
@@ -246,10 +243,6 @@
         Scoped to the folder you open — review every change before it's committed
       </div>
     </div>
-  {/if}
-
-  {#if statsOpen}
-    <StatsPanel onclose={() => (statsOpen = false)} />
   {/if}
 </div>
 

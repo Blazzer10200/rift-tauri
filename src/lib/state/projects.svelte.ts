@@ -27,6 +27,17 @@ class ProjectRegistry {
   activeId = $state<string | null>(null);
   loaded = $state(false);
   lastError = $state<string | null>(null);
+  /** Transient one-shot: set by an "+ New project" affordance OUTSIDE the
+   *  Workspace page (e.g. the sidebar ProjectRail) to ask WorkspacePage to open
+   *  its new-project editor on mount. WorkspacePage reads + clears it, so it
+   *  fires exactly once and never re-opens on a later visit. */
+  newProjectIntent = $state(false);
+  requestNewProject() { this.newProjectIntent = true; }
+  consumeNewProjectIntent(): boolean {
+    if (!this.newProjectIntent) return false;
+    this.newProjectIntent = false;
+    return true;
+  }
 
   init() {
     if (typeof window === "undefined") return;

@@ -52,7 +52,7 @@
     try { localStorage.setItem(NEWS_OPEN_KEY, newsOpen ? "1" : "0"); } catch { /* private mode */ }
   }
 
-  // ── Inline Activity stats (was the StatsPanel modal — now lives on the page) ──
+  // ── Inline Activity stats — the usage dashboard lives directly on the page ──
   let statsRaw = $state<ConvoStat[]>([]);
   let statsLoading = $state(true);
   let statsError = $state<string | null>(null);
@@ -83,6 +83,10 @@
   const statsEmpty = $derived(!statsLoading && !statsError && statsRaw.length === 0);
   const SEG_HUES = [163, 220, 285, 35, 130];
   const segs = $derived(models.map((m, i) => ({ ...m, hue: SEG_HUES[i % SEG_HUES.length] })));
+  // Legend lists only models that round to ≥1% — sub-1% slivers still ride in the
+  // bar's colored tail, but a "0%" legend row is dead clutter. Keep at least the
+  // top entry so the legend never empties on a tiny all-one-model sample.
+  const legendSegs = $derived(segs.filter((m, i) => i === 0 || Math.round(m.share * 100) >= 1));
 
   $effect(() => {
     if (paneRoot && assistant.workspaceFiles.length === 0) void assistant.loadWorkspaceFiles();
@@ -212,6 +216,15 @@
   onMount(async () => {
     await projects.refresh();
     if (projects.lastError) notify.warn("Couldn't load projects", { detail: projects.lastError });
+  });
+
+  // Honor a "+ New project" intent set by an off-page affordance (sidebar rail)
+  // — open the editor straight away instead of landing the user on the page to
+  // hunt for the New button. An $effect (not onMount) because this page stays
+  // mounted across navigations (WorkspaceShell keep-alive), so a repeat click
+  // must still fire. One-shot per click: consume clears the flag.
+  $effect(() => {
+    if (projects.newProjectIntent && projects.consumeNewProjectIntent()) startNew();
   });
 
   const activeKey = $derived(projectRootKey(assistant.activeRoot));
@@ -446,7 +459,7 @@
                     {/each}
                   </div>
                   <div class="mix-legend">
-                    {#each segs as m (m.model)}
+                    {#each legendSegs as m (m.model)}
                       <span class="lg"><i style="--mh:{m.hue}"></i>{m.label}<small>{Math.round(m.share * 100)}%</small></span>
                     {/each}
                   </div>
@@ -885,16 +898,26 @@
   .gcard-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .gcard-name { font-size: var(--fs-md); font-weight: 640; letter-spacing: -0.01em; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .gcard-meta { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  /* A lone full-width card has the room to lay name + meta on ONE line (like the
+     hero), so it doesn't read as a cramped 2-line stack in a wide row. The 2-up
+     grid keeps the vertical stack — narrow cards need it. */
+  .proj-grid.solo .gcard-id { flex-direction: row; align-items: center; gap: 12px; }
+  .proj-grid.solo .gcard-name { flex: none; }
+  .proj-grid.solo .gcard-meta { flex: 1; }
   .gcard-path { font-size: var(--fs-xs); color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   .gcard-meta .scope-chip.sm { flex: none; }
   .gcard-go { flex: none; display: grid; place-items: center; color: var(--fg-faint); opacity: 0; transform: translateX(-4px);
     transition: opacity var(--dur-fast), transform var(--dur-fast), color var(--dur-fast); }
   .gcard:hover .gcard-go { opacity: 1; transform: translateX(0); color: var(--accent); }
+  /* Edit + Split are DISTINCT actions a user can't discover if fully hidden, so
+     they're hinted at rest (cont.151 affordance doctrine) — faint, brightening to
+     full on card hover + their own hover. The go-arrow stays hover-only (it's a
+     directional reinforcement of the already-clickable card, not a 3rd action). */
   .gcard-edit, .gcard-split { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 6px;
-    color: var(--fg-faint); opacity: 0; transition: opacity var(--dur-fast), background var(--dur-fast), color var(--dur-fast); }
+    color: var(--fg-faint); opacity: 0.4; transition: opacity var(--dur-fast), background var(--dur-fast), color var(--dur-fast); }
   .gcard:hover .gcard-edit, .gcard:hover .gcard-split { opacity: 1; }
-  .gcard-edit:hover { background: var(--surface-hover); color: var(--fg); }
-  .gcard-split:hover { background: var(--surface-hover); color: var(--accent); }
+  .gcard-edit:hover { background: var(--surface-hover); color: var(--fg); opacity: 1; }
+  .gcard-split:hover { background: var(--surface-hover); color: var(--accent); opacity: 1; }
 
   /* ── Add-a-project zone — unified adopt tiles ───────────────────────────── */
   .add-zone { width: 100%; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }

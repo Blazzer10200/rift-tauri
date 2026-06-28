@@ -11,12 +11,14 @@
 
   const win = getCurrentWindow();
 
-  // Empty Chat surface = the "Home" verb (redesign §6); a real conversation
-  // shows its own title.
-  const chatHasConvo = $derived((assistant.activeTab?.messages.length ?? 0) > 0);
+  // Chat surface titles consistently as "Chat" (empty or not) — a real
+  // conversation shows its own title once it has one. (Previously an empty chat
+  // read "Home", which collided with the Workspace page now owning the home
+  // destination — two surfaces, one word. The "home is a verb" NAV behavior
+  // lives in goHome(); this is only the visible label.)
   const title = $derived(
     workspace.activeId === "chat"
-      ? (chatHasConvo ? assistant.activeTab?.convoTitle || "Chat" : "Home")
+      ? assistant.activeTab?.convoTitle || "Chat"
       : WORKSPACES[workspace.activeId].title,
   );
 </script>

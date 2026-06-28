@@ -71,7 +71,7 @@
     <div class="prail-h">
       <span class="prail-lbl">Projects</span>
       <button class="prail-add" type="button" use:tooltip={"New project"}
-        onclick={() => workspace.setActive("home")} aria-label="New project">
+        onclick={() => { projects.requestNewProject(); workspace.setActive("home"); }} aria-label="New project">
         <Plus size={13} strokeWidth={2.4} />
       </button>
     </div>

@@ -175,6 +175,10 @@
   // ── All-time rollup (persisted) ──
   const totals = $derived(stats ? summarize(stats) : null);
   const models = $derived(stats ? perModel(stats) : []);
+  // The "where your usage goes" breakdown lists only models that round to ≥1% —
+  // a "0%" row (a few messages on a since-retired model) is dead clutter. Keep at
+  // least the top row so the list never empties on a tiny sample.
+  const modelsShown = $derived(models.filter((m, i) => i === 0 || Math.round(m.share * 100) >= 1));
   const streak = $derived(stats ? streaks(stats, Date.now()) : { current: 0, longest: 0 });
   const top = $derived(stats ? topModel(stats) : null);
   const hasHistory = $derived(!!totals && totals.sessions > 0);
@@ -302,8 +306,23 @@
     if (limitRows.length > 0) dims.push({ k: "Plan", tint: rateLimitRisk, v: `${peakLimit}%` });
     if (dims.length === 0) return null;
     const worst = dims.reduce((a, b) => (RANK[b.tint] > RANK[a.tint] ? b : a));
+    // Upstream-latency reframe: when the ONLY problem dimension is Latency and
+    // we've attributed it to the Anthropic API (not the user's setup), the top
+    // strip must not blare "Action needed" — there's nothing the user can do, and
+    // the Speed section already says it "usually passes". Otherwise the verdict
+    // contradicts its own body. Demote the headline to an informational "API is
+    // slow right now" rather than a user-actionable alarm.
+    const flaggedDims = dims.filter((d) => d.tint !== "ok");
+    // Latency-only AND upstream → demote the whole headline (nothing to fix).
+    const latencyIsUpstream = !!latencyAttribution
+      && flaggedDims.length === 1 && flaggedDims[0].k === "Latency";
+    // Worst dim is upstream-latency but something ELSE is also flagged → keep the
+    // alarm (the other dim is real) but reword latency's note so it doesn't read
+    // as "your latency is broken" when we know it's the API.
+    const worstIsUpstreamLatency = !!latencyAttribution && worst.k === "Latency";
     const tint = worst.tint;
-    const label = tint === "ok" ? "Healthy" : tint === "warn" ? "Needs a look" : "Action needed";
+    const label = latencyIsUpstream ? "API is slow right now"
+      : tint === "ok" ? "Healthy" : tint === "warn" ? "Needs a look" : "Action needed";
     // Green note names only the dimensions actually checked (some are absent
     // below their sample floor), so it never claims a clean bill on data it
     // didn't have. Oxford-join the lowercased dimension names.
@@ -311,13 +330,20 @@
     const okList = okNames.length === 1 ? okNames[0]
       : okNames.length === 2 ? `${okNames[0]} and ${okNames[1]}`
       : `${okNames.slice(0, -1).join(", ")}, and ${okNames[okNames.length - 1]}`;
-    const note = tint === "ok"
+    const note = latencyIsUpstream ? "The wait is on Anthropic's side, not your setup — it usually clears on its own."
+      : worstIsUpstreamLatency ? "The slow replies are on Anthropic's side, not your setup."
+      : tint === "ok"
       ? `${okList.charAt(0).toUpperCase()}${okList.slice(1)} ${okNames.length === 1 ? "looks" : "look"} good.`
       : `${worst.k} ${tint === "hot" ? "needs attention" : "is worth a look"}.`;
     // Problem dimensions get a labeled value pill on the right of the strip; when
     // all-clear, the three dimension dots stand in (nothing to flag).
     const flagged = dims.filter((d) => d.tint !== "ok");
-    return { tint, label, note, dims, flagged };
+    // Display tint softens the headline to amber (warn) for the upstream-latency
+    // case — a red "hot" strip reads as user-actionable breakage, but there's
+    // nothing to fix. The per-dimension flag pill keeps its true (hot) tint, so
+    // the real latency number is still honestly shown as high.
+    const displayTint = latencyIsUpstream ? "warn" : tint;
+    return { tint: displayTint, label, note, dims, flagged };
   });
 
   // ── Advisor ── assemble the snapshot the backend reasons over. Limits +
@@ -723,9 +749,9 @@
             {#if top}<div class="ah-tile"><div class="ah-tile-v ah-tile-sm">{top}</div><div class="ah-tile-k">most used</div></div>{/if}
           </div>
 
-          {#if models.length > 0}
+          {#if modelsShown.length > 0}
             <div class="ah-models">
-              {#each models as m (m.model)}
+              {#each modelsShown as m (m.model)}
                 <div class="ah-model-row">
                   <span class="ah-model-k">{m.label}</span>
                   <div class="ah-track sm"><div class="ah-fill ok" style:width="{Math.round(m.share * 100)}%"></div></div>

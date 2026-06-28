@@ -10,7 +10,6 @@
   import { commandPalette, type SettingsSection } from "../../state/command-palette.svelte";
   import { workspace, type WorkspaceId } from "../../state/workspace.svelte";
   import { assistant } from "../../state/assistant.svelte";
-  import { goHome } from "../../state/nav";
 
   // lucide-svelte 1.x ships icons as legacy components — `typeof Search`
   // matches what the workspaces registry uses (see workspaces/index.ts).
@@ -38,10 +37,13 @@
     const out: Item[] = [];
 
     // Workspace navigation
+    // Labels match the sidebar nav + workspaces registry — "Workspace" is the
+    // home/dashboard surface (NOT "Home", which collided with the empty-chat
+    // label). Keeps "Go to …" consistent across palette, sidebar, and titlebar.
     const navs: { id: WorkspaceId; label: string; icon: Icon; sub: string }[] = [
-      { id: "home",     label: "Home",     icon: Home,          sub: "Ctrl+1" },
-      { id: "chat",     label: "Chat",     icon: MessageSquare, sub: "Ctrl+2" },
-      { id: "settings", label: "Settings", icon: SettingsIcon,  sub: "Ctrl+3" },
+      { id: "home",     label: "Workspace", icon: Home,          sub: "Ctrl+1" },
+      { id: "chat",     label: "Chat",      icon: MessageSquare, sub: "Ctrl+2" },
+      { id: "settings", label: "Settings",  icon: SettingsIcon,  sub: "Ctrl+3" },
     ];
     for (const n of navs) {
       out.push({
@@ -50,8 +52,8 @@
         sub: n.sub,
         group: "Go to",
         icon: n.icon,
-        keywords: `workspace pane ${n.id}`,
-        run: n.id === "home" ? goHome : () => workspace.setActive(n.id),
+        keywords: `workspace pane home ${n.id}`,
+        run: () => workspace.setActive(n.id),
       });
     }
 
