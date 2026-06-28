@@ -1,6 +1,15 @@
 # HANDOFF — Mega-Audit cont.228 (branch `mega-audit-cont228`)
 
-> Self-directed ULTRACODE full-codebase audit (user: "get it all done correctly, all angles, FE→BE, CLI-compat, perf"). NOT shipped — branch left for review. Resume from here.
+> Self-directed ULTRACODE full-codebase audit (user: "get it all done correctly, all angles, FE→BE, CLI-compat, perf"). SHIPPED as v0.68.0.
+
+## Session — 2026-06-28 (SHIPPED v0.68.0 + dev shut down)
+
+### RELEASE — branch merged to main + v0.68.0 tagged & pushed (release CI in progress)
+- Merged `mega-audit-cont228` → `main` (no-ff, `d5de0aa`), clean. Bumped 3-file lockstep + Cargo.lock → **0.68.0** (`13b735c`). CHANGELOG v0.68.0 entry written. Pushed main + tag `v0.68.0` to origin.
+- Release CI: tag-driven `release.yml` on self-hosted runner `proxmox-win` (online). Run 28322602529 in_progress — building/packing/publishing to `Blazzer10200/rift` via Velopack. Prior v0.66/v0.67 succeeded ~7-10min same runner. Monitoring (task b4vbggse2). **If session ended mid-build: verify `gh release view --repo Blazzer10200/rift` shows v0.68.0; if it FAILED, check `gh run view 28322602529 --repo Blazzer10200/rift-tauri --log-failed`.**
+- **ALL LOCAL DEV/AI SHUT DOWN:** 0 rift-tauri.exe, 0 node/cargo/vite, CDP :9222/:9223 + vite :1420 closed, nothink-proxy killed. Real installed app (`%LOCALAPPDATA%\Rift\`) NEVER touched (PID+path verified). Branch on origin as backup.
+
+---
 
 ## Session — 2026-06-28 (backlog applied + live-verified; organization task QUEUED)
 
