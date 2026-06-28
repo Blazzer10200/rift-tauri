@@ -2,18 +2,19 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.71.0 — First-run onboarding rework
+## v0.71.1 — Hotfix: the assistant could go passive on short messages
 
 ### What you'll notice
-- **A clearer first-run setup.** The welcome screen is lighter (the essentials, not a wall of text), and the final "Defaults" step is now a single **"How should Rift work?"** choice — pick **Cautious**, **Balanced** (recommended), or **Fast** instead of juggling three separate permission/thinking/git toggles. You can still fine-tune everything later from the composer and Settings.
-- **Better Connect step when the CLI is missing.** If the `claude` CLI isn't found, the setup now spells out exactly what to do — install it, then click Re-check (or relaunch Rift if a fresh PATH hasn't reached it yet). The most common fresh-machine snag is called out directly.
-- **Scratch-space hint.** The "open a project" step now mentions you can skip it and work in a private scratch space until you pick a folder.
+- **The assistant answers your short messages properly again.** A bug could make Claude reply to brief messages ("hi", "ok", "what's up") with vague one-liners — or, worse, act like there was nothing to respond to and even redo work it had already done. That's fixed. Every message, long or short, now gets a normal, engaged response.
 
 ### Under the hood
-- Collapsed the onboarding Defaults controls into preset cards that fan out to the same settings; removed the now-dead thinking-dial logic. Frontend-only.
-- **Verified.** svelte-check clean (4134 files), vitest 386/386; all four onboarding steps live-CDP-verified (render clean, presets switch correctly, zero console errors).
+- **Root cause:** Rift attached a per-turn "environment snapshot" (including your Claude plan-usage gauges) to *every* message, and a system instruction told the model to "wrap up gracefully when plan usage runs hot." On a perfectly healthy plan a benign "weekly 67% used" note, sitting in front of a short message, read to the model as *"the user is winding down"* — so it gave clipped, passive answers. (Diagnosed from a real session: the model was receiving the message fine; it was the framing that misled it.)
+- **Fix:** the plan-usage note is now shown only when usage is genuinely high (≥90% of the 5-hour window or ≥95% weekly) — so on a normal turn your message reaches the model with nothing prepended. The system instruction was reworded so a snapshot can never make the model treat a short message as low-priority or go passive.
+- **Verified.** New regression tests lock the threshold (cargo test 123/123); svelte-check clean (4134); live-verified in the running app — a short message now returns a direct reply with no snapshot attached.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.71.0** — First-run onboarding rework: lighter welcome, a clearer Connect step when the CLI is missing, a scratch-space hint, and the Defaults step collapsed into one Cautious/Balanced/Fast choice.
 
 - **v0.70.0** — Workspace + projects UI overhaul: one-click open/split projects via sidebar chips, the dashboard renamed to "Workspace" everywhere, an honest context gauge on 1M-context models, and a cleaner single-scroll Workspace + less self-contradictory AI Health. Plus a local-LLM corporate-TLS fix from a pre-release security sweep.
 
