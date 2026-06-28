@@ -70,8 +70,15 @@ import {
   loadPermissionMode,
   savePermissionMode,
   messagesHaveContextSignals,
+  migrateThinkingPins,
 } from "./assistant/helpers";
 export { messagesHaveContextSignals } from "./assistant/helpers";
+
+// Run before any per-workspace thinking pin is read (field init below +
+// applyWorkspacePrefs). Clears stale pre-v0.65.0 `thinkingEnabled::<root>=on`
+// pins so every folder falls back to the off-by-default baseline. One-time,
+// idempotent, SSR-safe (no-ops without localStorage). See helpers.ts.
+migrateThinkingPins();
 
 // M2 split (2026-05-26): SessionTelemetry class lifted to `./assistant/telemetry`.
 import { SessionTelemetry } from "./assistant/telemetry";

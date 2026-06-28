@@ -47,6 +47,36 @@ function wsKey(base: string, ws: string | null | undefined): string | null {
   return ws ? `${base}::${ws}` : null;
 }
 
+// One-time sweep of stale per-workspace `thinkingEnabled::<root>` pins. Before
+// v0.65.0 thinking was a separate toggle that defaulted ON and persisted a
+// per-folder `on` pin on first use; the off-by-default flip (cont.205/212) only
+// changed the GLOBAL baseline, so any folder that already carried an `on` pin
+// kept silently extend-thinking every turn. On Opus that thinking block emits
+// no visible text, so the symptom is "this folder is randomly slow / hangs"
+// with nothing in the UI explaining it. Clearing the per-folder pins makes every
+// such folder fall back to the fast off-by-default baseline; the user can still
+// raise the dial per-folder (a fresh, intentional pin) afterward. Model + effort
+// pins are deliberately left alone — those are visible (picker / dial rung) and
+// the per-folder design is intended (helpers.ts wsKey note). Idempotent + version
+// -guarded so it runs exactly once per install.
+const THINKING_PIN_SWEEP_KEY = "rift.assistant.thinkingPinSweep.v1";
+export function migrateThinkingPins() {
+  try {
+    if (typeof localStorage === "undefined") return;
+    if (localStorage.getItem(THINKING_PIN_SWEEP_KEY)) return; // already swept
+    const prefix = `${THINKING_KEY}::`;
+    const stale: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(prefix)) stale.push(k);
+    }
+    for (const k of stale) localStorage.removeItem(k);
+    localStorage.setItem(THINKING_PIN_SWEEP_KEY, "done");
+  } catch {
+    /* storage disabled — nothing to migrate */
+  }
+}
+
 const PERMISSION_MODES: readonly PermissionMode[] = [
   "default", "acceptEdits", "plan", "auto", "bypassPermissions",
 ] as const;

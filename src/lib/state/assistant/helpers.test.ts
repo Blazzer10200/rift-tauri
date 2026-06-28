@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage, ToolBlock } from "./types";
 import {
   FABLE_DISABLED, FABLE_SUNSET_MS, clampEffort, effortToFlag, fableAvailable,
-  flattenToolResult, messagesHaveContextSignals, modelFamily,
+  flattenToolResult, messagesHaveContextSignals, migrateThinkingPins, modelFamily,
   previewToolInput,
 } from "./helpers";
 
@@ -30,6 +30,47 @@ describe("fableAvailable", () => {
     expect(fableAvailable()).toBe(true);
     vi.setSystemTime(FABLE_SUNSET_MS);
     expect(fableAvailable()).toBe(false);
+  });
+});
+
+describe("migrateThinkingPins", () => {
+  const installLS = (seed: Record<string, string>) => {
+    const store = new Map(Object.entries(seed));
+    const ls = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+      key: (i: number) => Array.from(store.keys())[i] ?? null,
+      get length() { return store.size; },
+    };
+    vi.stubGlobal("localStorage", ls);
+    return store;
+  };
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("clears every per-folder thinkingEnabled pin but leaves model/effort pins + global baseline", () => {
+    const store = installLS({
+      "rift.assistant.thinkingEnabled::C:/proj/a": "on",
+      "rift.assistant.thinkingEnabled::C:/proj/b": "off",
+      "rift.assistant.thinkingEnabled": "off",          // global baseline — keep
+      "rift.assistant.thinkingEffort::C:/proj/a": "deep", // effort pin — keep
+      "rift.assistant.model::C:/proj/a": "opus",          // model pin — keep
+    });
+    migrateThinkingPins();
+    expect(store.has("rift.assistant.thinkingEnabled::C:/proj/a")).toBe(false);
+    expect(store.has("rift.assistant.thinkingEnabled::C:/proj/b")).toBe(false);
+    expect(store.get("rift.assistant.thinkingEnabled")).toBe("off");
+    expect(store.get("rift.assistant.thinkingEffort::C:/proj/a")).toBe("deep");
+    expect(store.get("rift.assistant.model::C:/proj/a")).toBe("opus");
+    expect(store.get("rift.assistant.thinkingPinSweep.v1")).toBe("done");
+  });
+
+  it("is idempotent — a fresh on-pin written after the sweep survives a second run", () => {
+    const store = installLS({ "rift.assistant.thinkingEnabled::C:/proj/a": "on" });
+    migrateThinkingPins(); // sweeps the stale pin, marks done
+    store.set("rift.assistant.thinkingEnabled::C:/proj/a", "on"); // user re-pins intentionally
+    migrateThinkingPins(); // must NOT sweep again
+    expect(store.get("rift.assistant.thinkingEnabled::C:/proj/a")).toBe("on");
   });
 });
 
