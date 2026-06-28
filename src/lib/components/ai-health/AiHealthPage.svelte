@@ -437,8 +437,14 @@
 
   // ── Current harness config ── the live values an apply action would change.
   // Pretty labels so newcomers see plain words, not "xhigh"/"sonnet".
+  // Display labels match the composer's unified thinking dial (Off·Low·Medium·
+  // High·Max). The advisor still operates on the underlying effort tier ids
+  // (none/quick/smart/deep/ultra — the JSON-contract allow-list, unchanged); this
+  // is presentation only. `none` is the lowest ON tier → "Low" (the dial's "Off"
+  // is a separate state: thinking disabled, not an effort tier). quick+smart both
+  // map to the medium CLI flag → both read "Medium".
   const EFFORT_LABEL: Record<string, string> = {
-    none: "Off", quick: "Quick", smart: "Smart", deep: "Deep", ultra: "Ultra",
+    none: "Low", quick: "Medium", smart: "Medium", deep: "High", ultra: "Max",
   };
   const MODEL_LABEL: Record<string, string> = {
     opus: "Opus", sonnet: "Sonnet", haiku: "Haiku",
@@ -453,8 +459,13 @@
   // Per-turn dollar budget is only a real knob in API-key mode (pay-per-token).
   // For a subscription session it's inert (usage-limit windows govern spend), so
   // it's dropped from the "knobs Rift can tune" list rather than shown as a lie.
+  // Thinking row reads "Off" when the master switch is off (the dial's Off rung),
+  // else the effort-tier label — so it matches what the composer dial shows.
+  const thinkingLabel = $derived(
+    assistant.thinkingEnabled ? (EFFORT_LABEL[assistant.thinkingEffort] ?? assistant.thinkingEffort) : "Off",
+  );
   const configRows = $derived([
-    { k: "Default effort", v: EFFORT_LABEL[assistant.thinkingEffort] ?? assistant.thinkingEffort },
+    { k: "Default thinking", v: thinkingLabel },
     { k: "Default model", v: MODEL_LABEL[assistant.model] ?? assistant.model },
     ...(assistant.hasApiKey ? [{ k: "Per-turn budget", v: budgetLabel(assistant.maxBudgetUsd) }] : []),
   ]);

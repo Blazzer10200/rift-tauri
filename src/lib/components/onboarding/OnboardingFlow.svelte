@@ -11,7 +11,8 @@
   import { uiPrefs, ACCENTS } from "$lib/state/ui-prefs.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { fableAvailable } from "$lib/state/assistant/helpers";
-  import { MODE_OPTIONS } from "$lib/components/assistant/composer/modelMatrix";
+  import { MODE_OPTIONS, DIAL_STOPS, dialIdFor } from "$lib/components/assistant/composer/modelMatrix";
+  import { EFFORT_ORDER } from "$lib/state/assistant/helpers";
   import type { ModelSel, ThinkingEffort } from "$lib/state/assistant/types";
   import {
     Check, ChevronLeft, ChevronRight, FolderGit2, FolderOpen, Terminal, Zap,
@@ -84,26 +85,25 @@
     { id: "sonnet", label: "Sonnet", version: "4.6", effort: true,  maxEffort: "smart" },
     { id: "haiku",  label: "Haiku",  version: "4.5", effort: false, maxEffort: "none" },
   ];
-  type EffortOpt = { id: ThinkingEffort; label: string; hint: string };
-  const EFFORT_OPTIONS: EffortOpt[] = [
-    { id: "none",  label: "Instant",   hint: "Minimal reasoning — fastest answers" },
-    { id: "quick", label: "Quick",     hint: "Light reasoning, leaner tool use" },
-    { id: "smart", label: "Smart",     hint: "Standard depth — the recommended default" },
-    { id: "deep",  label: "Deep",      hint: "Extra depth for hard agentic coding" },
-    { id: "ultra", label: "Ultracode", hint: "Deep reasoning + multi-agent workflows" },
-  ];
   const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === assistant.model));
-  const effortStops = $derived.by(() => {
-    if (!currentModel?.effort) return [] as EffortOpt[];
-    const cap = EFFORT_OPTIONS.findIndex((e) => e.id === currentModel.maxEffort);
-    return EFFORT_OPTIONS.slice(0, cap >= 0 ? cap + 1 : EFFORT_OPTIONS.length);
+  // Same unified thinking dial as the composer (Off·Low·Medium·High·Max),
+  // truncated at the current model's effort ceiling — so onboarding speaks the
+  // exact same vocabulary as the live picker, not a parallel Instant/Quick set.
+  const dialStops = $derived.by(() => {
+    if (!currentModel?.effort) return [DIAL_STOPS[0]]; // Off-only (Haiku)
+    const capIdx = EFFORT_ORDER.indexOf(currentModel.maxEffort as ThinkingEffort);
+    return DIAL_STOPS.filter(
+      (s) => s.effort === null || (capIdx >= 0 && EFFORT_ORDER.indexOf(s.effort) <= capIdx),
+    );
   });
+  const dialId = $derived(dialIdFor(assistant.thinkingEnabled, assistant.thinkingEffort));
+  function pickDial(s: (typeof DIAL_STOPS)[number]) {
+    if (s.effort === null) assistant.setThinkingDial(false);
+    else assistant.setThinkingDial(true, s.effort);
+  }
   function pickModel(m: ModelOpt) {
     assistant.setModel(m.id);
-    // clamp effort to the new model's ceiling so the saved pref never exceeds it
-    const idx = EFFORT_OPTIONS.findIndex((e) => e.id === assistant.thinkingEffort);
-    const cap = EFFORT_OPTIONS.findIndex((e) => e.id === m.maxEffort);
-    if (m.effort && cap >= 0 && idx > cap) assistant.setThinkingEffort(EFFORT_OPTIONS[cap].id);
+    // setModel already clamps the stored effort to the new model's ceiling.
   }
   // The three modes a first-run user can reason about — plan/auto stay in the
   // composer's full picker. Same source as the composer so labels never drift.
@@ -280,20 +280,20 @@
                   {/each}
                 </div>
               </div>
-              {#if effortStops.length > 0}
+              {#if dialStops.length > 1}
                 <div class="ob-field">
-                  <span class="ob-flabel">Thinking effort</span>
-                  <div class="ob-seg" role="radiogroup" aria-label="Thinking effort">
-                    {#each effortStops as e (e.id)}
+                  <span class="ob-flabel">Thinking</span>
+                  <div class="ob-seg" role="radiogroup" aria-label="Thinking">
+                    {#each dialStops as s (s.id)}
                       <button
                         type="button"
                         class="ob-seg-btn"
-                        class:on={assistant.thinkingEffort === e.id}
+                        class:on={dialId === s.id}
                         role="radio"
-                        aria-checked={assistant.thinkingEffort === e.id}
-                        title={e.hint}
-                        onclick={() => assistant.setThinkingEffort(e.id)}
-                      >{e.label}</button>
+                        aria-checked={dialId === s.id}
+                        title={s.hint}
+                        onclick={() => pickDial(s)}
+                      >{s.label}</button>
                     {/each}
                   </div>
                 </div>
