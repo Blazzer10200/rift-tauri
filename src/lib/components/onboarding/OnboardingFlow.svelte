@@ -11,11 +11,10 @@
   import { uiPrefs, ACCENTS } from "$lib/state/ui-prefs.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { fableAvailable } from "$lib/state/assistant/helpers";
-  import { MODE_OPTIONS, DIAL_STOPS, dialIdFor } from "$lib/components/assistant/composer/modelMatrix";
-  import { EFFORT_ORDER } from "$lib/state/assistant/helpers";
+  import { MODE_OPTIONS } from "$lib/components/assistant/composer/modelMatrix";
   import type { ModelSel, ThinkingEffort } from "$lib/state/assistant/types";
   import {
-    Check, ChevronLeft, ChevronRight, FolderGit2, FolderOpen, Terminal, Zap,
+    Check, ChevronLeft, ChevronRight, FolderGit2, FolderOpen,
     History, Loader2, TriangleAlert,
   } from "lucide-svelte";
 
@@ -85,31 +84,45 @@
     { id: "sonnet", label: "Sonnet", version: "4.6", effort: true,  maxEffort: "smart" },
     { id: "haiku",  label: "Haiku",  version: "4.5", effort: false, maxEffort: "none" },
   ];
-  const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === assistant.model));
-  // Same unified thinking dial as the composer (Off·Low·Medium·High·Max),
-  // truncated at the current model's effort ceiling — so onboarding speaks the
-  // exact same vocabulary as the live picker, not a parallel Instant/Quick set.
-  const dialStops = $derived.by(() => {
-    if (!currentModel?.effort) return [DIAL_STOPS[0]]; // Off-only (Haiku)
-    const capIdx = EFFORT_ORDER.indexOf(currentModel.maxEffort as ThinkingEffort);
-    return DIAL_STOPS.filter(
-      (s) => s.effort === null || (capIdx >= 0 && EFFORT_ORDER.indexOf(s.effort) <= capIdx),
-    );
-  });
-  const dialId = $derived(dialIdFor(assistant.thinkingEnabled, assistant.thinkingEffort));
-  function pickDial(s: (typeof DIAL_STOPS)[number]) {
-    if (s.effort === null) assistant.setThinkingDial(false);
-    else assistant.setThinkingDial(true, s.effort);
-  }
   function pickModel(m: ModelOpt) {
     assistant.setModel(m.id);
     // setModel already clamps the stored effort to the new model's ceiling.
   }
-  // The three modes a first-run user can reason about — plan/auto stay in the
-  // composer's full picker. Same source as the composer so labels never drift.
-  const PERM_OPTIONS = MODE_OPTIONS.filter((m) =>
-    m.id === "default" || m.id === "acceptEdits" || m.id === "bypassPermissions",
-  );
+
+  // ── Presets — collapse permission + thinking + git-trust into ONE first-run
+  // choice. A first-runner shouldn't have to reason about three orthogonal
+  // controls; power users retune any of them later from the composer/Settings.
+  // Each preset fans out to the same setters the granular controls used, so the
+  // stored state is identical to having picked them by hand.
+  type Preset = {
+    id: "cautious" | "balanced" | "fast";
+    label: string;
+    blurb: string;
+    perm: (typeof MODE_OPTIONS)[number]["id"];
+    thinking: { on: boolean; effort: ThinkingEffort };
+    trust: "readonly" | "standard";
+  };
+  const PRESETS: Preset[] = [
+    { id: "cautious", label: "Cautious", blurb: "Asks before every edit. Read-only git. Safest while you learn what Rift does.", perm: "default",           thinking: { on: true,  effort: "smart" }, trust: "readonly" },
+    { id: "balanced", label: "Balanced", blurb: "Edits files automatically, asks for anything riskier. Git commit/pull/push on. Recommended.", perm: "acceptEdits",       thinking: { on: true,  effort: "smart" }, trust: "standard" },
+    { id: "fast",     label: "Fast",     blurb: "Runs everything without prompts and replies instantly (no thinking step). Most autonomous.", perm: "bypassPermissions", thinking: { on: false, effort: "smart" }, trust: "standard" },
+  ];
+  // Reflect the live state back to a preset chip so the selection survives a
+  // back-nav (or a granular change made elsewhere) without a separate $state.
+  const activePreset = $derived.by(() => {
+    const p = PRESETS.find(
+      (x) =>
+        x.perm === assistant.permissionMode &&
+        x.thinking.on === assistant.thinkingEnabled &&
+        (x.trust === "readonly") === (assistant.trustLevel === "readonly"),
+    );
+    return p?.id ?? null;
+  });
+  function pickPreset(p: Preset) {
+    assistant.setPermissionMode(p.perm);
+    assistant.setThinkingDial(p.thinking.on, p.thinking.effort);
+    void assistant.setTrustLevel(p.trust);
+  }
 </script>
 
 <svelte:window onkeydown={onEscape} />
@@ -159,35 +172,21 @@
             <header class="ob-head">
               <span class="ob-eyebrow">Step 1 · Welcome</span>
               <h1 class="ob-title">Meet Rift</h1>
-              <p class="ob-sub">A local coding assistant powered by the <code>claude</code> CLI. It runs entirely on your machine — no remote connections, no sync.</p>
+              <p class="ob-sub">A local coding assistant powered by the <code>claude</code> CLI — it reads, searches, and edits your codebase entirely on your machine. No remote connections, no sync; your auth, your billing.</p>
             </header>
             <div class="ob-vlist">
               <div class="ob-vrow">
                 <span class="ob-vic"><FolderGit2 size={18} /></span>
                 <span class="ob-vbody">
-                  <span class="ob-vt">Workspace-scoped</span>
-                  <span class="ob-vp">Reads, searches, and edits your local codebase. Nothing leaves your machine.</span>
-                </span>
-              </div>
-              <div class="ob-vrow">
-                <span class="ob-vic"><Terminal size={18} /></span>
-                <span class="ob-vbody">
-                  <span class="ob-vt">Powered by the claude CLI</span>
-                  <span class="ob-vp">Spawns <code>claude</code> as a subprocess — your auth, your billing, your data.</span>
-                </span>
-              </div>
-              <div class="ob-vrow">
-                <span class="ob-vic"><Zap size={18} /></span>
-                <span class="ob-vbody">
-                  <span class="ob-vt">MCP tools built in</span>
-                  <span class="ob-vp"><code>read_file</code>, <code>list_dir</code>, <code>grep</code>, and local-git — exposed over stdio, no config.</span>
+                  <span class="ob-vt">Local &amp; private</span>
+                  <span class="ob-vp">Works in the folder you point it at — nothing leaves your machine. MCP tools (read, grep, local-git) built in, no config.</span>
                 </span>
               </div>
               <div class="ob-vrow">
                 <span class="ob-vic warn"><TriangleAlert size={18} /></span>
                 <span class="ob-vbody">
                   <span class="ob-vt">You're testing the beta</span>
-                  <span class="ob-vp">Pre-release software, and responses are AI-generated — they can be wrong or unsafe. Review changes before relying on them; keep your work backed up.</span>
+                  <span class="ob-vp">Pre-release, and replies are AI-generated — review changes before relying on them and keep your work backed up.</span>
                 </span>
               </div>
             </div>
@@ -253,7 +252,7 @@
                   </div>
                 </div>
               {/if}
-              <p class="ob-hint"><span>Or skip — you can open a folder anytime from the title bar.</span></p>
+              <p class="ob-hint"><span>Or skip — Rift works in a private scratch space until you pick a folder, and you can open one anytime from the title bar.</span></p>
             {/if}
           {:else}
             <ObStage kind="defaults" caption="tuned to you" />
@@ -280,48 +279,28 @@
                   {/each}
                 </div>
               </div>
-              {#if dialStops.length > 1}
-                <div class="ob-field">
-                  <span class="ob-flabel">Thinking</span>
-                  <div class="ob-seg" role="radiogroup" aria-label="Thinking">
-                    {#each dialStops as s (s.id)}
-                      <button
-                        type="button"
-                        class="ob-seg-btn"
-                        class:on={dialId === s.id}
-                        role="radio"
-                        aria-checked={dialId === s.id}
-                        title={s.hint}
-                        onclick={() => pickDial(s)}
-                      >{s.label}</button>
-                    {/each}
-                  </div>
-                </div>
-              {/if}
               <div class="ob-field">
-                <span class="ob-flabel">Permissions</span>
-                <div class="ob-seg" role="radiogroup" aria-label="Permission mode">
-                  {#each PERM_OPTIONS as m (m.id)}
+                <span class="ob-flabel">How should Rift work?</span>
+                <div class="ob-presets" role="radiogroup" aria-label="Working style preset">
+                  {#each PRESETS as p (p.id)}
                     <button
                       type="button"
-                      class="ob-seg-btn"
-                      class:on={assistant.permissionMode === m.id}
+                      class="ob-preset"
+                      class:on={activePreset === p.id}
                       role="radio"
-                      aria-checked={assistant.permissionMode === m.id}
-                      title={m.hint}
-                      onclick={() => assistant.setPermissionMode(m.id)}
-                    >{m.label}</button>
+                      aria-checked={activePreset === p.id}
+                      onclick={() => pickPreset(p)}
+                    >
+                      <span class="ob-preset-head">
+                        <span class="ob-preset-name">{p.label}</span>
+                        {#if p.id === "balanced"}<span class="ob-preset-rec">Recommended</span>{/if}
+                        {#if activePreset === p.id}<span class="ob-preset-check"><Check size={13} strokeWidth={3} /></span>{/if}
+                      </span>
+                      <span class="ob-preset-blurb">{p.blurb}</span>
+                    </button>
                   {/each}
                 </div>
-                <span class="ob-field-hint">Bypass runs tools and edits files without asking — pick "Ask before edits" to approve each change. Change anytime from the composer.</span>
-              </div>
-              <div class="ob-field">
-                <span class="ob-flabel">Git tools</span>
-                <div class="ob-seg" role="radiogroup" aria-label="Git tools trust level">
-                  <button type="button" class="ob-seg-btn" class:on={assistant.trustLevel === "readonly"} role="radio" aria-checked={assistant.trustLevel === "readonly"} onclick={() => void assistant.setTrustLevel("readonly")}>Read-only</button>
-                  <button type="button" class="ob-seg-btn" class:on={assistant.trustLevel !== "readonly"} role="radio" aria-checked={assistant.trustLevel !== "readonly"} onclick={() => void assistant.setTrustLevel("standard")}>Standard</button>
-                </div>
-                <span class="ob-field-hint">Read-only = status, diff, log. Standard adds commit, pull, and push.</span>
+                <span class="ob-field-hint">Fine-tune permissions, thinking, and git access anytime from the composer and Settings.</span>
               </div>
             </div>
           {/if}

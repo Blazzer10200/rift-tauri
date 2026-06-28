@@ -186,7 +186,7 @@
           {#if copiedNpm}<Check size={13} /> Copied{:else}<Copy size={13} /> Copy{/if}
         </button>
       </div>
-      <p class="ob-hint"><span>Rift detects either install automatically. After installing, <strong>relaunch Rift</strong> (or click Re-check) — PATH changes only take effect on restart. More options at <button type="button" class="ob-link" onclick={() => void openUrl(CLI_DOCS_URL).catch((e) => console.warn("openUrl failed", e))}>docs.claude.com/en/docs/claude-code</button>.</span></p>
+      <p class="ob-hint"><span>Rift detects either install automatically. After installing, click <strong>Re-check</strong> — or <strong>relaunch Rift</strong> if it's still not found (a fresh PATH only reaches Rift on restart; rarely a full sign-out is needed). More options at <button type="button" class="ob-link" onclick={() => void openUrl(CLI_DOCS_URL).catch((e) => console.warn("openUrl failed", e))}>docs.claude.com/en/docs/claude-code</button>.</span></p>
     </div>
   {:else if !connected}
     <div class="ob-input-row">
