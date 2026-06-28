@@ -11,6 +11,11 @@
   import { fmtAgo } from "./welcomeShared";
   import { tooltip } from "$lib/actions/tooltip";
 
+  // When embedded under a disclosure that already labels the section (the
+  // Workspace "What's new" strip), drop our own title row to avoid a stacked
+  // duplicate header — the refresh + "last checked" still ride a slim toolbar.
+  let { embedded = false }: { embedded?: boolean } = $props();
+
   // Tick once a minute so "Xm ago" stays fresh while the page is open.
   let now = $state(Date.now());
   $effect(() => {
@@ -81,8 +86,8 @@
 </script>
 
 <section class="news" aria-label="What's new in AI">
-  <div class="news-h">
-    <span class="news-title"><Newspaper size={13} /> What's new in AI</span>
+  <div class="news-h" class:embedded>
+    {#if !embedded}<span class="news-title"><Newspaper size={13} /> What's new in AI</span>{/if}
     <div class="news-h-r">
       {#if news.checkedAt}
         <span class="news-when" use:tooltip={"Last checked"}>{fmtAgo(news.checkedAt, now)}</span>

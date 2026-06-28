@@ -45,7 +45,6 @@ export type DayCell = {
 };
 
 const DAY_MS = 86_400_000;
-const MOBY_DICK_WORDS = 209_117; // Melville's Moby-Dick, a fun honest yardstick
 
 /** Local-midnight epoch-day index — stable integer per calendar day in the
  *  user's timezone, so consecutive days differ by exactly 1 (streak math). */
@@ -201,15 +200,14 @@ export function intensity(value: number, max: number): 0 | 1 | 2 | 3 | 4 {
   return 1;
 }
 
-/** One honest, self-deprecating-ish highlight line. Prefers the words/Moby-Dick
- *  gag (we count words for real), falls back to tool activity, else null. */
+/** One honest highlight line. Leads with the real words-exchanged figure (we
+ *  count words for real) + a plain per-session average, falls back to tool
+ *  activity, else null. */
 export function funFact(t: Totals): string | null {
   if (t.words >= 2000) {
-    const ratio = t.words / MOBY_DICK_WORDS;
-    const yard =
-      ratio >= 1 ? `about ${ratio < 10 ? ratio.toFixed(1) : Math.round(ratio)}× Moby-Dick`
-      : `about ${Math.max(1, Math.round(ratio * 100))}% of Moby-Dick`;
-    return `≈ ${fmtCompact(t.words)} words exchanged — ${yard}.`;
+    const perSession = t.sessions > 0 ? Math.round(t.words / t.sessions) : 0;
+    const avg = perSession > 0 ? ` · ~${fmtCompact(perSession)} per session` : "";
+    return `≈ ${fmtCompact(t.words)} words exchanged${avg}.`;
   }
   if (t.toolCalls > 0) {
     return `${fmtInt(t.toolCalls)} tool ${t.toolCalls === 1 ? "call" : "calls"} run across ${fmtInt(t.sessions)} ${t.sessions === 1 ? "session" : "sessions"}.`;

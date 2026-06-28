@@ -115,10 +115,10 @@ describe("intensity", () => {
 });
 
 describe("funFact", () => {
-  it("prefers the words/Moby-Dick line when there's enough text", () => {
+  it("prefers the words-exchanged line when there's enough text", () => {
     const f = funFact({ sessions: 5, messages: 100, userMessages: 50, toolCalls: 10, words: 500_000, cost: 5, activeDays: 4 });
-    expect(f).toContain("Moby-Dick");
-    expect(f).toContain("×");
+    expect(f).toContain("words exchanged");
+    expect(f).toContain("per session");
   });
   it("falls back to tool activity when words are sparse", () => {
     const f = funFact({ sessions: 3, messages: 20, userMessages: 10, toolCalls: 42, words: 10, cost: 1, activeDays: 2 });

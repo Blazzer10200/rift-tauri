@@ -571,6 +571,37 @@ class AssistantStore {
    *  single→split / sibling-swap / end-sentinel behavior. */
   dropTabIntoPane(tabId: string, paneIdx: number) { tabsDropTabIntoPane(this, tabId, paneIdx); }
 
+  /** Open a project (root folder) as a fresh chat in a specific pane, scoping
+   *  that pane to the project WITHOUT touching the global workspace root — the
+   *  mechanism behind "open project into a split pane". `paneIdx` beyond the
+   *  current panes (or `splitNew`) first grows the split (cap-aware) so two
+   *  projects can sit side-by-side from one gesture. Returns false if the split
+   *  couldn't grow (width/cap), in which case the project opens in the focused
+   *  pane instead. */
+  async openProjectInPane(root: string, opts?: { paneIdx?: number; splitNew?: boolean }): Promise<boolean> {
+    let targetIdx = opts?.paneIdx ?? this.focusedPaneIdx;
+    if (opts?.splitNew || targetIdx >= this.panes.length) {
+      // Want a NEW pane to the side — try to grow the split first.
+      const before = this.panes.length;
+      this.addPane();
+      const grew = this.panes.length > before;
+      // addPane focuses + (maybe) fills the new pane; we override its contents
+      // below with the project's own fresh tab. If it couldn't grow, fall back
+      // to the focused pane so the gesture still does something useful.
+      targetIdx = grew ? this.panes.length - 1 : this.focusedPaneIdx;
+      if (!grew) {
+        this.setFocusedPane(targetIdx);
+        await this.newTab();
+        await this.setTabRoot(this.currentConvoId, root);
+        return false;
+      }
+    }
+    this.setFocusedPane(targetIdx);
+    await this.newTab();
+    await this.setTabRoot(this.currentConvoId, root);
+    return true;
+  }
+
   /** Look up the TabState whose CLI session matches the event's session_id.
    *  Linear scan over open tabs is fine — typical user has <10. */
   private tabByCliSession(sid: string): TabState | null {
@@ -731,6 +762,11 @@ class AssistantStore {
   /** Set on tab dragstart so AssistantPane can render drop affordance.
    *  Cleared on dragend. Cross-component drag state. */
   draggingTabId = $state<string | null>(null);
+  /** Set on PROJECT-chip dragstart (sidebar rail / Workspace card) so panes
+   *  light up the same drop affordance as a tab drag. Holds the project's root
+   *  folder; the pane drop opens it as a fresh chat scoped to that root.
+   *  Mutually exclusive with draggingTabId in practice. */
+  draggingProjectRoot = $state<string | null>(null);
 
   // #143: currentCliSessionId / convoCreatedAt / convoTitle now live on
   // TabState. These getters/setters delegate to the active tab so existing

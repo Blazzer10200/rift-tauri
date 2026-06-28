@@ -261,7 +261,9 @@
   // the cursor is over from `e.clientX` so drop assigns to pane 0 (left) or
   // pane 1 (right). In split mode the whole pane is one zone tied to
   // `paneIdx`.
-  const dragging = $derived(assistant.draggingTabId);
+  const dragging = $derived(assistant.draggingTabId ?? assistant.draggingProjectRoot);
+  // Project drags get project-flavored drop labels ("Open here / Open → left").
+  const dragIsProject = $derived(assistant.draggingProjectRoot != null);
   let hoverHalf = $state<"left" | "right" | "full" | null>(null);
   let paneEl = $state<HTMLDivElement | undefined>();
 
@@ -315,9 +317,9 @@
   });
 
   function onPaneDragOver(e: DragEvent) {
-    // Always preventDefault when a tab is being dragged — without this on
-    // BOTH dragenter and dragover, Chromium shows the "no-drop" cursor.
-    if (!assistant.draggingTabId) return;
+    // Always preventDefault when a tab OR a project chip is being dragged —
+    // without this on BOTH dragenter and dragover, Chromium shows "no-drop".
+    if (!assistant.draggingTabId && !assistant.draggingProjectRoot) return;
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
     const next = computeHalf(e);
@@ -334,16 +336,24 @@
   }
 
   function onPaneDrop(e: DragEvent) {
-    if (!assistant.draggingTabId) return;
+    const tabDrag = assistant.draggingTabId;
+    const projRoot = assistant.draggingProjectRoot;
+    if (!tabDrag && !projRoot) return;
     e.preventDefault();
-    const id = assistant.draggingTabId;
     const half = computeHalf(e);
     hoverHalf = null;
-    if (!id) return;
     const targetPane: number = assistant.splitActive
       ? paneIdx
       : half === "left" ? 0 : 1;
-    assistant.dropTabIntoPane(id, targetPane);
+    if (projRoot) {
+      // Project chip → open it as a fresh chat in the dropped-on pane. In
+      // single-pane mode, dropping on the empty half grows the split; the
+      // store's openProjectInPane handles the cap-aware grow.
+      const splitNew = !assistant.splitActive && targetPane >= assistant.panes.length;
+      void assistant.openProjectInPane(projRoot, { paneIdx: targetPane, splitNew });
+      return;
+    }
+    if (tabDrag) assistant.dropTabIntoPane(tabDrag, targetPane);
   }
 </script>
 
@@ -580,14 +590,14 @@
   {#if dragging}
     {#if assistant.splitActive}
       <div class="drop-zone full" class:hover={hoverHalf === "full"} aria-hidden="true">
-        <span class="drop-label">Drop in pane {paneIdx + 1}</span>
+        <span class="drop-label">{dragIsProject ? "Open here" : "Drop in pane"} {paneIdx + 1}</span>
       </div>
     {:else}
       <div class="drop-zone half left" class:hover={hoverHalf === "left"} aria-hidden="true">
-        <span class="drop-label">Split → left</span>
+        <span class="drop-label">{dragIsProject ? "Open" : "Split"} → left</span>
       </div>
       <div class="drop-zone half right" class:hover={hoverHalf === "right"} aria-hidden="true">
-        <span class="drop-label">Split → right</span>
+        <span class="drop-label">{dragIsProject ? "Open" : "Split"} → right</span>
       </div>
     {/if}
   {/if}

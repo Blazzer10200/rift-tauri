@@ -6,6 +6,7 @@
   import { WORKSPACES } from "../workspaces";
   import RiftLogo from "./RiftLogo.svelte";
   import ConversationList from "./ConversationList.svelte";
+  import ProjectRail from "./ProjectRail.svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import { goHome } from "$lib/state/nav";
 
@@ -93,6 +94,8 @@
         </button>
       {/each}
     </nav>
+
+    <ProjectRail />
 
     <div class="side-sec">
       <ConversationList />

@@ -5,6 +5,7 @@
     FolderOpen, Plus, Trash2, Check, X, Pencil,
     ArrowRight, Filter, FolderGit2, GitBranch, Folder, MessageSquare,
     Sparkles, History, Activity as ActivityIcon, Loader2, Flame, Cpu, Wrench, DollarSign,
+    Newspaper, ChevronDown, SplitSquareHorizontal,
   } from "lucide-svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import NewsFeed from "./NewsFeed.svelte";
@@ -16,6 +17,7 @@
   } from "../home/statsHelpers";
   import { projects, projectRootKey } from "../../state/projects.svelte";
   import { assistant } from "../../state/assistant.svelte";
+  import { workspace } from "../../state/workspace.svelte";
   import { goHome } from "../../state/nav";
   import { prettyPath, leafName, shortPath } from "../shell/tabsbar/helpers";
   import { notify } from "../../state/toast.svelte";
@@ -37,6 +39,18 @@
     return () => clearInterval(t);
   });
   const greet = $derived(greeting(nowHour));
+
+  // "What's new in AI" is reference content, not a launch target — it rides as a
+  // collapsible strip below Projects (collapsed by default) so Projects owns the
+  // width. Open-state persists so a user who wants it open keeps it open.
+  const NEWS_OPEN_KEY = "rift.workspace.newsOpen";
+  let newsOpen = $state(
+    (() => { try { return localStorage.getItem(NEWS_OPEN_KEY) === "1"; } catch { return false; } })(),
+  );
+  function toggleNews() {
+    newsOpen = !newsOpen;
+    try { localStorage.setItem(NEWS_OPEN_KEY, newsOpen ? "1" : "0"); } catch { /* private mode */ }
+  }
 
   // ── Inline Activity stats (was the StatsPanel modal — now lives on the page) ──
   let statsRaw = $state<ConvoStat[]>([]);
@@ -209,6 +223,15 @@
     projects.setActiveId(p.id);
     await assistant.setRoot(p.root);
     goHome();
+  }
+
+  // Open a project beside the current chat in a fresh split pane (no global root
+  // mutation — the pane scopes itself). Switches to the chat surface so the
+  // panes are visible. Same primitive the sidebar rail + pane drop use.
+  async function openInSplit(p: Project) {
+    workspace.setActive("chat");
+    projects.setActiveId(p.id);
+    await assistant.openProjectInPane(p.root, { splitNew: true });
   }
 
   // ── Project card helpers ─────────────────────────────────────────────────────
@@ -435,7 +458,7 @@
         {/if}
       </section>
 
-      <!-- ── Row 2: Projects · What's new in AI ───────────────────────────────── -->
+      <!-- ── Row 2: Projects (full-width hero) · What's new strip ─────────────── -->
       <div class="dash">
 
         <!-- ── Workspace (projects) ─────────────────────────────────────────── -->
@@ -488,6 +511,11 @@
                   <button class="hero-edit" type="button" onclick={() => startEdit(p)} use:tooltip={"Edit project"}>
                     <Pencil size={13} />
                   </button>
+                  {#if assistant.canAddPane}
+                    <button class="hero-split" type="button" onclick={() => openInSplit(p)} use:tooltip={"Open in a new split pane"}>
+                      <SplitSquareHorizontal size={14} /> Split
+                    </button>
+                  {/if}
                   <button class="hero-open" type="button" onclick={() => goHome()}>
                     Continue <ArrowRight size={14} />
                   </button>
@@ -502,19 +530,25 @@
                 {#each otherProjects as p (p.id)}
                   <div class="gcard" role="button" tabindex="0" onclick={() => openProject(p)}
                     onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openProject(p); } }}>
-                    <div class="gcard-top">
-                      <span class="gcard-mono">{monogram(p.name)}</span>
-                      <span class="gcard-go" aria-hidden="true"><ArrowRight size={14} /></span>
+                    <span class="gcard-mono">{monogram(p.name)}</span>
+                    <div class="gcard-id">
+                      <div class="gcard-name">{p.name}</div>
+                      <div class="gcard-meta">
+                        <span class="gcard-path mono" use:tooltip={prettyPath(p.root)}>{shortPath(p.root)}</span>
+                        <span class="scope-chip sm"><Filter size={10} /> {scopeLabel(p)}</span>
+                      </div>
                     </div>
-                    <div class="gcard-name">{p.name}</div>
-                    <div class="gcard-path mono" use:tooltip={prettyPath(p.root)}>{shortPath(p.root)}</div>
-                    <div class="gcard-foot">
-                      <span class="scope-chip sm"><Filter size={10} /> {scopeLabel(p)}</span>
-                      <button class="gcard-edit" type="button"
-                        onclick={(e) => { e.stopPropagation(); startEdit(p); }} use:tooltip={"Edit"} aria-label="Edit project">
-                        <Pencil size={12} />
+                    {#if assistant.canAddPane}
+                      <button class="gcard-split" type="button"
+                        onclick={(e) => { e.stopPropagation(); openInSplit(p); }} use:tooltip={"Open in split"} aria-label="Open in split pane">
+                        <SplitSquareHorizontal size={13} />
                       </button>
-                    </div>
+                    {/if}
+                    <button class="gcard-edit" type="button"
+                      onclick={(e) => { e.stopPropagation(); startEdit(p); }} use:tooltip={"Edit"} aria-label="Edit project">
+                      <Pencil size={12} />
+                    </button>
+                    <span class="gcard-go" aria-hidden="true"><ArrowRight size={15} /></span>
                   </div>
                 {/each}
               </div>
@@ -546,12 +580,25 @@
           {/if}
         </section>
 
-        <!-- ── What's new in AI (right column) ───────────────────────────────── -->
-        <aside class="news-col">
-          <NewsFeed />
-        </aside>
-
       </div>
+
+      <!-- ── What's new in AI — full-width collapsible strip below Projects.
+           Reference content, not a launch target, so it sits collapsed by
+           default behind a disclosure and expands inline on demand. ─────────── -->
+      <section class="news-strip" class:open={newsOpen}>
+        <button class="news-strip-h" type="button" onclick={toggleNews}
+          aria-expanded={newsOpen} aria-controls="ws-news-body">
+          <span class="nsh-ic"><Newspaper size={14} /></span>
+          <span class="nsh-tx">What's new in AI</span>
+          {#if !newsOpen}<span class="nsh-hint">Claude Code releases &amp; this week in AI</span>{/if}
+          <ChevronDown size={16} class={"nsh-chev" + (newsOpen ? " open" : "")} />
+        </button>
+        {#if newsOpen}
+          <div class="news-strip-body" id="ws-news-body">
+            <NewsFeed embedded />
+          </div>
+        {/if}
+      </section>
 
     </div>
   </div>
@@ -560,11 +607,10 @@
 <style>
   .sb-main { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
   .sb-scroll { flex: 1; min-height: 0; overflow-y: auto; }
-  /* Fill the scroll viewport so the dashboard fits one screen: head + act-band
-     stay fixed, .dash absorbs the remainder and scrolls per-column. height:100%
-     caps the wrap to the viewport so .dash (flex:1; min-height:0) is bounded and
-     its columns scroll internally rather than pushing a page scrollbar. */
-  .sb-wrap { max-width: 1200px; height: 100%; margin: 0 auto; padding: 20px 40px 20px; display: flex; flex-direction: column; gap: 14px; }
+  /* The page owns ONE scroll (the .sb-scroll viewport). Header → Activity band →
+     Projects → News strip flow at natural height and the page scrolls as a whole
+     — no nested per-column scroll regions (that was the twin-scroll-wheel). */
+  .sb-wrap { max-width: 1200px; margin: 0 auto; padding: 18px 40px 18px; display: flex; flex-direction: column; gap: 12px; }
 
   /* ── Header ─────────────────────────────────────────────────────────────── */
   .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
@@ -615,9 +661,9 @@
   /* head + act-band hold their natural height; .dash takes the rest (below). */
   .head, .act-band { flex: none; }
   .act-band { min-width: 0; }
-  .act-card { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 22px;
-    padding: 18px 20px; border-radius: var(--radius-2xl); border: 1px solid var(--border); background: var(--bg-elev-1); }
-  .act-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .act-card { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 20px;
+    padding: 15px 18px; border-radius: var(--radius-2xl); border: 1px solid var(--border); background: var(--bg-elev-1); }
+  .act-main { display: flex; flex-direction: column; gap: 13px; min-width: 0; }
   /* The chart flexes to fill the band's height (matched to the side column's
      stat-grid + mix), so there's no dead vertical void beside the tiles. */
   .act-main .chart { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
@@ -634,16 +680,11 @@
     border: 1px solid var(--border); background: var(--bg-elev-1); }
   .act-state.err { color: var(--danger); }
 
-  /* ── Row 2 — Projects · News (two balanced columns) ────────────────────── */
-  /* .dash absorbs the leftover height; each column scrolls internally so the
-     page itself never scrolls (the unwanted page scrollbar fix). align-items
-     stretch lets both columns claim full row height for their inner scroll. */
-  .dash { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 28px; align-items: stretch; }
-  @media (max-width: 1080px) { .dash { grid-template-columns: minmax(0, 1fr); gap: 24px; } }
-  .col, .news-col { min-width: 0; min-height: 0; overflow-y: auto; }
-  /* breathing room so the last card isn't flush against the scroll edge */
-  .col, .news-col { padding-bottom: 4px; }
+  /* ── Row 2 — Projects (full-width hero) ─────────────────────────────────── */
+  /* Projects is the launch target, so it owns the full width and flows at its
+     natural height. No internal scroll — the page scrolls as a whole. */
+  .dash { display: flex; flex-direction: column; }
+  .col { min-width: 0; }
 
   .hero { display: flex; flex-direction: column; gap: 5px; }
   .hero-num { display: flex; align-items: baseline; gap: 10px; }
@@ -776,7 +817,7 @@
   .empty .save-btn { margin-top: 4px; }
 
   /* ── Hero card — the active project, framed + primary ───────────────────── */
-  .hero-card { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 13px; padding: 15px 16px; margin-bottom: 12px;
+  .hero-card { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 11px; padding: 13px 15px; margin-bottom: 8px;
     border-radius: var(--radius-2xl); border: 1px solid color-mix(in oklab, var(--accent) 34%, var(--border));
     background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 7%, var(--bg-elev-1)), var(--bg-elev-1) 70%);
     box-shadow: 0 14px 36px -22px color-mix(in oklab, var(--accent) 60%, transparent); }
@@ -808,6 +849,15 @@
     transition: filter var(--dur-fast), transform var(--dur-fast); }
   .hero-open:hover { filter: brightness(1.08); }
   .hero-open:active { transform: translateY(1px); }
+  /* Secondary action — open the project in a fresh split pane. Ghost/soft so
+     Continue stays the primary. The edit pencil keeps margin-left:auto, so this
+     + Continue ride the same right-aligned cluster. */
+  .hero-split { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; flex: none; border-radius: var(--radius-lg);
+    border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 3%, transparent); color: var(--fg-2);
+    font-size: var(--fs-sm); font-weight: 580; transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast); }
+  .hero-split :global(svg) { color: var(--fg-faint); transition: color var(--dur-fast); }
+  .hero-split:hover { background: var(--surface-hover); border-color: var(--border-strong); color: var(--fg); }
+  .hero-split:hover :global(svg) { color: var(--accent); }
 
   /* Shared scope chip — used by hero + grid cards. */
   .scope-chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; border-radius: 999px;
@@ -816,35 +866,42 @@
   .scope-chip.sm { height: 20px; padding: 0 8px; font-size: 10.5px; }
   .scope-chip :global(svg) { color: var(--fg-faint); flex: none; }
 
-  /* ── Other projects — 2-up grid of compact, clickable cards ─────────────── */
-  .proj-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  /* ── Other projects — compact horizontal rows (was tall stacked cards) ──────
+     Each project is one slim row (mono · name+path · edit · go) so the whole
+     block stays short and the page fits with no scroll. Auto-fills 2-up on a
+     wide window, 1-up when narrow. */
+  .proj-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 8px; }
   .proj-grid.solo { grid-template-columns: minmax(0, 1fr); }
-  @media (max-width: 560px) { .proj-grid { grid-template-columns: minmax(0, 1fr); } }
-  .gcard { display: flex; flex-direction: column; gap: 7px; padding: 12px 13px; text-align: left; cursor: pointer; font: inherit;
+  @media (max-width: 680px) { .proj-grid { grid-template-columns: minmax(0, 1fr); } }
+  .gcard { display: flex; align-items: center; gap: 11px; padding: 9px 11px; text-align: left; cursor: pointer; font: inherit; min-width: 0;
     border-radius: var(--radius-xl); border: 1px solid var(--border); background: var(--bg-elev-1);
     transition: border-color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast), background var(--dur-fast); }
   .gcard:hover { border-color: var(--border-strong); background: var(--bg-elev-2);
-    box-shadow: 0 10px 24px -18px color-mix(in oklab, var(--fg) 40%, transparent); transform: translateY(-2px); }
-  .gcard-top { display: flex; align-items: center; justify-content: space-between; }
-  .gcard-mono { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: var(--radius);
+    box-shadow: 0 8px 20px -16px color-mix(in oklab, var(--fg) 40%, transparent); transform: translateY(-1px); }
+  .gcard-mono { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: var(--radius);
     font-size: 13px; font-weight: 700; color: var(--accent);
     background: var(--accent-soft);
     box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 30%, transparent); }
-  .gcard-go { display: grid; place-items: center; color: var(--fg-faint); opacity: 0; transform: translateX(-4px);
+  .gcard-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .gcard-name { font-size: var(--fs-md); font-weight: 640; letter-spacing: -0.01em; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gcard-meta { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .gcard-path { font-size: var(--fs-xs); color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .gcard-meta .scope-chip.sm { flex: none; }
+  .gcard-go { flex: none; display: grid; place-items: center; color: var(--fg-faint); opacity: 0; transform: translateX(-4px);
     transition: opacity var(--dur-fast), transform var(--dur-fast), color var(--dur-fast); }
   .gcard:hover .gcard-go { opacity: 1; transform: translateX(0); color: var(--accent); }
-  .gcard-name { font-size: var(--fs-md); font-weight: 640; letter-spacing: -0.01em; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .gcard-path { font-size: var(--fs-xs); color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .gcard-foot { display: flex; align-items: center; gap: 6px; margin-top: 2px; }
-  .gcard-edit { width: 24px; height: 24px; flex: none; margin-left: auto; display: grid; place-items: center; border-radius: 6px;
+  .gcard-edit, .gcard-split { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 6px;
     color: var(--fg-faint); opacity: 0; transition: opacity var(--dur-fast), background var(--dur-fast), color var(--dur-fast); }
-  .gcard:hover .gcard-edit { opacity: 1; }
+  .gcard:hover .gcard-edit, .gcard:hover .gcard-split { opacity: 1; }
   .gcard-edit:hover { background: var(--surface-hover); color: var(--fg); }
+  .gcard-split:hover { background: var(--surface-hover); color: var(--accent); }
 
   /* ── Add-a-project zone — unified adopt tiles ───────────────────────────── */
-  .add-zone { width: 100%; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
-  .add-zone-h { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-faint); margin: 0 2px 10px; }
-  .add-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .add-zone { width: 100%; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .add-zone-h { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-faint); margin: 0 2px 9px; }
+  /* Auto-fill so recent folders flow into one wide row at fullscreen instead of
+     stacking into 2 rows — keeps the block short. */
+  .add-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
   @media (max-width: 560px) { .add-list { grid-template-columns: minmax(0, 1fr); } }
   .add-tile { display: flex; align-items: center; gap: 10px; padding: 9px 11px; text-align: left; cursor: pointer; font: inherit; min-width: 0;
     border-radius: var(--radius-lg); border: 1px dashed var(--border-strong); background: color-mix(in oklab, var(--fg) 2%, transparent);
@@ -859,6 +916,22 @@
   .add-tx { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
   .add-tx b { font-size: var(--fs-sm); font-weight: 620; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .add-tx small { font-size: 10.5px; color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* ── What's new strip — collapsible disclosure below Projects ───────────── */
+  .news-strip { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
+  .news-strip-h { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; cursor: pointer; font: inherit; text-align: left;
+    border-radius: var(--radius-xl); border: 1px solid var(--border); background: var(--bg-elev-1);
+    transition: border-color var(--dur-fast), background var(--dur-fast); }
+  .news-strip-h:hover { border-color: var(--border-strong); background: var(--surface-hover); }
+  .news-strip.open .news-strip-h { background: color-mix(in oklab, var(--fg) 2.5%, transparent); }
+  .nsh-ic { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: var(--radius);
+    background: var(--accent-soft); color: var(--accent); }
+  .nsh-tx { font-size: var(--fs-md); font-weight: 620; color: var(--fg); flex: none; }
+  .nsh-hint { font-size: var(--fs-sm); color: var(--fg-subtle); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .news-strip-h :global(.nsh-chev) { margin-left: auto; flex: none; color: var(--fg-faint); transition: transform var(--dur-fast), color var(--dur-fast); }
+  .news-strip-h:hover :global(.nsh-chev) { color: var(--fg-2); }
+  .news-strip-h :global(.nsh-chev.open) { transform: rotate(180deg); }
+  .news-strip-body { padding: 10px 2px 2px; }
 
   .mono { font-family: var(--font-mono); }
 </style>

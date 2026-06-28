@@ -12,6 +12,7 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 import { invoke } from "@tauri-apps/api/core";
 import { assistant } from "./assistant.svelte.js";
 import { recordTurnUsage } from "./assistant/streaming.js";
+import { shell } from "./shell.svelte.js";
 
 // Minimal turn record. TurnRecord is a private type so we build a structural
 // stand-in and cast — the accumulator only reads the fields below.
@@ -87,8 +88,10 @@ const stubTurn = (overrides: Partial<StubTurn>): StubTurn => ({
 });
 
 describe("assistant.ctxWindowFor()", () => {
-  it("defaults to 200K when no tab passed", () => {
-    expect(assistant.ctxWindowFor(null)).toBe(200_000);
+  it("defaults to the plan cap (1M on default max plan) when no tab passed", () => {
+    // cont.229b plan-aware window: with no tab/model the window falls through to
+    // planCap, which defaults to max=1M (was a hardcoded 200K pre-plan-arc).
+    expect(assistant.ctxWindowFor(null)).toBe(1_000_000);
   });
 
   it("returns 200K for haiku models", () => {
@@ -481,6 +484,54 @@ describe("drag a tab onto a pane half enters split (single-pane)", () => {
 
     expect(assistant.splitActive).toBe(true);
     expect(assistant.panes.map((p) => p.tabId)).toEqual([null, "solo"]);
+  });
+});
+
+describe("openProjectInPane — open a project into a (split) pane", () => {
+  const invokeMock = vi.mocked(invoke);
+
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockImplementation(async (cmd: string, args?: any) => {
+      // setTabRoot canonicalizes via the backend → echo the path back.
+      if (cmd === "assistant_set_tab_root") return args.path;
+      if (cmd === "assistant_set_root") return { current: args.path, recent: [] };
+      if (cmd === "assistant_list_recent_roots") return { current: null, recent: [] };
+      return undefined;
+    });
+    assistant.panes = [{ tabId: null }];
+    assistant.focusedPaneIdx = 0;
+    assistant.openTabs = [];
+    assistant.currentConvoId = null;
+    // Headless env reports width-for-1-pane; this suite tests routing, not the
+    // width-fit guard — let the split grow up to MAX.
+    vi.spyOn(shell, "maxPanesForWidth").mockReturnValue(4);
+  });
+
+  it("splitNew grows the split and scopes the new pane's tab to the project root (no global mutation)", async () => {
+    const grew = await assistant.openProjectInPane("C:/proj/alpha", { splitNew: true });
+
+    expect(grew).toBe(true);
+    expect(assistant.splitActive).toBe(true);
+    // Focus + new tab landed in the freshly-added (last) pane.
+    expect(assistant.focusedPaneIdx).toBe(assistant.panes.length - 1);
+    const tabId = assistant.currentConvoId!;
+    expect(assistant.tabFor(tabId)!.workspaceRoot).toBe("C:/proj/alpha");
+    // Scopes via per-tab root (assistant_set_tab_root), NOT the global root —
+    // assistant_set_root must never fire.
+    expect(invokeMock).toHaveBeenCalledWith("assistant_set_tab_root", { path: "C:/proj/alpha" });
+    expect(invokeMock).not.toHaveBeenCalledWith("assistant_set_root", expect.anything());
+  });
+
+  it("paneIdx beyond current panes auto-grows; falls back to focused pane when split can't grow", async () => {
+    // Fill to MAX so addPane can't grow → returns false, opens in focused pane.
+    assistant.panes = [{ tabId: null }, { tabId: null }, { tabId: null }, { tabId: null }];
+    assistant.focusedPaneIdx = 1;
+    const grew = await assistant.openProjectInPane("C:/proj/beta", { splitNew: true });
+
+    expect(grew).toBe(false);
+    expect(assistant.focusedPaneIdx).toBe(1);
+    expect(assistant.tabFor(assistant.currentConvoId!)!.workspaceRoot).toBe("C:/proj/beta");
   });
 });
 
