@@ -9,8 +9,10 @@
 //
 // Design (docs/design/warm-cli-process.md "DECIDED ARCHITECTURE"):
 //  - ONE spare per call, keyed to the current picker signature.
-//  - fires only for a FRESH tab (no convo started) WITH a workspace root —
-//    a no-root chat is tool-less + conversational (low latency stakes) and a
+//  - fires only for a FRESH tab (no convo started) WITH a warm-target root —
+//    the tab's folder OR the local scratch dir (local mode now runs full tools,
+//    so it pays the same hook tax and benefits from pre-warming). Only an
+//    API-key/sandboxed no-folder chat (tool-less + conversational) is skipped; a
 //    started convo already has/had its warm child.
 //  - debounced; deduped per (sessionId, signature) so a reactive re-tick or a
 //    settled picker doesn't re-spawn. A signature change re-arms (the old spare
@@ -57,10 +59,13 @@ export function requestPrewarm(store: AssistantStore): void {
   if (tab.convoCreatedAt || tab.streaming) return;
   const sessionId = tab.cliSessionId;
   if (!sessionId) return;
-  // Require a workspace root: a no-root chat runs tool-less + conversational
-  // (the latency that bothered the user is the tool-using, full-config path),
-  // and pre-warming it would still pay the hook tax for little felt gain.
-  const root = store.effectiveRoot(tab);
+  // Resolve the warm-target root: the tab's folder, else the local scratch dir
+  // (`%LOCALAPPDATA%\Rift\local`) when in local mode — the backend keys the
+  // no-folder OAuth turn's SpawnKey on that same scratch path, so warming it
+  // makes the first real turn a warm hit instead of a cold spawn. Only the truly
+  // root-less + scratch-less case (API-key/sandboxed no-folder) bails: there the
+  // turn runs tool-less + conversational and pre-warming buys little.
+  const root = store.effectiveRoot(tab) ?? store.localScratchPath;
   if (!root) return;
   // Auth gate: a logged-out user can't spawn a usable child (the backend turn
   // would error) — don't burn a spawn. Mirrors send()'s auth chokepoint.
@@ -76,7 +81,7 @@ export function requestPrewarm(store: AssistantStore): void {
     // switched tabs, or changed the picker during the debounce window.
     const t = store.activeTab;
     if (!t || t.cliSessionId !== sessionId || t.convoCreatedAt || t.streaming) return;
-    if (store.effectiveRoot(t) !== root) return;
+    if ((store.effectiveRoot(t) ?? store.localScratchPath) !== root) return;
     if (signatureOf(store, sessionId, root) !== sig) return;
     lastFiredKey = sig;
     void invoke("assistant_prewarm", {

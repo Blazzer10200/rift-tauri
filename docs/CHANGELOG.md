@@ -2,6 +2,20 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## Unreleased — Just start chatting (work-locally mode)
+
+> Built cont.224 (2026-06-28), awaiting `/git-ship`. No version bump yet.
+
+### What you'll notice
+- **No project folder? Just type.** Open Rift without picking a folder and you can still ask the assistant to read, write, edit, and run things — it works in a private scratch workspace (`%LOCALAPPDATA%\Rift\local`) instead of being stuck in a tool-less, chat-only mode. A small **"Local"** badge (and the status-bar) show the mode; click it any time to open a real project and switch over.
+- **The empty-chat screen explains it.** With no folder open you get a "Working locally" card (instead of the old cold welcome) that says what's happening and keeps the "Open a project folder" action + your recent folders one click away.
+
+### Under the hood
+- Scratch path is **backend-resolved** (`local_scratch_dir()` in Rust, `create_dir_all`'d so it self-heals) — never renderer-supplied, so there's no path-injection surface. The renderer learns it via one read-only command (`assistant_local_scratch_path`) purely for the badge.
+- The change is one branch in turn.rs root-resolution: a no-folder OAuth turn now resolves to the scratch dir, which makes the existing MCP-config + full-tools + workspace-`cwd` path apply automatically. **Gated to the standard OAuth path** — API-key, local-LLM, and sandboxed/prompting branches keep their existing `--tools ""` conversational behavior (ISSUES #47), unchanged.
+- Pre-warming now warms the scratch-dir session too, so the first local turn is a warm hit, not a cold spawn.
+- **Verified.** svelte-check clean (4134), 2 new Rust unit tests + 116 existing pass, cargo check clean, and the full flow confirmed live: a no-folder chat wrote `test.txt` into the scratch dir and reported back its absolute path (`Applied 1 file`, zero console errors); badge + status-bar + real-folder override all confirmed.
+
 ## v0.65.0 — One dial, one queue, no surprises
 
 > A simplify pass on the three things you touch every turn: choosing a model, how much the assistant thinks, and what happens when you type while it's busy. Each was quietly over-built; each is now one clear control.

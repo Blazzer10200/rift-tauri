@@ -19,6 +19,7 @@ type WorkspaceHost = {
   workspaceFiles: string[];
   workspaceFilesLoadingFor: string | null;
   workspaceBranch: string | null;
+  localScratchPath: string | null;
   lastError: string | null;
   applyWorkspacePrefs: () => void;
   // Per-tab root surface (split-pane): the @-mention walk + branch probe scope
@@ -34,6 +35,15 @@ export async function refreshWorkspace(host: WorkspaceHost): Promise<void> {
     host.applyWorkspacePrefs();
   } catch (e) {
     console.warn("assistant_get_workspace failed", e);
+  }
+  // Resolve the persistent scratch path once for the "Local" badge. Best-effort:
+  // null leaves no-folder turns in the legacy no-tools mode (badge just hides).
+  if (host.localScratchPath === null) {
+    try {
+      host.localScratchPath = await invoke<string | null>("assistant_local_scratch_path");
+    } catch (e) {
+      console.warn("assistant_local_scratch_path failed", e);
+    }
   }
 }
 

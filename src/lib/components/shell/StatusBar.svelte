@@ -6,9 +6,13 @@
   import { onMount } from "svelte";
 
   const connected = $derived(!!(assistant.auth?.loggedIn || assistant.hasApiKey));
-  const repoName = $derived(
-    (assistant.activeRoot ?? "").replace(/[/\\]+$/, "").split(/[/\\]/).pop() || "No folder",
-  );
+  const repoName = $derived.by(() => {
+    const leaf = (assistant.activeRoot ?? "").replace(/[/\\]+$/, "").split(/[/\\]/).pop();
+    if (leaf) return leaf;
+    // No folder open — distinguish local-scratch mode (full tools in the scratch
+    // workspace) from the truly tool-less state, matching the pane "Local" badge.
+    return assistant.isLocalMode ? "Local" : "No folder";
+  });
 
   const today = new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 

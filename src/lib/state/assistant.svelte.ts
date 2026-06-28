@@ -514,6 +514,14 @@ class AssistantStore {
     return this.effectiveRoot(this.activeTab);
   }
 
+  /** No project folder open, but the backend scratch workspace is available →
+   *  turns silently run in `%LOCALAPPDATA%\Rift\local` with the full tool set.
+   *  Drives the "Local" badge + welcome card. `effectiveRoot` stays null in this
+   *  mode (the backend fills the scratch dir per turn). */
+  get isLocalMode(): boolean {
+    return !this.workspace.current && !!this.localScratchPath;
+  }
+
   get splitActive(): boolean {
     return this.panes.length > 1;
   }
@@ -627,6 +635,10 @@ class AssistantStore {
    *  Gates the cold "no folder" welcome so it never flashes for a frame before
    *  the rehydrated root lands (same pattern as `configLoaded`). */
   workspaceReady = $state<boolean>(false);
+  /** Backend-resolved persistent scratch workspace (`%LOCALAPPDATA%\Rift\local`).
+   *  Populated once by `refreshWorkspace()`; drives the "Local" badge only — the
+   *  backend re-resolves the real path per turn (never renderer-supplied). */
+  localScratchPath = $state<string | null>(null);
 
   // Cached relative file paths under the workspace root, populated on first
   // `@` trigger and re-loaded whenever the workspace root changes. Drives the

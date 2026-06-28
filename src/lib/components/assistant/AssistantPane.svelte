@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { ChevronDown, ChevronUp, Plus, X, MessageSquarePlus, ChevronRight, FolderOpen } from "lucide-svelte";
+  import { ChevronDown, ChevronUp, Plus, X, MessageSquarePlus, ChevronRight, FolderOpen, HardDrive } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { workspace } from "../../state/workspace.svelte";
   import MessageBubble from "./MessageBubble.svelte";
@@ -377,15 +377,21 @@
       <span class="pane-label" use:tooltip={`Pane ${paneIdx + 1} of ${assistant.panes.length}`}>{paneIdx + 1}</span>
       <span class="pane-head-title" use:tooltip={paneTitle}>{paneTitle}</span>
       {#if tabId && tab}
+        {@const localMode = !paneFolder && assistant.isLocalMode}
         <button
           class="pane-folder"
+          class:local-mode={localMode}
           type="button"
-          use:tooltip={paneRoot ? `Project: ${paneRoot}\nClick to change this pane's folder` : "Set this pane's project folder"}
-          aria-label="Change pane folder"
+          use:tooltip={paneRoot
+            ? `Project: ${paneRoot}\nClick to change this pane's folder`
+            : localMode
+              ? `Working locally — turns run in ${assistant.localScratchPath}\nClick to open a project folder`
+              : "Set this pane's project folder"}
+          aria-label={localMode ? "Working locally — click to open a project folder" : "Change pane folder"}
           onclick={onPickPaneFolder}
         >
-          <FolderOpen size={11}/>
-          <span class="pane-folder-name">{paneFolder ?? "No folder"}</span>
+          {#if localMode}<HardDrive size={11}/>{:else}<FolderOpen size={11}/>{/if}
+          <span class="pane-folder-name">{paneFolder ?? (localMode ? "Local" : "No folder")}</span>
         </button>
       {/if}
       {#if streaming}
@@ -699,6 +705,14 @@
     border-color: color-mix(in oklab, var(--accent) 35%, var(--border));
     background: color-mix(in oklab, var(--accent) 8%, var(--bg-elev-2));
   }
+  /* Local-scratch mode — a faint accent tint so the badge reads as an active
+     mode (clickable to switch to a real folder), not an error/empty state. */
+  .pane-folder.local-mode {
+    color: color-mix(in oklab, var(--accent) 55%, var(--fg-muted));
+    border-color: color-mix(in oklab, var(--accent) 28%, var(--border));
+    background: color-mix(in oklab, var(--accent) 7%, var(--bg-elev-2));
+  }
+  .pane-folder.local-mode :global(svg) { opacity: 0.95; }
   .pane-ctx-bar {
     width: 28px; height: 3px;
     background: var(--bg-elev-3, var(--border));

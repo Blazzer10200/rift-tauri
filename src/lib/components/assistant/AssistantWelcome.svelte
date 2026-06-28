@@ -1,6 +1,6 @@
 <script lang="ts">
   import {
-    Sparkles, FolderOpen,
+    Sparkles, FolderOpen, HardDrive,
     X, Folder, FolderGit2, GitBranch, ChevronRight, ChevronDown,
     Compass, MessageSquare, Shield, Zap, BarChart3,
   } from "lucide-svelte";
@@ -158,12 +158,23 @@
   {:else}
     <!-- No folder open — branded welcome: viewfinder open-folder target, recents, orientation primer. -->
     <div class="wel-inner welcome-cold">
-      <!-- Hero — logo over a soft accent aura + a vertical "rift" seam of light. -->
-      <div class="welcome-hero">
-        <div class="welcome-mark"><RiftLogo size={32} /></div>
-        <h1 class="welcome-title">Welcome to Rift</h1>
-        <p class="welcome-tag">{RIFT_TAGLINE}</p>
-      </div>
+      {#if assistant.isLocalMode}
+        <!-- Local scratch active — no project folder, but turns run with full
+             tools in %LOCALAPPDATA%\Rift\local. The "Open a project" CTA + recents
+             below let the user switch to a real repo whenever they want. -->
+        <div class="welcome-hero local-hero">
+          <div class="welcome-mark local-mark"><HardDrive size={28} /></div>
+          <h1 class="welcome-title">Working locally</h1>
+          <p class="welcome-tag">No project folder — just start chatting. The assistant reads, writes, and runs in a private scratch workspace. Open a folder below to switch to a real project.</p>
+        </div>
+      {:else}
+        <!-- Hero — logo over a soft accent aura + a vertical "rift" seam of light. -->
+        <div class="welcome-hero">
+          <div class="welcome-mark"><RiftLogo size={32} /></div>
+          <h1 class="welcome-title">Welcome to Rift</h1>
+          <p class="welcome-tag">{RIFT_TAGLINE}</p>
+        </div>
+      {/if}
 
       <!-- Open-folder action — a crafted viewfinder target + recents. -->
       <div class="openfolder">
@@ -353,6 +364,7 @@
     border: 1px solid var(--ghost-border);
     box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.06), 0 14px 34px -16px color-mix(in oklab, var(--accent) 60%, transparent);
   }
+  .local-mark { color: color-mix(in oklab, var(--accent) 80%, var(--fg)); }
   .welcome-title { margin: 5px 0 0; font-size: 28px; font-weight: 600; letter-spacing: -0.024em; color: var(--fg); }
   .welcome-tag {
     margin: 0; max-width: 44ch; color: var(--fg-subtle); font-size: 13.5px;

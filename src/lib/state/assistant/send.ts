@@ -88,9 +88,11 @@ export async function send(store: AssistantStore, prompt: string) {
   // #184: clear stale error banner so it doesn't bleed into the new turn.
   // Setter routes to tab.lastError when activeTab is set, store-level otherwise.
   store.lastError = null;
-  // No workspace → the backend silently runs the turn in no-tools mode; say so
-  // up front instead of letting the user discover it from the reply.
-  if (!store.workspace.current) {
+  // No workspace AND no scratch fallback → the backend runs the turn in no-tools
+  // mode; say so up front. In local mode (scratch available) the turn silently
+  // runs in `%LOCALAPPDATA%\Rift\local` with full tools — the "Local" badge is
+  // the signal, so stay quiet.
+  if (!store.workspace.current && !store.localScratchPath) {
     notify.warn("No folder open", {
       detail: "The assistant can't read or edit files this turn. Open one from the title bar.",
     });

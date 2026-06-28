@@ -716,12 +716,28 @@ async fn run_or_prewarm(
         .filter(|s| !s.is_empty())
         .map(PathBuf::from)
         .filter(|p| p.is_dir());
+    // No folder open → fall back to the persistent local scratch workspace
+    // (`%LOCALAPPDATA%\Rift\local`) so the standard OAuth no-folder turn gets the
+    // full tool set + MCP boundary instead of a dead `--tools ""` chat. Gated to
+    // the full-config OAuth path: API-key / local-LLM / (later) sandboxed branches
+    // keep the empty roots → no-tools fallback intact (mirrors the `use_full_config`
+    // computation below; recomputed here because that binding is resolved later).
+    let scratch_eligible =
+        cfg.use_full_config.unwrap_or(true) && !use_api_key && !cfg.local_llm_enabled;
     let roots: Vec<PathBuf> = if let Some(p) = pinned_cwd.clone() {
         vec![p]
     } else if let Some(r) = tab_root {
         vec![r]
     } else if let Some(root) = cfg.current_root.as_ref().filter(|p| p.is_dir()) {
         vec![root.clone()]
+    } else if scratch_eligible {
+        match super::workspace::local_scratch_dir() {
+            Ok(scratch) => vec![scratch],
+            Err(e) => {
+                log::warn!("assistant: local scratch dir unavailable, falling back to no-tools: {e}");
+                Vec::new()
+            }
+        }
     } else {
         Vec::new()
     };

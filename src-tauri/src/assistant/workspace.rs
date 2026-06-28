@@ -122,6 +122,30 @@ pub(crate) fn current_root() -> Option<PathBuf> {
     load_config().current_root
 }
 
+/// The persistent local scratch workspace used when no project folder is open.
+/// Resolves to `%LOCALAPPDATA%\Rift\local` (pattern mirrors `certs.rs` — prefer
+/// LOCALAPPDATA, which GPO forbids redirecting, over a redirectable temp dir),
+/// always `create_dir_all`'d so it self-heals a deleted dir and is guaranteed to
+/// exist for the MCP containment boundary + `current_dir`. Backend-resolved only,
+/// never renderer-supplied → no path-injection surface.
+pub(crate) fn local_scratch_dir() -> Result<PathBuf, String> {
+    let base = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .filter(|p| p.is_dir())
+        .unwrap_or_else(std::env::temp_dir);
+    let dir = base.join("Rift").join("local");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("could not create local scratch dir: {e}"))?;
+    Ok(dir)
+}
+
+/// The local scratch workspace path, surfaced to the renderer for the "Local"
+/// badge only (FE never supplies it back — the backend re-resolves per turn).
+/// `None` if the dir can't be created (LOCALAPPDATA + temp both unwritable).
+#[tauri::command]
+pub fn assistant_local_scratch_path() -> Option<String> {
+    local_scratch_dir().ok().map(|p| p.to_string_lossy().into_owned())
+}
+
 /// Resolve a per-tab root override (validated dir) or fall back to the global
 /// `current_root`. Lets the `@`-mention walk + branch probe scope to whichever
 /// pane the user is interacting with instead of always the global default.
@@ -237,4 +261,25 @@ pub async fn assistant_workspace_branch(root: Option<String>) -> Option<String> 
         .await
         .ok()
         .flatten()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_scratch_dir_creates_and_is_dir() {
+        let dir = local_scratch_dir().expect("scratch dir resolves");
+        assert!(dir.is_dir(), "scratch dir must exist after resolve");
+        assert!(dir.ends_with("Rift/local") || dir.ends_with("Rift\\local"),
+            "scratch dir tail should be Rift/local, got {}", dir.display());
+    }
+
+    #[test]
+    fn local_scratch_dir_is_idempotent() {
+        let a = local_scratch_dir().expect("first resolve");
+        let b = local_scratch_dir().expect("second resolve self-heals / no-ops");
+        assert_eq!(a, b, "repeated resolution yields the same path");
+        assert!(b.is_dir());
+    }
 }
