@@ -131,10 +131,13 @@ jobs:
       # path returned HTTP 401 Bad credentials for it on v0.35.0 — false-failing a
       # release that published perfectly. Dropping the token removes that whole
       # class of auth mismatch; no credential is needed to read a public release.
-      - name: Verify published to rift-releases
+      - name: Verify published to rift
         run: |
           $tag  = $env:GITHUB_REF_NAME
-          $repo = 'Blazzer10200/rift-releases'
+          # Must match the repo release.ps1 actually publishes to (Blazzer10200/rift,
+          # renamed from rift-releases v0.16.2). Was 'rift-releases' relying on a
+          # GitHub 301 redirect the REST API doesn't reliably follow. (cont.228)
+          $repo = 'Blazzer10200/rift'
           Write-Host "Verifying $tag published to $repo (anonymous public read) ..."
           $headers = @{ 'User-Agent' = 'rift-release-verify'; 'Accept' = 'application/vnd.github+json' }
           $uri = "https://api.github.com/repos/$repo/releases/tags/$tag"

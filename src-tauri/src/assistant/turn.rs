@@ -21,11 +21,11 @@ use super::warm_pool::kill_child_tree;
 use super::auth_update::assistant_auth_probe;
 use super::cli_install::{claude_command, resolve_claude_exe};
 use super::config::{
-    clamp_effort, current_api_key, current_api_key_with, effective_trust_level, fable_unavailable,
-    haiku_unavailable, HAIKU_FALLBACK_MODEL, HAIKU_MODEL,
+    clamp_effort, current_api_key, current_api_key_with, effective_trust_level, effort_tier_to_flag,
+    fable_unavailable, haiku_unavailable, HAIKU_FALLBACK_MODEL, HAIKU_MODEL,
     is_valid_effort_tier,
     is_valid_local_model_name, is_valid_model_name, is_valid_permission_mode, load_config,
-    DEFAULT_MODEL, FABLE_FALLBACK_MODEL, FABLE_MODEL,
+    send_effort_flag, DEFAULT_MODEL, FABLE_FALLBACK_MODEL, FABLE_MODEL,
 };
 use super::convo_store::{
     is_valid_session_id, load_session_cwd, load_session_model, save_session_cwd,
@@ -1151,12 +1151,7 @@ async fn run_or_prewarm(
         log::warn!("assistant_send: unknown effort tier {effort:?} — treating as deep (high)");
     }
     let effort_tier = clamp_effort(&effort, &model);
-    let effort_level = match effort_tier {
-        "none" => "low",
-        "quick" | "smart" => "medium", // "smart" = the responsive interactive default (Anthropic's recommended medium); see effortToFlag in helpers.ts
-        "ultra" => "xhigh",
-        _ /* "deep" or unknown */ => "high",
-    };
+    let effort_level = effort_tier_to_flag(effort_tier);
     log::info!("assistant_send: effort tier={effort_tier} flag={effort_level} model={model} session={session_id}");
     // Local-LLM mode skips `--effort` wholesale — local models/proxies don't
     // implement Anthropic extended-thinking tiers and 4xx or silently ignore it.
@@ -1173,7 +1168,7 @@ async fn run_or_prewarm(
     // kills the multi-second pre-pass; if the shim ever starts working again the
     // injected disabled-block still wins on top of this.)
     // `--effort` gated on caps.effort: an older CLI without the flag rejects it.
-    let send_effort = if thinking_on { Some(effort_level) } else { Some("low") };
+    let send_effort = Some(send_effort_flag(thinking_on, effort_level));
     if !cfg.local_llm_enabled && model != "haiku" && caps.effort {
         if let Some(level) = send_effort {
             cmd.arg("--effort").arg(level);

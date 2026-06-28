@@ -191,6 +191,34 @@ pub(super) fn clamp_effort<'a>(effort: &'a str, model: &str) -> &'a str {
     }
 }
 
+/// Map a clamped effort tier to the CLI `--effort` flag value. Mirrors
+/// `effortToFlag` in state/assistant/helpers.ts. Unknown/out-of-range tiers fall
+/// through to `high` (the "deep" default) — `clamp_effort` runs first, so this
+/// only sees a valid tier or a stale string the ladder doesn't define.
+pub(super) fn effort_tier_to_flag(tier: &str) -> &'static str {
+    match tier {
+        "none" => "low",
+        // "smart" = the responsive interactive default (Anthropic's recommended medium)
+        "quick" | "smart" => "medium",
+        "ultra" => "xhigh",
+        _ /* "deep" or unknown */ => "high",
+    }
+}
+
+/// The effort value actually sent to the CLI for a turn. #68: thinking-OFF must
+/// still send `--effort low` (the CLI floor) — the CLI has no thinking-disable
+/// flag and the no-think shim is bypassed on the OAuth path, so `low` is the only
+/// real "minimal reasoning" lever. When thinking is on, send the tier's mapped
+/// flag. Returns the flag string; the caller decides whether `--effort` is
+/// emitted at all (local-LLM / haiku / old-CLI gates live at the call site).
+pub(super) fn send_effort_flag(thinking_on: bool, effort_flag: &'static str) -> &'static str {
+    if thinking_on {
+        effort_flag
+    } else {
+        "low"
+    }
+}
+
 /// Local-LLM model names carry provider prefixes + tags the cloud allowlist
 /// rejects (`ollama/llama3`, `ollama_chat/qwen2.5:7b`). Same anti-flag-injection
 /// guard (no leading dash, no empty) but also allows `/` and `:`.
@@ -524,8 +552,8 @@ pub fn assistant_set_api_key(api_key: Option<String>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        clamp_effort, is_valid_effort_tier, is_valid_local_base_url, model_max_effort,
-        DEFAULT_MODEL, FABLE_FALLBACK_MODEL,
+        clamp_effort, effort_tier_to_flag, is_valid_effort_tier, is_valid_local_base_url,
+        model_max_effort, send_effort_flag, DEFAULT_MODEL, FABLE_FALLBACK_MODEL,
     };
 
     #[test]
@@ -577,6 +605,36 @@ mod tests {
         assert_eq!(clamp_effort("bogus", "sonnet"), "bogus");
         assert!(!is_valid_effort_tier("bogus"));
         assert!(is_valid_effort_tier("ultra"));
+    }
+
+    // TC-001 (mega-audit cont.228): the tier→flag mapping was an untested inline
+    // match in turn.rs — a wrong CLI `--effort` arg would ship silently. MUST stay
+    // in lockstep with `effortToFlag` in helpers.ts (the 3-way effort invariant).
+    #[test]
+    fn effort_tier_maps_to_correct_cli_flag() {
+        assert_eq!(effort_tier_to_flag("none"), "low");
+        assert_eq!(effort_tier_to_flag("quick"), "medium");
+        assert_eq!(effort_tier_to_flag("smart"), "medium");
+        assert_eq!(effort_tier_to_flag("deep"), "high");
+        assert_eq!(effort_tier_to_flag("ultra"), "xhigh");
+        // A stale/unknown tier (clamp passes it through) falls back to high(deep).
+        assert_eq!(effort_tier_to_flag("bogus"), "high");
+    }
+
+    // TC-002 (mega-audit cont.228): thinking-OFF MUST send `--effort low` (#68).
+    // Untested → a silent regression reinstates the ~12s "slow hello" TTFT. This
+    // is the v0.67.0 fast-default win; guard it.
+    #[test]
+    fn thinking_off_forces_low_regardless_of_tier() {
+        // thinking on → the tier's own flag passes through unchanged.
+        assert_eq!(send_effort_flag(true, "xhigh"), "xhigh");
+        assert_eq!(send_effort_flag(true, "high"), "high");
+        assert_eq!(send_effort_flag(true, "medium"), "medium");
+        assert_eq!(send_effort_flag(true, "low"), "low");
+        // thinking off → ALWAYS low, even when the tier maps higher.
+        assert_eq!(send_effort_flag(false, "xhigh"), "low");
+        assert_eq!(send_effort_flag(false, "high"), "low");
+        assert_eq!(send_effort_flag(false, "medium"), "low");
     }
 
     #[test]
