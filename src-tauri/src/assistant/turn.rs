@@ -21,11 +21,11 @@ use super::warm_pool::kill_child_tree;
 use super::auth_update::assistant_auth_probe;
 use super::cli_install::{claude_command, resolve_claude_exe};
 use super::config::{
-    clamp_effort, current_api_key, current_api_key_with, effective_trust_level, fable_unavailable,
-    haiku_unavailable, HAIKU_FALLBACK_MODEL, HAIKU_MODEL,
+    clamp_effort, current_api_key, current_api_key_with, effective_trust_level, effort_tier_to_flag,
+    fable_unavailable, haiku_unavailable, HAIKU_FALLBACK_MODEL, HAIKU_MODEL,
     is_valid_effort_tier,
     is_valid_local_model_name, is_valid_model_name, is_valid_permission_mode, load_config,
-    DEFAULT_MODEL, FABLE_FALLBACK_MODEL, FABLE_MODEL,
+    send_effort_flag, DEFAULT_MODEL, FABLE_FALLBACK_MODEL, FABLE_MODEL,
 };
 use super::convo_store::{
     is_valid_session_id, load_session_cwd, load_session_model, save_session_cwd,
@@ -56,7 +56,7 @@ static SESSION_STOPPED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 // Ok without killing the child, orphaning it. `into_inner()` is safe here:
 // these maps are append/remove on String keys with no cross-field invariant
 // that a panic could break.
-fn with_session_pids<R>(f: impl FnOnce(&mut HashMap<String, u32>) -> R) -> Option<R> {
+fn with_session_pids<R>(f: impl FnOnce(&mut HashMap<String, u32>) -> R) -> R {
     let mut g = match SESSION_PIDS.lock() {
         Ok(g) => g,
         Err(p) => {
@@ -65,10 +65,10 @@ fn with_session_pids<R>(f: impl FnOnce(&mut HashMap<String, u32>) -> R) -> Optio
         }
     };
     let map = g.get_or_insert_with(HashMap::new);
-    Some(f(map))
+    f(map)
 }
 
-fn with_session_stopped<R>(f: impl FnOnce(&mut HashSet<String>) -> R) -> Option<R> {
+fn with_session_stopped<R>(f: impl FnOnce(&mut HashSet<String>) -> R) -> R {
     let mut g = match SESSION_STOPPED.lock() {
         Ok(g) => g,
         Err(p) => {
@@ -77,7 +77,7 @@ fn with_session_stopped<R>(f: impl FnOnce(&mut HashSet<String>) -> R) -> Option<
         }
     };
     let set = g.get_or_insert_with(HashSet::new);
-    Some(f(set))
+    f(set)
 }
 
 fn set_session_pid(session_id: &str, pid: u32) {
@@ -100,7 +100,7 @@ fn clear_session_pid_if(session_id: &str, pid: u32) {
 }
 
 fn get_session_pid(session_id: &str) -> Option<u32> {
-    with_session_pids(|m| m.get(session_id).copied()).flatten()
+    with_session_pids(|m| m.get(session_id).copied())
 }
 
 /// Tree-kill every tracked streaming `claude` child, draining the registry.
@@ -118,8 +118,7 @@ pub(crate) fn kill_all_session_children() {
         let v: Vec<u32> = m.values().copied().collect();
         m.clear();
         v
-    })
-    .unwrap_or_default();
+    });
     for pid in pids {
         kill_child_tree(pid);
     }
@@ -133,7 +132,7 @@ fn mark_session_stopped(session_id: &str) {
 /// `false` otherwise. Used by the wait-task to disambiguate user-stop from
 /// silent CLI crash.
 fn take_session_stopped(session_id: &str) -> bool {
-    with_session_stopped(|s| s.remove(session_id)).unwrap_or(false)
+    with_session_stopped(|s| s.remove(session_id))
 }
 
 /// A mid-turn steer: a user message injected into the RUNNING turn's stdin so
@@ -204,24 +203,9 @@ fn validate_attachments(attachments: &[AssistantAttachment]) -> Result<(), Strin
     // #116: `len * 3 / 4` is approximate — pasted base64 can contain
     // whitespace/CRLF that inflates the encoded length but doesn't add to
     // decoded bytes. Strip whitespace before the divide so the cap reflects
-    // real decoded size.
-    let total: usize = attachments
-        .iter()
-        .map(|a| {
-            let trimmed_len = a
-                .data_base64
-                .bytes()
-                .filter(|b| !b.is_ascii_whitespace())
-                .count();
-            trimmed_len.saturating_mul(3) / 4
-        })
-        .sum();
-    if total > ATTACHMENT_BYTES_CAP {
-        return Err(format!(
-            "Those images are too large to send — keep attachments under {} MB total.",
-            ATTACHMENT_BYTES_CAP / (1024 * 1024)
-        ));
-    }
+    // real decoded size. MIME check runs first (O(1) per attachment) so a bad
+    // type returns before the full base64 byte scan.
+    let mut total: usize = 0;
     for a in attachments {
         if !ALLOWED_IMAGE_MIMES.contains(&a.mime.as_str()) {
             return Err(format!(
@@ -229,6 +213,18 @@ fn validate_attachments(attachments: &[AssistantAttachment]) -> Result<(), Strin
                 a.mime
             ));
         }
+        let trimmed_len = a
+            .data_base64
+            .bytes()
+            .filter(|b| !b.is_ascii_whitespace())
+            .count();
+        total = total.saturating_add(trimmed_len.saturating_mul(3) / 4);
+    }
+    if total > ATTACHMENT_BYTES_CAP {
+        return Err(format!(
+            "Those images are too large to send — keep attachments under {} MB total.",
+            ATTACHMENT_BYTES_CAP / (1024 * 1024)
+        ));
     }
     Ok(())
 }
@@ -426,7 +422,7 @@ async fn handle_permission_request(
 
     // Guard cancels the registry entry on drop — covers task-abort mid-await
     // (the explicit cancel below never runs when the future is cancelled).
-    let (rx, _perm_guard) = registry.register_guarded(request_id.clone());
+    let (rx, _perm_guard) = registry.register_guarded(request_id.clone(), session_id.to_string());
     // B4: if the UI is unreachable (window closed mid-turn) the user never sees
     // the prompt — deny immediately rather than hang for the full 120s timeout
     // while the CLI waits on us. `emit_to` returns Ok(()) for a missing/closed
@@ -1155,12 +1151,7 @@ async fn run_or_prewarm(
         log::warn!("assistant_send: unknown effort tier {effort:?} — treating as deep (high)");
     }
     let effort_tier = clamp_effort(&effort, &model);
-    let effort_level = match effort_tier {
-        "none" => "low",
-        "quick" | "smart" => "medium", // "smart" = the responsive interactive default (Anthropic's recommended medium); see effortToFlag in helpers.ts
-        "ultra" => "xhigh",
-        _ /* "deep" or unknown */ => "high",
-    };
+    let effort_level = effort_tier_to_flag(effort_tier);
     log::info!("assistant_send: effort tier={effort_tier} flag={effort_level} model={model} session={session_id}");
     // Local-LLM mode skips `--effort` wholesale — local models/proxies don't
     // implement Anthropic extended-thinking tiers and 4xx or silently ignore it.
@@ -1177,7 +1168,7 @@ async fn run_or_prewarm(
     // kills the multi-second pre-pass; if the shim ever starts working again the
     // injected disabled-block still wins on top of this.)
     // `--effort` gated on caps.effort: an older CLI without the flag rejects it.
-    let send_effort = if thinking_on { Some(effort_level) } else { Some("low") };
+    let send_effort = Some(send_effort_flag(thinking_on, effort_level));
     if !cfg.local_llm_enabled && model != "haiku" && caps.effort {
         if let Some(level) = send_effort {
             cmd.arg("--effort").arg(level);
@@ -1937,6 +1928,16 @@ async fn run_turn_loop(mut ctx: RunCtx) {
                      This is the local Claude process stalling (a hung startup, a stuck tool/MCP connection, or a dropped pipe), not a slow model. \
                      Try the turn again; if it keeps happening, run `claude` in a terminal to confirm the CLI itself works."
                 );
+                // cont.228 (prod incident 2026-06-28, session 87a27f20): a child
+                // wedged AFTER an auto-denied permission ask sat for 9+ min holding
+                // the session. `loop_cleanup` below only `start_kill`s the direct
+                // child handle — a wedged CLI's own subprocess tree (its MCP server,
+                // tool children) survives that. Force a tree-kill by PID HERE so the
+                // wedged process and all descendants are reaped, not orphaned.
+                if let Some(pid) = warm_pool::pid_of(&ctx.session_id) {
+                    log::warn!("warm_pool: tree-killing wedged child pid={pid} session={stream_sid}");
+                    kill_child_tree(pid);
+                }
                 warm_pool::remove_if(&ctx.session_id, &ctx.warm);
                 let _ = app_out.emit_to(&win_label, ERROR_EVENT, serde_json::json!({
                     "session_id": stream_sid, "message": msg.clone(),
@@ -2215,8 +2216,11 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                         continue;
                     }
                     // A `control_response` on a REUSED turn (handshake already
-                    // done) is the CLI re-acking — ignore, don't forward.
-                    if *handshake_done && !user_sent && ty == Some("control_response") {
+                    // done) is the CLI re-acking — ignore, don't forward. On a
+                    // reused turn user_sent is already true (set at init above),
+                    // so the old `!user_sent` conjunction made this dead → the
+                    // re-ack leaked to the UI. Gate on handshake_done alone.
+                    if *handshake_done && ty == Some("control_response") {
                         continue;
                     }
                     // Permission ask → resolve via the registry + UI, write the
@@ -2589,6 +2593,7 @@ fn auth_rejection_message() -> String {
 pub async fn assistant_stop(
     session_id: String,
     ask_user: tauri::State<'_, std::sync::Arc<crate::assistant::AskUserRegistry>>,
+    permissions: tauri::State<'_, std::sync::Arc<PermissionRegistry>>,
 ) -> Result<(), String> {
     if !is_valid_session_id(&session_id) {
         return Err(format!("invalid session_id: must be a UUID (got {} chars)", session_id.len()));
@@ -2603,6 +2608,16 @@ pub async fn assistant_stop(
     let cancelled = ask_user.cancel_all_for_session(&session_id);
     if cancelled > 0 {
         log::info!("assistant_stop: cancelled {cancelled} pending ask_user for {session_id}");
+    }
+    // Same safety net for a parked `can_use_tool` permission ask (cont.228): the
+    // stdout reader awaits the user's Allow/Deny on a PermissionRegistry oneshot.
+    // If the PID is already gone the kill is a no-op and that await would park for
+    // the full 120s timeout — the real prod wedge (child stuck 9+ min after a
+    // permission card timed out). Dropping the sender resolves the await `Err` →
+    // the reader denies + writes the control_response → the UI tool-chip clears.
+    let perms_cancelled = permissions.cancel_all_for_session(&session_id);
+    if perms_cancelled > 0 {
+        log::info!("assistant_stop: cancelled {perms_cancelled} pending permission ask(s) for {session_id}");
     }
     let Some(pid) = get_session_pid(&session_id) else {
         return Ok(());
@@ -2633,8 +2648,10 @@ pub async fn assistant_stop(
         .await
         .map_err(|e| format!("taskkill join: {e}"))?;
         match out {
-            Ok(s) if s.success() => Ok(()),
-            Ok(s) => Err(format!("taskkill exited {}", s.code().unwrap_or(-1))),
+            // A non-zero exit means the PID was already gone (the turn finished
+            // naturally before Stop landed) — the stop goal is met. Best-effort,
+            // like kill_child_tree; only a spawn failure is a real error.
+            Ok(_) => Ok(()),
             Err(e) => Err(format!("spawn taskkill: {e}")),
         }
     }
@@ -2651,8 +2668,9 @@ pub async fn assistant_stop(
         .await
         .map_err(|e| format!("kill join: {e}"))?;
         match out {
-            Ok(s) if s.success() => Ok(()),
-            Ok(s) => Err(format!("kill exited {}", s.code().unwrap_or(-1))),
+            // Non-zero exit = PID already gone (turn finished before Stop). The
+            // stop goal is met; only a spawn failure is a real error.
+            Ok(_) => Ok(()),
             Err(e) => Err(format!("spawn kill: {e}")),
         }
     }

@@ -650,47 +650,49 @@
                   </span>
                 </button>
               {/each}
-              <!-- "Other" — auto-added per AskUserQuestion contract. -->
+              <!-- "Other" — auto-added per AskUserQuestion contract.
+                   {#if true} scopes the {@const} (required: @const must be an
+                   immediate child of a block, not a sibling after the {#each}). -->
               {#if true}
-                {@const otherSelected =
-                  q.multiSelect
-                    ? (askMultiSet[qi] ?? new Set()).has(OTHER_IDX)
-                    : askSingleIdx[qi] === OTHER_IDX}
-                <button
-                  type="button"
-                  class="ask-option ask-option-other"
-                  class:selected={otherSelected}
+              {@const otherSelected =
+                q.multiSelect
+                  ? (askMultiSet[qi] ?? new Set()).has(OTHER_IDX)
+                  : askSingleIdx[qi] === OTHER_IDX}
+              <button
+                type="button"
+                class="ask-option ask-option-other"
+                class:selected={otherSelected}
+                disabled={askSubmitting || askAnswered}
+                role={q.multiSelect ? "checkbox" : "radio"}
+                aria-checked={otherSelected}
+                onclick={() => {
+                  if (q.multiSelect) {
+                    toggleAskMulti(qi, OTHER_IDX);
+                  } else {
+                    askSingleIdx = askSingleIdx.map((v, i) => (i === qi ? OTHER_IDX : v));
+                  }
+                }}
+              >
+                <span class="ask-opt-marker" aria-hidden="true">
+                  {#if q.multiSelect}
+                    {#if otherSelected}<CheckCircle2 size={12} />{:else}<Square size={12} />{/if}
+                  {:else}
+                    {#if otherSelected}<CheckCircle2 size={12} />{:else}<Circle size={12} />{/if}
+                  {/if}
+                </span>
+                <span class="ask-opt-text">
+                  <span class="ask-opt-label">Other (custom)</span>
+                </span>
+              </button>
+              {#if otherSelected}
+                <input
+                  type="text"
+                  class="ask-other-input"
+                  placeholder="Type your answer…"
                   disabled={askSubmitting || askAnswered}
-                  role={q.multiSelect ? "checkbox" : "radio"}
-                  aria-checked={otherSelected}
-                  onclick={() => {
-                    if (q.multiSelect) {
-                      toggleAskMulti(qi, OTHER_IDX);
-                    } else {
-                      askSingleIdx = askSingleIdx.map((v, i) => (i === qi ? OTHER_IDX : v));
-                    }
-                  }}
-                >
-                  <span class="ask-opt-marker" aria-hidden="true">
-                    {#if q.multiSelect}
-                      {#if otherSelected}<CheckCircle2 size={12} />{:else}<Square size={12} />{/if}
-                    {:else}
-                      {#if otherSelected}<CheckCircle2 size={12} />{:else}<Circle size={12} />{/if}
-                    {/if}
-                  </span>
-                  <span class="ask-opt-text">
-                    <span class="ask-opt-label">Other (custom)</span>
-                  </span>
-                </button>
-                {#if otherSelected}
-                  <input
-                    type="text"
-                    class="ask-other-input"
-                    placeholder="Type your answer…"
-                    disabled={askSubmitting || askAnswered}
-                    bind:value={askOtherText[qi]}
-                  />
-                {/if}
+                  bind:value={askOtherText[qi]}
+                />
+              {/if}
               {/if}
             </div>
           </div>

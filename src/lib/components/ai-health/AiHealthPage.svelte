@@ -71,7 +71,7 @@
   // instead of guessing on a timer. "" between runs.
   let analyzeStage = $state<"" | "spawned" | "thinking" | "writing">("");
   // Map a stage to the earliest ANALYZE_STEPS index it justifies.
-  const STAGE_FLOOR: Record<string, number> = { spawned: 0, thinking: 3, writing: 4 };
+  const STAGE_FLOOR: Record<string, number> = { thinking: 3, writing: 4 };
 
   onMount(() => {
     const poll = () => void usage.refreshRateLimits(assistant.auth?.cliVersion ?? null);
@@ -494,6 +494,8 @@
   // set). Holds the prior value for one-tap undo + a transient "applied" flag.
   type ApplyState = { prev: string | number | null; appliedAt: number };
   let applied = $state<Record<string, ApplyState>>({});
+  // Clear stale applied badges when a new advice set arrives.
+  $effect(() => { if (usage.advice) applied = {}; });
 
   async function applyAction(title: string, a: AdviceApply) {
     // Snapshot the prior value so undo can restore it exactly.
@@ -632,7 +634,7 @@
                             <ArrowRight size={12} strokeWidth={2} />
                             <span class="ah-apply-to">{newValueFor(a)}</span>
                           </span>
-                          <button class="ah-apply-btn" type="button" onclick={() => void applyAction(c.title, a)}>
+                          <button class="ah-apply-btn" type="button" disabled={usage.analyzing} onclick={() => void applyAction(c.title, a)}>
                             {a.label || "Apply"}
                           </button>
                         {/if}

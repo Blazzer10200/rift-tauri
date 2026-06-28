@@ -283,7 +283,7 @@ class SttStore {
       await sub("stt://download_progress", () =>
         listen<DownloadProgress>("stt://download_progress", (ev) => {
           if (!ev.payload?.model) return;
-          this.modelDownloads = { ...this.modelDownloads, [ev.payload.model]: ev.payload };
+          this.modelDownloads[ev.payload.model] = ev.payload;
           if (ev.payload.phase === "done") {
             void this.refreshModels();
           }
@@ -509,6 +509,8 @@ class SttStore {
   /** Hard-cancel — drop interim text, restore the original draft. */
   async cancel() {
     this.cancelRequested = true;
+    this.cancelPolish();
+    if (this.polishUndoTimer) { clearTimeout(this.polishUndoTimer); this.polishUndoTimer = null; }
     this.clearSilenceWatch();
     this.segments = [];
     this.pendingSend = false;

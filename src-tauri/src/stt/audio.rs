@@ -118,6 +118,7 @@ pub fn start_capture(device_name: Option<&str>) -> Result<AudioCapture, String> 
             let ring_cb = ring_cb.clone();
             let rs = resampler.clone();
             let lo = leftover.clone();
+            let mut conv_buf: Vec<f32> = Vec::with_capacity(4096);
             device
                 .build_input_stream(
                     &config,
@@ -126,9 +127,9 @@ pub fn start_capture(device_name: Option<&str>) -> Result<AudioCapture, String> 
                         // (-32768..=32767), so dividing by 32767 pushes the minimum
                         // sample to -1.00003 — past the ±1.0 rail. 32768 keeps every
                         // sample in range (max maps to +0.99997, which is correct).
-                        let f: Vec<f32> =
-                            data.iter().map(|s| *s as f32 / 32768.0).collect();
-                        push_samples(&ring_cb, &f, source_channels, rs.as_ref(), lo.as_ref());
+                        conv_buf.clear();
+                        conv_buf.extend(data.iter().map(|s| *s as f32 / 32768.0));
+                        push_samples(&ring_cb, &conv_buf, source_channels, rs.as_ref(), lo.as_ref());
                     },
                     err_cb,
                     None,
@@ -139,6 +140,7 @@ pub fn start_capture(device_name: Option<&str>) -> Result<AudioCapture, String> 
             let ring_cb = ring_cb.clone();
             let rs = resampler.clone();
             let lo = leftover.clone();
+            let mut conv_buf: Vec<f32> = Vec::with_capacity(4096);
             device
                 .build_input_stream(
                     &config,
@@ -146,11 +148,9 @@ pub fn start_capture(device_name: Option<&str>) -> Result<AudioCapture, String> 
                         // u16 (0..=65535) centers at 32768; subtract it to center,
                         // divide by 32768 so the rails land in ±1.0. The old divisor
                         // i16::MAX (32767) pushed s=0 to -1.00003 — past the rail.
-                        let f: Vec<f32> = data
-                            .iter()
-                            .map(|s| (*s as f32 - 32768.0) / 32768.0)
-                            .collect();
-                        push_samples(&ring_cb, &f, source_channels, rs.as_ref(), lo.as_ref());
+                        conv_buf.clear();
+                        conv_buf.extend(data.iter().map(|s| (*s as f32 - 32768.0) / 32768.0));
+                        push_samples(&ring_cb, &conv_buf, source_channels, rs.as_ref(), lo.as_ref());
                     },
                     err_cb,
                     None,
@@ -189,6 +189,18 @@ fn push_samples(
     resampler: Option<&Arc<Mutex<FastFixedIn<f32>>>>,
     leftover: Option<&Arc<Mutex<Vec<f32>>>>,
 ) {
+    // Fast path: already mono and no resampling needed — push directly.
+    if channels <= 1 && resampler.is_none() {
+        let cap = TARGET_HZ as usize * MAX_BUFFER_SECS;
+        if let Ok(mut q) = ring.lock() {
+            q.extend(interleaved.iter().copied());
+            while q.len() > cap {
+                q.pop_front();
+            }
+        }
+        return;
+    }
+
     let mono: Vec<f32> = if channels <= 1 {
         interleaved.to_vec()
     } else {

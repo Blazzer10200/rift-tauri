@@ -195,6 +195,21 @@ foreach ($t in @('npm', 'vpk', 'gh')) {
     }
 }
 
+# --- Preflight: R2 creds present in CI (silent-stale-feed guard) ----------
+# The app's live update feed is R2 ONLY (update_service.rs UPDATE_FEED_URL) --
+# GitHub is NOT a fallback. The R2 dual-publish below is conditional, so a CI run
+# missing these secrets would build + pack + publish to GitHub fully green while
+# the feed clients actually read goes stale and no update ever reaches them. Fail
+# loud here -- BEFORE the expensive build -- rather than skip silently at upload.
+# (mega-audit cont.228 F2; arc: git log -- docs/design/self-hosted-distribution.md)
+if ($Ci) {
+    $missingR2 = @('R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_ENDPOINT') |
+        Where-Object { -not (Get-Item "env:$_" -ErrorAction SilentlyContinue) }
+    if ($missingR2) {
+        throw "release.ps1: CI run is missing R2 secret(s): $($missingR2 -join ', '). The live update feed is R2-only -- shipping without them silently strands clients on a stale feed. Set them as repo secrets and re-run."
+    }
+}
+
 # --- Preflight: clean git ------------------------------------------------
 # Skipped in CI: a tag-push checkout is clean by definition, and the build step
 # may have already written node_modules/build artifacts before this runs.
@@ -328,7 +343,10 @@ if ($env:R2_ACCESS_KEY_ID -and $env:R2_SECRET_ACCESS_KEY -and $env:R2_ENDPOINT) 
     & vpk @r2Args
     if ($LASTEXITCODE -ne 0) { throw 'vpk upload s3 (R2) failed' }
 } else {
-    Write-Host 'R2 env not set -- skipping S3 dual-publish (GitHub feed only).' -ForegroundColor DarkGray
+    # In CI this branch is unreachable -- the R2 preflight above hard-fails on
+    # missing creds. Only a local (-Ci-less) run lands here, where skipping the
+    # dual-publish is fine (local builds aren't the shipped feed).
+    Write-Host 'R2 env not set -- skipping S3 dual-publish (local run; GitHub feed only).' -ForegroundColor DarkGray
 }
 
 # --- Drop the portable zip from the published release --------------------

@@ -73,7 +73,10 @@
     uiPrefs.setDotField(p.dots);
     uiPrefs.setDensity(p.density);
   }
-  const lookSel = (p: Look) => uiPrefs.accentHue === p.h && uiPrefs.dotField === p.dots && uiPrefs.density === p.density;
+  const lookSel = (p: Look) => {
+    const viv = VIVIDNESS_MIN + (p.vib / 100) * (VIVIDNESS_MAX - VIVIDNESS_MIN);
+    return uiPrefs.accentHue === p.h && uiPrefs.dotField === p.dots && uiPrefs.density === p.density && Math.abs(uiPrefs.vividness - viv) < 0.001;
+  };
 
   // Command-palette deep-link: open the requested tab, then clear (one-shot).
   $effect(() => {
@@ -449,7 +452,7 @@
         <div class="sb-status {assistantDot ?? 'ok'}">
           <div class="sb-status-l">
             <div class="sb-status-ic">
-              {#if assistantStore.auth}<CircleCheck size={18} />{:else}<Loader2 size={18} class="st-spin" />{/if}
+              {#if assistantStore.auth}<CircleCheck size={18} />{:else}<Loader2 size={18} class="spin" />{/if}
             </div>
             <div class="sb-status-main">
               <b>{assistantStore.auth ? assistantStore.auth.summary : assistantStore.authChecking ? "Checking session…" : "Session unknown"}</b>
@@ -851,7 +854,7 @@
                 {#if present}
                   <span class="env-stat ok"><span class="env-dot"></span>Installed</span>
                 {:else if installing}
-                  <span class="env-stat warn"><Loader2 size={12} class="mic-spin" /> Installing…</span>
+                  <span class="env-stat warn"><Loader2 size={12} class="spin" /> Installing…</span>
                 {:else}
                   <button class="st-btn accent" type="button" onclick={() => void environment.install(t.key)} use:tooltip={`Install ${t.label} via winget`}>
                     <Download size={13} /> Install

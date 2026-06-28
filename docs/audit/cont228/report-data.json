@@ -1,0 +1,596 @@
+{
+ "applied": [
+  {
+   "id": "cli-compat-active-version-no-winner-check",
+   "file": "src-tauri/src/assistant/cli_install.rs:513-519",
+   "sev": "T4",
+   "title": "`active_cli_version` write path lacks the concurrent-winner check present in `resolve_claude_exe`"
+  },
+  {
+   "id": "cli-compat-oneshot-disable-slash-ungated",
+   "file": "src-tauri/src/assistant/oneshot.rs:240",
+   "sev": "T3",
+   "title": "`--disable-slash-commands` passed unconditionally in all four oneshot paths"
+  },
+  {
+   "id": "consistency-logging-naming-drift",
+   "file": "src-tauri/src/assistant/oneshot.rs:273",
+   "sev": "T4",
+   "title": "Log prefix inconsistency: warm_pool.rs logs use 'warm_pool:' prefix; oneshot.rs uses unlabelled or 'assistant:' prefix"
+  },
+  {
+   "id": "correctness-applied-map-stale-on-reanalyze",
+   "file": "src/lib/components/ai-health/AiHealthPage.svelte:496",
+   "sev": "T2",
+   "title": "`applied` badge map is never cleared between analyses \u2014 stale \"Applied\" badges appear on new cards"
+  },
+  {
+   "id": "correctness-bridge-comment-wrong-token-gate",
+   "file": "src-tauri/src/assistant/bridge.rs:187",
+   "sev": "T4",
+   "title": "bridge.rs handle_conn comment incorrectly claims parse-error `continue` never reaches the token gate"
+  },
+  {
+   "id": "correctness-cancel-missing-cancelpolish",
+   "file": "src/lib/state/stt.svelte.ts:510",
+   "sev": "T3",
+   "title": "cancel() omits cancelPolish() \u2014 shimmer persists up to 6s after hard-cancel"
+  },
+  {
+   "id": "correctness-cli-dismiss-no-persist",
+   "file": "src/lib/components/shell/UpdateBanner.svelte:81",
+   "sev": "T2",
+   "title": "CLI update banner X-dismiss skips persist() \u2014 dismissal lost on reload"
+  },
+  {
+   "id": "correctness-deleteall-bg-streams",
+   "file": "src/lib/state/assistant.svelte.ts:1322",
+   "sev": "T2",
+   "title": "deleteAllConversations leaves background-streaming CLI subprocesses running"
+  },
+  {
+   "id": "correctness-deleteall-prunetabui-leak",
+   "file": "src/lib/state/assistant/persistence.ts:402",
+   "sev": "T4",
+   "title": "deleteAllConversations skips pruneTabUi, leaking tabScroll entries"
+  },
+  {
+   "id": "correctness-evict-stale-in-progress-snapshot",
+   "file": "src-tauri/src/assistant/warm_pool.rs:326-374",
+   "sev": "T3",
+   "title": "evict_idle_once may kill a mid-turn child \u2014 in_progress snapshot goes stale before kill"
+  },
+  {
+   "id": "correctness-finalize-missing-ondone",
+   "file": "src/lib/state/assistant/streaming.ts:891",
+   "sev": "T2",
+   "title": "onStreamDone skips finalizeInflightBlocks \u2014 thinking blocks persist status:\"active\" on error_max_thinking_tokens"
+  },
+  {
+   "id": "correctness-local-llm-base-url-no-sink-revalidation",
+   "file": "src-tauri/src/assistant/local_llm.rs:54-61",
+   "sev": "T3",
+   "title": "local_llm.rs: base_url read from config without re-validation, contradicting the 'validate at the sink' pattern used in turn.rs"
+  },
+  {
+   "id": "correctness-looksel-missing-vividness",
+   "file": "src/lib/components/settings/SettingsPage.svelte:76",
+   "sev": "T3",
+   "title": "Look preset checkmark persists after manual vividness change"
+  },
+  {
+   "id": "correctness-notify-detail-cap-mismatch",
+   "file": "src-tauri/src/assistant/mcp_bridge.rs:220",
+   "sev": "T4",
+   "title": "notify `detail` capped at 2000 chars in child but 500 chars in parent \u2014 mismatched and wasteful"
+  },
+  {
+   "id": "correctness-patterns-for-root-redundant-canonicalize",
+   "file": "src-tauri/src/assistant/projects.rs:136",
+   "sev": "T4",
+   "title": "patterns_for_root re-canonicalizes already-canonical stored project roots"
+  },
+  {
+   "id": "correctness-pid_of-lock-inversion",
+   "file": "src-tauri/src/assistant/warm_pool.rs:216-223",
+   "sev": "T3",
+   "title": "pid_of() holds registry + WarmChild locks simultaneously, violating M5/M7"
+  },
+  {
+   "id": "correctness-session-lost-prompt-missing",
+   "file": "src-tauri/src/assistant/turn.rs:2427",
+   "sev": "T1",
+   "title": "SESSION_LOST_EVENT missing `prompt` field causes TypeError crash in session-lost recovery"
+  },
+  {
+   "id": "correctness-sidecar-nonatomic-write",
+   "file": "src-tauri/src/assistant/convo_store.rs:152",
+   "sev": "T3",
+   "title": "save_session_cwd / save_session_model use bare fs::write, not atomic tmp+rename"
+  },
+  {
+   "id": "correctness-splitpane-bg-toast",
+   "file": "src/lib/state/assistant/healthAlerts.ts:68",
+   "sev": "T2",
+   "title": "Split-pane non-focused tab fires spurious \"Background turn finished\" toast"
+  },
+  {
+   "id": "correctness-stale-apply-during-inflight",
+   "file": "src/lib/components/ai-health/AiHealthPage.svelte:606",
+   "sev": "T3",
+   "title": "Apply buttons on stale advice cards remain active during an in-flight re-analyze"
+  },
+  {
+   "id": "correctness-stop-errors-on-already-dead",
+   "file": "src-tauri/src/assistant/turn.rs:2635",
+   "sev": "T3",
+   "title": "assistant_stop returns Err to frontend when killed process had already exited"
+  },
+  {
+   "id": "correctness-validate-ref-double-dot",
+   "file": "src-tauri/src/assistant/git_local.rs:81-87",
+   "sev": "T4",
+   "title": "validate_ref permits `.` sequences that violate git ref rules (e.g. `..`, `ref..name`, trailing `.lock`)"
+  },
+  {
+   "id": "dc-detect-button-blank-busy-label",
+   "file": "src/lib/components/local-llm/LocalLlmPage.svelte:331",
+   "sev": "T4",
+   "title": "Detect button shows only '\u2026' when busy \u2014 inconsistent with every other loading button in LocalLlmPage"
+  },
+  {
+   "id": "dc-mic-spin-cross-component-dep",
+   "file": "src/lib/components/settings/SettingsPage.svelte:854",
+   "sev": "T2",
+   "title": "Installing\u2026 spinner borrows mic-spin from Composer.svelte \u2014 silent when Composer not yet mounted"
+  },
+  {
+   "id": "dc-st-spin-outside-st-btn",
+   "file": "src/lib/components/settings/SettingsPage.svelte:452",
+   "sev": "T2",
+   "title": "Auth-checking spinner is frozen: st-spin outside .st-btn ancestor"
+  },
+  {
+   "id": "deadcode-askuser-if-true",
+   "file": "src/lib/components/assistant/stream/StreamAskUser.svelte:214 and src/lib/components/assistant/ToolChip.svelte:654",
+   "sev": "T4",
+   "title": "StreamAskUser + ToolChip: `{#if true}` wrappers used only to scope `{@const}` \u2014 no longer necessary in Svelte 5"
+  },
+  {
+   "id": "deadcode-consistency-delete-project-missing-id-validation",
+   "file": "src-tauri/src/assistant/projects.rs:204",
+   "sev": "T4",
+   "title": "assistant_delete_project skips is_valid_id check that assistant_save_project requires"
+  },
+  {
+   "id": "deadcode-consistency-npm-update-missing-env-strip",
+   "file": "src-tauri/src/assistant/auth_update.rs:362-384",
+   "sev": "T4",
+   "title": "run_npm_update() does not strip ANTHROPIC_API_KEY, inconsistent with all other spawns"
+  },
+  {
+   "id": "deadcode-consistency-stage-floor-spawned",
+   "file": "src/lib/components/ai-health/AiHealthPage.svelte:74",
+   "sev": "T4",
+   "title": "`STAGE_FLOOR.spawned = 0` is a dead entry \u2014 the floor condition `0 > stepIdx` is never true"
+  },
+  {
+   "id": "deadcode-if-true-wrapper",
+   "file": "src/lib/components/assistant/ToolChip.svelte:654",
+   "sev": "T4",
+   "title": "`{#if true}` block wrapping the Other-option render is dead scaffolding"
+  },
+  {
+   "id": "deadcode-livepills-unused-props",
+   "file": "src/lib/components/assistant/composer/LivePills.svelte:14-24",
+   "sev": "T3",
+   "title": "LivePills: `tab` and `streaming` props declared but never consumed"
+  },
+  {
+   "id": "deadcode-localllm-localctxinfo-export",
+   "file": "src/lib/state/localLlm.svelte.ts:21",
+   "sev": "T4",
+   "title": "LocalCtxInfo type exported from localLlm.svelte.ts but never imported externally"
+  },
+  {
+   "id": "deadcode-localllm-min-usable-ctx-export",
+   "file": "src/lib/state/localLlm.svelte.ts:34",
+   "sev": "T4",
+   "title": "MIN_USABLE_CTX constant exported from localLlm.svelte.ts but never imported externally"
+  },
+  {
+   "id": "deadcode-option-wrapper-inconsistency",
+   "file": "src-tauri/src/assistant/turn.rs:59",
+   "sev": "T4",
+   "title": "`with_session_pids` / `with_session_stopped` return `Option<R>` that is always `Some` \u2014 inconsistent with the same idiom in `oneshot.rs` and `warm_pool.rs`"
+  },
+  {
+   "id": "deadcode-phantom-fs-2xs",
+   "file": "src/lib/components/local-llm/LocalLlmPage.svelte:485",
+   "sev": "T4",
+   "title": "Phantom `--fs-2xs` token referenced in LocalLlmPage (never defined in token sheet)"
+  },
+  {
+   "id": "deadcode-phantom-sm-row",
+   "file": "src/lib/components/assistant/composer/SettingsMenu.svelte:600",
+   "sev": "T3",
+   "title": "Phantom `--sm-row` token in SettingsMenu think-toggle"
+  },
+  {
+   "id": "deadcode-reused-control-response-guard",
+   "file": "src-tauri/src/assistant/turn.rs:2219",
+   "sev": "T4",
+   "title": "control_response filter on reused turn is unreachable \u2014 unexpected frames forwarded to frontend"
+  },
+  {
+   "id": "perf-delete-all-serial-ipc",
+   "file": "src/lib/state/assistant/persistence.ts:397",
+   "sev": "T4",
+   "title": "deleteAllConversations issues N sequential IPC round-trips instead of parallel"
+  },
+  {
+   "id": "perf-deny-set-per-call",
+   "file": "src/lib/state/assistant/streaming.ts:476",
+   "sev": "T4",
+   "title": "DENY set allocated inside appendToolUse on every tool_use event"
+  },
+  {
+   "id": "perf-draft-trim-in-derived-template",
+   "file": "src/lib/components/assistant/Composer.svelte:1164",
+   "sev": "T4",
+   "title": "draft.trim() called in two separate reactive template expressions without a shared $derived"
+  },
+  {
+   "id": "perf-editdiff-shiki-per-line-no-cache",
+   "file": "src/lib/components/assistant/EditDiff.svelte:154",
+   "sev": "T2",
+   "title": "EditDiff: per-line shiki+DOMPurify re-highlight with no memoization \u2014 O(N) on shikiReady flip"
+  },
+  {
+   "id": "perf-i16-u16-callback-alloc",
+   "file": "src-tauri/src/stt/audio.rs:128-131",
+   "sev": "T3",
+   "title": "Per-callback Vec<f32> allocation in i16/u16 audio paths on the real-time audio thread"
+  },
+  {
+   "id": "perf-modeldownloads-spread",
+   "file": "src/lib/state/stt.svelte.ts:286",
+   "sev": "T4",
+   "title": "Object-spread on every download-progress event rebuilds entire modelDownloads record"
+  },
+  {
+   "id": "perf-mono-copy-no-resample",
+   "file": "src-tauri/src/stt/audio.rs:192-193",
+   "sev": "T4",
+   "title": "Unnecessary `to_vec()` copy in the mono / no-resample audio path"
+  },
+  {
+   "id": "perf-plaintext-rebuild-per-token",
+   "file": "src/lib/components/assistant/MessageBubble.svelte:91",
+   "sev": "T4",
+   "title": "`plainText` re-joins all text blocks on every stream token"
+  },
+  {
+   "id": "perf-prewarm-delay-ignored",
+   "file": "src/lib/state/assistant/prewarm.ts:136",
+   "sev": "T2",
+   "title": "prewarm fast-fire path is dead: setTimeout uses PREWARM_DEBOUNCE_MS not `delay`"
+  },
+  {
+   "id": "perf-subagent-repeated-mutateagent",
+   "file": "src/lib/state/assistant/streaming.ts:632",
+   "sev": "T4",
+   "title": "applySubAgentFrame calls mutateAgent separately per block \u2014 N slices of agentSpawns per envelope"
+  },
+  {
+   "id": "perf-tabsstoragekey-alloc",
+   "file": "src/lib/state/assistant/persistence.ts:426",
+   "sev": "T4",
+   "title": "tabsStorageKey() re-allocates a Window object on every persistTabs call"
+  },
+  {
+   "id": "perf-title-no-effort",
+   "file": "src-tauri/src/assistant/oneshot.rs:535",
+   "sev": "T3",
+   "title": "Title path missing --effort flag; CLI default triggers expensive thinking pre-pass"
+  },
+  {
+   "id": "perf-title-partial-messages",
+   "file": "src-tauri/src/assistant/oneshot.rs:541",
+   "sev": "T3",
+   "title": "Title path passes --include-partial-messages but never consumes partial frames"
+  },
+  {
+   "id": "perf-triple-autosize-during-stt",
+   "file": "src/lib/components/assistant/Composer.svelte:795",
+   "sev": "T3",
+   "title": "Three autosize() calls per draft tick during STT dictation"
+  },
+  {
+   "id": "perf-validate-attachments-byte-scan-order",
+   "file": "src-tauri/src/assistant/turn.rs:200",
+   "sev": "T4",
+   "title": "validate_attachments scans all base64 bytes before the cheap MIME allowlist check"
+  }
+ ],
+ "report_only": [
+  {
+   "id": "cli-compat-shim-dedup-version-none",
+   "file": "src-tauri/src/assistant/cli_install.rs:310-328",
+   "sev": "T2",
+   "risk": "localized",
+   "title": "`.cmd` shim always returns `version: None` so dedup guard never fires \u2014 spurious entry in install list",
+   "symptom": "When both the bundled `.exe` and the `.cmd` shim are found (normal default-npm-prefix install on Windows), `probe_version_at` on the `.cmd` path always returns `None` because `std::process::Command::new(\"file.cmd\")` uses `CreateProcess` directly \u2014 which does not route through `cmd.exe` and cannot execute batch files. The dedup guard at line 316 (`inst.version.is_some()`) never fires for the shim, ",
+   "fix": "Either: (a) in `probe_version_at`, detect a `.cmd`/`.bat` path and shell out via `cmd.exe /c <path> --version` instead of direct spawn; or (b) relax the dedup guard to also match when one entry is a shim and the other has the same method: `e.method == inst.method && (is_shim(&e.path) || is_shim(&inst.path)) && (e.version == inst.version || e.version.is_none() || inst.version.is_none())`, keeping t"
+  },
+  {
+   "id": "correctness-cli-recommended-version-lockstep",
+   "file": "src/lib/state/cliUpdate.svelte.ts:53",
+   "sev": "T4",
+   "risk": "design-decision",
+   "title": "CLI_RECOMMENDED_VERSION not mechanically enforced against cli_caps::mins \u2014 silent drift risk",
+   "symptom": "When a new capability gate is added to cli_caps::mins (Rust) above version 2.1.170, `CLI_RECOMMENDED_VERSION` must be manually bumped in lockstep. Nothing enforces this: no test, no assertion, no CI check. A missed bump means Rift shows users 'all features enabled' for their CLI version when a new spawn flag is actually missing.",
+   "fix": "Add a vitest test that imports `CLI_RECOMMENDED_VERSION` and asserts it equals the version string produced by the highest `mins::*` constant (extractable via a tiny Rust build.rs print or a generated TS const). Alternatively, move the recommended-version constant to a shared source (e.g., a generated file from Cargo metadata) so there is a single source of truth."
+  },
+  {
+   "id": "correctness-destroy-init-listener-race",
+   "file": "src/lib/state/stt.svelte.ts:198",
+   "sev": "T3",
+   "risk": "localized",
+   "title": "destroy() + init() HMR race: mid-await sub() calls orphan UnlistenFns",
+   "symptom": "If destroy() is called while init() is mid-await inside the sequential sub() loop, destroy() clears this.unlisten = [] and resets initStarted = false. The in-flight sub() calls complete after that and push their UnlistenFns into the now-fresh (empty) this.unlisten array. A subsequent init() then registers another full set of listeners. The UnlistenFns from the first (pre-destroy) batch are lost \u2014 ",
+   "fix": "Add a destroy-generation counter: bump it in destroy() and check it inside sub() before pushing: `const gen = ++this.destroyGen; const sub = async (...) => { const fn = await fn(); if (this.destroyGen === gen) this.unlisten.push(fn); else fn(); };` Alternatively, collect all listen() promises in a local array in init(), resolve them after the awaits, then check initStarted once before pushing the "
+  },
+  {
+   "id": "correctness-initInner-guard-race",
+   "file": "src/lib/state/assistant.svelte.ts:922",
+   "sev": "T3",
+   "risk": "localized",
+   "title": "initInner early-exit guard (`unlistens.length > 0`) can silently no-op a legitimate re-init",
+   "symptom": "If `destroy()` fires while `initInner()` is awaiting a `listen()` call, then `init()` is called again before the in-flight `initInner()` reaches its gen-check cleanup (line 1046), the old `initInner()` pushes new unlisten entries to `this.unlistens` (now a fresh empty array after `destroy()` cleared it). The new `initInner()` reads `unlistens.length > 0` (seeing those entries) and returns early as",
+   "fix": "Remove the `unlistens.length > 0` guard and rely solely on the gen-check already at line 1046. The `initPromise ??=` guard prevents normal concurrent calls; the gen check handles the destroy-during-init case. Alternatively, `destroy()` should set a `destroying = true` flag that `initInner` checks synchronously after each await instead of relying on array-length."
+  },
+  {
+   "id": "correctness-local-llm-ephemeral-clients",
+   "file": "src-tauri/src/assistant/local_llm.rs:92",
+   "sev": "T3",
+   "risk": "localized",
+   "title": "local_llm.rs: all 4 commands create ephemeral reqwest clients \u2014 bypass corporate certs, waste a pool per call",
+   "symptom": "If local_llm_base_url points at an https:// LiteLLM proxy behind a corporate MITM proxy (valid enterprise setup), all four probe commands fail with TLS cert errors while real turns succeed (Node.js uses NODE_EXTRA_CA_CERTS). Also allocates a full reqwest::Client (TCP pool + TLS state) on every invocation instead of reusing a shared one.",
+   "fix": "Replace all four `reqwest::Client::new()` calls in local_llm.rs with `crate::certs::usage_client()`. The 15s timeout it carries is appropriate for probes. If the 180s create-model timeout (assistant_optimize_local_model) needs its own value, add a third singleton `certs::probe_client()` with that timeout, or build one with `certs::build_client(Duration::from_secs(180), None)` stored in a OnceLock "
+  },
+  {
+   "id": "correctness-nothink-shim-client-no-corp-certs",
+   "file": "src-tauri/src/assistant/nothink.rs:39-46",
+   "sev": "T4",
+   "risk": "localized",
+   "title": "nothink.rs: pooled UPSTREAM client skips corporate cert injection",
+   "symptom": "The no-think shim's upstream client (used on every proxied /v1/messages turn in local-LLM mode) is built via reqwest::Client::builder() without loading native certs. If local_llm_base_url is an https:// LiteLLM endpoint behind a corporate MITM proxy, every turn silently fails TLS verification. The shim comment at line 32 notes it fixed per-request client churn but didn't address the cert gap.",
+   "fix": "Replace the custom `upstream_client()` builder with `crate::certs::usage_client()` (or a dedicated certs singleton if a different timeout is needed). The pool_idle_timeout(90s) behavior is available via `certs::build_client` if a dedicated singleton is warranted."
+  },
+  {
+   "id": "correctness-stop-permission-registry-not-cancelled",
+   "file": "src-tauri/src/assistant/turn.rs:2596",
+   "sev": "T2",
+   "risk": "localized",
+   "title": "`assistant_stop` does not cancel pending PermissionRegistry entries \u2014 UI stuck for up to 120s after Stop",
+   "symptom": "If the user clicks Stop while a `can_use_tool` permission prompt is awaiting a response, `assistant_stop` kills the child process (via taskkill) and cancels `AskUserRegistry` entries, but does NOT cancel the pending `PermissionRegistry` oneshot. `handle_permission_request` is blocked inside `tokio::time::timeout(120s, rx).await` \u2014 the `rx` is not dropped and no external code cancels the registry e",
+   "fix": "Add session-keyed tracking to `PermissionRegistry` (store `session_id` alongside the sender, as `AskUserRegistry` does) and add a `cancel_all_for_session(&self, session_id: &str) -> usize` method. Call it from `assistant_stop` immediately after `ask_user.cancel_all_for_session` (same pattern). This drops the `tx`, causing `rx.await` to resolve `Err(RecvError)` immediately, unblocking `handle_permi"
+  },
+  {
+   "id": "deadcode-duplicate-tree-kill",
+   "file": "src-tauri/src/assistant/oneshot.rs:80",
+   "sev": "T4",
+   "risk": "localized",
+   "title": "Duplicate platform kill helper: `oneshot::tree_kill` mirrors `warm_pool::kill_child_tree`",
+   "symptom": "Identical Windows/Unix taskkill/kill-TERM logic is copy-pasted in two files. Any fix or platform addition must be made twice.",
+   "fix": "Remove `fn tree_kill` from `oneshot.rs`. Add a `pid == 0` early-return guard to `warm_pool::kill_child_tree` (one line), then change `kill_all_enhance_children` and `assistant_enhance_cancel` in `oneshot.rs` to call `super::warm_pool::kill_child_tree(pid)`. The `pub(super)` visibility already covers this without any visibility change."
+  },
+  {
+   "id": "deadcode-streaming-ctxwindowformodel-dup",
+   "file": "src/lib/state/assistant/streaming.ts:83",
+   "sev": "T3",
+   "risk": "localized",
+   "title": "ctxWindowForModel in streaming.ts is an acknowledged mirror of AssistantStore.ctxWindowFor with no shared source",
+   "symptom": "Two copies of the same model-context branching logic. If a new model is added or a context window changes, both branches must be updated manually \u2014 the comment explicitly acknowledges the duplicate but offers no migration path.",
+   "fix": "Extract the shared logic into `helpers.ts` as a pure fn (no store dep), re-export from there, and import in both streaming.ts and assistant.svelte.ts. Eliminates the acknowledged duplicate without introducing a circular dep."
+  },
+  {
+   "id": "deadcode-tree-kill-duplicate",
+   "file": "src-tauri/src/assistant/oneshot.rs:80",
+   "sev": "T4",
+   "risk": "localized",
+   "title": "Duplicate tree-kill implementation: oneshot::tree_kill vs warm_pool::kill_child_tree",
+   "symptom": "Two private tree-kill functions exist with near-identical bodies. oneshot.rs::tree_kill has a pid==0 guard that kill_child_tree (warm_pool.rs:54) lacks. Any future fix (e.g. adding a retry, changing the signal on Unix) must be applied to both or they drift.",
+   "fix": "Make `kill_child_tree` public to `assistant::` (change `pub(super)` to `pub(crate)` in warm_pool.rs) and add the pid==0 guard there. Delete oneshot.rs::tree_kill and replace its three call-sites (lines 112, 122, 313) with `super::warm_pool::kill_child_tree(pid)`."
+  },
+  {
+   "id": "perf-double-autosize-per-keystroke",
+   "file": "src/lib/components/assistant/Composer.svelte:163",
+   "sev": "T3",
+   "risk": "needs-care",
+   "title": "autosize() fires twice per user keystroke \u2014 sync in oninput + deferred via draft $effect",
+   "symptom": "Every user keystroke triggers two browser layout reflows: one synchronous (oninput line 1211) and one deferred via tick().then() inside the draft $effect (line 166). Each autosize() reads ta.scrollHeight (forced layout) and writes ta.style.height (invalidates layout). On slow machines or long drafts the second reflow visibly jitters the textarea height after a short settle delay.",
+   "fix": "The $effect is needed only for programmatic draft mutations (recall, mention insert, STT). Guard it with `untrack`: read `draft` outside the effect to subscribe, but inside the `tick().then()` skip `autosize()` if the last autosize already ran this microtask tick \u2014 or simply remove the `autosize()` call from the $effect and let the `oninput` handler own it. The `ta.focus()` call inside the $effect"
+  },
+  {
+   "id": "perf-drain-collect-resample-chunk",
+   "file": "src-tauri/src/stt/audio.rs:215",
+   "sev": "T3",
+   "risk": "needs-care",
+   "title": "`drain(..).collect()` allocates a new Vec<f32> per 1024-sample resample chunk inside audio callback",
+   "symptom": "Inside `push_samples`, each 1024-sample rubato chunk drains from `buf` into a freshly collected `Vec<f32>` before passing to `guard.process(&[chunk], None)`. At 48 kHz mono with ~480-sample callbacks, a chunk fills every ~2 callbacks, causing roughly 50 allocs/sec on the audio thread \u2014 the same real-time thread where alloc glitches cause mic dropouts.",
+   "fix": "Hoist a single reusable `chunk_buf: Vec<f32>` alongside the existing `leftover` buffer (captured in the same closure). Before each `process` call: `chunk_buf.clear(); chunk_buf.extend(buf.drain(..chunk_in));` then pass `&[chunk_buf.clone()]` \u2014 or restructure to use `rubato`'s `process_into_buffer` variant which accepts pre-allocated output. Only one closure-captured allocation needed for the lifet"
+  },
+  {
+   "id": "perf-fresh-vad-per-tick",
+   "file": "src-tauri/src/stt/vad.rs:26",
+   "sev": "T4",
+   "risk": "localized",
+   "title": "Fresh webrtc-vad instance allocated every rolling-window tick (already-known #46 R10)",
+   "symptom": "Every 1-second rolling-window inference tick calls `window_has_speech`, which allocates a new `Vad` object via FFI (webrtc-vad C heap) and initializes its state machine from scratch. At 1 Hz this is low-frequency, but the FFI alloc + C-side initialization is non-trivial and can spike the 1 s tick latency by several ms on slower machines. Catalogued as #46 R10.",
+   "fix": "Construct one `Vad` per `rolling_window_loop` invocation (outside the tick loop) and reset its state between windows using `Vad::reset_state()` or equivalent, or cache it in `ActiveSession`. Already catalogued \u2014 noting per scope instructions."
+  },
+  {
+   "id": "perf-grouped-full-pipeline-per-token",
+   "file": "src/lib/components/assistant/MessageBubble.svelte:168",
+   "sev": "T3",
+   "risk": "design-decision",
+   "title": "`grouped` derived re-runs full O(N) block pipeline on every stream token",
+   "symptom": "During text streaming, `message.blocks` is updated on every token delta (the last text block grows one chunk at a time). `grouped` \u2014 which calls `mergeSplitProse(reconcileSplitHeaders(...))` \u2192 `coalesceToolGroups` \u2192 `numberActions` \u2014 re-executes in full on every token. For a long assistant turn with many blocks this is O(blocks \u00d7 lines-per-text-block) regex work per token. The regex scan (`STEP_HE",
+   "fix": "Split into two derived values: (1) a `processedBlocks` derived that runs `mergeSplitProse(reconcileSplitHeaders(message.blocks))` and feeds `grouped`; (2) memoize the expensive pipeline on block-count change rather than arbitrary mutation. More targeted: because streaming only appends to or mutates the LAST block, track `message.blocks.length` and the last block's text separately \u2014 rerun the full "
+  },
+  {
+   "id": "perf-markdown-triple-template-parse",
+   "file": "src/lib/components/assistant/Markdown.svelte:485",
+   "sev": "T3",
+   "risk": "design-decision",
+   "title": "Markdown: 3 serial <template> DOM parse+serialize passes per parsed $derived recompute",
+   "symptom": "Every time parsed $derived recomputes (each rAF frame during streaming, and once on shikiReady flip), the pipeline runs three independent HTML parse+serialize round-trips: extractAndStripChecklists (tpl.innerHTML = html \u2192 mutate \u2192 tpl.innerHTML), then tagFlatShortLists (another tpl.innerHTML = html \u2192 query \u2192 tpl.innerHTML), then annotateCodeBlocks (another tpl.innerHTML = html \u2192 mutate \u2192 tpl.inner",
+   "fix": "Merge all three functions into one DOM pass: parse once into a single template, run all mutations (checklist extraction \u2192 flat-short tagging \u2192 collapsible annotation \u2192 copy-button injection) in sequence on the same DocumentFragment, then serialize once with tpl.innerHTML. This cuts 3 parse+serialize cycles to 1 per derived recompute. extractAndStripChecklists already has a fast-bail on `!html.incl"
+  },
+  {
+   "id": "perf-markdown-wrapwords-ancestor-walk",
+   "file": "src/lib/components/assistant/Markdown.svelte:214",
+   "sev": "T4",
+   "risk": "needs-care",
+   "title": "Markdown: wrapWords per-text-node ancestor walk is O(depth \u00d7 textNodes)",
+   "symptom": "The TreeWalker acceptNode callback walks the full ancestor chain (while (p) { p = p.parentElement }) for every text node encountered, even for nodes deep inside non-excluded subtrees (e.g., every word in a table row climbs through td \u2192 tr \u2192 tbody \u2192 table \u2192 div.md). On a response with a large table or deeply nested list, this is O(depth \u00d7 textNodes) ancestor traversal \u2014 redundant for all text nodes",
+   "fix": "Pre-collect excluded subtree roots with `container.querySelectorAll('pre, .shiki-block')` before creating the walker, store them in a Set<Node>, then in acceptNode check `[...excludedRoots].some(root => root.contains(n))` \u2014 or simpler: use `FILTER_REJECT` at the PRE/shiki-block element level by also walking elements (SHOW_TEXT | SHOW_ELEMENT) and rejecting on the element itself, letting FILTER_REJ"
+  },
+  {
+   "id": "perf-query-vec-materialization",
+   "file": "src-tauri/src/diagnostics/perf.rs:481",
+   "sev": "T4",
+   "risk": "localized",
+   "title": "query_turn_perf_sync materializes full NDJSON log into Vec<String> before aggregation",
+   "symptom": "Both the rotated .old file (up to 5 MB) and the live turns.ndjson (up to 5 MB) are read line-by-line into a single Vec<String> before being passed to aggregate(). At a rotation boundary this materializes up to ~10 MB of heap that is never needed simultaneously \u2014 aggregate() takes impl Iterator<Item = String> and is fully streaming (no look-ahead, processes one record at a time). The Vec is a legac",
+   "fix": "Chain the two file iterators directly into aggregate() without collecting:\n```rust\nif let Some(path) = turns_log_path() {\n    let old_path = path.with_extension(\"ndjson.old\");\n    let old_iter = std::fs::File::open(&old_path)\n        .map(|f| BufReader::new(f).lines().map_while(Result::ok))\n        .into_iter().flatten();\n    let new_iter = std::fs::File::open(&path)\n        .map(|f| BufReader::ne"
+  },
+  {
+   "id": "perf-stream-full-json-parse-per-line",
+   "file": "src-tauri/src/assistant/turn.rs:2185",
+   "sev": "T4",
+   "risk": "needs-care",
+   "title": "Full serde_json::Value deserialization on every NDJSON streaming line",
+   "symptom": "The hot streaming loop allocates a full `serde_json::Value` tree for every line from the CLI's stdout (line 2185: `serde_json::from_str::<Value>(trimmed)`). The dominant line types during a streaming turn are `stream_event` (partial token deltas, often containing embedded base64 image/tool data) \u2014 these are parsed into a `Value`, the `\"type\"` field is read, and the `Value` is dropped. The forwarde",
+   "fix": "Replace full `Value` parse with a cheaper type-extraction first pass. Use `serde_json::from_str::<serde_json::map::Map<String, serde_json::Value>>` (slightly cheaper) or \u2014 better \u2014 a small struct `struct TypeOnly { #[serde(rename=\"type\")] ty: Option<String> }` for the initial dispatch branch. Only deserialize into a full `Value` for lines where `ty` is one that needs deep field access (`\"control_r"
+  },
+  {
+   "id": "perf-warmhit-mcp-write",
+   "file": "src-tauri/src/assistant/turn.rs:787",
+   "sev": "T3",
+   "risk": "needs-care",
+   "title": "MCP config file written + immediately deleted on every warm-pool hit",
+   "symptom": "Every turn \u2014 including warm-pool hits where the spawned `cmd` is never used \u2014 calls `write_mcp_config` (line 787: `std::fs::create_dir_all` + `std::fs::write`). On a warm hit, `dispatch_turn` returns early at line 1420 (`Ok(r) => return r`) before `mcp_guard` is moved into `cold_spawn_and_run`, so the `Option<McpConfigGuard>` parameter drops when `dispatch_turn` returns \u2192 `McpConfigGuard::drop` de",
+   "fix": "Skip `write_mcp_config` when a warm-pool hit is likely. Check `warm_pool::get(&session_id)` before building `cmd` and the MCP config; if a warm child exists AND its key will match (compute the `SpawnKey` fields first), skip the config write entirely and pass `mcp_guard: None` to `dispatch_turn`. The existing warm child already has a live MCP config guard from its cold-spawn turn. Only write a new "
+  }
+ ],
+ "killed": [
+  {
+   "id": "cli-compat-custom-npm-prefix-on-path-false",
+   "title": "Custom npm prefix: bundled `.exe` gets `on_path = false`, misleading auth-priority logic and frontend display",
+   "why": ""
+  },
+  {
+   "id": "cli-compat-est-floors-eclipsed",
+   "title": "All three // est version floors are permanently eclipsed by MIN_SUPPORTED \u2014 unverified but zero runtime impact today; dangerous if MIN_SUPPORTED is ever lowered",
+   "why": ""
+  },
+  {
+   "id": "cli-compat-exclude-dynamic-sections-est",
+   "title": "EXCLUDE_DYNAMIC_SECTIONS floor unconfirmed (// est) \u2014 needs changelog verification",
+   "why": ""
+  },
+  {
+   "id": "cli-compat-include-partial-messages-est",
+   "title": "INCLUDE_PARTIAL_MESSAGES floor unconfirmed (// est) \u2014 needs changelog verification",
+   "why": ""
+  },
+  {
+   "id": "cli-compat-max-budget-usd-est",
+   "title": "MAX_BUDGET_USD floor unconfirmed (// est) \u2014 needs changelog verification",
+   "why": ""
+  },
+  {
+   "id": "compat-init-ack-unguarded",
+   "title": "init-ack gate triggers on ANY control_response, not just the rift-init reply",
+   "why": ""
+  },
+  {
+   "id": "compat-init-hooks-field",
+   "title": "initialize request embeds a hard-coded empty `hooks:{}` field the SDK contract may not define",
+   "why": ""
+  },
+  {
+   "id": "consistency-enhance-missing-effort-flag",
+   "title": "assistant_enhance_prompt always passes --effort medium unconditionally without a caps gate",
+   "why": ""
+  },
+  {
+   "id": "correctness-askcansubit-only-gated-by-length",
+   "title": "AskUser grow-effect silent no-op when only askMultiSet mutates and length hasn't changed",
+   "why": ""
+  },
+  {
+   "id": "correctness-cancel-after-pump-join",
+   "title": "cancel_inflight_download() called after pump.join() \u2014 narrow race window where zombie download can set downloaded=true",
+   "why": ""
+  },
+  {
+   "id": "correctness-certs-double-cert-store-read",
+   "title": "certs.rs: Windows cert store read via rustls_native_certs happens twice at startup \u2014 once for PEM, once per shared client",
+   "why": ""
+  },
+  {
+   "id": "correctness-compaction-fallback-ordering",
+   "title": "appendCliCompaction else-path inserts boundary after streaming message, not before",
+   "why": ""
+  },
+  {
+   "id": "correctness-onSessionLost-messages-strip",
+   "title": "onSessionLost strips only a trailing assistant+user pair \u2014 stranded if last message is not assistant",
+   "why": ""
+  },
+  {
+   "id": "correctness-resolve-manager-under-lock",
+   "title": "resolve_manager() called while holding Inner mutex in check() recovery path",
+   "why": ""
+  },
+  {
+   "id": "correctness-validate-path-raw-return",
+   "title": "validate_path returns raw string, not normalized form \u2014 absolute in-root paths reach git as-is",
+   "why": ""
+  },
+  {
+   "id": "perf-askquestions-remap-per-input-token",
+   "title": "`askQuestions` derived re-maps tool input on every streaming token for AskUser tools",
+   "why": ""
+  },
+  {
+   "id": "perf-index-keyed-each-askquestions",
+   "title": "Index-keyed `{#each}` on `askQuestions` and `q.options` causes full re-render on partial streaming input",
+   "why": ""
+  },
+  {
+   "id": "perf-rawlinelog-shift",
+   "title": "rawLineLog uses Array.shift() \u2014 O(n) on every stream line",
+   "why": ""
+  },
+  {
+   "id": "perf-stderr-mutex-per-line",
+   "title": "stderr_tail Mutex locked on every stderr line for the entire turn lifetime",
+   "why": ""
+  },
+  {
+   "id": "perf-termlines-reclassify-per-result-delta",
+   "title": "`termLines` re-classifies all shell result lines on every streaming result token",
+   "why": ""
+  },
+  {
+   "id": "perf-thinking-delta-livetokens-reactive",
+   "title": "refreshLiveTokens called on every thinking delta \u2014 unnecessary reactive invalidation of liveOutputTokens",
+   "why": ""
+  }
+ ]
+}

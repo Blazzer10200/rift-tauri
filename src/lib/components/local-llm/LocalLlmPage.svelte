@@ -328,7 +328,7 @@
                 {#each localLlm.models as m (m)}<option value={m}></option>{/each}
               </datalist>
               <button class="st-btn" type="button" disabled={!localLlm.enabled || localLlm.detecting} onclick={detectModels}>
-                {#if localLlm.detecting}<Loader2 size={14} class="st-spin" /> …{:else}<RefreshCw size={14} /> Detect{/if}
+                {#if localLlm.detecting}<Loader2 size={14} class="st-spin" /> Detecting…{:else}<RefreshCw size={14} /> Detect{/if}
               </button>
             </div>
             {#if localLlm.models.length > 0}
@@ -482,7 +482,7 @@
   .rv-latency { display: inline-flex; align-items: center; gap: 3px; font-size: var(--fs-xs); font-weight: 650; color: var(--accent); }
   .rv-desc { font-size: var(--fs-xs); color: var(--fg-muted); line-height: 1.45; }
   .rv-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
-  .rv-stamp { font-size: var(--fs-2xs, 10.5px); color: var(--fg-subtle); }
+  .rv-stamp { font-size: 10.5px; color: var(--fg-subtle); }
   .rail-verify .st-btn.primary { margin-left: auto; }
   .ll-result { white-space: pre-wrap; word-break: break-word; color: var(--ok); font-size: var(--fs-xs); line-height: 1.5; background: var(--bg-inset, color-mix(in oklab, var(--fg) 5%, transparent)); border: 1px solid var(--border); border-radius: var(--radius); padding: 9px 11px; max-height: 160px; overflow: auto; }
   .ll-result.err { color: var(--danger); }
@@ -530,7 +530,7 @@
 
   /* Model card — family / params / quant tags from /api/show */
   .model-card { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-  .mc-tag { font-size: var(--fs-2xs, 10.5px); font-weight: 600; color: var(--code-fg); background: var(--code-bg); border: 1px solid var(--code-border); border-radius: 4px; padding: 2px 7px; }
+  .mc-tag { font-size: 10.5px; font-weight: 600; color: var(--code-fg); background: var(--code-bg); border: 1px solid var(--code-border); border-radius: 4px; padding: 2px 7px; }
 
   /* Optimize target selector */
   .ctx-targets { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 10px; }

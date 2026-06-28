@@ -88,12 +88,10 @@
   // (single source of in-flight truth, down by the prompt) — the in-bubble
   // strips were de-duplicated to a quiet dots pulse (see .stage-strip below).
 
-  const plainText = $derived(
-    message.blocks
-      .map((b) => (b.type === "text" ? b.text : ""))
-      .join("")
-      .trim(),
-  );
+  const plainText = $derived.by(() => {
+    if (streaming) return "";
+    return message.blocks.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
+  });
 
   const isUser = $derived(message.role === "user");
   const isSystem = $derived(message.role === "system");

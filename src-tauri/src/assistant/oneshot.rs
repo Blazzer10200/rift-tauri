@@ -12,6 +12,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
+use super::cli_caps::CliCaps;
 use super::cli_install::claude_command;
 use super::config::{
     effective_trust_level, is_valid_model_name, load_config, DEFAULT_MODEL,
@@ -75,31 +76,6 @@ fn with_enhance_pids<R>(f: impl FnOnce(&mut HashMap<String, u32>) -> R) -> R {
     f(g.get_or_insert_with(HashMap::new))
 }
 
-/// Tree-kill one PID, best-effort + blocking (mirrors `kill_all_session_children`
-/// — grounded enhances parent a `rift-tauri.exe` MCP child, so `/T` matters).
-fn tree_kill(pid: u32) {
-    if pid == 0 { return; }
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        let _ = std::process::Command::new("taskkill")
-            .args(["/F", "/T", "/PID", &pid.to_string()])
-            .creation_flags(CREATE_NO_WINDOW)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-    #[cfg(unix)]
-    {
-        let _ = std::process::Command::new("kill")
-            .args(["-TERM", &pid.to_string()])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-}
-
 /// Reap every live enhance child. Called from `kill_all_session_children` on
 /// the update-apply path — these also hold `current/` locks via their MCP child.
 pub(crate) fn kill_all_enhance_children() {
@@ -109,7 +85,7 @@ pub(crate) fn kill_all_enhance_children() {
         v
     });
     for pid in pids {
-        tree_kill(pid);
+        super::warm_pool::kill_child_tree(pid);
     }
 }
 
@@ -119,7 +95,7 @@ pub(crate) fn kill_all_enhance_children() {
 #[tauri::command]
 pub async fn assistant_enhance_cancel(request_id: String) -> Result<(), String> {
     if let Some(pid) = with_enhance_pids(|m| m.remove(&request_id)) {
-        tree_kill(pid);
+        super::warm_pool::kill_child_tree(pid);
     }
     Ok(())
 }
@@ -234,10 +210,8 @@ names), then output the rewritten prompt. Keep lookups minimal."
         // Medium effort: the rewrite is a short, bounded task — high effort (the
         // CLI default) buys a long hidden pre-pass that reads as "the wand is
         // slow" and can over-deliberate on Sonnet 4.6. Mirrors the interactive
-        // turn's `--effort medium` default (turn.rs). Unconditional like the
-        // other oneshot flags — the bundled CLI is modern.
+        // turn's `--effort medium` default (turn.rs).
         .arg("--effort").arg("medium")
-        .arg("--disable-slash-commands")
         .arg("--permission-mode").arg("bypassPermissions")
         // One-shot: never persist this throwaway rewrite to the session store.
         .arg("--no-session-persistence")
@@ -248,6 +222,8 @@ names), then output the rewritten prompt. Keep lookups minimal."
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    let caps = CliCaps::active();
+    if caps.disable_slash_commands { cmd.arg("--disable-slash-commands"); }
 
     // Tool + cwd wiring differs by mode. The guard cleans up the per-request MCP
     // config file after the child exits (held until this fn returns).
@@ -270,7 +246,7 @@ names), then output the rewritten prompt. Keep lookups minimal."
                 Some(McpConfigGuard(p))
             }
             Err(e) => {
-                log::warn!("assistant: enhance grounding unavailable, using context-free: {e}");
+                log::warn!("oneshot: enhance grounding unavailable, using context-free: {e}");
                 cmd.arg("--strict-mcp-config")
                     .arg("--tools").arg("")
                     .current_dir(std::env::temp_dir());
@@ -310,7 +286,7 @@ names), then output the rewritten prompt. Keep lookups minimal."
             None => true,
         });
         if cancelled_early {
-            tree_kill(pid);
+            super::warm_pool::kill_child_tree(pid);
             return Err("enhance cancelled".into());
         }
     } else {

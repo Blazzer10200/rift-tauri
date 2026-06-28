@@ -52,6 +52,7 @@ use tokio::sync::{mpsc, oneshot};
 /// so dropping the registry entry alone never makes the loop's `recv()` return None
 /// (self-referential sender). The child must be killed by PID.
 pub(super) fn kill_child_tree(pid: u32) {
+    if pid == 0 { return; } // never taskkill PID 0 (meaningless / unsafe target)
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -214,12 +215,9 @@ pub(super) fn remove_if(session_id: &str, this: &Arc<Mutex<WarmChild>>) -> bool 
 /// holds a `turn_tx` clone (via the WarmChild), so dropping the registry entry
 /// can't make the loop's `recv()` return None — the child must be reaped by PID.
 pub(super) fn pid_of(session_id: &str) -> Option<u32> {
-    with_warm(|m| {
-        m.get(session_id).and_then(|arc| {
-            let g = match arc.lock() { Ok(g) => g, Err(p) => p.into_inner() };
-            g.pid
-        })
-    })
+    let arc = with_warm(|m| m.get(session_id).cloned())?;
+    let g = match arc.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+    g.pid
 }
 
 /// Idle eviction window. A warm child unused for this long is killed +
@@ -356,15 +354,18 @@ fn evict_idle_once() -> usize {
                 evicted += 1;
                 let reason = if rank < over_cap { "pressure" } else { "idle" };
                 let window = if rank < over_cap { IDLE_EVICT_PRESSURE } else { IDLE_EVICT };
-                // Reap the child by PID. Dropping the registry Arc does NOT free
-                // the last turn_tx clone — the reader loop ALSO holds the WarmChild
-                // (via `ctx.warm`, for its own exit-time `remove_if`), so a sender
-                // stays alive and the loop's parked `recv()` never returns None.
-                // Same self-referential-sender leak the signature-drain hit; reap
-                // directly by PID (loop_cleanup then no-ops the already-gone child).
-                if let Some(pid) = c.pid {
-                    kill_child_tree(pid);
+                // Guard: a turn may have started after our snapshot; re-check before killing.
+                let still_idle = {
+                    let g = arc.lock().unwrap_or_else(|p| p.into_inner());
+                    !g.turn_in_progress.load(Ordering::Acquire)
+                };
+                if still_idle {
+                    if let Some(pid) = c.pid {
+                        kill_child_tree(pid);
+                    }
                 }
+                // (if a turn started after our snapshot, the child is already removed from
+                // the registry; loop_cleanup will reap it when the turn ends.)
                 log::info!(
                     "warm_pool: idle-evicted session {sid} (>{}s, {reason}, {total} warm, pid={:?})",
                     window.as_secs(), c.pid

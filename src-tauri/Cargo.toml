@@ -62,9 +62,10 @@ serde_json = "1"
 # Async runtime — narrowed from "full" to what we actually use.
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time", "net", "io-util", "process"] }
 
-# L9: force `ring` crypto provider on rustls — drops aws-lc-rs from dep tree.
-# Declared for feature control only — never `use rustls::*` directly (cargo-machete
-# flags it as unused; see [package.metadata.cargo-machete] below).
+# Force the `ring` crypto provider on rustls — keeps aws-lc-rs out of the dep tree
+# (verified via `cargo tree -i aws-lc-rs` → no match). Paired with reqwest's
+# `rustls-no-provider` feature below; `run()` in lib.rs installs ring as the
+# process-default provider so reqwest's no-provider build finds one at runtime.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 
 # M13: structured cancellation tokens for in-flight downloads.
@@ -91,7 +92,12 @@ walkdir = "2.5.0"
 # directly lets us import w/o relying on transitive paths.
 regex = "1"
 futures = "0.3.32"
-reqwest = { version = "0.13.3", default-features = false, features = ["rustls", "charset", "http2", "system-proxy", "stream", "json"] }
+# `rustls-no-provider` (NOT `rustls`): reqwest's `rustls` feature pulls in
+# `__rustls-aws-lc-rs`, re-adding aws-lc-rs despite the ring pin above (cont.228).
+# `-no-provider` enables rustls + the platform verifier but leaves provider
+# selection to our ring pin on line ~68. (NB: velopack→ureq pulls aws-lc-rs on its
+# own path, so the crate may still appear in `cargo tree` — this drops reqwest's.)
+reqwest = { version = "0.13.3", default-features = false, features = ["rustls-no-provider", "charset", "http2", "system-proxy", "stream", "json"] }
 
 # sha2 — SHA-256 digest for STT Whisper model-download integrity verification
 # (see stt/model_manager.rs). Pure-Rust RustCrypto impl.
@@ -128,9 +134,8 @@ webrtc-vad = "0.4"
 whisper-rs = { version = "0.14", default-features = false, optional = true }
 
 [package.metadata.cargo-machete]
-# rustls is declared at the top-level to force the `ring` crypto provider features
-# across the transitive tree (via reqwest); we never `use rustls::*` directly.
-ignored = ["rustls"]
+# (rustls is now `use`d directly in lib.rs to install the ring provider, so it no
+# longer needs a machete ignore. Kept block for any future feature-only deps.)
 
 # Speech-to-text — Phase 2: local Whisper pipeline.
 #   - `webkitSpeechRecognition` (Web Speech / Azure) kept as legacy engine.

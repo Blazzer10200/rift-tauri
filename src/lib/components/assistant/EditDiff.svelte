@@ -151,14 +151,20 @@
     json: "json", jsonc: "json", toml: "toml", lua: "lua", py: "python", pyi: "python",
   };
   const langId = $derived(EXT_LANG[lang.toLowerCase()] ?? null);
+  // Cache keyed on `${langId}:${text}` — stable across shikiReady flips since
+  // langId and code lines are immutable once the diff is built.
+  const hlCache = new Map<string, string | null>();
   function hl(text: string): string | null {
     if (!shikiReady || !langId || text.length === 0) return null;
+    const key = `${langId}:${text}`;
+    if (hlCache.has(key)) return hlCache.get(key)!;
     const html = highlightSync(text, langId);
-    if (!html) return null;
+    if (!html) { hlCache.set(key, null); return null; }
     // Extract just the inner tokens of shiki's single `.line` span.
     const m = html.match(/<span class="line">([\s\S]*?)<\/span><\/code>/);
-    if (!m) return null;
-    return DOMPurify.sanitize(m[1], { ALLOWED_TAGS: ["span"], ALLOWED_ATTR: ["style", "class"] });
+    const result = m ? DOMPurify.sanitize(m[1], { ALLOWED_TAGS: ["span"], ALLOWED_ATTR: ["style", "class"] }) : null;
+    hlCache.set(key, result);
+    return result;
   }
 
   const counts = $derived.by(() => {

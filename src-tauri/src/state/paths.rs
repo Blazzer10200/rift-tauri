@@ -19,3 +19,12 @@ pub fn dirs_home() -> std::io::Result<PathBuf> {
     ))
 }
 
+/// `dirs_home` with an absolute-temp fallback. Use when a missing home must NOT
+/// abort (e.g. writing a config file): falling back to `temp_dir()` keeps the path
+/// absolute so it never lands CWD-relative next to the exe (which a Velopack
+/// install update-wipes). Prefer the `Result` form when a missing home is a real
+/// error to surface. (cont.228: was inline in stt::dirs_home.)
+pub fn dirs_home_or_temp() -> PathBuf {
+    dirs_home().unwrap_or_else(|_| std::env::temp_dir())
+}
+

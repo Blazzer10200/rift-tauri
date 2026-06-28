@@ -373,6 +373,7 @@ async fn run_npm_update() -> Result<String, String> {
         cmd = Command::new("npm");
         cmd.args(["install", "-g", "@anthropic-ai/claude-code@latest"]);
     }
+    cmd.env_remove("ANTHROPIC_API_KEY");
     // RR10: bound the npm spawn — a stalled registry/download would otherwise
     // hang the invoke forever (frontend `updating` spinner never clears).
     let fut = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).output();

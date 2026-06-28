@@ -71,6 +71,7 @@ import {
   savePermissionMode,
   messagesHaveContextSignals,
   migrateThinkingPins,
+  ctxWindowForModelId,
 } from "./assistant/helpers";
 export { messagesHaveContextSignals } from "./assistant/helpers";
 
@@ -459,13 +460,7 @@ class AssistantStore {
 
   /** Per-tab ctx helpers. */
   ctxWindowFor(tab: TabState | null): number {
-    const model = tab?.lastModelId ?? null;
-    if (!model) return 200_000;
-    if (/\[1m\]/i.test(model)) return 1_000_000;
-    const id = model.toLowerCase();
-    if (id.includes("haiku")) return 200_000;
-    if (/sonnet-4-[56]/.test(id) || /opus-4-[678]/.test(id) || /fable-5/.test(id)) return 1_000_000;
-    return 200_000;
+    return ctxWindowForModelId(tab?.lastModelId ?? null);
   }
   ctxTokensFor(tab: TabState | null): number {
     const u = tab?.lastTurnUsage ?? null;
@@ -1091,12 +1086,19 @@ class AssistantStore {
    *  next send uses --session-id, surface a friendly notice, then re-send
    *  the prompt. Tab-aware: ignore if the lost session isn't current
    *  (user switched tabs while the error was in flight). */
-  private onSessionLost(payload: { session_id: string; prompt: string }) {
+  private onSessionLost(payload: { session_id: string; prompt?: string }) {
     // Find the tab whose CLI session failed (may not be the active tab if the
     // user switched mid-recovery). After S103 decoupling cliSessionId may
     // differ from convoId (post-compaction).
     const tab = this.tabByCliSession(payload.session_id);
     if (!tab) return;
+    // The backend SESSION_LOST_EVENT carries only { session_id }; recover the
+    // prompt to retry from the last user message (still present pre-pop) so the
+    // auto-retry re-sends the real turn instead of `undefined`.
+    const lastUser = [...tab.messages].reverse().find((m) => m.role === "user");
+    const retryPrompt =
+      payload.prompt ??
+      (lastUser?.blocks.map((b) => (b.type === "text" ? b.text : "")).join("").trim() ?? "");
     this.telemetry.event("session.lost", { sid: payload.session_id, willRetry: tab === this.activeTab });
     if (tab.currentTurnRecord) {
       tab.currentTurnRecord.doneAt = Date.now();
@@ -1123,10 +1125,10 @@ class AssistantStore {
     notify.warn("Session was lost — retrying as a fresh start");
     // Auto-retry only when the lost tab is active. Bg-tab retry would require
     // routing send() to a specific tab; for now the user re-clicks send.
-    if (this.activeTab === tab) {
+    if (this.activeTab === tab && retryPrompt) {
       this.convoCreatedAt = null;
       this.convoTitle = null;
-      void this.send(payload.prompt);
+      void this.send(retryPrompt);
     }
   }
 
@@ -1320,7 +1322,10 @@ class AssistantStore {
   loadConversation(id: string) { return persistLoad(this, id); }
   deleteConversation(id: string) { return persistDelete(this, id); }
   async deleteAllConversations() {
-    if (this.streaming) await this.stop();
+    for (const id of this.openTabs) {
+      const t = this.tabs.get(id);
+      if (t?.streaming) await this.stop(id);
+    }
     await persistDeleteAll(this);
     await this.newTab();
   }

@@ -129,15 +129,8 @@ impl Default for SttConfig {
     }
 }
 
-fn dirs_home() -> PathBuf {
-    // Delegate to the canonical USERPROFILE→HOME helper; fall back to an absolute
-    // temp path rather than "." so stt-config.json never lands CWD-relative next
-    // to the exe (which is update-wiped on a Velopack install).
-    crate::state::paths::dirs_home().unwrap_or_else(|_| std::env::temp_dir())
-}
-
 fn config_path() -> PathBuf {
-    dirs_home().join(".rift").join("stt-config.json")
+    crate::state::paths::dirs_home_or_temp().join(".rift").join("stt-config.json")
 }
 
 /// Serializes config disk access — `stt_set_config` is a sync command on the
