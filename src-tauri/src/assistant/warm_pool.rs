@@ -236,37 +236,44 @@ pub(super) fn pid_of(session_id: &str) -> Option<u32> {
 /// already covered by `drain_all_for_shutdown` on the update-apply path, so
 /// this timer is now purely a memory backstop — hence the generous window plus
 /// the `MAX_WARM` pressure valve below.
-const IDLE_EVICT: Duration = Duration::from_secs(1800);
-/// Memory pressure valve. While at most this many warm children are registered,
-/// the generous `IDLE_EVICT` window applies. Above it, the OLDEST idle children
-/// are evicted on a much shorter `IDLE_EVICT_PRESSURE` window until the count is
-/// back at the cap — bounds the worst case (many abandoned sessions × ~450MB)
-/// without taxing the common active-session case.
 ///
-/// **Raised 3→6 (2026-06-27, prod-log evidence):** real multi-tab usage drove
-/// the live pool to ≥6 concurrent warm children (the eviction log's "N warm"
-/// count is measured AT evict time, so true peak ran higher), and the old cap
-/// of 3 meant the 4th+ active tab fell to the 2-min pressure window and re-paid
-/// a full cold respawn (~1.7s, observed as the dominant TTFT cause: 65% of prod
-/// turns were cold, 14 of them "signature/pressure" respawns on a still-active
-/// session). 6 × ~450MB ≈ 2.7GB worst case — trivial against the target's
-/// 32GB / 15GB-free profile, and only matters at all when 6 sessions are
-/// genuinely abandoned at once. Keeps interactive multi-tab work hot.
-const MAX_WARM: usize = 6;
-/// Shortened idle window applied to surplus children once `MAX_WARM` is
-/// exceeded (oldest-first).
+/// **ARCHITECTURE (2026-06-28, cold-start rewrite): persistent-process model.**
+/// The warm child is the SAME long-lived CLI process every IDE-extension /
+/// terminal Claude session keeps alive — booted + handshaked once, it serves
+/// every turn over a persistent `--input-format stream-json` stdin. Spawning
+/// per-turn (and eviction) was never the CLI's requirement; it was an
+/// over-eager memory-reclaim instinct. The original concrete reason to evict —
+/// releasing the Velopack `current/` file lock during self-update — is fully
+/// covered by `drain_all_for_shutdown` on the apply path, so this timer is NOT
+/// a correctness mechanism. It is ONLY a backstop against a genuinely-abandoned
+/// session leaking ~450MB forever.
 ///
-/// **Raised 120→300s (2026-06-27, prod-log evidence):** recomputed same-session
-/// inter-turn gaps (n=66) show p50=44s, p75=132s, **p90=281s**, p95=376s — a
-/// real interactive follow-up (read reply → think → reply) routinely pauses 2-5
-/// min. The old 120s window sat below p75, so when the pool went into surplus the
-/// pressure valve cold-respawned sessions whose user was merely paused, not gone.
-/// 300s clears the p90 of genuine follow-ups while staying far under the 1800s
-/// generous window, so the valve still trims actually-stale surplus aggressively
-/// — it just stops mistaking a thinking user for an abandoned session.
-const IDLE_EVICT_PRESSURE: Duration = Duration::from_secs(300);
-/// How often the background sweeper checks for idle children.
-const EVICT_TICK: Duration = Duration::from_secs(60);
+/// So the window is now ABANDONED-SESSION scale, not inter-turn scale: a child
+/// survives any realistic active-use gap (meal, meeting, deep-read, context
+/// switch) and is reaped only after the session is clearly walked-away-from.
+/// Prior values (30m → 90m) still sat in the tail of real pause distributions
+/// and evicted mid-session, which IS the 63%-cold-rate bug. 2h clears every
+/// plausible active pause; what's left is true abandonment. Cost is pure idle
+/// RAM on a 32GB box — a parked child burns no CPU.
+const IDLE_EVICT: Duration = Duration::from_secs(7200);
+/// Memory backstop cap. The pressure valve below only fires ABOVE this many
+/// concurrent children — and with the persistent-process model that should mean
+/// "an unreasonable number of abandoned chats", never normal multi-tab/window
+/// use. Sized well past the user's real concurrent window+tab count (~7 windows)
+/// so an actively-used set is NEVER subject to the shorter pressure window;
+/// only a pathological pile of abandoned sessions trips it. 20 × ~450MB ≈ 9GB
+/// worst case, still inside a 32GB box and only when 20 sessions are abandoned
+/// at once.
+const MAX_WARM: usize = 20;
+/// Shortened window applied ONLY to surplus children once `MAX_WARM` is exceeded
+/// (oldest-first). With the persistent-process model the valve is a pure
+/// pathological-accumulation guard, not a normal-use path. Even when it fires it
+/// stays at abandoned-session scale (30 min) so a merely-paused session in a
+/// pathologically-large set still isn't mistaken for abandoned.
+const IDLE_EVICT_PRESSURE: Duration = Duration::from_secs(1800);
+/// How often the background reaper checks for abandoned children. Slow — this is
+/// now a rare-event backstop, not a hot eviction loop.
+const EVICT_TICK: Duration = Duration::from_secs(300);
 
 /// Pure eviction decision (extracted so the v0.26.3 pressure-valve logic is
 /// unit-testable without the global registry + real clocks). Given each child's
@@ -422,48 +429,49 @@ mod tests {
     const MIN: Duration = Duration::from_secs(60);
 
     // Helper: durations in minutes, descending (oldest-first as evict_idle_once
-    // pre-sorts). Real consts: IDLE_EVICT=1800s (30m), PRESSURE=300s (5m),
-    // MAX_WARM=6. Tests pass these windows EXPLICITLY to evict_decision (not the
-    // consts) so the pure kernel stays tested independent of tuning — bumping a
-    // const can't silently change a test's meaning.
+    // pre-sorts). Real consts (persistent-process model): IDLE_EVICT=7200s (120m),
+    // PRESSURE=1800s (30m), MAX_WARM=20. Tests pass these windows to evict_decision
+    // so the pure kernel stays tested against the live tuning — a child only ages
+    // out at abandoned-session scale, never an active-use pause.
     fn mins(v: &[u64]) -> Vec<Duration> {
         v.iter().map(|m| MIN * (*m as u32)).collect()
     }
 
     #[test]
     fn under_cap_uses_generous_window_only() {
-        // 3 children (== MAX_WARM=3), none over 30m → nobody evicted even though
-        // two are well past the 2m pressure window. The pressure valve must NOT
-        // fire below the cap (the v0.26.3 fix: don't age out an active session).
-        let ages = mins(&[20, 10, 5]); // 20m, 10m, 5m idle
+        // 3 children (under MAX_WARM), none over the 120m generous window → nobody
+        // evicted even though two are well past the 30m pressure window. The
+        // pressure valve must NOT fire below the cap: an active session that's been
+        // paused 60-90m is kept hot, not aged out (the persistent-process model).
+        let ages = mins(&[90, 60, 30]); // 90m, 60m, 30m idle — all < 120m
         let d = evict_decision(&ages, &[false; 3], 3, IDLE_EVICT, IDLE_EVICT_PRESSURE);
         assert_eq!(d, vec![false, false, false]);
     }
 
     #[test]
     fn under_cap_evicts_only_past_generous_window() {
-        // A genuinely abandoned session (>30m) ages out even under the cap.
-        let ages = mins(&[40, 10, 5]);
+        // A genuinely abandoned session (>120m) ages out even under the cap.
+        let ages = mins(&[130, 60, 30]);
         let d = evict_decision(&ages, &[false; 3], 3, IDLE_EVICT, IDLE_EVICT_PRESSURE);
         assert_eq!(d, vec![true, false, false]);
     }
 
     #[test]
     fn over_cap_trims_surplus_oldest_on_short_window() {
-        // 5 children, cap 3 → over_cap=2: the two OLDEST get the 2m pressure
-        // window, the remaining three keep the 30m window. Ages 10m/8m are past
-        // 2m but under 30m → the two surplus evict, the rest stay.
-        let ages = mins(&[10, 8, 6, 4, 1]);
+        // 5 children, cap 3 → over_cap=2: the two OLDEST get the 30m pressure
+        // window, the remaining three keep the 120m generous window. Ages 50m/40m
+        // are past 30m but under 120m → the two surplus evict, the rest stay.
+        let ages = mins(&[50, 40, 20, 10, 1]);
         let d = evict_decision(&ages, &[false; 5], 3, IDLE_EVICT, IDLE_EVICT_PRESSURE);
-        // ranks 0,1 (10m,8m) surplus & >2m → evict; ranks 2,3,4 keep 30m → stay.
+        // ranks 0,1 (50m,40m) surplus & >30m → evict; ranks 2,3,4 keep 120m → stay.
         assert_eq!(d, vec![true, true, false, false, false]);
     }
 
     #[test]
     fn over_cap_surplus_still_needs_to_exceed_pressure_window() {
-        // Surplus rank but idle only 1m (< 2m pressure) → NOT evicted. The valve
-        // trims the *oldest idle*, not freshly-used children that happen to rank.
-        let ages = mins(&[1, 1, 1, 1, 1]);
+        // Surplus rank but idle only 10m (< 30m pressure) → NOT evicted. The valve
+        // trims the *oldest idle*, not recently-used children that happen to rank.
+        let ages = mins(&[10, 10, 10, 10, 10]);
         let d = evict_decision(&ages, &[false; 5], 3, IDLE_EVICT, IDLE_EVICT_PRESSURE);
         assert_eq!(d, vec![false; 5]);
     }
@@ -471,12 +479,12 @@ mod tests {
     #[test]
     fn mid_turn_child_never_evicted_even_if_oldest() {
         // The oldest child is mid-turn → must be spared regardless of age, or we'd
-        // kill the CLI under an in-flight request. (rank 0, 40m idle, in_progress)
-        let ages = mins(&[40, 35, 5, 5, 5]);
+        // kill the CLI under an in-flight request. (rank 0, 130m idle, in_progress)
+        let ages = mins(&[130, 50, 5, 5, 5]);
         let mut prog = [false; 5];
         prog[0] = true;
         let d = evict_decision(&ages, &prog, 3, IDLE_EVICT, IDLE_EVICT_PRESSURE);
-        // rank 0 spared (in-progress); rank 1 (35m surplus, >2m) evicts.
+        // rank 0 spared (in-progress); rank 1 (50m surplus, >30m) evicts.
         assert_eq!(d, vec![false, true, false, false, false]);
     }
 
@@ -502,9 +510,9 @@ mod tests {
     fn aged_child_with_pid_is_selected_for_eviction() {
         // An aged-out child (older than IDLE_EVICT) under the cap is evicted, and the
         // decision kernel that drives `evict_idle_once` agrees.
-        let aged = mins(&[40]); // 40m ≫ 30m IDLE_EVICT
+        let aged = mins(&[130]); // 130m ≫ 120m IDLE_EVICT
         let d = evict_decision(&aged, &[false], MAX_WARM, IDLE_EVICT, IDLE_EVICT_PRESSURE);
-        assert_eq!(d, vec![true], "a 40m-idle child must be evicted under the generous window");
+        assert_eq!(d, vec![true], "a 130m-idle child must be evicted under the generous window");
         // And a child still mid-turn is spared regardless of age (we never kill a PID
         // out from under an in-flight request — the reap only runs once it's idle).
         let d2 = evict_decision(&aged, &[true], MAX_WARM, IDLE_EVICT, IDLE_EVICT_PRESSURE);

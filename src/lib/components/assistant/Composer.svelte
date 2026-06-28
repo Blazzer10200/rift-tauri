@@ -230,11 +230,14 @@
     });
   });
 
-  // #67 pre-warming: request a warm `claude` spare for a FRESH tab before the
-  // user sends, so the first turn skips cold-boot + the SessionStart-hook tax.
-  // Reads the picker signature + tab so it re-arms when any of them change; the
-  // debounce + per-signature dedup inside requestPrewarm keep it cheap (no spawn
-  // on a started convo, no root, while streaming, or for an identical spare).
+  // #67 pre-warming: request a warm `claude` spare for a tab that has no live
+  // child yet (a fresh tab, or a history chat opened after an app restart), so
+  // the first turn skips cold-boot + the SessionStart-hook tax. Re-runs when the
+  // picker signature, tab, root, or auth changes; the debounce + per-signature
+  // dedup inside requestPrewarm keep it cheap (no spawn while streaming or for an
+  // identical spare). With the persistent-process model the child survives the
+  // whole session, so there's no mid-session re-warm scramble — the backend
+  // no-ops when a live child already exists.
   $effect(() => {
     // Touch the signature inputs so the effect re-runs on any change.
     void tabId;

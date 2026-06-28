@@ -428,7 +428,7 @@ async fn handle_permission_request(
     // (the explicit cancel below never runs when the future is cancelled).
     let (rx, _perm_guard) = registry.register_guarded(request_id.clone());
     // B4: if the UI is unreachable (window closed mid-turn) the user never sees
-    // the prompt — deny immediately rather than hang for the full 30-min timeout
+    // the prompt — deny immediately rather than hang for the full 120s timeout
     // while the CLI waits on us. `emit_to` returns Ok(()) for a missing/closed
     // label (zero webviews matched), so the error path below can't detect a gone
     // window — check existence explicitly first.
@@ -559,6 +559,12 @@ pub async fn assistant_prewarm(
     thinking_enabled: Option<bool>,
     permission_mode: Option<String>,
     root: Option<String>,
+    // Re-warm support (2026-06-28 cold-start arc): a fresh tab pre-warms a
+    // `--session-id` child; an EXISTING conversation whose warm child was idle-
+    // evicted re-warms a `--resume` child so the next real turn is a warm hit
+    // instead of a cold respawn. Defaults to true (fresh-tab) when the frontend
+    // omits it, preserving the original single-call-site behaviour.
+    is_first_turn: Option<bool>,
 ) -> Result<(), String> {
     // A spare for a session that already has a live warm child is pure waste —
     // bail before doing any work (cheap registry read, no child lock).
@@ -578,7 +584,7 @@ pub async fn assistant_prewarm(
         }
     }
     run_or_prewarm(
-        app, window, String::new(), session_id, /*is_first_turn*/ true, model,
+        app, window, String::new(), session_id, is_first_turn.unwrap_or(true), model,
         /*attachments*/ None, /*dyslexia*/ None, thinking_effort, thinking_enabled,
         permission_mode, /*prior_context_summary*/ None, root, true,
     ).await
@@ -1158,22 +1164,33 @@ async fn run_or_prewarm(
     log::info!("assistant_send: effort tier={effort_tier} flag={effort_level} model={model} session={session_id}");
     // Local-LLM mode skips `--effort` wholesale — local models/proxies don't
     // implement Anthropic extended-thinking tiers and 4xx or silently ignore it.
-    // Thinking-off also skips it: the shim disables thinking entirely, so an
-    // effort tier would be moot (and the CLI would still emit a thinking block).
-    // `--effort` gated: a CLI without it rejects the unknown flag. Omitting it
-    // falls back to the CLI's default thinking behavior (still a working turn,
-    // just not tier-controlled). The ultracode `--settings` key is gated
-    // independently below.
-    if !cfg.local_llm_enabled && thinking_on && model != "haiku" && caps.effort {
-        cmd.arg("--effort").arg(effort_level);
+    //
+    // #68 (cont.226): thinking-OFF must STILL send `--effort low`. The CLI has no
+    // `--thinking`/disable flag (verified `claude --help` 2.1.195: `--effort` is
+    // the only thinking control), so the no-think shim — which rewrites the
+    // request body to `thinking:{disabled}` — was the only real off switch. But
+    // the OAuth CLI ignores our `ANTHROPIC_BASE_URL` override (proven live: 0
+    // shim connections, 12-13 direct conns to api.anthropic.com), so the shim is
+    // bypassed. With no `--effort` sent, the CLI defaults to `high` → a `hello`
+    // "reckons" ~12s. Sending `low` forces minimal reasoning regardless of
+    // whether the shim is reachable. (low ≠ fully off, but it's the CLI floor and
+    // kills the multi-second pre-pass; if the shim ever starts working again the
+    // injected disabled-block still wins on top of this.)
+    // `--effort` gated on caps.effort: an older CLI without the flag rejects it.
+    let send_effort = if thinking_on { Some(effort_level) } else { Some("low") };
+    if !cfg.local_llm_enabled && model != "haiku" && caps.effort {
+        if let Some(level) = send_effort {
+            cmd.arg("--effort").arg(level);
+        }
         // Ultracode tier: xhigh effort + autonomous dynamic-workflow
         // orchestration. The workflow behavior rides the CLI's `ultracode`
         // settings key (a boolean read into app state, gated server-side by the
         // user's plan entitlement). `--settings` merges this additively over
         // user/project/local settings — when unentitled the CLI ignores it and
         // the session simply runs at xhigh effort. Haiku is excluded (it skips
-        // extended thinking + workflow orchestration wholesale).
-        if effort_tier == "ultra" && caps.settings_flag {
+        // extended thinking + workflow orchestration wholesale). Only when
+        // thinking is actually on — a thinking-off turn never rides ultracode.
+        if thinking_on && effort_tier == "ultra" && caps.settings_flag {
             cmd.arg("--settings").arg(r#"{"ultracode":true}"#);
         }
     }
@@ -2044,7 +2061,7 @@ struct StreamCtx<'a> {
 /// declaring it wedged (`TurnOutcome::Stalled`). The deadline is RESET on every
 /// stdout line, so it only bites a truly silent pipe; a streaming turn (frames
 /// arriving) never trips it, and a legitimate permission wait runs inside the
-/// read arm (its own 1800s timeout governs) so the watchdog isn't even polled.
+/// read arm (its own 120s timeout governs) so the watchdog isn't even polled.
 /// 180s is far above a real prefill/queue first-frame (<60s) yet bounds the
 /// previously-infinite deadlock the UI used to mislabel as "the Anthropic API".
 const STREAM_NO_PROGRESS_SECS: u64 = 180;
@@ -2211,7 +2228,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                         if let Err(e) = handle_permission_request(app_out, stream_sid, win_label, stdin, &v).await {
                             return TurnOutcome::Fatal(format!("write permission response: {e}"));
                         }
-                        // A permission ask parks on the USER (its own 1800s
+                        // A permission ask parks on the USER (its own 120s
                         // timeout). That human time isn't a stalled child — re-arm
                         // the watchdog so a slow decision doesn't trip it on the
                         // next park; the CLI's first post-decision frame is what

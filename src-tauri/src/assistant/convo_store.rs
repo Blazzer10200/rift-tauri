@@ -105,7 +105,7 @@ fn convo_path(id: &str) -> Result<PathBuf, String> {
 /// `~/.claude/projects/<cwd-hash>/<uuid>.jsonl`, and `--resume <uuid>` only
 /// searches the CURRENT cwd's hash dir — it does NOT fall back across dirs
 /// (anthropics/claude-code#35226). So if the user's active workspace changes
-/// between turns (folder swap, autosync engine flip, root vanishes), the
+/// between turns (folder swap, root vanishes), the
 /// resume target moves and the session goes silently stale ("session lost"
 /// → frontend pops messages → all history dropped). Pinning cwd per session
 /// keeps every turn aimed at the same JSONL.

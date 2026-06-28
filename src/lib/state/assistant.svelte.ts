@@ -633,10 +633,9 @@ class AssistantStore {
   // Trust level gating the local git tools (mcp__rift__git_*). Loaded from the
   // backend; defaults to "readonly" when unset. Settings seg treats full ⊇ standard.
   trustLevel = $state<TrustLevel>("readonly");
-  // The Assistant's open project folder + recent-folder list. Decoupled from
-  // Sync's server folders; populated by `assistant_get_workspace` on init and
-  // updated whenever the user opens, switches, or clears a folder. Empty
-  // `current` falls back to AutoSync folders on the Rust side.
+  // The Assistant's open project folder + recent-folder list. Populated by
+  // `assistant_get_workspace` on init and updated whenever the user opens,
+  // switches, or clears a folder.
   workspace = $state<WorkspaceState>({ current: null, recent: [] });
   /** True once `refreshWorkspace()` has resolved the persisted folder on boot.
    *  Gates the cold "no folder" welcome so it never flashes for a frame before

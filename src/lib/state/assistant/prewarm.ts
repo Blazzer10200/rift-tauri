@@ -7,13 +7,15 @@
 // via the normal warm path when the SpawnKey matches (a picker change before
 // send just cold-respawns, never worse than no pre-warm).
 //
-// Design (docs/design/warm-cli-process.md "DECIDED ARCHITECTURE"):
+// Design (persistent-process model — see warm-pool-cold-start-diagnosis.md):
 //  - ONE spare per call, keyed to the current picker signature.
-//  - fires only for a FRESH tab (no convo started) WITH a warm-target root —
-//    the tab's folder OR the local scratch dir (local mode now runs full tools,
-//    so it pays the same hook tax and benefits from pre-warming). Only an
-//    API-key/sandboxed no-folder chat (tool-less + conversational) is skipped; a
-//    started convo already has/had its warm child.
+//  - fires for any tab with NO live warm child yet WITH a warm-target root: a
+//    FRESH tab (`--session-id` spare) OR a started chat reopened after an app
+//    restart (`--resume` spare). The warm child is persistent for the session,
+//    so a mid-session convo already has its child — the backend no-ops then.
+//    Target root is the tab's folder OR the local scratch dir (local mode runs
+//    full tools). Only an API-key/sandboxed no-folder chat (tool-less +
+//    conversational) is skipped.
 //  - debounced; deduped per (sessionId, signature) so a reactive re-tick or a
 //    settled picker doesn't re-spawn. A signature change re-arms (the old spare
 //    would mismatch at send anyway → backend drains it).
@@ -28,6 +30,13 @@ import { effortToFlag } from "./helpers";
 // into one spawn. ~600ms: long enough to skip the mount thrash, short enough that
 // a user reading the empty composer is warm before they type a sentence.
 const PREWARM_DEBOUNCE_MS = 600;
+// Fast first-fire (2026-06-28 cold-start arc): the 600ms window is what a fast
+// typer BEATS — open a tab, type, send in <600ms and the spare never spawned,
+// so the first turn is cold. For a NEVER-SEEN signature (a freshly focused tab)
+// fire on a much shorter delay; it still coalesces the mount-thrash burst but
+// starts the ~450MB spawn ~450ms sooner. Re-warms of an existing signature keep
+// the generous window (no rush — the user just finished reading a reply).
+const PREWARM_FIRST_FIRE_MS = 150;
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 // The (sessionId|signature) we last fired for — dedup so we don't re-spawn an
@@ -36,7 +45,12 @@ let lastFiredKey: string | null = null;
 
 /** The fields that, if changed, make the existing spare mismatch at send time
  *  (mirror of the backend SpawnKey). A change here re-arms the trigger. */
-function signatureOf(store: AssistantStore, sessionId: string, root: string): string {
+function signatureOf(
+  store: AssistantStore,
+  sessionId: string,
+  root: string,
+  isFirstTurn: boolean,
+): string {
   return [
     sessionId,
     store.effectiveModel,
@@ -44,6 +58,11 @@ function signatureOf(store: AssistantStore, sessionId: string, root: string): st
     String(store.thinkingEnabled),
     store.permissionMode,
     root,
+    // A fresh-tab spare (`--session-id`) and a restart-history spare (`--resume`)
+    // are different children; keep them distinct in the dedup key so opening a
+    // started chat after the app reopens re-arms rather than matching a prior
+    // fresh-tab fire.
+    isFirstTurn ? "fresh" : "resume",
   ].join("|");
 }
 
@@ -54,9 +73,16 @@ function signatureOf(store: AssistantStore, sessionId: string, root: string): st
 export function requestPrewarm(store: AssistantStore): void {
   const tab = store.activeTab;
   if (!tab) return;
-  // Only a FRESH tab benefits: a started convo already cold-spawned (and likely
-  // still has) its warm child, and re-warming it would double-spawn.
-  if (tab.convoCreatedAt || tab.streaming) return;
+  // Never pre-warm a tab mid-turn — its warm child is busy.
+  if (tab.streaming) return;
+  // Pre-warm BOTH a fresh tab (no convo yet → `--session-id` spare) AND a STARTED
+  // conversation that currently has no live child (→ `--resume` spare). With the
+  // persistent-process model the warm child survives any active-use pause, so the
+  // started-convo case is really only "app was reopened and the user clicked an
+  // existing chat from history" — its child is gone, so warm it before they type.
+  // The backend `assistant_prewarm` no-ops when a live child already exists, so
+  // calling this on an already-warm convo is a cheap nothing.
+  const isFirstTurn = !tab.convoCreatedAt;
   const sessionId = tab.cliSessionId;
   if (!sessionId) return;
   // Resolve the warm-target root: the tab's folder, else the local scratch dir
@@ -71,18 +97,27 @@ export function requestPrewarm(store: AssistantStore): void {
   // would error) — don't burn a spawn. Mirrors send()'s auth chokepoint.
   if (!(store.auth?.pill === "green" || store.auth?.pill === "yellow")) return;
 
-  const sig = signatureOf(store, sessionId, root);
+  const sig = signatureOf(store, sessionId, root, isFirstTurn);
   if (sig === lastFiredKey) return; // identical spare already requested
 
+  // A fresh tab (first-turn, no prior fire latched) races the user's first
+  // keystrokes → fire fast. A re-warm or a re-armed signature can take the
+  // generous window. `lastFiredKey === null` ⇒ nothing pending/latched here.
+  const delay = isFirstTurn && lastFiredKey === null
+    ? PREWARM_FIRST_FIRE_MS
+    : PREWARM_DEBOUNCE_MS;
   if (debounceTimer) clearTimeout(debounceTimer);
   debounceTimer = setTimeout(() => {
     debounceTimer = null;
     // Re-validate at fire time — the user may have started typing/sending,
-    // switched tabs, or changed the picker during the debounce window.
+    // switched tabs, or changed the picker during the debounce window. A convo
+    // that STARTED during the window flips isFirstTurn but is still warmable
+    // (re-warm path), so we no longer bail on convoCreatedAt — only on a tab/
+    // session switch or an in-flight turn.
     const t = store.activeTab;
-    if (!t || t.cliSessionId !== sessionId || t.convoCreatedAt || t.streaming) return;
+    if (!t || t.cliSessionId !== sessionId || t.streaming) return;
     if ((store.effectiveRoot(t) ?? store.localScratchPath) !== root) return;
-    if (signatureOf(store, sessionId, root) !== sig) return;
+    if (signatureOf(store, sessionId, root, isFirstTurn) !== sig) return;
     lastFiredKey = sig;
     void invoke("assistant_prewarm", {
       sessionId,
@@ -91,6 +126,7 @@ export function requestPrewarm(store: AssistantStore): void {
       thinkingEnabled: store.thinkingEnabled,
       permissionMode: store.permissionMode,
       root,
+      isFirstTurn,
     }).catch((e) => {
       // Best-effort: a failed spare just means a cold first turn. Reset the
       // dedup key so a later tick can retry rather than latching off forever.

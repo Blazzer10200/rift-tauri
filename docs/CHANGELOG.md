@@ -2,19 +2,21 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.66.0 — Just start chatting (+ no more mystery-slow folders)
+## v0.67.0 — Replies stay fast all session long
 
 ### What you'll notice
-- **No project folder? Just type.** Open Rift without picking a folder and you can still ask the assistant to read, write, edit, and run things — it works in a private scratch workspace (`%LOCALAPPDATA%\Rift\local`) instead of being stuck in a tool-less, chat-only mode. A small **"Local"** badge (and the status-bar) show the mode; click it any time to open a real project and switch over.
-- **The empty-chat screen explains it.** With no folder open you get a "Working locally" card (instead of the old cold welcome) that says what's happening and keeps the "Open a project folder" action + your recent folders one click away.
-- **No more folders that are mysteriously slow.** If a project folder felt like every reply hung or crawled while another folder was instant, this fixes it. Older versions could leave extended **thinking** silently switched **on for one folder** — and on Opus that thinking step shows no text, so it just looked like the app was stuck. Thinking is off-by-default everywhere now; any folder still carrying that stale "on" is cleared on update, so it falls back to fast replies. You can still raise the thinking dial per-folder whenever you actually want deeper reasoning.
+- **No more "fast first reply, then it crawls."** Within a single chat, every turn now reuses the same warm assistant process — so the snappy response you get on turn one holds for turn two, turn ten, and after you step away and come back. Previously the app could quietly tear down that warm process between turns and pay the full 5–12 second cold-start over and over, which is what made the assistant *feel* slow even when the model itself was fast.
+- This is the fix behind the long-standing "Rift feels slow every turn" complaint. The earlier "slow = the model, not Rift" finding was only half the story: warm turns really were instant (0–2ms), but the app was only landing a warm turn about a third of the time. It now stays warm for the whole session.
 
 ### Under the hood
-- Scratch path is **backend-resolved** (`local_scratch_dir()`, `create_dir_all`'d so it self-heals) — never renderer-supplied, so no path-injection surface; the renderer learns it via one read-only command for the badge. The no-folder turn is one branch in turn.rs root-resolution (resolves to the scratch dir, reusing the existing full-tools + workspace-`cwd` path), **gated to the standard OAuth path** — API-key/local-LLM/sandboxed keep `--tools ""` (ISSUES #47). Pre-warming warms the scratch session too, so the first local turn is a warm hit.
-- The slow-folder fix is a **one-time, idempotent localStorage migration** (`migrateThinkingPins`, runs before any pref is read): it clears stale per-folder `thinkingEnabled::<root>` pins from the pre-v0.65.0 always-on toggle, leaving the **intentional** per-folder model + effort pins untouched. The off-by-default baseline + FE↔BE lockstep were already correct — this only neutralizes the old data that predated them.
-- **Verified.** svelte-check clean (4134 files), vitest 378/378 (2 new migration tests), and the no-folder flow confirmed live (wrote `test.txt` to scratch + reported its absolute path, zero console errors).
+- Root cause was the warm pool **evicting the live CLI child mid-session**, re-paying cold-spawn on the majority of turns (measured 63% cold across 175 real turns in `turns.ndjson`). The persistent `stream-json` child is already a long-lived per-session process — its only hard eviction reason (releasing the Velopack `current/` lock on update) is already covered by the shutdown drain, so idle eviction was only ever a memory backstop, never a correctness need.
+- Reframed eviction to **abandoned-session scale** instead of per-turn (`warm_pool.rs`): `IDLE_EVICT` 2h, `MAX_WARM` 20, pressure trim 30m, evict tick 5m. The child now survives any normal active-use pause. Removed the accumulated patch-on-patch re-warm scramble (stream-end/focus re-warm + `prevStreaming` in `Composer.svelte`); kept pre-warming for a childless tab (fresh `--session-id` or restart-history `--resume`) and the 150ms fast-fire.
+- A model/effort/thinking dial change mid-chat still correctly drains and cold-respawns — different CLI argv is a genuinely different process — so that one case is expected, not a regression.
+- **Verified.** `cargo test assistant::warm_pool` 7/7 (eviction tests rescaled to the new windows), svelte-check clean (4134 files), and runtime-confirmed on a live build: a second same-dial turn lands warm (`warm-start, cold-boot skipped, TTFT 1 ms`).
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.66.0** — Just start chatting: open Rift with no folder and the assistant still reads/writes/edits/runs in a private scratch workspace (with a "Local" badge), plus a one-time migration that clears stale per-folder "thinking on" pins so no folder is mysteriously slow.
 
 - **v0.65.0** — One dial, one queue, no surprises: thinking collapsed to a single Off·Low·Medium·High·Max dial, honest mid-chat model switching, and a unified type-to-queue / Alt+Enter-to-steer follow-up model.
 - **v0.60.0–v0.64.0** — Cross-machine + diagnostics era: smaller/scaled-screen layout, guided first-run setup, human-readable errors, a live per-subsystem diagnostics console + `metric!`/`timed!` instrumentation, honest tool display, and the proof that slow replies are the model not Rift (warm TTFT 0–2ms).
