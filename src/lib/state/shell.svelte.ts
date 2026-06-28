@@ -10,6 +10,16 @@ const MIN_W = 208;
 const MAX_W = 380;
 const DEFAULT_W = 248;
 
+// Below this window width the sidebar auto-collapses to give the main content
+// room (1366px laptops, 150%-scaled 1080p). Hysteresis: re-open only past a
+// wider mark so a window parked near the edge doesn't flicker open/closed.
+const NARROW_COLLAPSE_W = 1100;
+const NARROW_REOPEN_W = 1180;
+
+// Min usable content width per chat pane. addPane() refuses to split below this
+// so a 4-way split never produces unusable slivers on a small screen.
+const MIN_PANE_W = 360;
+
 function clampW(w: number): number {
   return Math.max(MIN_W, Math.min(MAX_W, Math.round(w)));
 }
@@ -27,12 +37,23 @@ class ShellState {
    *  true = show every project's chats (with a per-row project label). */
   allProjects = $state(false);
 
+  /** True while the window is narrow enough that we auto-collapsed the rail.
+   *  Tracked separately from `collapsed` so widening restores the user's own
+   *  open/closed choice rather than force-opening a rail they'd closed. */
+  autoCollapsed = $state(false);
+  /** The user's explicit collapse choice, snapshotted when an auto-collapse
+   *  kicks in so we can restore it on widen. */
+  private userCollapsed = false;
+
   readonly minWidth = MIN_W;
   readonly maxWidth = MAX_W;
 
   init() {
     if (typeof window === "undefined") return;
     this.collapsed = localStorage.getItem(COLLAPSE_KEY) === "1";
+    this.userCollapsed = this.collapsed;
+    // Honor a narrow boot window immediately (auto-collapse before first paint).
+    this.syncToViewport(window.innerWidth);
     const raw = localStorage.getItem(WIDTH_KEY);
     const n = raw ? Number(raw) : NaN;
     if (Number.isFinite(n)) this.width = clampW(n);
@@ -63,9 +84,38 @@ class ShellState {
 
   toggleCollapsed() {
     this.collapsed = !this.collapsed;
+    // A manual toggle while narrow becomes the user's new intent: clear the
+    // auto-flag so a later widen doesn't override what they just chose.
+    this.autoCollapsed = false;
+    this.userCollapsed = this.collapsed;
     if (typeof window !== "undefined") {
       localStorage.setItem(COLLAPSE_KEY, this.collapsed ? "1" : "0");
     }
+  }
+
+  /** Drive auto-collapse from the live window width. Call on resize + once at
+   *  boot. Only touches `collapsed` when crossing a threshold, and never
+   *  overwrites the persisted choice in localStorage (auto-state is transient). */
+  syncToViewport(winWidth: number) {
+    if (winWidth <= NARROW_COLLAPSE_W && !this.collapsed) {
+      // Narrowing: remember the user's open state, collapse for room.
+      this.userCollapsed = false;
+      this.autoCollapsed = true;
+      this.collapsed = true;
+    } else if (winWidth >= NARROW_REOPEN_W && this.autoCollapsed) {
+      // Widening past the reopen mark: restore the rail we auto-hid.
+      this.autoCollapsed = false;
+      this.collapsed = this.userCollapsed;
+    }
+  }
+
+  /** How many chat panes the current viewport can hold without slivers.
+   *  Accounts for the live sidebar footprint when it's open. Always ≥1. */
+  maxPanesForWidth(): number {
+    if (typeof window === "undefined") return 1;
+    const sidebar = this.collapsed ? 0 : this.width;
+    const content = Math.max(0, window.innerWidth - sidebar);
+    return Math.max(1, Math.floor(content / MIN_PANE_W));
   }
 
   setWidth(w: number) {

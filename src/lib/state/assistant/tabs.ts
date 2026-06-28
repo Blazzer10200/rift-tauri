@@ -16,6 +16,7 @@ import { MAX_PANES, type PaneState } from "./types";
 import type { TextAttachment } from "./attachments";
 import { tabsStorageKey } from "./persistence";
 import { notify } from "../toast.svelte";
+import { shell } from "../shell.svelte";
 
 /** Subset of AssistantStore the tab/pane lifecycle touches. Structural —
  *  mirrors the live public surface of AssistantStore. */
@@ -58,12 +59,22 @@ type TabsHost = {
 
 // ── Panes ────────────────────────────────────────────────────────────────
 
-/** Add a new pane to the right of the focused one. Caps at MAX_PANES.
- *  New pane is auto-filled with the next openTab not already in any pane,
- *  else stays empty (drop a tab in from the tabsbar). Focus moves to new
- *  pane. Persists. */
-export function addPane(host: TabsHost) {
-  if (host.panes.length >= MAX_PANES) return;
+/** Add a new pane to the right of the focused one. Caps at MAX_PANES, and
+ *  further at however many panes the current viewport can hold without
+ *  unusable slivers (narrow laptops / scaled displays). New pane is auto-filled
+ *  with the next openTab not already in any pane, else stays empty (drop a tab
+ *  in from the tabsbar). Focus moves to new pane. Persists. Returns true if a
+ *  pane was added. */
+export function addPane(host: TabsHost): boolean {
+  if (host.panes.length >= MAX_PANES) return false;
+  // Width-fit guard: don't split below the min usable pane width.
+  const fitCap = shell.maxPanesForWidth();
+  if (host.panes.length >= fitCap) {
+    notify.warn("Not enough width to split", {
+      detail: "Widen the window or collapse the sidebar to open another pane.",
+    });
+    return false;
+  }
   const taken = new Set(host.panes.map((p) => p.tabId).filter((x): x is string => !!x));
   const fill = host.openTabs.find((id) => !taken.has(id)) ?? null;
   const insertAt = host.focusedPaneIdx + 1;
@@ -84,6 +95,7 @@ export function addPane(host: TabsHost) {
   }
   host.restoreTabUi(fill);
   host.persistTabs();
+  return true;
 }
 
 /** Close a pane (the pane container, not the tab inside it). Tabs stay in
@@ -189,6 +201,13 @@ export function dropTabIntoPane(host: TabsHost, tabId: string, paneIdx: number) 
     // Sentinel: "add new pane at end". Cap-respecting. Multi-pane only —
     // single-pane is handled above.
     if (host.panes.length >= MAX_PANES) return;
+    // Width-fit guard (same as addPane): refuse a 3rd+ pane that won't fit.
+    if (host.panes.length >= shell.maxPanesForWidth()) {
+      notify.warn("Not enough width to split", {
+        detail: "Widen the window or collapse the sidebar to open another pane.",
+      });
+      return;
+    }
     const next = host.panes.slice();
     next.push({ tabId });
     host.panes = next;

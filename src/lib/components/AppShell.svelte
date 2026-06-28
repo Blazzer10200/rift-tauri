@@ -98,6 +98,26 @@
     return () => window.removeEventListener("keydown", onGlobalKey);
   });
 
+  // Responsive sidebar: auto-collapse the rail on narrow windows (laptops /
+  // 150%-scaled displays) so the chat column keeps room, and restore the user's
+  // own choice on widen. shell.syncToViewport carries the hysteresis + intent
+  // tracking; this effect just feeds it the live width (rAF-coalesced).
+  $effect(() => {
+    let raf = 0;
+    const onResize = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        shell.syncToViewport(window.innerWidth);
+      });
+    };
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  });
+
   // Window-level file-drop guard. Without it, a file dropped anywhere outside a
   // drop zone makes WebView2 navigate to its file:// URL — the app "breaks".
   // We swallow every file drag; a stray drop over the Chat workspace still

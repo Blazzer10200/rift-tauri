@@ -256,7 +256,7 @@
                     <input
                       id="ll-key" class="st-input mono" type={keyVisible ? "text" : "password"}
                       bind:value={keyInput} disabled={!localLlm.enabled}
-                      placeholder="any non-empty value" style="width:158px;"
+                      placeholder="any non-empty value" style="width:100%; max-width:158px;"
                       spellcheck="false" autocapitalize="off" autocomplete="off"
                     />
                     <button class="st-eye" type="button" onclick={() => (keyVisible = !keyVisible)} aria-label={keyVisible ? "Hide key" : "Show key"}>
@@ -296,7 +296,7 @@
               <input
                 id="ll-base" class="st-input mono" type="text"
                 bind:value={localLlm.baseUrl} onblur={saveBaseUrl} disabled={!localLlm.enabled}
-                placeholder="http://localhost:4000" style="width:220px;"
+                placeholder="http://localhost:4000" style="width:100%; max-width:220px;"
                 spellcheck="false" autocapitalize="off" autocomplete="off"
               />
             </div>
