@@ -1,4 +1,4 @@
-<!-- @dsCard group="Foundations" name="Color & Accent" subtitle="Graphite-Ink surface stack · emerald accent ramp · status semantics · 5-step text ladder" -->
+<!-- @dsCard group="Foundations" name="Color & Accent" subtitle="Graphite-Ink surface stack · 3-dial accent system · activity semantics · status semantics · 5-step text ladder" -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -22,14 +22,30 @@
   .lad { display: flex; align-items: baseline; gap: 14px; padding: 7px 12px; border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--border); }
   .lad .t { font-size: 15px; flex: 1; }
   .lad .tk { font-family: var(--font-mono); font-size: 11px; color: var(--fg-subtle); }
+
+  /* 3-dial accent demo */
+  .dial-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .dial-card { border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px; background: var(--surface); }
+  .dial-card .dc-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-faint); margin-bottom: 8px; }
+  .dial-card .dc-token { font-family: var(--font-mono); font-size: 12px; color: var(--accent); font-weight: 600; }
+  .dial-card .dc-val { font-family: var(--font-mono); font-size: 11px; color: var(--fg-subtle); margin-top: 2px; }
+  .dial-card .dc-desc { font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 6px; line-height: 1.4; }
+  .dial-preview { height: 40px; border-radius: var(--radius-sm); margin-top: 10px; border: 1px solid var(--border); }
+
+  /* activity semantics row */
+  .activity-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .act-sw { border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; background: var(--surface); min-width: 140px; }
+  .act-sw .chip { height: 48px; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 11px; font-weight: 600; gap: 7px; }
+  .act-sw .meta { padding: 7px 10px; }
+  .act-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
 </style>
 </head>
 <body>
   <h1>Color &amp; Accent</h1>
-  <p class="lede">Dark-only, true-neutral graphite (<code>Graphite Ink</code>). One themeable hue
-  (<code>--accent-h</code>, emerald <code>163</code> by default) drives the entire accent ramp; status
-  colors are accent-independent and never recolor with the theme. Solid accent is rare — reserved for the
-  primary action; everything else is a ghost wash that only colors on hover.</p>
+  <p class="lede">Dark-only, true-neutral graphite (<code>Graphite Ink</code>). The accent ramp is driven by
+  three independent dials — hue, vividness, and strength — all exposed in Settings. Status and activity colors
+  are accent-independent and never recolor with the theme. Solid accent is rare — reserved for the primary
+  action; everything else is a ghost wash.</p>
 
   <div class="section-label">Surface stack</div>
   <div class="swatches">
@@ -42,7 +58,32 @@
     <div class="sw"><div class="chip" style="background:var(--border-strong)"></div><div class="meta"><div class="name">--border-strong</div><div class="val">oklch(0.365 .007 255)</div><div class="role">standard line</div></div></div>
   </div>
 
-  <div class="section-label">Accent ramp — emerald</div>
+  <div class="section-label">Accent — 3-dial system</div>
+  <div class="dial-grid">
+    <div class="dial-card">
+      <div class="dc-label">Hue</div>
+      <div class="dc-token">--accent-h</div>
+      <div class="dc-val">163 (emerald default)</div>
+      <div class="dc-desc">The color angle on the oklch wheel. Changing this re-themes the entire accent ramp from ghost fills to the solid Send button.</div>
+      <div class="dial-preview" style="background:linear-gradient(90deg,oklch(0.78 0.15 100),oklch(0.78 0.15 163),oklch(0.78 0.15 230),oklch(0.78 0.15 300))"></div>
+    </div>
+    <div class="dial-card">
+      <div class="dc-label">Vividness (chroma)</div>
+      <div class="dc-token">--accent-c</div>
+      <div class="dc-val">0.15 (default)</div>
+      <div class="dc-desc">Chroma of the accent ramp. Lower = more grey and neutral; higher = saturated and vivid. Controls how much color bleeds into ghost fills.</div>
+      <div class="dial-preview" style="background:linear-gradient(90deg,oklch(0.78 0.02 163),oklch(0.78 0.08 163),oklch(0.78 0.15 163),oklch(0.78 0.22 163))"></div>
+    </div>
+    <div class="dial-card">
+      <div class="dc-label">Strength (alpha)</div>
+      <div class="dc-token">--accent-a</div>
+      <div class="dc-val">0.12 (default)</div>
+      <div class="dc-desc">Alpha of ghost fills (<code>--accent-soft</code>). The ghost-border and ring derive from multiples of this value (×2.9 and ×3.75).</div>
+      <div class="dial-preview" style="background:linear-gradient(90deg,oklch(0.78 0.15 163 / 0.04),oklch(0.78 0.15 163 / 0.12),oklch(0.78 0.15 163 / 0.24),oklch(0.78 0.15 163 / 0.40))"></div>
+    </div>
+  </div>
+
+  <div class="section-label">Accent ramp — emerald defaults</div>
   <div class="ramp">
     <div style="background:var(--accent-soft);color:var(--accent)">soft .12</div>
     <div style="background:var(--accent-active);color:var(--accent-fg)">active</div>
@@ -51,7 +92,31 @@
     <div style="background:var(--ghost-border);color:var(--fg)">ghost .35</div>
   </div>
   <p class="note"><code>--accent-fg</code> is the dark ink used on top of solid accent. <code>--accent-soft</code> is
-  the default ghost fill; <code>--ring</code> (.45 alpha) is the focus ring on every control.</p>
+  the ghost fill (alpha = <code>--accent-a</code>); <code>--ghost-border</code> = ×2.9; <code>--ring</code> = ×3.75.</p>
+
+  <div class="section-label">Activity semantics — "system is doing something"</div>
+  <div class="activity-row">
+    <div class="act-sw">
+      <div class="chip" style="color:var(--status-busy);background:color-mix(in oklch,var(--status-busy) 12%,transparent)">
+        <span class="act-dot"></span>Working
+      </div>
+      <div class="meta"><div class="name" style="color:var(--status-busy)">--status-busy</div><div class="val">#22c55e</div><div class="role">live / streaming</div></div>
+    </div>
+    <div class="act-sw">
+      <div class="chip" style="color:var(--status-pending);background:color-mix(in oklch,var(--status-pending) 12%,transparent)">
+        <span class="act-dot"></span>Queued
+      </div>
+      <div class="meta"><div class="name" style="color:var(--status-pending)">--status-pending</div><div class="val">#3b82f6</div><div class="role">waiting / queued</div></div>
+    </div>
+    <div class="act-sw">
+      <div class="chip" style="color:var(--status-warn);background:color-mix(in oklch,var(--status-warn) 12%,transparent)">
+        <span class="act-dot"></span>Warning
+      </div>
+      <div class="meta"><div class="name" style="color:var(--status-warn)">--status-warn</div><div class="val">#e5a54b</div><div class="role">amber warning</div></div>
+    </div>
+  </div>
+  <p class="note">Activity colors are fixed hex values — they do NOT recolor with <code>--accent-h</code>. Used for
+  stream status dots and live indicators, not for alert/error states (those use the <code>--ok/warn/danger/info</code> ramp below).</p>
 
   <div class="section-label">Status semantics — accent-independent</div>
   <div class="swatches">

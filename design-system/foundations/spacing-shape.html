@@ -66,10 +66,12 @@
   <div class="section-label">Motion</div>
   <div class="motion">
     <div class="mo"><span class="tk">--ease-page</span><span class="d">Decelerate — screen &amp; block entrances</span><span class="track"><i></i></span></div>
-    <div class="mo"><span class="tk">--dur-fast · 140</span><span class="d">Control hover / small state flip</span></div>
-    <div class="mo"><span class="tk">--dur-base · 240</span><span class="d">Default transition · layout shift</span></div>
-    <div class="mo"><span class="tk">--dur-page · 400</span><span class="d">A screen enters</span></div>
-    <div class="mo"><span class="tk">--dur-slow · 520</span><span class="d">Large data reveal — bars, gauges, timelines</span></div>
+    <div class="mo"><span class="tk">--dur-fast · 140ms</span><span class="d">Control hover / small state flip</span></div>
+    <div class="mo"><span class="tk">--dur-base · 240ms</span><span class="d">Default transition · layout shift</span></div>
+    <div class="mo"><span class="tk">--dur-page · 400ms</span><span class="d">A screen enters</span></div>
+    <div class="mo"><span class="tk">--dur-rise · 460ms</span><span class="d">A content block rises into view</span></div>
+    <div class="mo"><span class="tk">--dur-slow · 520ms</span><span class="d">Large data reveal — bars, gauges, timelines</span></div>
+    <div class="mo"><span class="tk">--pulse-live · 1.6s</span><span class="d">Shared breathing period for live status dots</span></div>
   </div>
   <p class="note">Staggered blocks share <code>--stagger 62ms</code>; the global <code>.enter</code> keyframe
   (rise + fade) replaces every per-component entrance. All motion respects <code>prefers-reduced-motion</code>.</p>
