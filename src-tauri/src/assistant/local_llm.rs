@@ -71,7 +71,7 @@ pub async fn assistant_test_local_llm() -> Result<LocalTestResult, String> {
         "messages": [{ "role": "user", "content": "Reply with exactly: OK" }],
     });
 
-    let resp = reqwest::Client::new()
+    let resp = crate::certs::local_llm_client()
         .post(&url)
         .header("x-api-key", &local_key)
         .header("anthropic-version", "2023-06-01")
@@ -154,7 +154,7 @@ pub async fn assistant_list_local_models() -> Result<Vec<String>, String> {
         .unwrap_or_else(|| "local".to_string());
 
     let url = format!("{base_url}/v1/models");
-    let resp = reqwest::Client::new()
+    let resp = crate::certs::local_llm_client()
         .get(&url)
         .header("x-api-key", &local_key)
         .header("authorization", format!("Bearer {local_key}"))
@@ -241,7 +241,7 @@ pub async fn assistant_local_model_context() -> Result<LocalCtxInfo, String> {
         .to_string();
 
     let url = format!("{base_url}/api/show");
-    let resp = reqwest::Client::new()
+    let resp = crate::certs::local_llm_client()
         .post(&url)
         .json(&serde_json::json!({ "model": model }))
         .timeout(std::time::Duration::from_secs(10))
@@ -352,7 +352,7 @@ pub async fn assistant_optimize_local_model(target_ctx: Option<u64>) -> Result<S
     let target = target_ctx.unwrap_or(32768).clamp(8192, 131072);
 
     let url = format!("{base_url}/api/create");
-    let resp = reqwest::Client::new()
+    let resp = crate::certs::local_llm_client()
         .post(&url)
         .json(&serde_json::json!({
             "model": variant,
