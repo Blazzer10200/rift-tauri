@@ -422,7 +422,7 @@ async fn handle_permission_request(
 
     // Guard cancels the registry entry on drop — covers task-abort mid-await
     // (the explicit cancel below never runs when the future is cancelled).
-    let (rx, _perm_guard) = registry.register_guarded(request_id.clone());
+    let (rx, _perm_guard) = registry.register_guarded(request_id.clone(), session_id.to_string());
     // B4: if the UI is unreachable (window closed mid-turn) the user never sees
     // the prompt — deny immediately rather than hang for the full 120s timeout
     // while the CLI waits on us. `emit_to` returns Ok(()) for a missing/closed
@@ -1928,6 +1928,16 @@ async fn run_turn_loop(mut ctx: RunCtx) {
                      This is the local Claude process stalling (a hung startup, a stuck tool/MCP connection, or a dropped pipe), not a slow model. \
                      Try the turn again; if it keeps happening, run `claude` in a terminal to confirm the CLI itself works."
                 );
+                // cont.228 (prod incident 2026-06-28, session 87a27f20): a child
+                // wedged AFTER an auto-denied permission ask sat for 9+ min holding
+                // the session. `loop_cleanup` below only `start_kill`s the direct
+                // child handle — a wedged CLI's own subprocess tree (its MCP server,
+                // tool children) survives that. Force a tree-kill by PID HERE so the
+                // wedged process and all descendants are reaped, not orphaned.
+                if let Some(pid) = warm_pool::pid_of(&ctx.session_id) {
+                    log::warn!("warm_pool: tree-killing wedged child pid={pid} session={stream_sid}");
+                    kill_child_tree(pid);
+                }
                 warm_pool::remove_if(&ctx.session_id, &ctx.warm);
                 let _ = app_out.emit_to(&win_label, ERROR_EVENT, serde_json::json!({
                     "session_id": stream_sid, "message": msg.clone(),
@@ -2583,6 +2593,7 @@ fn auth_rejection_message() -> String {
 pub async fn assistant_stop(
     session_id: String,
     ask_user: tauri::State<'_, std::sync::Arc<crate::assistant::AskUserRegistry>>,
+    permissions: tauri::State<'_, std::sync::Arc<PermissionRegistry>>,
 ) -> Result<(), String> {
     if !is_valid_session_id(&session_id) {
         return Err(format!("invalid session_id: must be a UUID (got {} chars)", session_id.len()));
@@ -2597,6 +2608,16 @@ pub async fn assistant_stop(
     let cancelled = ask_user.cancel_all_for_session(&session_id);
     if cancelled > 0 {
         log::info!("assistant_stop: cancelled {cancelled} pending ask_user for {session_id}");
+    }
+    // Same safety net for a parked `can_use_tool` permission ask (cont.228): the
+    // stdout reader awaits the user's Allow/Deny on a PermissionRegistry oneshot.
+    // If the PID is already gone the kill is a no-op and that await would park for
+    // the full 120s timeout — the real prod wedge (child stuck 9+ min after a
+    // permission card timed out). Dropping the sender resolves the await `Err` →
+    // the reader denies + writes the control_response → the UI tool-chip clears.
+    let perms_cancelled = permissions.cancel_all_for_session(&session_id);
+    if perms_cancelled > 0 {
+        log::info!("assistant_stop: cancelled {perms_cancelled} pending permission ask(s) for {session_id}");
     }
     let Some(pid) = get_session_pid(&session_id) else {
         return Ok(());
