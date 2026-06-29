@@ -59,9 +59,20 @@ pub struct TurnPerf {
     /// so historical NDJSON lines (pre-tagging) deserialize as None.
     #[serde(default)]
     pub model: Option<String>,
-    /// Effort tier for this turn ("none"/"quick"/"smart"/"deep"/"ultra").
+    /// The effort FLAG this turn's child was keyed on ("low"/"medium"/"high"/
+    /// "xhigh") — i.e. tier→flag, BEFORE the thinking gate. Not the tier string.
     #[serde(default)]
     pub effort: Option<String>,
+    /// The effort actually sent as `--effort` after the thinking gate: when
+    /// thinking is off, `send_effort_flag` floors any tier to "low". So a turn
+    /// keyed `effort:"high"` with thinking off really ran `--effort low`. Without
+    /// this the latency analysis can't tell a deep turn from a floored one.
+    #[serde(default)]
+    pub send_effort: Option<String>,
+    /// Whether extended thinking was on for this turn. Pairs with `send_effort`
+    /// to disambiguate slow-because-thinking from slow-because-cold.
+    #[serde(default)]
+    pub thinking_on: Option<bool>,
 
     // ── Latency cause attribution (WS6) ───────────────────────────────────────
     // The clocks below decompose `ttft_text_ms` into WHERE the wait went, so the
@@ -514,6 +525,8 @@ mod tests {
             result_subtype: Some("success".into()),
             model: None,
             effort: None,
+            send_effort: None,
+            thinking_on: None,
             ttft_first_line_ms: None,
             pre_text_tool_ms: None,
             was_cold: None,
@@ -545,6 +558,8 @@ mod tests {
             result_subtype: Some("success".into()),
             model: Some(model.into()),
             effort: Some(effort.into()),
+            send_effort: None,
+            thinking_on: None,
             ttft_first_line_ms: None,
             pre_text_tool_ms: None,
             was_cold: None,
@@ -572,6 +587,8 @@ mod tests {
             result_subtype: Some("success".into()),
             model: Some("opus".into()),
             effort: Some("deep".into()),
+            send_effort: None,
+            thinking_on: None,
             ttft_first_line_ms: None,
             pre_text_tool_ms: None,
             was_cold: Some(was_cold),
@@ -632,6 +649,25 @@ mod tests {
         assert_eq!(s.by_model[1].turn_count, 1);
     }
 
+    #[test]
+    fn send_effort_and_thinking_round_trip_and_default_to_none() {
+        // #69: a record stamped with the actual sent effort + thinking state must
+        // serialize both, and a legacy line missing them must deserialize as None
+        // (the serde(default) contract that keeps old turns.ndjson readable).
+        let mut r: TurnPerf = serde_json::from_str(&rec(Some(100), Some(200), None, None)).unwrap();
+        assert_eq!(r.send_effort, None, "base helper omits the new fields");
+        assert_eq!(r.thinking_on, None);
+
+        // A thinking-off "deep" turn really ran --effort low; stamp + round-trip it.
+        r.effort = Some("high".into());
+        r.send_effort = Some("low".into());
+        r.thinking_on = Some(false);
+        let back: TurnPerf = serde_json::from_str(&serde_json::to_string(&r).unwrap()).unwrap();
+        assert_eq!(back.effort.as_deref(), Some("high"), "keyed tier preserved");
+        assert_eq!(back.send_effort.as_deref(), Some("low"), "floored flag preserved");
+        assert_eq!(back.thinking_on, Some(false));
+    }
+
     // Record carrying the CLI's server-side timing (duration + cli_api) so the
     // non-API overhead aggregation can be exercised.
     fn rec_attrib(duration_ms: u64, cli_api_ms: u64) -> String {
@@ -650,6 +686,8 @@ mod tests {
             result_subtype: Some("success".into()),
             model: Some("opus".into()),
             effort: Some("smart".into()),
+            send_effort: None,
+            thinking_on: None,
             ttft_first_line_ms: None,
             pre_text_tool_ms: None,
             was_cold: Some(false),

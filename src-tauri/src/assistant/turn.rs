@@ -1606,8 +1606,10 @@ async fn cold_spawn_and_run(
     // starts it, so a process that never opens a chat pays nothing).
     warm_pool::ensure_evictor();
 
-    // Capture effort before `key` is moved into the warm entry (perf grouping, WS5).
+    // Capture effort + thinking before `key` is moved into the warm entry (perf
+    // grouping, WS5 / #69 send-effort telemetry).
     let effort = key.effort_level.clone();
+    let thinking_on = key.thinking_on;
     let turn_start = std::time::Instant::now();
     let mut child = cmd.spawn().map_err(|e| format!("spawn `claude`: {e}"))?;
     let turn_pid = child.id();
@@ -1697,6 +1699,7 @@ async fn cold_spawn_and_run(
         is_first_turn,
         model,
         effort,
+        thinking_on,
         turn_start,
     }));
 
@@ -1738,6 +1741,7 @@ fn prewarm_spawn(
     warm_pool::ensure_evictor();
 
     let effort = key.effort_level.clone();
+    let thinking_on = key.thinking_on;
     let model_log = model.clone();
     let turn_start = std::time::Instant::now();
     let mut child = cmd.spawn().map_err(|e| format!("prewarm spawn `claude`: {e}"))?;
@@ -1797,6 +1801,7 @@ fn prewarm_spawn(
         is_first_turn: true,
         model,
         effort,
+        thinking_on,
         turn_start,
     }));
     log::info!("prewarm_spawn: spare warm child spawned + parked for session {session_id} (model={model_log})");
@@ -1829,6 +1834,7 @@ struct RunCtx {
     is_first_turn: bool,
     model: String,
     effort: String,
+    thinking_on: bool,
     turn_start: std::time::Instant,
 }
 
@@ -1975,6 +1981,7 @@ async fn run_turn_loop(mut ctx: RunCtx) {
             stream_sid: &stream_sid,
             model: &ctx.model,
             effort: &ctx.effort,
+            thinking_on: ctx.thinking_on,
             user_line: &user_line,
             handshake_done: &mut handshake_done,
             bg_evict: &bg_evict,
@@ -2138,6 +2145,9 @@ struct StreamCtx<'a> {
     /// Threaded only so the perf record can be grouped by model/effort (WS5).
     model: &'a str,
     effort: &'a str,
+    /// Whether thinking was on for this process — pairs with `effort` so the perf
+    /// record can log the ACTUAL `--effort` sent (thinking-off floors to "low").
+    thinking_on: bool,
     user_line: &'a [u8],
     /// True once the per-process `initialize` handshake has been acked. The
     /// FIRST turn waits for the first `control_response` (the init ack) before
@@ -2226,8 +2236,8 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
     use tokio::io::AsyncWriteExt;
 
     let StreamCtx {
-        stdin, lines, steer_rx, app_out, win_label, stream_sid, model, effort, user_line,
-        handshake_done, bg_evict, turn_start,
+        stdin, lines, steer_rx, app_out, win_label, stream_sid, model, effort, thinking_on,
+        user_line, handshake_done, bg_evict, turn_start,
     } = ctx;
 
     // A reused turn entered with the handshake already done. If such a turn sees
@@ -2410,7 +2420,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                         // perf record. Fire-and-forget — never gates the DONE emit.
                         record_turn_perf(
                             &v, ts_start_ms, turn_start, perf_ttft_thinking_ms,
-                            perf_ttft_text_ms, stream_sid, model, effort,
+                            perf_ttft_text_ms, stream_sid, model, effort, thinking_on,
                             perf_first_line_ms, perf_pre_text_tool_ms, !was_reused,
                         );
                         let _ = app_out.emit_to(win_label, STREAM_EVENT, serde_json::json!({
@@ -2653,6 +2663,7 @@ fn record_turn_perf(
     stream_sid: &str,
     model: &str,
     effort: &str,
+    thinking_on: bool,
     first_line_ms: Option<u64>,
     pre_text_tool_ms: u64,
     was_cold: bool,
@@ -2702,6 +2713,11 @@ fn record_turn_perf(
         result_subtype,
         model: Some(model.to_owned()),
         effort: Some(effort.to_owned()),
+        // The flag we actually sent: thinking-off floors any tier to "low"
+        // (#69 — distinguishes a real deep turn from a floored one). Mirrors
+        // `send_effort_flag` (which needs a &'static arg; `effort` here is borrowed).
+        send_effort: Some(if thinking_on { effort.to_owned() } else { "low".to_owned() }),
+        thinking_on: Some(thinking_on),
         ttft_first_line_ms: first_line_ms,
         pre_text_tool_ms: pre_text_tool,
         was_cold: Some(was_cold),
