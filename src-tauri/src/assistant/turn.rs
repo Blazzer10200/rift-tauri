@@ -2144,6 +2144,55 @@ const STREAM_NO_PROGRESS_SECS: u64 = 180;
 /// the net forever (2 ≈ 6min). Any received line resets the counter.
 const STREAM_TOOL_GRACE_WINDOWS: u32 = 2;
 
+/// Max time spent discarding stale buffered stdout at the start of a reused
+/// turn. Only drains what's ALREADY sitting in the pipe from the previous turn
+/// (post-`result` dribble / late MCP-bridge frames) — each read either returns
+/// an instantly-available buffered line or times out, so this is the worst-case
+/// added latency, not a fixed sleep. 75ms clears the Windows default timer
+/// granularity (~15.6ms) so a dribble batch the OS hasn't flushed to the read
+/// side yet still gets caught instead of leaking in as the next turn's first
+/// frame; still far below a real fresh frame (≥100ms out), so a clean reused
+/// turn that has nothing buffered pays the FIRST-read timeout once and moves on.
+const REUSE_DRAIN_BUDGET_MS: u64 = 75;
+
+/// Discard any stdout the warm child buffered AFTER the previous turn's `result`
+/// frame, BEFORE this reused turn writes its user envelope. The CLI emits trailing
+/// "dribble" after `result` (the FE logs it as `orphaned (post-done)` — streaming.ts)
+/// and an `ask_user`/MCP-bridge round-trip can leave late control frames in the
+/// pipe; left there, the next reused turn's first `next_line()` returns that STALE
+/// frame at ~0ms (`first-text 0 ms` in the log) → the UI renders a previous turn's
+/// content as an instant, off-topic reply to the new message. Bounded by
+/// `REUSE_DRAIN_BUDGET_MS`: each iteration races a read against the remaining
+/// budget — a buffered line resolves immediately and is dropped; once the pipe is
+/// momentarily empty (timeout) or hits EOF, we stop. Returns the count dropped.
+async fn drain_stale_buffered_lines<R>(lines: &mut tokio::io::Lines<R>) -> usize
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+{
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(REUSE_DRAIN_BUDGET_MS);
+    let mut dropped = 0usize;
+    loop {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            break;
+        }
+        match tokio::time::timeout_at(deadline, lines.next_line()).await {
+            // A line was sitting in the buffer (stale residue from the prior turn) — drop it.
+            Ok(Ok(Some(_))) => {
+                dropped += 1;
+            }
+            // EOF (child died while parked) or a read error — stop draining; the
+            // reused-turn path below surfaces the dead child as DeadOnReuse on its
+            // own first read/write.
+            Ok(Ok(None)) | Ok(Err(_)) => break,
+            // Timed out waiting for the next line → the pipe is momentarily empty,
+            // i.e. nothing stale is buffered. This is the normal exit.
+            Err(_) => break,
+        }
+    }
+    dropped
+}
+
 /// Stream ONE turn: write the user envelope, forward NDJSON, handle the control
 /// channel (init ack, `can_use_tool` permission asks) + mid-turn steers, and
 /// return when `result` lands / stdout EOFs / a fatal write fails. Ported
@@ -2167,6 +2216,14 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
     // Reused turns: the handshake already happened at process start, so write
     // the user envelope immediately. First turn: wait for the init ack below.
     let mut user_sent = if *handshake_done {
+        // Drop any stdout the child buffered after the PREVIOUS turn's `result`
+        // (post-result dribble, late ask_user/MCP-bridge control frames). Left in
+        // the pipe, that stale frame would be read as THIS turn's first output at
+        // ~0ms and render a prior turn's content as an instant, off-topic reply.
+        let dropped = drain_stale_buffered_lines(lines).await;
+        if dropped > 0 {
+            log::debug!("warm_pool: drained {dropped} stale buffered line(s) before reused turn, session={stream_sid}");
+        }
         // Reused turn: a write failure here means the warm child died while
         // parked. No output has been produced, so this is silently retryable —
         // signal the loop to drop the child and let the dispatcher respawn cold.
@@ -2531,6 +2588,24 @@ async fn emit_turn_end_error(
     let _ = done.send(Err(msg));
 }
 
+/// Per-session running total of the CLI's CUMULATIVE `duration_api_ms` as last
+/// seen, so `record_turn_perf` can derive a single turn's API time (current
+/// cumulative − previous cumulative). Entry is best-effort housekeeping for the
+/// turn-attrib log only — never load-bearing for correctness, so a poisoned lock
+/// just recovers the inner map. Pruned lazily: only ever holds live-session keys
+/// (a session's worst case is one stale entry until its child is reaped).
+static CUMULATIVE_CLI_API: Mutex<Option<HashMap<String, u64>>> = Mutex::new(None);
+
+fn prev_cumulative_cli_api(session_id: &str) -> u64 {
+    let mut g = match CUMULATIVE_CLI_API.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+    g.get_or_insert_with(HashMap::new).get(session_id).copied().unwrap_or(0)
+}
+
+fn store_cumulative_cli_api(session_id: &str, cumulative: u64) {
+    let mut g = match CUMULATIVE_CLI_API.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+    g.get_or_insert_with(HashMap::new).insert(session_id.to_string(), cumulative);
+}
+
 /// B2: build a `TurnPerf` from the result frame + accumulated TTFT milestones,
 /// persist it to `turns.ndjson` (fire-and-forget), and mirror it onto the diag
 /// bus as a structured event. The CLI carries token/cache/cost data ONLY on the
@@ -2617,14 +2692,21 @@ fn record_turn_perf(
     diagnostics::perf::append_turn_perf(rec);
 
     // Latency attribution at a glance: the CLI's own API time vs Rift's wall-clock.
-    // `overhead = duration - cli_api` is everything NOT spent in the model API
-    // (Rift IPC, tool execution, stdin/stdout plumbing). A small overhead next to
-    // a large cli_api proves the turn's cost is the model, not Rift.
+    // CAVEAT: the CLI's `duration_api_ms` is CUMULATIVE across a resumed session
+    // (it grows every turn — e.g. 22s→35s→133s on one real session), NOT per-turn.
+    // The old code did `overhead = this_turn_rift_wall - cumulative_cli_api`, which
+    // went wildly negative on turn 2+ (logged non_api_overhead=-2823403ms). Subtract
+    // the PREVIOUS cumulative for this session to recover the per-turn API time, then
+    // `overhead = rift_wall - per_turn_api` is meaningful again. First turn (no prior)
+    // uses the value as-is.
     if let Some(api) = cli_api_ms {
+        let prev = prev_cumulative_cli_api(stream_sid);
+        let per_turn_api = api.saturating_sub(prev) as i64;
+        store_cumulative_cli_api(stream_sid, api);
         let dur = turn_start.elapsed().as_millis() as i64;
-        let overhead = dur - api as i64;
+        let overhead = dur - per_turn_api;
         log::info!(
-            "turn-attrib: cli_api={api}ms cli_ttft={}ms rift_wall={dur}ms non_api_overhead={overhead}ms session={stream_sid}",
+            "turn-attrib: cli_api={per_turn_api}ms (turn) cli_ttft={}ms rift_wall={dur}ms non_api_overhead={overhead}ms session={stream_sid}",
             cli_ttft_ms.map(|v| v as i64).unwrap_or(-1),
         );
     }
@@ -2792,7 +2874,36 @@ pub async fn assistant_steer(
 
 #[cfg(test)]
 mod tests {
-    use super::plan_usage_is_hot;
+    use super::{drain_stale_buffered_lines, plan_usage_is_hot};
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    #[tokio::test]
+    async fn drain_drops_stale_buffered_lines_then_stops() {
+        // Regression guard for the "instant off-topic reply" incident
+        // (rift.log first-text 0 ms on a reused turn after an ask_user cycle):
+        // a reused warm child had post-`result` dribble + a late control frame
+        // buffered; draining must discard ALL of it so the turn's real first
+        // frame isn't a stale replay.
+        let stale = concat!(
+            "{\"type\":\"stream_event\",\"event\":{\"type\":\"content_block_start\"}}\n",
+            "{\"type\":\"control_response\"}\n",
+            "leftover dribble line\n",
+        );
+        let mut lines = BufReader::new(stale.as_bytes()).lines();
+        let dropped = drain_stale_buffered_lines(&mut lines).await;
+        assert_eq!(dropped, 3, "all three buffered residue lines must be dropped");
+        // Buffer is now at EOF — nothing leaks into the would-be next read.
+        assert!(lines.next_line().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn drain_is_a_noop_on_an_empty_buffer() {
+        // A clean reused turn (no residue) must drain nothing and return promptly
+        // — the drain is bounded, never a fixed sleep that taxes every turn.
+        let mut lines = BufReader::new(&b""[..]).lines();
+        let dropped = drain_stale_buffered_lines(&mut lines).await;
+        assert_eq!(dropped, 0);
+    }
 
     #[test]
     fn plan_usage_reminder_stays_silent_on_a_healthy_window() {

@@ -63,6 +63,16 @@ export function beginTurn(tab: TabState) {
   // and a TaskUpdate{taskId:"1"} would then patch the wrong (older) task.
   tab.taskCreateCount = tab.tasks.length;
   tab.planBlockId = null;
+  // Belt-and-suspenders: the three terminal paths (onStreamDone/onStreamError/
+  // stop) already clear the ask_user pairing FIFOs, but a late `assistant://
+  // ask-user` IPC event can race PAST a stop() and push a stale requestId onto
+  // the just-stopped tab. Left there, beginTurn's FIFO would pair that dead
+  // requestId with the NEXT turn's first ask_user toolUseId — binding a live
+  // Allow/Deny chip to an already-resolved backend oneshot. Clear here too so a
+  // new turn always starts with empty pairing state (nothing pushed yet).
+  tab.unboundAskUserRequestIds = [];
+  tab.unboundAskUserToolUseIds = [];
+  if (tab.askUserBindings.size > 0) tab.askUserBindings = new Map();
   tab.streaming = true;
 }
 

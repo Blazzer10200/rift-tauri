@@ -2,24 +2,23 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.71.3 — Bug-fix sweep: chat/tab persistence + warm-pool hygiene
+## v0.71.4 — Fix: instant, off-topic replies while a tool/sub-agent is running
 
 ### What you'll notice
-- **Deleting all conversations is safer.** If the backend hiccups mid-purge, only the chats that actually deleted are cleared — surviving chats stay open instead of leaving broken tabs that could fail on your next message.
-- **Your open tabs survive a flaky restart.** A transient load error during startup no longer wipes your saved tab layout.
-- **No more empty-pane flicker** when you close a chat that's still streaming.
-- **Closing a chat right after a reply can't resurrect a just-deleted conversation** — a stray background save is now cancelled the moment the tab closes.
+- **No more instant, nonsensical replies.** If you sent a follow-up message right after the assistant had asked you a question (or while a sub-agent was working in the background), it could fire back an instant, completely off-topic answer — it was replaying a leftover scrap of the *previous* turn's output instead of actually answering you. Fixed: a reused chat process now clears any stale output still sitting in its pipe before starting your next message.
+- **Allow/Deny prompts can't get crossed up between turns.** A rare timing race could bind a fresh permission/question prompt to an already-finished request, leaving a dead or wrong-acting button. The pairing state now resets cleanly at the start of every turn.
 
 ### Under the hood
-- **Fixed a rare background-process leak.** A race in the idle-eviction sweeper could orphan a live chat's helper process (~450 MB) instead of reaping it; the entry is now re-registered when a turn races in.
-- **Process-kill sweeps no longer block the app's async runtime** (idle eviction + the CLI-update reap moved off the executor).
-- **Capped concurrent usage-gauge refreshes at one**, so a burst of queued turns can't fan out duplicate background requests.
-- **Verified.** cargo test 123/123 · clippy 0 warnings · svelte-check clean (4134) · 387/387 frontend unit tests (+1 regression).
+- **Root cause was confirmed from your real session logs** — a reused warm CLI process logged a `0ms` first response (a literal stale-frame replay) right after an `ask_user` round-trip. The drain that fixes it is bounded (≤75ms, and only when there's actually leftover output), so a clean turn pays nothing.
+- **Fixed broken latency telemetry.** The per-turn "time outside the model API" stat was subtracting the CLI's *cumulative* session API time from a single turn's wall-clock, logging impossible negative values that were polluting the AI-Health latency analysis. It now uses the real per-turn delta.
+- **Verified.** cargo test 125/125 (+2 regression) · clippy 0 warnings · svelte-check clean (4134) · 387/387 frontend unit tests.
 
 ### Where these came from
-All seven fixes came from an autonomous live stress-test + an adversarially-verified static audit (36 raw findings → 10 confirmed → **7 fixed, 0 critical/high**). The other three were deliberately left as intentional design tradeoffs (documented in the issue tracker).
+A real user-reported incident ("I talk to it while a sub-agent runs and it replies instantly + totally off-topic"), root-caused from the live production log, then a two-sweep adversarial audit of the turn lifecycle + frontend state machine that surfaced two more same-family fixes. (Issues #72 + #73.)
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.71.3** — Bug-fix sweep: safer "delete all conversations", tab layout survives a flaky restart, no empty-pane flicker on close, no ghost-save resurrecting a deleted chat, plus a warm-pool process-leak race + async-runtime + usage-refresh hygiene batch (7 fixes from a live stress-test + static audit).
 
 - **v0.71.2** — Maintenance/housekeeping (no behavior change): the ~740-line turn-spawn function split into an orchestrator + `resolve_spawn`, every compiler lint cleared (14 → 0), dead code removed, internal trackers reconciled to reality.
 
