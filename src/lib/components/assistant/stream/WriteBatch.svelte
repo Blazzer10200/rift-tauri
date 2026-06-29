@@ -82,10 +82,33 @@
   }
   .wb-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .wb-dir { color: var(--fg-faint); opacity: 0.6; font-family: var(--font-mono); font-size: 11px; }
+  /* Diff preview card — matches the unified Rift code surface (shiki blocks,
+     terminal, results): rounded, tinted, soft-shadowed, with a rise-in + top
+     accent glow, so a create/edit block reads as part of the same family. */
   .wb-diffwrap {
-    margin: 2px 0 8px 2px;
-    border-left: 2px solid color-mix(in oklch, var(--border) 80%, transparent);
-    padding-left: 10px;
+    position: relative;
+    margin: 4px 0 9px 0;
+    padding: 4px 0;
+    border: 1px solid color-mix(in oklch, var(--accent) 10%, var(--border));
+    border-radius: var(--radius-xl);
+    overflow: hidden;
+    background:
+      radial-gradient(140% 120% at 0% 0%, color-mix(in oklch, var(--accent) 6%, transparent), transparent 55%),
+      color-mix(in oklch, var(--accent) 3%, var(--bg-inset));
+    box-shadow: var(--shadow-sm), inset 0 1px 0 color-mix(in oklch, #fff 4%, transparent);
+    animation: wb-rise var(--dur-rise) var(--ease-page) both;
   }
-  @media (prefers-reduced-motion: reduce) { .wb-chev { transition: color 140ms ease; } }
+  .wb-diffwrap::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 1px;
+    background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--accent) 42%, transparent), transparent);
+    opacity: 0.7; pointer-events: none;
+  }
+  @keyframes wb-rise {
+    from { opacity: 0; transform: translateY(5px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .wb-chev { transition: color 140ms ease; }
+    .wb-diffwrap { animation: none; }
+  }
 </style>

@@ -1019,10 +1019,10 @@
   /* JSON fallback (unknown tool shapes). */
   .field-block {
     margin: 0;
-    padding: 6px 8px;
+    padding: 7px 10px;
     background: var(--bg-elev-1);
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: var(--radius-lg);
     font-family: var(--font-mono, monospace);
     font-size: 10.5px;
     line-height: 1.5;
@@ -1045,27 +1045,55 @@
     animation: chip-spin 1s linear infinite;
   }
 
-  /* Result — terminal style (Bash, remote_bash, BashOutput). */
+  /* Result — terminal style (Bash, remote_bash, BashOutput). A deep terminal
+     surface w/ a shell-colored left spine (cyan-ish info for PowerShell, neutral
+     for bash) + header chrome, matching the code-block family in Markdown. */
   .terminal {
-    background: oklch(0.16 0.012 250);
-    border: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
-    border-radius: 5px;
+    background:
+      radial-gradient(140% 120% at 0% 0%, color-mix(in oklch, var(--accent) 6%, transparent), transparent 55%),
+      oklch(0.17 0.01 245);
+    border: 1px solid color-mix(in oklch, var(--accent) 8%, var(--border));
+    border-radius: var(--radius-xl);
     overflow: hidden;
+    position: relative;
+    box-shadow: var(--shadow), inset 0 1px 0 color-mix(in oklch, #fff 4%, transparent);
+    animation: tool-rise var(--dur-rise) var(--ease-page) both;
   }
+  .terminal::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 1px;
+    background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--accent) 45%, transparent), transparent);
+    opacity: 0.7; pointer-events: none;
+  }
+  .terminal[data-shell="pwsh"]::before {
+    background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--info) 50%, transparent), transparent);
+  }
+  @keyframes tool-rise {
+    from { opacity: 0; transform: translateY(5px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) { .terminal { animation: none; } }
   /* Command head — shell badge + the $/PS>-prefixed command. */
   .terminal-cmd {
-    display: flex; align-items: center; gap: 9px;
-    padding: 6px 10px;
-    background: color-mix(in oklch, var(--bg-elev-1) 55%, transparent);
-    border-bottom: 1px solid color-mix(in oklch, var(--border) 50%, transparent);
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 13px;
+    background: color-mix(in oklch, var(--bg-elev-1) 28%, transparent);
+    backdrop-filter: blur(8px) saturate(120%);
+    -webkit-backdrop-filter: blur(8px) saturate(120%);
+    border-bottom: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
   }
   .term-badge {
+    display: inline-flex; align-items: center; gap: 6px;
     font-family: var(--font-mono, monospace);
     font-size: 9.5px; font-weight: 600;
-    padding: 2px 7px; border-radius: 5px; flex-shrink: 0;
+    padding: 2px 9px; border-radius: 999px; flex-shrink: 0;
+    border: 1px solid transparent;
   }
-  .term-badge[data-shell="bash"] { background: rgba(255, 255, 255, 0.06); color: var(--fg-muted); }
-  .term-badge[data-shell="pwsh"] { background: var(--info-soft); color: var(--info); }
+  .term-badge::before {
+    content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor;
+    box-shadow: 0 0 6px currentColor; opacity: 0.9;
+  }
+  .term-badge[data-shell="bash"] { background: color-mix(in oklch, var(--fg) 6%, transparent); color: var(--fg-muted); border-color: color-mix(in oklch, var(--fg) 12%, transparent); }
+  .term-badge[data-shell="pwsh"] { background: var(--info-soft); color: var(--info); border-color: color-mix(in oklch, var(--info) 30%, transparent); }
   .term-cmd-text {
     flex: 1; min-width: 0;
     font-size: 11px; color: var(--fg);
@@ -1092,35 +1120,46 @@
   .term-line.err  { color: var(--danger); }
   .term-line.warn { color: var(--warn); }
   .terminal .more {
-    padding: 4px 10px;
+    padding: 4px 11px;
     font-size: 10px;
     color: var(--fg-muted);
     border-top: 1px solid color-mix(in oklch, var(--border) 40%, transparent);
-    background: oklch(0.18 0.012 250);
+    background: color-mix(in oklch, var(--accent) 4%, oklch(0.195 0.01 245));
     font-style: italic;
   }
 
-  /* Result — code style (Read). */
+  /* Result — code style (Read). Emerald-spined read surface, matching the
+     code-block + terminal family. */
   .result.code {
-    background: var(--bg-elev-1);
-    border-left: 2px solid color-mix(in oklab, var(--accent) 35%, transparent);
-    padding: 6px 10px;
+    background:
+      radial-gradient(140% 120% at 0% 0%, color-mix(in oklch, var(--accent) 6%, transparent), transparent 55%),
+      color-mix(in oklch, var(--accent) 3%, var(--bg-elev-1));
+    border: 1px solid color-mix(in oklch, var(--accent) 10%, var(--border));
+    border-radius: var(--radius-xl);
+    padding: 9px 13px;
     max-height: 320px;
+    box-shadow: var(--shadow-sm), inset 0 1px 0 color-mix(in oklch, var(--accent) 6%, transparent);
+    animation: tool-rise var(--dur-rise) var(--ease-page) both;
   }
 
   /* Result — list style (Grep, Glob, list_dir). */
   .list {
     list-style: none;
     margin: 0;
-    padding: 4px 0;
-    background: var(--bg-elev-1);
-    border: 1px solid var(--border);
-    border-radius: 4px;
+    padding: 5px 0;
+    background: color-mix(in oklch, var(--accent) 3%, var(--bg-elev-1));
+    border: 1px solid color-mix(in oklch, var(--accent) 9%, var(--border));
+    border-radius: var(--radius-xl);
     max-height: 320px;
     overflow: auto;
     font-family: var(--font-mono, monospace);
     font-size: 10.5px;
     line-height: 1.55;
+    box-shadow: var(--shadow-sm);
+    animation: tool-rise var(--dur-rise) var(--ease-page) both;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .result.code, .list { animation: none; }
   }
   .list li {
     padding: 1px 10px;
@@ -1141,10 +1180,10 @@
   /* Result — plain text fallback. */
   .result {
     margin: 0;
-    padding: 6px 8px;
+    padding: 7px 10px;
     background: var(--bg-elev-1);
     border: 1px solid var(--border);
-    border-radius: 4px;
+    border-radius: var(--radius-lg);
     font-family: var(--font-mono, monospace);
     font-size: 10.5px;
     line-height: 1.5;

@@ -606,16 +606,28 @@
     line-height: inherit;
     white-space: nowrap;
   }
+  /* Legacy / untagged code blocks (no shiki grammar) — share the modern Rift
+     code surface so they match shiki blocks + terminal output exactly. */
   .md :global(pre) {
-    margin: 8px 0;
-    padding: 10px 14px;
-    background: var(--bg-elev-1);
-    border: 1px solid var(--border);
-    border-left: 3px solid color-mix(in oklab, var(--accent) 22%, var(--border));
-    border-radius: 8px;
+    position: relative;
+    margin: 14px 0;
+    padding: 12px 15px;
+    background:
+      radial-gradient(140% 120% at 0% 0%, color-mix(in oklch, var(--accent) 6%, transparent), transparent 55%),
+      color-mix(in oklch, var(--accent) 3.5%, oklch(0.185 0.012 245));
+    border: 1px solid color-mix(in oklch, var(--accent) 10%, var(--border));
+    border-radius: var(--radius-xl);
     overflow-x: auto;
     font-size: var(--fs-sm);
-    line-height: 1.55;
+    line-height: 1.6;
+    box-shadow: var(--shadow), inset 0 1px 0 color-mix(in oklch, #fff 4%, transparent);
+    animation: code-rise var(--dur-rise) var(--ease-page) both;
+  }
+  .md :global(pre)::before {
+    content: "";
+    position: absolute; inset: 0 0 auto 0; height: 1px;
+    background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--accent) 45%, transparent), transparent);
+    opacity: 0.7; pointer-events: none;
   }
   .md :global(pre code) {
     background: transparent;
@@ -912,38 +924,78 @@
   /* Wraps the shiki-rendered <pre> in a slim header bar w/ lang + line count
      + Copy. Overrides the default .md pre styling so shiki's own bg + colors
      take over from the elev-1/accent-border treatment. */
+  /* Rift-native code surface. A deep, faintly emerald-tinted frame (built from
+     tokens, not a hardcoded GitHub hex) wraps shiki's own github-dark-dimmed
+     code body, with a left accent spine + header chrome so a code block reads
+     as a *Rift* block, not a generic markdown rectangle. Radius/shadow match
+     the EditDiff + card family. */
+  /* ── Unified Rift code surface (shared language: code blocks · terminal ·
+     read/grep results all match). Modern, rounded, glassy, with a soft
+     rise-in entrance. Drives off the shared --code-surface-* custom props so
+     ToolChip can reuse the exact same look. ─────────────────────────────── */
   .md :global(.shiki-block) {
-    margin: 10px 0;
-    border: 1px solid color-mix(in oklab, var(--fg) 9%, transparent);
-    border-radius: 11px;
+    margin: 14px 0;
+    border: 1px solid color-mix(in oklch, var(--accent) 10%, var(--border));
+    border-radius: var(--radius-xl);
     overflow: hidden;
-    background: #22272e; /* github-dark-dimmed bg, matches Shiki output */
+    background:
+      radial-gradient(140% 120% at 0% 0%, color-mix(in oklch, var(--accent) 7%, transparent), transparent 55%),
+      color-mix(in oklch, var(--accent) 4%, oklch(0.18 0.012 245));
     position: relative;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.22), inset 0 1px 0 color-mix(in oklab, #fff 4%, transparent);
+    box-shadow:
+      var(--shadow),
+      inset 0 1px 0 color-mix(in oklch, #fff 5%, transparent);
+    animation: code-rise var(--dur-rise) var(--ease-page) both;
+  }
+  @keyframes code-rise {
+    from { opacity: 0; transform: translateY(6px) scale(0.992); }
+    to   { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  /* hairline accent glow along the top edge */
+  .md :global(.shiki-block::before) {
+    content: "";
+    position: absolute; inset: 0 0 auto 0; height: 1px;
+    background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--accent) 50%, transparent), transparent);
+    opacity: 0.7; pointer-events: none;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .md :global(.shiki-block) { animation: none; }
   }
   .md :global(.shiki-head) {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 8px 10px;
-    background: color-mix(in oklch, var(--bg-elev-1) 80%, transparent);
-    border-bottom: 1px solid var(--border);
+    gap: 9px;
+    padding: 9px 13px;
+    background: color-mix(in oklch, var(--bg-elev-1) 30%, transparent);
+    backdrop-filter: blur(8px) saturate(120%);
+    -webkit-backdrop-filter: blur(8px) saturate(120%);
+    border-bottom: 1px solid color-mix(in oklch, var(--accent) 10%, var(--border));
     font-size: 10px;
     color: var(--fg-muted);
     letter-spacing: 0.04em;
   }
-  /* Lang label — a small pill badge (mock ct-diff-lang), not plain text. */
+  /* Lang label — a refined accent pill with a glowing leading dot. */
   .md :global(.shiki-lang) {
-    padding: 1px 6px;
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    background: var(--bg-elev-2);
-    color: var(--fg-2);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 9px 2px 7px;
+    border: 1px solid color-mix(in oklch, var(--accent) 25%, transparent);
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--accent) 12%, transparent);
+    color: color-mix(in oklch, var(--accent) 60%, var(--fg));
     font-size: 9px;
     font-weight: 700;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.09em;
     text-transform: uppercase;
     font-family: var(--font-mono, ui-monospace, monospace);
+  }
+  .md :global(.shiki-lang::before) {
+    content: "";
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 6px color-mix(in oklch, var(--accent) 70%, transparent);
   }
   .md :global(.shiki-sep) { color: var(--fg-faint); opacity: 0.6; }
   .md :global(.shiki-lines) {
