@@ -16,6 +16,12 @@ use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
+/// Per-(model, effort) accumulator: (ttft vec, duration vec, cause→count tally).
+type GroupAcc = std::collections::BTreeMap<
+    (String, Option<String>),
+    (Vec<u64>, Vec<u64>, std::collections::BTreeMap<String, usize>),
+>;
+
 /// One record per completed assistant turn — one NDJSON line in `turns.ndjson`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TurnPerf {
@@ -318,10 +324,7 @@ fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
     // effort) latency+duration vecs (for the breakdown).
     let mut ttft_by_day: BTreeMap<String, Vec<u64>> = BTreeMap::new();
     // Per group: (ttft vec, duration vec, cause→count tally for the modal cause).
-    let mut by_group: BTreeMap<
-        (String, Option<String>),
-        (Vec<u64>, Vec<u64>, BTreeMap<String, usize>),
-    > = BTreeMap::new();
+    let mut by_group: GroupAcc = BTreeMap::new();
     let mut total = 0usize;
 
     for line in lines {
@@ -447,7 +450,7 @@ fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
             }
         })
         .collect();
-    by_model.sort_by(|a, b| b.turn_count.cmp(&a.turn_count));
+    by_model.sort_by_key(|m| std::cmp::Reverse(m.turn_count));
 
     TurnPerfStats {
         p50_ttft_text_ms: percentile(&ttft_text, 0.50, 1),

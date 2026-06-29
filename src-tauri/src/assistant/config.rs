@@ -66,9 +66,9 @@ pub(super) struct AssistantConfig {
     /// Experimental local-LLM mode. When true, `turn.rs` points the spawned CLI
     /// at a local Anthropic-Messages-compatible endpoint (LiteLLM/Ollama) via
     /// `ANTHROPIC_BASE_URL` + the keychain `LOCAL_LLM_API_KEY`, forces `--bare`,
-    /// overrides `--model` with `local_llm_model`, and skips the cloud model-pin
-    /// + `--effort`. Purely additive + flag-gated — off = byte-identical to the
-    /// cloud path. Testing/experiment only for now.
+    /// overrides `--model` with `local_llm_model`, and skips the cloud
+    /// model-pin and `--effort`. Purely additive + flag-gated — off =
+    /// byte-identical to the cloud path. Testing/experiment only for now.
     #[serde(default)]
     pub(super) local_llm_enabled: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]

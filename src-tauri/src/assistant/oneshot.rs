@@ -106,6 +106,7 @@ pub async fn assistant_enhance_cancel(request_id: String) -> Result<(), String> 
 /// simplest possible call. The frontend shows the result as an editable
 /// preview; this command never mutates conversation state.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn assistant_enhance_prompt(
     app: AppHandle,
     request_id: String,

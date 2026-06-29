@@ -474,7 +474,9 @@ pub(crate) fn claude_command() -> Option<Command> {
 /// also re-probes the version instead of serving a stale triple. Inner version
 /// is `Option` because `--version` can fail to run (treated as conservative-old
 /// upstream — see `cli_caps`).
-static CLAUDE_VERSION: Mutex<Option<(PathBuf, Option<(u64, u64, u64)>)>> = Mutex::new(None);
+/// `(major, minor, patch)` parsed from the CLI's `--version`.
+type VersionTriple = (u64, u64, u64);
+static CLAUDE_VERSION: Mutex<Option<(PathBuf, Option<VersionTriple>)>> = Mutex::new(None);
 
 /// RR10: drop the cached version triple. An in-place CLI update leaves the
 /// binary at the SAME path, so the path-keyed cache would return the PRE-update

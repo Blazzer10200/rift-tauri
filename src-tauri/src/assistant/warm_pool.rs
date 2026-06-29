@@ -279,6 +279,7 @@ const EVICT_TICK: Duration = Duration::from_secs(300);
 ///   * the first `total - max_warm` (the surplus, oldest) use `pressure`,
 ///   * the rest use the generous `idle` window,
 ///   * a mid-turn child is never evicted regardless of age.
+///
 /// Returns a bool per input index (same order as the sorted input).
 fn evict_decision(
     sorted_idle: &[Duration],
@@ -335,7 +336,7 @@ fn evict_idle_once() -> usize {
         })
         .collect();
     // Oldest (most idle) first — the surplus we trim under pressure.
-    ranked.sort_by(|a, b| b.idle_for.cmp(&a.idle_for));
+    ranked.sort_by_key(|c| std::cmp::Reverse(c.idle_for));
     let over_cap = total.saturating_sub(MAX_WARM);
 
     // Decide via the pure kernel (unit-tested) so this hot path and the test

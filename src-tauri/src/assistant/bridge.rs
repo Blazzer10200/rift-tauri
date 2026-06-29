@@ -315,7 +315,7 @@ fn open_browser_op(app: &AppHandle, req: Request) -> Response {
         return err(format!("open_browser: {e}"));
     }
     let _ = app.emit_to(
-        &window_of(&req),
+        window_of(&req),
         "assistant://open-browser",
         serde_json::json!({
             "url": url,
@@ -345,7 +345,7 @@ fn notify_op(app: &AppHandle, req: Request) -> Response {
         _ => "info",
     };
     let _ = app.emit_to(
-        &window_of(&req),
+        window_of(&req),
         "assistant://notify",
         serde_json::json!({
             "title": title,

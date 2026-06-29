@@ -280,6 +280,7 @@ impl LogForwarder {
 ///   2. Lines containing OpenSSH/RSA `BEGIN ... PRIVATE KEY` markers →
 ///      full-message redaction (safer than per-line — a single leaked body
 ///      line is enough to compromise the key, so drop the whole message).
+///
 /// RR8: recursively scrub every String leaf of a JSON value in place. Used on
 /// structured `event.fields` so home-dir prefixes / key bodies are redacted at
 /// their real (unescaped) values — serializing first would `\`-escape Windows
