@@ -2,17 +2,20 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.71.1 — Hotfix: the assistant could go passive on short messages
+## v0.71.2 — Maintenance: internal cleanup, no behavior change
 
 ### What you'll notice
-- **The assistant answers your short messages properly again.** A bug could make Claude reply to brief messages ("hi", "ok", "what's up") with vague one-liners — or, worse, act like there was nothing to respond to and even redo work it had already done. That's fixed. Every message, long or short, now gets a normal, engaged response.
+- **Nothing should change in how Rift behaves** — this is a housekeeping release. Same features, same speed; the work was all under the hood to keep the codebase healthy.
 
 ### Under the hood
-- **Root cause:** Rift attached a per-turn "environment snapshot" (including your Claude plan-usage gauges) to *every* message, and a system instruction told the model to "wrap up gracefully when plan usage runs hot." On a perfectly healthy plan a benign "weekly 67% used" note, sitting in front of a short message, read to the model as *"the user is winding down"* — so it gave clipped, passive answers. (Diagnosed from a real session: the model was receiving the message fine; it was the framing that misled it.)
-- **Fix:** the plan-usage note is now shown only when usage is genuinely high (≥90% of the 5-hour window or ≥95% weekly) — so on a normal turn your message reaches the model with nothing prepended. The system instruction was reworded so a snapshot can never make the model treat a short message as low-priority or go passive.
-- **Verified.** New regression tests lock the threshold (cargo test 123/123); svelte-check clean (4134); live-verified in the running app — a short message now returns a direct reply with no snapshot attached.
+- **Refactored the turn-spawn path for readability.** The single largest function behind every chat turn (~740 lines that resolved your model/effort/thinking/permission settings and assembled the CLI command) was split into a small orchestrator plus a focused `resolve_spawn` step. Behavior is byte-identical — verified by the full test suite (123/123) — it's just far easier to maintain and reason about now.
+- **Cleared every compiler lint** (14 → 0) and **removed dead code** (a pair of no-op methods and their call sites left over from an earlier refactor).
+- **Reconciled the internal issue trackers to reality** — several items marked "open" were verified already shipped, so the docs no longer point future work at ghosts.
+- **Verified.** cargo test 123/123 · clippy 0 warnings · svelte-check clean (4134) · 386/386 frontend unit tests.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.71.1** — Hotfix: the assistant could go passive on short messages — a benign plan-usage note in front of a brief message made the model give clipped/"winding down" replies. The note now appears only when usage is genuinely high, so short messages get a normal response again.
 
 - **v0.71.0** — First-run onboarding rework: lighter welcome, a clearer Connect step when the CLI is missing, a scratch-space hint, and the Defaults step collapsed into one Cautious/Balanced/Fast choice.
 
