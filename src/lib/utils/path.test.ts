@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { leafName, prettyPath, shortPath } from "./path";
+import { leafName, prettyPath, shortPath, rootKey } from "./path";
 
 describe("leafName", () => {
   it("returns the last segment of a posix or windows path", () => {
@@ -31,5 +31,19 @@ describe("shortPath", () => {
     expect(shortPath("/home")).toBe("/home");
     expect(shortPath("a/b")).toBe("a/b");
     expect(shortPath("/home/user/project/")).toBe("…/user/project");
+  });
+});
+
+describe("rootKey", () => {
+  it("strips a trailing separator and lowercases for case-insensitive compare", () => {
+    expect(rootKey("C:\\AI Workflow\\Projects\\Rift\\")).toBe("c:\\ai workflow\\projects\\rift");
+    expect(rootKey("/Home/User/Proj/")).toBe("/home/user/proj");
+  });
+  it("treats null/undefined as empty", () => {
+    expect(rootKey(null)).toBe("");
+    expect(rootKey(undefined)).toBe("");
+  });
+  it("matches the same folder regardless of trailing slash + casing", () => {
+    expect(rootKey("C:/Proj/Rift")).toBe(rootKey("C:/proj/rift/"));
   });
 });

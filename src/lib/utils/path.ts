@@ -26,3 +26,11 @@ export function shortPath(p: string): string {
 export function prettyPath(p: string): string {
   return p.replace(/^\\\\\?\\/, "").replace(/^\/\/\?\//, "");
 }
+
+/** Canonicalize a root path for comparison: strip a trailing separator and
+ *  lowercase (Windows paths are case-insensitive + drive-letter casing varies).
+ *  The single home for the "is this the same folder?" key — was duplicated as
+ *  `projects.svelte.ts::projectRootKey` and `ConversationList::rootKey`. */
+export function rootKey(r: string | null | undefined): string {
+  return (r ?? "").replace(/[\\/]+$/, "").toLowerCase();
+}

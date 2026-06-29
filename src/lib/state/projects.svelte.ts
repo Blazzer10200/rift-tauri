@@ -7,17 +7,16 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type { Project } from "./assistant/types";
+import { rootKey } from "$lib/utils/path";
 
 /** localStorage key for the id of the last-active project, so a relaunch can
  *  highlight it in the sidebar. The active ROOT itself is owned by the backend
  *  workspace state; this is purely the UI's "which project chip is lit". */
 const ACTIVE_PROJECT_KEY = "rift.projects.activeId.v1";
 
-/** Canonicalize a root for comparison (trailing-slash + case-insensitive, to
- *  match Windows paths and the ConversationList rootKey() convention). */
-export function projectRootKey(r: string | null | undefined): string {
-  return (r ?? "").replace(/[\\/]+$/, "").toLowerCase();
-}
+/** Canonicalize a root for comparison — the canonical `rootKey` (utils/path.ts),
+ *  re-exported under the existing name so this module's callers stay unchanged. */
+export const projectRootKey = rootKey;
 
 class ProjectRegistry {
   items = $state<Project[]>([]);

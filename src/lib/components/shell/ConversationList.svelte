@@ -6,7 +6,7 @@
   import { projects } from "$lib/state/projects.svelte";
   import type { ConversationMeta } from "$lib/state/assistant/types";
   import { portal } from "$lib/actions/portal";
-  import { leafName } from "$lib/utils/path";
+  import { leafName, rootKey } from "$lib/utils/path";
 
   // ── grouping ─────────────────────────────────────────────────────────
   type Group = { label: string; items: ConversationMeta[] };
@@ -25,12 +25,8 @@
   const BUCKET_ORDER = ["Today", "Yesterday", "Previous 7 Days", "Previous 30 Days", "Older"];
 
   // ── per-project scope ────────────────────────────────────────────────
-  // Canonical roots from the backend are already normalized; lower-case for a
-  // case-insensitive match (Windows paths) so a convo's stamped root lines up
-  // with the open folder regardless of drive-letter casing.
-  function rootKey(r: string | null | undefined): string {
-    return (r ?? "").replace(/[\\/]+$/, "").toLowerCase();
-  }
+  // `rootKey` (utils/path.ts) canonicalizes for a case-insensitive match so a
+  // convo's stamped root lines up with the open folder regardless of casing.
   /** Short project label for a root: the defined project's name if one owns the
    *  folder, else the folder basename. */
   function projLabel(r: string | null | undefined): string {

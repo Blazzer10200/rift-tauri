@@ -2,13 +2,18 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.71.7 — Maintenance: de-duplicated path helpers (no behavior change)
+## v0.71.8 — Maintenance: de-duplicated path helpers (no behavior change)
 
 ### Under the hood
-- The "last segment of a path" logic (the folder/file name shown on pane headers, file menus, the conversation list, and tool captions) had drifted into ~6 separate copies — two named functions, an inline arrow, and three hand-rolled `replace().split().pop()` chains. Consolidated to one canonical `leafName` in `src/lib/utils/path.ts` (with `shortPath`/`prettyPath`), unit-tested in one place; every call site now imports it. Two of the copies even slightly disagreed on trailing-slash handling — now they all behave identically (the more-correct way).
-- No user-visible change. Pure consolidation: svelte-check clean (4136) · 391/391 frontend unit tests.
+- The path-string helpers had drifted into ~7 separate copies across the codebase. Consolidated into one canonical home, `src/lib/utils/path.ts`, unit-tested in one place; every call site now imports from there:
+  - **`leafName`** (the folder/file name shown on pane headers, file menus, the conversation list, and tool captions) — was two named functions, an inline arrow, and three hand-rolled `replace().split().pop()` chains. Two copies even disagreed on trailing-slash handling; now uniform (the more-correct way).
+  - **`rootKey`** (the "is this the same folder?" comparison key — trailing-slash-strip + lowercase for Windows) — was duplicated between the project registry and the conversation-list scope filter.
+  - **`shortPath` / `prettyPath`** moved alongside them.
+- No user-visible change. Pure consolidation: svelte-check clean (4136) · 394/394 frontend unit tests.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.71.7** — Maintenance (no behavior change): first half of the path-helper de-dup — consolidated `leafName`/`shortPath`/`prettyPath` into `utils/path.ts` (v0.71.8 folded in the `rootKey` half).
 
 - **v0.71.6** — Split-pane stays in its lane: per-pane sub-agent panel (each pane shows its own agents, with a "N steps · Ms" summary, per-tool-type icons, and a blended-glass card), steer now tells you when a missed steer became a queued message, closing a background tab no longer drops its unsaved tail, and background-pane notifications/browser-dock stop popping in the pane you're looking at. Root cause: nearly everything read off the single global focused-tab (16 of 31 audit findings confirmed; backend session-isolation was already clean).
 
