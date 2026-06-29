@@ -275,8 +275,14 @@ pub async fn assistant_update_cli() -> Result<CliUpdateResult, String> {
     // nothing happened (the "says updating, goes back to the notification" bug).
     // Reap every live claude child first, then let the OS release the handles,
     // so the overwrite actually lands. Mirrors the Velopack apply child-reap.
-    crate::assistant::warm_pool::drain_all_for_shutdown();
-    crate::assistant::kill_all_session_children();
+    // Both reaps are synchronous best-effort (a taskkill per child) — run them
+    // off the async worker so the kill sweep can't stall the executor.
+    tauri::async_runtime::spawn_blocking(|| {
+        crate::assistant::warm_pool::drain_all_for_shutdown();
+        crate::assistant::kill_all_session_children();
+    })
+    .await
+    .ok();
     // taskkill /F returns before Windows fully releases the file handle; a short
     // settle avoids racing the overwrite against a not-yet-closed lock.
     #[cfg(windows)]

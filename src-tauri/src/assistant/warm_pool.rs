@@ -352,10 +352,8 @@ fn evict_idle_once() -> usize {
         if decisions[rank] {
             // remove_if takes the registry lock alone (child lock released).
             if remove_if(&sid, &arc) {
-                evicted += 1;
-                let reason = if rank < over_cap { "pressure" } else { "idle" };
-                let window = if rank < over_cap { IDLE_EVICT_PRESSURE } else { IDLE_EVICT };
-                // Guard: a turn may have started after our snapshot; re-check before killing.
+                // Guard: a turn may have started after our snapshot; re-check now
+                // that the entry is out of the registry.
                 let still_idle = {
                     let g = arc.lock().unwrap_or_else(|p| p.into_inner());
                     !g.turn_in_progress.load(Ordering::Acquire)
@@ -364,13 +362,21 @@ fn evict_idle_once() -> usize {
                     if let Some(pid) = c.pid {
                         kill_child_tree(pid);
                     }
+                    evicted += 1;
+                    let reason = if rank < over_cap { "pressure" } else { "idle" };
+                    let window = if rank < over_cap { IDLE_EVICT_PRESSURE } else { IDLE_EVICT };
+                    log::info!(
+                        "warm_pool: idle-evicted session {sid} (>{}s, {reason}, {total} warm, pid={:?})",
+                        window.as_secs(), c.pid
+                    );
+                } else {
+                    // A turn raced in after our snapshot. We already pulled the
+                    // registry entry — re-insert it so the live child stays
+                    // reachable. Its reader loop holds a self-referential turn_tx,
+                    // so an orphaned entry would never be reaped (~450MB leak).
+                    // Never kill a child mid-turn.
+                    insert(&sid, arc);
                 }
-                // (if a turn started after our snapshot, the child is already removed from
-                // the registry; loop_cleanup will reap it when the turn ends.)
-                log::info!(
-                    "warm_pool: idle-evicted session {sid} (>{}s, {reason}, {total} warm, pid={:?})",
-                    window.as_secs(), c.pid
-                );
             }
         }
     }
@@ -389,7 +395,10 @@ pub(super) fn ensure_evictor() {
         let mut tick = tokio::time::interval(EVICT_TICK);
         loop {
             tick.tick().await;
-            let n = evict_idle_once();
+            // evict_idle_once is fully synchronous (registry/child mutex locks +
+            // a blocking taskkill per reap) — run it off the async worker so a
+            // slow taskkill (AV/contention) can't stall other Tokio tasks.
+            let n = tokio::task::spawn_blocking(evict_idle_once).await.unwrap_or(0);
             if n > 0 {
                 log::debug!("warm_pool: idle sweep evicted {n} child(ren)");
             }

@@ -636,6 +636,12 @@ class AssistantStore {
     // grows in a tab that nobody renders, and the rAF chain self-perpetuates
     // (drainTick re-arms itself at the tail).
     tab.flushPendingText();
+    // Cancel the debounced save too — else the 700ms timer fires against a tab
+    // no longer in the map (ghost save), which can resurrect a just-deleted convo.
+    if (tab.saveTimer) {
+      clearTimeout(tab.saveTimer);
+      tab.saveTimer = null;
+    }
     const next = new Map(this.tabs);
     next.delete(convoId);
     this.tabs = next;

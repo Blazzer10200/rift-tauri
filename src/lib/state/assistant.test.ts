@@ -549,3 +549,49 @@ describe("assistant.sessionUsage default", () => {
     });
   });
 });
+
+describe("deleteAllConversations — partial backend failure (orphan-tab regression)", () => {
+  const invokeMock = vi.mocked(invoke);
+
+  beforeEach(() => {
+    invokeMock.mockReset();
+  });
+
+  it("drops the deleted convo's tab but keeps a tab whose delete REJECTED", async () => {
+    assistant.ensureTab("del-ok", "del-ok");
+    assistant.ensureTab("del-fail", "del-fail");
+    assistant.openTabs = ["del-ok", "del-fail"];
+    assistant.currentConvoId = "del-ok";
+    assistant.panes = [{ tabId: "del-ok" }];
+    assistant.focusedPaneIdx = 0;
+    assistant.conversations = [
+      { id: "del-ok", title: "ok", model: "sonnet", createdAt: 1, updatedAt: 1 },
+      { id: "del-fail", title: "fail", model: "sonnet", createdAt: 1, updatedAt: 1 },
+    ] as any;
+
+    // Backend deletes "del-ok" but fails "del-fail" (e.g. mid-restart). With the
+    // old Promise.all this rejected before any teardown, orphaning both tabs.
+    invokeMock.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "assistant_delete_conversation") {
+        if (args.id === "del-fail") throw new Error("backend mid-restart");
+        return undefined;
+      }
+      if (cmd === "assistant_list_conversations") {
+        return [{ id: "del-fail", title: "fail", model: "sonnet", createdAt: 1, updatedAt: 1 }];
+      }
+      return undefined;
+    });
+
+    await assistant.deleteAllConversations();
+
+    // del-ok was deleted → its tab is torn down; del-fail's delete REJECTED → its
+    // tab survives. The old Promise.all rejected before teardown, orphaning del-ok
+    // (it would still be in openTabs + tabs here). newTab() runs after the purge,
+    // so currentConvoId is a fresh tab — assert only that it isn't a deleted convo.
+    expect(assistant.openTabs).not.toContain("del-ok");
+    expect(assistant.openTabs).toContain("del-fail");
+    expect((assistant as any).tabs.has("del-ok")).toBe(false);
+    expect((assistant as any).tabs.has("del-fail")).toBe(true);
+    expect(assistant.currentConvoId).not.toBe("del-ok");
+  });
+});

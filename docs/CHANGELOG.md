@@ -2,18 +2,26 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.71.2 — Maintenance: internal cleanup, no behavior change
+## v0.71.3 — Bug-fix sweep: chat/tab persistence + warm-pool hygiene
 
 ### What you'll notice
-- **Nothing should change in how Rift behaves** — this is a housekeeping release. Same features, same speed; the work was all under the hood to keep the codebase healthy.
+- **Deleting all conversations is safer.** If the backend hiccups mid-purge, only the chats that actually deleted are cleared — surviving chats stay open instead of leaving broken tabs that could fail on your next message.
+- **Your open tabs survive a flaky restart.** A transient load error during startup no longer wipes your saved tab layout.
+- **No more empty-pane flicker** when you close a chat that's still streaming.
+- **Closing a chat right after a reply can't resurrect a just-deleted conversation** — a stray background save is now cancelled the moment the tab closes.
 
 ### Under the hood
-- **Refactored the turn-spawn path for readability.** The single largest function behind every chat turn (~740 lines that resolved your model/effort/thinking/permission settings and assembled the CLI command) was split into a small orchestrator plus a focused `resolve_spawn` step. Behavior is byte-identical — verified by the full test suite (123/123) — it's just far easier to maintain and reason about now.
-- **Cleared every compiler lint** (14 → 0) and **removed dead code** (a pair of no-op methods and their call sites left over from an earlier refactor).
-- **Reconciled the internal issue trackers to reality** — several items marked "open" were verified already shipped, so the docs no longer point future work at ghosts.
-- **Verified.** cargo test 123/123 · clippy 0 warnings · svelte-check clean (4134) · 386/386 frontend unit tests.
+- **Fixed a rare background-process leak.** A race in the idle-eviction sweeper could orphan a live chat's helper process (~450 MB) instead of reaping it; the entry is now re-registered when a turn races in.
+- **Process-kill sweeps no longer block the app's async runtime** (idle eviction + the CLI-update reap moved off the executor).
+- **Capped concurrent usage-gauge refreshes at one**, so a burst of queued turns can't fan out duplicate background requests.
+- **Verified.** cargo test 123/123 · clippy 0 warnings · svelte-check clean (4134) · 387/387 frontend unit tests (+1 regression).
+
+### Where these came from
+All seven fixes came from an autonomous live stress-test + an adversarially-verified static audit (36 raw findings → 10 confirmed → **7 fixed, 0 critical/high**). The other three were deliberately left as intentional design tradeoffs (documented in the issue tracker).
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.71.2** — Maintenance/housekeeping (no behavior change): the ~740-line turn-spawn function split into an orchestrator + `resolve_spawn`, every compiler lint cleared (14 → 0), dead code removed, internal trackers reconciled to reality.
 
 - **v0.71.1** — Hotfix: the assistant could go passive on short messages — a benign plan-usage note in front of a brief message made the model give clipped/"winding down" replies. The note now appears only when usage is genuinely high, so short messages get a normal response again.
 

@@ -309,7 +309,14 @@ export async function restoreTabs(host: TabsHost) {
       // the pane renders empty while a different convo is "current".
       const fp = host.panes[host.focusedPaneIdx];
       if (fp && fp.tabId !== winner) fp.tabId = winner;
-      await host.loadConversation(winner);
+      try {
+        await host.loadConversation(winner);
+      } catch (e) {
+        // A transient load failure must NOT fall through to the outer catch —
+        // that resets openTabs=[] and the finally persists it, permanently wiping
+        // a valid tab list. The parsed tabs are already restored; keep them.
+        console.warn("restoreTabs: loadConversation failed", e);
+      }
     }
   } catch (e) {
     console.warn("restoreTabs failed", e);
@@ -383,12 +390,14 @@ export async function closeTab(host: TabsHost, id: string) {
     notify.warn(`${closingTab.queue.length} queued message(s) discarded`, { detail: "The tab was closed mid-queue." });
   }
   host.pruneTabUi(id);
-  scrubTabFromPanes(host, id);
   // Stop the CLI subprocess for the CLOSING tab — `host.streaming` reads the
   // ACTIVE tab, so a streaming background tab would leak its subprocess (burning
   // tokens, events silently dropped once its TabState is gone). Mirror the
   // tab-targeted stop in closeOtherTabs/closeTabsToRight.
   if (closingTab?.streaming) await host.stop(id);
+  // Scrub the pane pointer AFTER stop resolves — doing it before the await blanks
+  // the pane (welcome-screen flash) for the whole stop IPC round-trip.
+  scrubTabFromPanes(host, id);
   if (wasActive) {
     // Save unsaved tail of the closing tab before switching/clearing.
     if (host.messages.length > 0 && host.convoCreatedAt) {

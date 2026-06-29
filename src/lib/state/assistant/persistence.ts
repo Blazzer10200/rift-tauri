@@ -400,28 +400,41 @@ export async function deleteAllConversations(host: PersistenceHost): Promise<voi
       tab.saveTimer = null;
     }
   }
-  try {
-    await Promise.all(ids.map((id) => invoke("assistant_delete_conversation", { id })));
-    // Wipe to a clean slate — drop every open tab + reset active-convo fields.
-    // dropTab (not closeTab) since there's no neighbor worth picking after a purge.
-    for (const id of [...host.openTabs]) { host.dropTab(id); host.pruneTabUi(id); }
-    host.openTabs = [];
+  // allSettled (not Promise.all): a partial backend failure must still tear down
+  // the tabs whose convo WAS deleted — Promise.all rejects on the first failure
+  // and skips teardown, leaving tabs that point at deleted sessions (a later send
+  // then --resumes a dead JSONL).
+  const results = await Promise.allSettled(
+    ids.map((id) => invoke("assistant_delete_conversation", { id })),
+  );
+  const deletedOk = new Set(ids.filter((_, i) => results[i]?.status === "fulfilled"));
+  const failed = ids.length - deletedOk.size;
+  if (failed > 0) {
+    host.lastError = `Failed to delete ${failed} of ${ids.length} conversation(s)`;
+  }
+  // Drop only the tabs whose convo was actually deleted; survivors stay open.
+  // dropTab (not closeTab) since there's no neighbor worth picking after a purge.
+  for (const id of [...host.openTabs]) {
+    if (deletedOk.has(id)) { host.dropTab(id); host.pruneTabUi(id); }
+  }
+  host.openTabs = host.openTabs.filter((id) => !deletedOk.has(id));
+  if (host.currentConvoId && deletedOk.has(host.currentConvoId)) {
     host.currentConvoId = null;
     host.currentCliSessionId = null;
     host.convoCreatedAt = null;
     host.convoTitle = null;
     host.queue = [];
     host.lastNotice = null;
+  }
+  if (host.openTabs.length === 0) {
     host.panes = [{ tabId: null }];
     host.focusedPaneIdx = 0;
-  } catch (e) {
-    host.lastError = `Failed to delete all conversations: ${String(e)}`;
-  } finally {
-    // Re-sync from backend regardless — a mid-loop failure leaves some convos
-    // deleted server-side, so the in-memory list must reflect what survived.
-    await refreshConversations(host);
-    broadcastConvosChanged(); // #37: propagate the purge to other windows
+  } else {
+    host.panes = host.panes.map((p) => (p.tabId && deletedOk.has(p.tabId) ? { tabId: null } : p));
   }
+  // Re-sync from backend regardless — reflects exactly what survived.
+  await refreshConversations(host);
+  broadcastConvosChanged(); // #37: propagate the purge to other windows
 }
 
 // #37: namespace the open-tabs record per window label. Two windows share the

@@ -5,6 +5,7 @@
 //! (refresh tokens are one-time-use; an external refresh would break the
 //! CLI's own auth loop). 60s in-process cache keeps polling polite.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -90,6 +91,16 @@ pub fn spawn_background_refresh() {
             }
         }
     }
+    // Cap concurrent refreshes at one: a message queue draining back-to-back hits
+    // spawn_background_refresh once per turn, all seeing the same stale cache —
+    // without this each would spawn its own HTTP task. Cleared when the task ends.
+    static REFRESH_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+    if REFRESH_IN_FLIGHT
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return;
+    }
     tauri::async_runtime::spawn(async {
         if let Err(e) = usage_rate_limits(None).await {
             // The three swallowed states (missing creds / API-key user / expired
@@ -105,6 +116,7 @@ pub fn spawn_background_refresh() {
                 serde_json::json!({ "reason": reason, "detail": e }),
             );
         }
+        REFRESH_IN_FLIGHT.store(false, Ordering::Release);
     });
 }
 
