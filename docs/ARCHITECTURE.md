@@ -113,6 +113,15 @@ The MCP server runs as a child process and can't touch the webview directly. For
 
 Tag-driven CI: push a `v*` tag → `.github/workflows/release.yml` builds + packs (Velopack `vpk`) + publishes to the public `rift` repo (renamed from `rift-releases`, v0.16.2). **Version lockstep across THREE files** — `package.json` · `src-tauri/Cargo.toml` · `src-tauri/tauri.conf.json` (+ `Cargo.lock`); `release.ps1` preflight bails on mismatch. The `vpk` CLI version MUST equal the `velopack` crate version (both pinned `=1.2.0`).
 
-## 9. What was removed (so you don't go looking)
+## 9. Hot-file split invariants (don't regress a load-bearing seam)
+
+Four hot files were split into module dirs (cont.207); step detail in `git log`. Forward-looking invariants a future refactor must preserve:
+
+- **`assistant/mod.rs`** — every `#[tauri::command]` is registered by path in `lib.rs`; extracted modules re-export commands (`pub use cli_install::*;`) so the registry never churns. `kill_all_session_children()` is load-bearing for the Velopack apply — keep it on whatever module owns `SESSION_PIDS`. Process-state statics (`SESSION_PIDS`/`SESSION_STOPPED`/`STEER_TX`/`CLAUDE_EXE`/`MCP_CFG_SEQ`/`CONFIG_WRITE_LOCK`) move with their accessor cluster, never duplicated. `McpConfigGuard` (Drop) stays paired with `write_mcp_config` (the Drop deletes the temp config — splitting invites a leak).
+- **`assistant.svelte.ts`** — per-tab fields live on `TabState` with a getter on `AssistantStore`, never back on the store (compaction/queue/draft/attachments/messages/streaming/agentSpawns/askUser bindings are all per-tab). `import { assistant } from "$lib/state/assistant.svelte"` MUST keep working — extracted concerns re-export at the same shape. Persisted JSON contract (`compactionHistory[]` camelCase, `openTabs`/`panes`/`currentConvoId` shapes) is locked; shared defs live in `types.ts`. `TabState` ctor signature locked (`ensureTab` passes `(cliSessionId)`).
+- **`Composer.svelte`** — `onKey` is the one keyboard handler (slash menu, mention popover, queue recall, Enter/Alt+Enter fire/steer); stays in the parent, children get open/close/index via props. `fire()`/`steer()`/`onBtnClick`/send-button `mode` stay in the parent. `.composer-wrap` sets `--model-color`; children consume the variable, never `:global()`.
+- **`shell/tabsbar/`** (was `ChatTabsBar.svelte`) — `portal` action is canonical at `$lib/actions/portal.ts` (`portalFocus` is the focus-first variant); don't re-fork. Drag-reorder moves as ONE unit — the six handlers + the `window` `dragend` listener (WebView2 missed-dragend workaround) + its `onDestroy` teardown. `:global` selectors move with their element's owner.
+
+## 10. What was removed (so you don't go looking)
 
 The pure-assistant conversion (2026-06-03) + minimal-core strip (2026-06-12) deleted the entire SFTP / sync / server / RCON / tunnel / transport stack, the Swarm + cost-cockpit + compaction subsystems, custom providers, and the SQLite usage DB. Rift today is first-party Anthropic only, five active workspaces (Workspace · Chat · Settings · Local LLM · AI Health), no remote anything. History is in `git log`.

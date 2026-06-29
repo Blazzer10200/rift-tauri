@@ -53,8 +53,6 @@ type TabsHost = {
   ensureTab(convoId: string, cliSessionId: string): unknown;
   dropTab(convoId: string): void;
   pruneTabUi(id: string): void;
-  stashTabUi(id: string | null): void;
-  restoreTabUi(id: string | null): void;
 };
 
 // ── Panes ────────────────────────────────────────────────────────────────
@@ -83,7 +81,6 @@ export function addPane(host: TabsHost): boolean {
   host.panes = next;
   host.telemetry.event("pane.add", { count: next.length, fill });
   // Focus the freshly-added pane so subsequent newTab/openTab assigns to it.
-  host.stashTabUi(host.currentConvoId);
   host.focusedPaneIdx = insertAt;
   if (fill) {
     const inMeta = host.conversations.some((c) => c.id === fill);
@@ -93,7 +90,6 @@ export function addPane(host: TabsHost): boolean {
       host.currentConvoId = fill;
     }
   }
-  host.restoreTabUi(fill);
   host.persistTabs();
   return true;
 }
@@ -126,7 +122,6 @@ export function setFocusedPane(host: TabsHost, idx: number) {
   if (idx < 0 || idx >= host.panes.length) return;
   if (host.focusedPaneIdx === idx && host.currentConvoId === host.panes[idx].tabId) return;
   const prevRoot = host.activeRoot;
-  host.stashTabUi(host.currentConvoId);
   host.focusedPaneIdx = idx;
   const next = host.panes[idx].tabId;
   if (next) {
@@ -139,7 +134,6 @@ export function setFocusedPane(host: TabsHost, idx: number) {
   } else {
     host.currentConvoId = null;
   }
-  host.restoreTabUi(next);
   // Focus moved to a pane with a different folder → drop the @-mention + branch
   // caches so the next read reflects the newly-focused pane's root.
   if (host.activeRoot !== prevRoot) {
@@ -212,7 +206,6 @@ export function dropTabIntoPane(host: TabsHost, tabId: string, paneIdx: number) 
     next.push({ tabId });
     host.panes = next;
     const newIdx = next.length - 1;
-    host.stashTabUi(host.currentConvoId);
     host.focusedPaneIdx = newIdx;
     const inMeta = host.conversations.some((c) => c.id === tabId);
     if (inMeta && !host.tabs.get(tabId)) {
@@ -220,7 +213,6 @@ export function dropTabIntoPane(host: TabsHost, tabId: string, paneIdx: number) 
     } else {
       host.currentConvoId = tabId;
     }
-    host.restoreTabUi(tabId);
     host.persistTabs();
     return;
   } else {
@@ -244,7 +236,6 @@ export function dropTabIntoPane(host: TabsHost, tabId: string, paneIdx: number) 
     host.panes = next;
   }
   // Move focus to the freshly-dropped pane + sync currentConvoId.
-  host.stashTabUi(host.currentConvoId);
   host.focusedPaneIdx = paneIdx;
   if (tabId !== host.currentConvoId) {
     const inMeta = host.conversations.some((c) => c.id === tabId);
@@ -254,7 +245,6 @@ export function dropTabIntoPane(host: TabsHost, tabId: string, paneIdx: number) 
       host.currentConvoId = tabId;
     }
   }
-  host.restoreTabUi(tabId);
   host.persistTabs();
 }
 
@@ -348,7 +338,6 @@ export async function openTab(host: TabsHost, id: string) {
     host.scheduleSave(true);
   }
   // Stash outgoing tab's composer + attachments before any state change.
-  host.stashTabUi(host.currentConvoId);
   const inMeta = host.conversations.some((c) => c.id === id);
   if (host.tabs.get(id)) {
     // Live TabState (possibly streaming in the bg) — its messages/queue ride
@@ -370,7 +359,6 @@ export async function openTab(host: TabsHost, id: string) {
   }
   // Restore incoming tab's composer + attachments (loadConversation cleared
   // them; we re-fill from cache if the user had a draft mid-typing).
-  host.restoreTabUi(id);
   assignFocusedPane(host, id);
   host.persistTabs();
 }
@@ -430,7 +418,6 @@ export async function closeTab(host: TabsHost, id: string) {
         host.queue = [];
         host.lastNotice = null;
       }
-      host.restoreTabUi(neighbor);
       assignFocusedPane(host, neighbor);
     }
   }
@@ -447,7 +434,6 @@ export async function newTab(host: TabsHost) {
     host.scheduleSave(true);
   }
   // Snapshot outgoing tab's composer state before we mint the new one.
-  host.stashTabUi(host.currentConvoId);
   // Inherit the focused tab's folder so a new chat opens in the same project
   // by default (a concrete snapshot — later folder switches elsewhere can't
   // leak in). null = follow the global default.

@@ -949,14 +949,6 @@ class AssistantStore {
     });
   }
 
-  // Draft + attachments live on TabState directly in v2.1 — focus changes no
-  // longer need to stash/restore. stashTabUi/restoreTabUi are kept as no-ops
-  // so the call-sites in addPane/closePane/setFocusedPane/dropTabIntoPane
-  // don't need surgery; the per-tab fields already carry the right value.
-  // M6: relaxed from `private` so the tabs module calls them through the host ref.
-  stashTabUi(_id: string | null) { /* no-op since v2.1 */ }
-  restoreTabUi(_id: string | null) { /* no-op since v2.1 */ }
-
   /** AssistantPage writes the active tab's scrollTop here on scroll, then
    *  reads it back on tab activation. Kept in the store so it survives
    *  remounts without re-querying the DOM. */
