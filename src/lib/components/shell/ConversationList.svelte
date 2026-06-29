@@ -6,6 +6,7 @@
   import { projects } from "$lib/state/projects.svelte";
   import type { ConversationMeta } from "$lib/state/assistant/types";
   import { portal } from "$lib/actions/portal";
+  import { leafName } from "$lib/utils/path";
 
   // ── grouping ─────────────────────────────────────────────────────────
   type Group = { label: string; items: ConversationMeta[] };
@@ -35,10 +36,7 @@
   function projLabel(r: string | null | undefined): string {
     const named = projects.byRoot(r);
     if (named) return named.name;
-    const k = (r ?? "").replace(/[\\/]+$/, "");
-    if (!k) return "Unfiled";
-    const seg = k.split(/[\\/]/).pop();
-    return seg || k;
+    return r ? leafName(r) : "Unfiled";
   }
   const activeKey = $derived(rootKey(assistant.activeRoot));
 

@@ -10,6 +10,7 @@
   import Composer from "./Composer.svelte";
   import SubAgentDock from "./SubAgentDock.svelte";
   import { activityDock } from "../../state/activityDock.svelte";
+  import { leafName } from "$lib/utils/path";
 
   import { tooltip } from "$lib/actions/tooltip";
   let {
@@ -66,11 +67,7 @@
   // each pane can run in a DIFFERENT folder, so the head surfaces the basename +
   // a click-to-change picker. "—" when nothing is set (pure conversational).
   const paneRoot = $derived(tab ? assistant.effectiveRoot(tab) : null);
-  const paneFolder = $derived.by(() => {
-    const r = (paneRoot ?? "").replace(/[\\/]+$/, "");
-    if (!r) return null;
-    return r.split(/[\\/]/).pop() || r;
-  });
+  const paneFolder = $derived(paneRoot ? leafName(paneRoot) : null);
   const paneChipTitle = $derived.by(() => {
     if (!tab) return "";
     const w = assistant.ctxWindowFor(tab);

@@ -9,6 +9,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { portal } from "$lib/actions/portal";
   import { environment } from "$lib/state/environment.svelte";
+  import { leafName } from "$lib/utils/path";
 
   let { path, x, y, onClose }: { path: string; x: number; y: number; onClose: () => void } = $props();
 
@@ -16,7 +17,7 @@
   // svelte-ignore state_referenced_locally
   let pos = $state({ x, y });
 
-  const baseName = $derived(path.replace(/[\\/]+$/, "").split(/[\\/]/).pop() ?? path);
+  const baseName = $derived(leafName(path));
 
   onMount(() => {
     void environment.ensureLoaded(); // hide "Open in VS Code" if `code` isn't on PATH

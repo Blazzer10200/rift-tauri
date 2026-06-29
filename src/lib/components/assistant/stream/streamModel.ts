@@ -10,6 +10,7 @@
 // backend doesn't emit the extra metadata (sources, diff counts, pass/fail).
 
 import type { Block, ChatMessage, ToolBlock } from "$lib/state/assistant.svelte";
+import { leafName as basename } from "$lib/utils/path";
 import { diffArrays } from "diff";
 
 export type TKind =
@@ -84,8 +85,8 @@ export type Group =
   | { type: "steer"; text: string };
 
 // ── helpers (mirror ToolChip.svelte) ────────────────────────────────────────
+// `basename` = canonical `leafName` (imported above) — was a local inline copy.
 const shortName = (n: string) => n.replace(/^mcp__rift__/, "");
-const basename = (p: string) => p.split(/[\\/]/).pop() || p;
 const trim = (s: string, n = 60) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 const hostOf = (u: string) => { try { return new URL(u).host; } catch { return u; } };
 

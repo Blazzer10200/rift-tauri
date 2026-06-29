@@ -1,16 +1,15 @@
 // Synthesized fallback captions for tool actions, used when the model didn't
 // narrate a "Step N" line. MessageBubble folds in the model's own prose first.
 
+import { leafName } from "$lib/utils/path";
+
 type Input = Record<string, unknown>;
 
-// Sibling of tabsbar/helpers.ts::leafName — same path-leaf extraction, kept
-// local so the assistant family doesn't import across the shell boundary.
-// Behavior must match leafName (its vitest + toolCaption.test.ts cover both).
-export function basename(p: string): string {
-  const norm = p.replace(/\\/g, "/").replace(/\/$/, "");
-  const parts = norm.split("/");
-  return parts[parts.length - 1] || norm;
-}
+// `basename` is the canonical `leafName` (utils/path.ts) — re-exported under the
+// existing name so ToolChip's import + toolCaption.test.ts stay unchanged. The
+// old local copy (kept duplicated to avoid a shell-boundary import) is gone now
+// that the helper lives in the neutral utils/ home.
+export const basename = leafName;
 function shortName(name: string): string {
   return name.replace(/^mcp__rift__/, "");
 }

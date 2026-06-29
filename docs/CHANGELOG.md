@@ -2,30 +2,19 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.71.6 — Split-pane stays in its lane: per-pane sub-agents, steer feedback, no lost messages
-
-### What you'll notice
-- **Sub-agents now belong to their own pane.** With two chats side-by-side, the sub-agent activity panel showed the *focused* pane's agents in both panes. Now each pane has its own panel — a sub-agent running in the background pane shows in *that* pane. The panel also looks better: each finished agent shows a "3 steps · 408ms" summary, every tool step has a type icon (read / edit / search / shell / web / git), and the card is now a softer glass surface that blends with the chat instead of a hard floating panel.
-- **Steering tells you what happened.** If you Alt+Enter to steer a reply but the turn finishes a split-second before it lands, your message used to silently vanish into the queue with no feedback — it read as "steer ignored." Now it clears the box and says "Turn finished — message queued" so you always know whether it injected or queued.
-- **Closing a background tab no longer loses its last messages.** Closing a chat you weren't looking at could drop its unsaved tail. It's now flushed to History before the tab is retired, same as the active tab.
-- **Background-pane notifications and the browser dock stay put.** A notification or `open_browser` from a background pane's turn no longer pops in the pane you're actually looking at.
+## v0.71.7 — Maintenance: de-duplicated path helpers (no behavior change)
 
 ### Under the hood
-- All of the above trace to one root cause: nearly everything keyed off a single global "focused tab", so any operation meant for a *specific* pane leaked to the focused one. Diagnosed with a multi-agent audit (5 parallel finders → 24 adversarial verifiers → synthesis): 31 candidate findings, 16 confirmed, 15 refuted — including several plausible-but-wrong hypotheses the verifiers killed. The backend session isolation was already clean (everything keys by session id); the fixes are all on the frontend read path.
-- The sub-agent panel moved from one page-level float to one per pane (scoped to that pane's tab); its expand/collapse + auto-reveal moved into each panel instance, leaving the global singleton as just the Settings on/off switch.
-- Small cleanup: the "is auth ready to send?" check was copy-pasted in four places — now a single `authReady` getter.
-- **Verified live.** Drove the running app over CDP through real sub-agent turns and split-pane navigation. svelte-check clean (4134) · 390/390 frontend unit tests (+3 split-pane regressions).
-
-### Where these came from
-A live multi-session test: the user confirmed two-folder isolation working, then asked for sub-agents to "stay in their lanes" per pane and to show more detail / blend in better. Caught and reverted one self-inflicted reactive-loop freeze mid-session (per-pane file-list rework) before it shipped.
+- The "last segment of a path" logic (the folder/file name shown on pane headers, file menus, the conversation list, and tool captions) had drifted into ~6 separate copies — two named functions, an inline arrow, and three hand-rolled `replace().split().pop()` chains. Consolidated to one canonical `leafName` in `src/lib/utils/path.ts` (with `shortPath`/`prettyPath`), unit-tested in one place; every call site now imports it. Two of the copies even slightly disagreed on trailing-slash handling — now they all behave identically (the more-correct way).
+- No user-visible change. Pure consolidation: svelte-check clean (4136) · 391/391 frontend unit tests.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.71.6** — Split-pane stays in its lane: per-pane sub-agent panel (each pane shows its own agents, with a "N steps · Ms" summary, per-tool-type icons, and a blended-glass card), steer now tells you when a missed steer became a queued message, closing a background tab no longer drops its unsaved tail, and background-pane notifications/browser-dock stop popping in the pane you're looking at. Root cause: nearly everything read off the single global focused-tab (16 of 31 audit findings confirmed; backend session-isolation was already clean).
 
 - **v0.71.5** — Fix: split-pane crosstalk (the inactive pane mirrored the active one's thinking timer + context readout) and dragging a project chip onto a pane (a copy/move drag-effect mismatch made WebView2 reject the drop).
 
 - **v0.71.4** — Fix: a reused warm CLI process could fire an instant, off-topic reply (stale pipe frame) after an `ask_user` round-trip, plus a permission-prompt pairing race and broken per-turn latency telemetry (Issues #72 + #73).
-
-## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
 
 - **v0.71.3** — Bug-fix sweep: safer "delete all conversations", tab layout survives a flaky restart, no empty-pane flicker on close, no ghost-save resurrecting a deleted chat, plus a warm-pool process-leak race + async-runtime + usage-refresh hygiene batch (7 fixes from a live stress-test + static audit).
 
