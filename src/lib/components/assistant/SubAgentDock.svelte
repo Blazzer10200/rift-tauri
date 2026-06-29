@@ -10,14 +10,85 @@
   import { tooltip } from "$lib/actions/tooltip";
   import Markdown from "./Markdown.svelte";
   import { scale } from "svelte/transition";
-  import { Loader2, Check, AlertTriangle, ChevronDown, ChevronRight, Bot, Sparkles, Minus, Brain, Terminal, FileText } from "lucide-svelte";
+  import { Loader2, Check, AlertTriangle, ChevronDown, ChevronRight, Bot, Sparkles, Minus, Brain, Terminal, FileText,
+    FileSearch, FilePen, FilePlus, Search, FolderTree, Globe, GitBranch, ListChecks, Wrench } from "lucide-svelte";
+
+  // Tool-kind → icon. Gives each step a type-specific glyph (read / edit / search
+  // / shell / web / git) instead of a flat check, so a transcript reads as
+  // distinct actions at a glance. Falls back to a generic wrench. (Return type
+  // mirrors an imported lucide icon — they share one component shape.)
+  function toolIcon(name: string): typeof Bot {
+    const n = name.replace(/^mcp__rift__/, "");
+    if (n === "Read" || n === "read_file") return FileSearch;
+    if (n === "Edit" || n === "MultiEdit" || n === "NotebookEdit") return FilePen;
+    if (n === "Write") return FilePlus;
+    if (n === "Grep" || n === "grep" || n === "Glob") return Search;
+    if (n === "list_dir") return FolderTree;
+    if (n === "Bash" || n === "remote_bash" || n === "BashOutput") return Terminal;
+    if (n === "WebFetch" || n === "WebSearch" || n === "open_browser") return Globe;
+    if (n.startsWith("git_")) return GitBranch;
+    if (n === "TaskCreate" || n === "TaskUpdate" || n === "TodoWrite") return ListChecks;
+    return Wrench;
+  }
+
+  // Per-pane: each pane mounts its OWN dock scoped to its tab, so a sub-agent
+  // running in the background pane shows in THAT pane's dock — not the focused
+  // one (agentSpawns is already per-tab; the bug was the single global dock
+  // reading activeTab). `tabId` null = the empty-pane case → nothing to show.
+  let { tabId = null }: { tabId?: string | null } = $props();
+  const tab = $derived(tabId ? assistant.tabFor(tabId) : assistant.activeTab);
 
   const reducedMotion =
     typeof window !== "undefined" &&
     window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 
-  const spawns = $derived(assistant.activeTab?.agentSpawns ?? []);
+  const spawns = $derived(tab?.agentSpawns ?? []);
   const runningCount = $derived(spawns.filter((a) => a.completedAt == null).length);
+
+  // Expand/collapse is now PER-PANE local state (the old global activityDock.open
+  // forced both panes' docks to share one expanded flag). `activityDock.enabled`
+  // (the Settings master switch) stays global. Auto-reveal: this pane's dock
+  // pops open while ITS agents run, auto-collapses to the pill a few seconds
+  // after they finish — unless the user toggled/hovered it this cycle.
+  const DISMISS_MS = 6000;
+  let paneOpen = $state(false);
+  let autoShown = false;
+  let userPinned = false;
+  let dismissTimer: ReturnType<typeof setTimeout> | null = null;
+  const open = $derived(activityDock.enabled && paneOpen);
+
+  function clearDismiss() {
+    if (dismissTimer !== null) { clearTimeout(dismissTimer); dismissTimer = null; }
+  }
+  function toggleOpen() {
+    if (!activityDock.enabled) return;
+    userPinned = true; autoShown = false; clearDismiss();
+    paneOpen = !paneOpen;
+  }
+  function onPointerEnter() {
+    if (autoShown && !userPinned) { userPinned = true; clearDismiss(); }
+  }
+  // Auto-reveal controller — reacts to THIS pane's running/total counts. Mirrors
+  // the old activityDock.syncActivity, but scoped to one pane's dock instance.
+  $effect(() => {
+    const running = runningCount;
+    const total = spawns.length;
+    if (!activityDock.enabled) return;
+    if (total === 0) { userPinned = false; autoShown = false; clearDismiss(); return; }
+    if (running > 0) {
+      clearDismiss();
+      if (!paneOpen && !userPinned) { paneOpen = true; autoShown = true; }
+      return;
+    }
+    // All finished → schedule collapse-to-pill if WE auto-opened it.
+    if (autoShown && !userPinned && dismissTimer === null) {
+      dismissTimer = setTimeout(() => {
+        dismissTimer = null;
+        if (autoShown && !userPinned) { paneOpen = false; autoShown = false; }
+      }, DISMISS_MS);
+    }
+  });
+  $effect(() => () => clearDismiss());
 
   type Status = "running" | "done" | "error";
   function statusOf(a: { completedAt: number | null; isError: boolean }): Status {
@@ -65,12 +136,12 @@
 
   // The trail: the last few SETTLED tool steps (newest first), captioned. Drives
   // the "Read X · Grepped Y · Ran Z" momentum strip under a collapsed agent.
-  function recentSteps(blocks: Block[], n = 3): { id: number; kind: ActKind; label: string }[] {
-    const out: { id: number; kind: ActKind; label: string }[] = [];
+  function recentSteps(blocks: Block[], n = 3): { id: number; kind: ActKind; label: string; name: string }[] {
+    const out: { id: number; kind: ActKind; label: string; name: string }[] = [];
     for (let i = blocks.length - 1; i >= 0 && out.length < n; i--) {
       const b = blocks[i];
       if (b.type === "tool" && b.status !== "pending") {
-        out.push({ id: i, kind: "tool", label: captionForTool(b.name ?? "", b.input ?? {}) });
+        out.push({ id: i, kind: "tool", label: captionForTool(b.name ?? "", b.input ?? {}), name: b.name ?? "" });
       }
     }
     return out;
@@ -121,13 +192,21 @@
 
   // Count the tool steps in a transcript for the collapsed-section "+N earlier".
   const toolCount = (blocks: { type: string }[]) => blocks.filter((b) => b.type === "tool").length;
+  // Compact summary for a FINISHED agent's head — "N steps · Ms" — so a collapsed
+  // completed agent tells its story (how much work, how long) at a glance without
+  // expanding. Skips a count of 0 (a no-tool agent just shows its duration).
+  function agentSummary(a: { blocks: { type: string }[]; startedAt: number; completedAt: number | null }): string {
+    const tools = toolCount(a.blocks);
+    const dur = fmtDur((a.completedAt ?? now) - a.startedAt);
+    return tools > 0 ? `${tools} step${tools === 1 ? "" : "s"} · ${dur}` : dur;
+  }
   // Settled (non-pending) tool blocks only — matches what `recentSteps` lists, so
   // the "+N earlier steps" trail-more count isn't inflated by an in-flight call.
   const settledToolCount = (blocks: { type: string; status?: string }[]) =>
     blocks.filter((b) => b.type === "tool" && b.status !== "pending").length;
 </script>
 
-{#if !activityDock.open}
+{#if !open}
   <!-- Collapsed: a compact live pill anchored top-right. Click to expand the
        card. Hidden entirely when there's nothing to show (idle + no spawns) so
        a fresh chat stays clean. -->
@@ -136,8 +215,8 @@
       class="subagent-pill"
       class:live={runningCount > 0}
       transition:scale={{ duration: reducedMotion ? 0 : 160, start: 0.85 }}
-      onclick={() => activityDock.toggle()}
-      onpointerenter={() => activityDock.notePointerEnter()}
+      onclick={toggleOpen}
+      onpointerenter={onPointerEnter}
       use:tooltip={runningCount > 0 ? `${runningCount} sub-agent${runningCount === 1 ? "" : "s"} running — click to expand` : "Sub-agent activity — click to expand"}
       aria-label="Expand sub-agent activity"
     >
@@ -154,7 +233,7 @@
 {:else}
 <div class="subagent-dock" role="complementary" aria-label="Sub-agent activity"
      transition:scale={{ duration: reducedMotion ? 0 : 180, start: 0.96 }}
-     onpointerenter={() => activityDock.notePointerEnter()}>
+     onpointerenter={onPointerEnter}>
   <header class="head" class:live={runningCount > 0}>
     <span class="head-badge" class:live={runningCount > 0}>
       {#if runningCount > 0}<Loader2 size={15} class="spin" />{:else}<Bot size={15} />{/if}
@@ -168,7 +247,7 @@
       {/if}
     </span>
     {#if spawns.length > 0}<span class="count" class:live={runningCount > 0}>{spawns.length}</span>{/if}
-    <button class="close" onclick={() => activityDock.toggle()} use:tooltip={"Minimize to pill"} aria-label="Minimize sub-agent panel">
+    <button class="close" onclick={toggleOpen} use:tooltip={"Minimize to pill"} aria-label="Minimize sub-agent panel">
       <Minus size={15} />
     </button>
   </header>
@@ -199,7 +278,13 @@
                   {#if a.kind === "skill"}<Sparkles size={12} />{:else}<Bot size={12} />{/if}
                 </span>
                 <span class="type">{a.subagentType}</span>
-                <span class="elapsed mono">{elapsed(a)}</span>
+                {#if st === "running"}
+                  <span class="elapsed mono">{elapsed(a)}</span>
+                {:else}
+                  <!-- Finished: a compact "N steps · 408ms" summary so a collapsed
+                       done agent reads its workload at a glance. -->
+                  <span class="summary mono" data-status={st}>{agentSummary(a)}</span>
+                {/if}
               </span>
               <span class="desc">{a.description}</span>
             </span>
@@ -238,6 +323,7 @@
                   {:else if b.type === "text"}
                     <div class="block text-block"><Markdown text={b.text} /></div>
                   {:else if b.type === "tool"}
+                    {@const ToolIc = toolIcon(b.name)}
                     <div class="block tool" data-status={b.status}>
                       <button class="tool-head" onclick={() => toggleTool(b.id)} aria-expanded={openTools.has(b.id)}>
                         <span class="tool-stat">
@@ -245,6 +331,7 @@
                           {:else if b.status === "error"}<AlertTriangle size={12} />
                           {:else}<Check size={12} />{/if}
                         </span>
+                        <span class="tool-ic" aria-hidden="true"><ToolIc size={12} /></span>
                         <span class="tool-label">{captionForTool(b.name, b.input)}</span>
                         {#if b.status !== "pending" && typeof b.durationMs === "number" && b.durationMs >= 1000}
                           <span class="tool-dur mono">{fmtDur(b.durationMs)}</span>
@@ -265,7 +352,8 @@
             {#if steps.length > 0}
               <ul class="trail" aria-label="Recent steps">
                 {#each steps as s (s.id)}
-                  <li class="trail-step"><span class="trail-dot"></span><span class="trail-label">{s.label}</span></li>
+                  {@const StepIc = toolIcon(s.name)}
+                  <li class="trail-step"><span class="trail-ic" aria-hidden="true"><StepIc size={11} /></span><span class="trail-label">{s.label}</span></li>
                 {/each}
                 {#if total > steps.length}
                   <li class="trail-more">+{total - steps.length} earlier step{total - steps.length === 1 ? "" : "s"}</li>
@@ -285,19 +373,28 @@
      in AssistantPage), not a full-height column. Rounded, raised, self-scrolling;
      it floats above the chat instead of reserving a side column. */
   .subagent-dock {
-    width: 360px; max-width: calc(100vw - 32px);
+    width: 348px; max-width: calc(100vw - 32px);
     /* Capped so the card clears the composer at the bottom of the pane even on
        shorter windows (it starts ~38px down + leaves room for the composer);
        overflow scrolls internally past this. */
     max-height: min(56vh, 480px);
     display: flex; flex-direction: column;
-    background: var(--bg-elev-1);
-    border: 1px solid color-mix(in oklch, var(--border) 85%, transparent);
+    /* Blended glass: a translucent surface tinted toward the chat backdrop +
+       real blur, so the card reads as part of the conversation surface rather
+       than a hard opaque panel pasted on top. A faint accent-warmed hairline
+       border + a soft (not heavy) shadow keep it legible without shouting. */
+    background: color-mix(in oklch, var(--bg-elev-1) 82%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
     border-radius: var(--radius-lg);
-    box-shadow: 0 12px 40px -12px color-mix(in oklch, var(--shadow, #000) 55%, transparent),
-                0 2px 8px -4px color-mix(in oklch, var(--shadow, #000) 40%, transparent);
+    box-shadow: 0 10px 34px -16px color-mix(in oklch, var(--shadow, #000) 50%, transparent),
+                0 1px 0 0 color-mix(in oklch, var(--fg, #fff) 5%, transparent) inset;
     overflow: hidden;
-    backdrop-filter: blur(2px);
+    backdrop-filter: blur(14px) saturate(1.1);
+  }
+  .subagent-dock:has(.head.live) {
+    border-color: color-mix(in oklch, var(--accent) 30%, transparent);
+    box-shadow: 0 10px 34px -16px color-mix(in oklch, var(--accent) 40%, transparent),
+                0 0 0 1px color-mix(in oklch, var(--accent) 12%, transparent);
   }
 
   /* ── Collapsed pill ── the idle/minimized affordance. A small capsule with the
@@ -451,6 +548,18 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .elapsed { flex: 0 0 auto; font-size: 10px; color: var(--fg-subtle); }
+  /* Finished-agent summary chip ("3 steps · 408ms") — a quiet pill so a collapsed
+     done agent reads its workload without expanding. Error agents tint danger. */
+  .summary {
+    flex: 0 0 auto; font-size: 10px; font-weight: 600; line-height: 1;
+    padding: 2px 6px; border-radius: 999px;
+    background: var(--field); color: var(--fg-subtle);
+    font-variant-numeric: tabular-nums;
+  }
+  .summary[data-status="error"] {
+    background: color-mix(in oklch, var(--danger) 14%, transparent);
+    color: color-mix(in oklch, var(--danger) 85%, var(--fg));
+  }
   /* The spawn `description` is the full prompt — for a skill spawn (/plan) it's a
      wall of text. Clamp to 2 lines so the head stays a scannable label; the full
      prompt lives in the main transcript's Task tool-call. */
@@ -500,11 +609,8 @@
     min-width: 0;
   }
   .trail-step:first-child { color: var(--fg-muted); }
-  .trail-dot {
-    flex: 0 0 auto; width: 4px; height: 4px; border-radius: 999px;
-    background: color-mix(in oklch, var(--fg-subtle) 60%, transparent);
-  }
-  .trail-step:first-child .trail-dot { background: var(--ok); }
+  .trail-ic { flex: 0 0 auto; display: grid; place-items: center; color: var(--fg-faint); }
+  .trail-step:first-child .trail-ic { color: var(--fg-subtle); }
   .trail-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .trail-more { font-size: 10px; color: var(--fg-faint); padding-left: 11px; }
 
@@ -551,6 +657,8 @@
   }
   .tool-head:hover { background: color-mix(in oklch, var(--surface-hover) 60%, transparent); }
   .tool-stat { flex: 0 0 auto; display: grid; place-items: center; color: var(--fg-muted); }
+  .tool-ic { flex: 0 0 auto; display: grid; place-items: center; color: var(--fg-subtle); }
+  .tool[data-status="pending"] .tool-ic { color: var(--accent); }
   .tool[data-status="pending"] .tool-stat { color: var(--accent); }
   .tool[data-status="done"] .tool-stat { color: var(--ok); }
   .tool[data-status="error"] .tool-stat { color: var(--danger); }

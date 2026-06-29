@@ -35,7 +35,7 @@ export async function send(store: AssistantStore, prompt: string) {
   // queue drains, programmatic retries). A turn with no usable Claude session
   // dies as "claude exited with 1"; block it, re-probe (state may be stale),
   // and surface the reason. Slash commands above are local, so they still run.
-  if (!(store.auth?.pill === "green" || store.auth?.pill === "yellow")) {
+  if (!store.authReady) {
     notify.danger("Claude isn't set up", {
       detail: store.auth?.summary ?? "Open Settings to sign in or add an API key.",
     });
@@ -242,7 +242,18 @@ export function drainQueue(store: AssistantStore, tab: TabState | null) {
   // No `tab.lastError` gate: it's cleared by beginTurn (inside send()), which
   // only drainQueue→send reaches — gating here would deadlock the queue behind
   // a stale error forever. send() clears lastError before anything visible.
-  if (!tab || tab !== store.activeTab || tab.streaming || tab.queue.length === 0) return;
+  //
+  // Split-pane: the old `tab !== store.activeTab` gate stranded a queued
+  // message forever on any pane the user wasn't focused on — in a 2-pane split
+  // BOTH panes are visible, so a completion on the unfocused pane could never
+  // drain its own queue until the user clicked it. Allow the active tab (the
+  // single-pane case + the focused pane) OR any tab shown in a sibling pane;
+  // still block a truly backgrounded tab (open in no pane, not active) so we
+  // don't auto-send into a chat the user can't see (the original intent).
+  const drainEligible =
+    tab === store.activeTab ||
+    store.panes.some((p) => p.tabId != null && store.tabFor(p.tabId) === tab);
+  if (!tab || !drainEligible || tab.streaming || tab.queue.length === 0) return;
   // Fire the head of the queue as the next turn. The queue order IS the send
   // order (drag-to-reorder in the rail). RR7: PEEK the head, don't pop yet.
   // Popping here (before the microtask) left a window where closeTab could read
@@ -252,17 +263,28 @@ export function drainQueue(store: AssistantStore, tab: TabState | null) {
   // The item now stays in the queue until the microtask actually sends it, so
   // closeTab's count is always accurate.
   const next = tab.queue[0];
-  // #148: capture the active convo at peek time; if the user switches tabs OR
-  // a new turn starts before the microtask fires, leave the head queued and
-  // bail. The next completion or tab activation re-drains — never a silent strand.
-  const capturedConvoId = store.currentConvoId;
+  // #148: capture the COMPLETING TAB's own convoId (its Map key) at peek time,
+  // not the globally-active convo. The old `store.currentConvoId` capture
+  // bailed whenever the user merely shifted pane focus during the microtask —
+  // in split-pane that stranded the completing pane's queue even though its own
+  // tab was unchanged. Reverse-look-up the key so the guard tracks THIS tab.
+  let capturedTabConvoId: string | null = null;
+  for (const [cid, t] of store.tabs) {
+    if (t === tab) { capturedTabConvoId = cid; break; }
+  }
   queueMicrotask(() => {
-    if (store.currentConvoId !== capturedConvoId || tab.streaming) return;
+    // Bail if the tab was retired (closed/cleared) or a new turn already started
+    // on it. Focus moving to a sibling pane no longer cancels the drain.
+    if (!capturedTabConvoId || store.tabs.get(capturedTabConvoId) !== tab || tab.streaming) return;
     // Item is still in the queue (we peeked); remove it now that we're committed
     // to sending. If it's already gone (raced drain), bail.
     if (!tab.queue.some((q) => q.id === next.id)) return;
     tab.queue = tab.queue.filter((q) => q.id !== next.id);
-    send(store, next.text).catch(e => tab.onError(String(e)));
+    // Route through the STORE wrapper (not the bare sendImpl) with the draining
+    // tab's id: sendImpl keys off currentConvoId, so a drain on a non-focused
+    // pane-visible tab must retarget first or the queued message fires into the
+    // focused pane instead. store.send(text, tabId) does that retarget.
+    store.send(next.text, capturedTabConvoId).catch(e => tab.onError(String(e)));
   });
 }
 

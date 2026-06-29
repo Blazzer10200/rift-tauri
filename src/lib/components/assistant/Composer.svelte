@@ -104,6 +104,11 @@
   const paneCtxTokens = $derived(assistant.ctxTokensFor(tab));
   const paneCtxPct = $derived(assistant.ctxPctFor(tab));
   const paneCtxWindow = $derived(assistant.ctxWindowFor(tab));
+  // Per-pane model — `assistant.effectiveModel` delegates to the focused
+  // activeTab (modelOverride ?? store.model), so in split-pane the background
+  // pane's pill / settings highlight / data-model showed the FOCUSED pane's
+  // model. Read this pane's own tab override, falling back to the global model.
+  const paneEffectiveModel = $derived(tab?.modelOverride ?? assistant.model);
 
   // Pending rail (queue chips + steer/clear) extracted to composer/QueueRail.svelte
   // (C3) — `steer()`/`steerFlash` stay here and flow down as props.
@@ -326,7 +331,7 @@
     slashIdx = 0;
   });
   // Current model row — drives the composer's bottom-right pill label.
-  const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === assistant.effectiveModel));
+  const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === paneEffectiveModel));
 
   // Thinking-dial derives the parent still needs (pill label, settingsRows,
   // onKey ←/→) — same matrix helpers SettingsMenu uses, so they can't drift.
@@ -392,7 +397,7 @@
   // Re-seed the cursor to the current model row whenever the panel opens.
   $effect(() => {
     if (settingsOpen) {
-      const i = settingsRows.findIndex((r) => r.kind === "model" && r.model.id === assistant.effectiveModel);
+      const i = settingsRows.findIndex((r) => r.kind === "model" && r.model.id === paneEffectiveModel);
       settingsIdx = i >= 0 ? i : 0;
     }
   });
@@ -453,7 +458,7 @@
     // turn that's doomed to "claude exited with 1". Guard BEFORE clearing the
     // draft so their text survives; re-probe (state may be stale) and surface
     // the actionable reason via the notice banner.
-    if (!(assistant.auth?.pill === "green" || assistant.auth?.pill === "yellow")) {
+    if (!assistant.authReady) {
       notify.danger("Claude isn't set up", {
         detail: assistant.auth?.summary ?? "Open Settings to sign in or add an API key.",
       });
@@ -488,9 +493,28 @@
         steerFlash = true;
         if (steerFlashTimer) clearTimeout(steerFlashTimer);
         steerFlashTimer = setTimeout(() => { steerFlash = false; }, 1400);
+      } else if (result === "no_active_turn") {
+        // The turn ENDED in the IPC round-trip between Alt+Enter and the
+        // backend lookup — assistant.steer already enqueued the message as a
+        // normal follow-up. Without this branch the steer just "vanished" (no
+        // flash, draft lingering) — the long-standing "my steer is ignored
+        // every time" report. Clear the draft (it's now a visible queue chip)
+        // and say what happened so the inject-vs-queue outcome is never silent.
+        setDraft("");
+        setAttachments([]);
+        notify.info("Turn finished — message queued", {
+          detail: "The reply ended before the steer landed, so it'll send as the next message.",
+        });
+      } else if (result === "queued") {
+        // Not streaming when fired (e.g. Alt+Enter just after the turn ended).
+        // Already enqueued by assistant.steer — clear + tell the user it queued
+        // rather than steered, so the box isn't left looking like nothing fired.
+        setDraft("");
+        setAttachments([]);
+        notify.info("Message queued", {
+          detail: "No turn was running, so it'll send as the next message.",
+        });
       }
-      // On "queued"/"no_active_turn" the text/attachments stay so the user
-      // can see what was queued / retry.
     });
     void tick().then(autosize);
   }
@@ -1030,8 +1054,7 @@
   });
   const canFire = $derived(
     mode === "stop" ||
-      ((hasDraft || attachments.length > 0) &&
-        (assistant.auth?.pill === "green" || assistant.auth?.pill === "yellow")),
+      ((hasDraft || attachments.length > 0) && assistant.authReady),
   );
 
   // ── Drag-over highlight ────────────────────────────────────────────────
@@ -1101,7 +1124,7 @@
 
 <svelte:window onkeyup={onKeyUp} onblur={onWindowBlur} />
 
-<div class="composer-wrap" data-model={modelFamily(assistant.effectiveModel)}>
+<div class="composer-wrap" data-model={modelFamily(paneEffectiveModel)}>
   <QueueRail
     tab={tab ?? null}
     {tabId}
@@ -1446,7 +1469,7 @@
               : `Model\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel} · no extended thinking`}
           >
             <span class="model-dot" aria-hidden="true"></span>
-            <span class="pill-label">{currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel}</span>
+            <span class="pill-label">{currentModel ? `${currentModel.label} ${currentModel.version}` : paneEffectiveModel}</span>
             {#if dialApplies}
               <span class="pill-effort" class:dim={!thinkingOn}>· {thinkingOn ? currentEffort?.label : "Fast"}</span>
             {/if}

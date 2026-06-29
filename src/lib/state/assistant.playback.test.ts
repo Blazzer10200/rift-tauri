@@ -718,4 +718,82 @@ describe("playback — unified queue (one model: type → queue, Send-now → st
     );
     expect(tab.queue).toHaveLength(0);
   });
+
+  it("steer re-queues AND reports when the turn ended in the IPC round-trip (no_active_turn)", async () => {
+    // The "my steer is ignored every time" report: when assistant_steer returns
+    // no_active_turn, send.ts enqueues the message — it must NOT silently vanish.
+    const { tab } = readyStore();
+    await assistant.send("go");
+    feed(tab, [textDelta("working")]);
+    mockInvoke.mockResolvedValueOnce("no_active_turn");
+
+    const res = await assistant.steer("too late", null);
+
+    expect(res).toBe("no_active_turn");
+    // The message survives as a queued follow-up (not dropped).
+    expect(tab.queue.map((q) => q.text)).toEqual(["too late"]);
+  });
+});
+
+// Split-pane: two panes, two tabs, two folders. The store hangs everything off
+// the focused-pane globals (currentConvoId / activeTab); these guard the bg pane
+// against having its turn / queue / persistence routed to the focused pane.
+describe("split-pane — background-pane isolation", () => {
+  function twoPaneStore() {
+    const a = `pane-a-${++convoSeq}`;
+    const b = `pane-b-${++convoSeq}`;
+    assistant.auth = { pill: "green" } as never;
+    const tabA = assistant.ensureTab(a, a);
+    const tabB = assistant.ensureTab(b, b);
+    assistant.openTabs = [a, b];
+    assistant.panes = [{ tabId: a }, { tabId: b }];
+    assistant.focusedPaneIdx = 0;
+    assistant.currentConvoId = a; // pane A is focused
+    return { a, b, tabA, tabB };
+  }
+
+  it("drains a queued message on a VISIBLE non-focused pane (was stranded forever)", async () => {
+    const { b, tabA, tabB } = twoPaneStore();
+    void tabA;
+    // Pane B (unfocused but visible) is mid-turn with a queued follow-up.
+    tabB.streaming = true;
+    tabB.queue = [{ id: "q1", text: "next on B" }];
+    mockInvoke.mockClear();
+
+    // B's turn completes while focus is still on A. onTurnComplete is the hook
+    // every terminal path fires (wired by the store in wireTab) — it runs the
+    // queue drain. Pre-split this drain bailed because tabB !== activeTab.
+    tabB.streaming = false;
+    tabB.onTurnComplete?.(tabB);
+    await settle();
+
+    // The queued message fired as B's next turn — not stranded, not sent into A.
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "assistant_send",
+      expect.objectContaining({ sessionId: b, prompt: "next on B" }),
+    );
+    expect(tabB.queue).toHaveLength(0);
+  });
+
+  it("closing a background tab flushes its unsaved messages before dropping it", async () => {
+    const { a, b, tabB } = twoPaneStore();
+    // Pane B (not active) has an unsaved exchange.
+    tabB.messages = [
+      { id: "u1", role: "user", blocks: [{ type: "text", text: "hi" }] },
+      { id: "a1", role: "assistant", blocks: [{ type: "text", text: "hello" }] },
+    ];
+    tabB.convoCreatedAt = Date.now();
+    assistant.currentConvoId = a; // A stays focused — B is the bg tab being closed
+    mockInvoke.mockClear();
+
+    await assistant.closeTab(b);
+
+    // The bg tab's tail was persisted (scheduleSave → assistant_save_conversation)
+    // rather than lost when its TabState was dropped.
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "assistant_save_conversation",
+      expect.anything(),
+    );
+  });
+
 });

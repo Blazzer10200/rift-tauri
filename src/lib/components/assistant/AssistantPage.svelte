@@ -3,10 +3,8 @@
   import { cubicOut } from "svelte/easing";
   import { assistant } from "../../state/assistant.svelte";
   import { browserDock } from "../../state/browserDock.svelte";
-  import { activityDock } from "../../state/activityDock.svelte";
   import AssistantPane from "./AssistantPane.svelte";
   import WebBrowserPage from "../webview/WebBrowserPage.svelte";
-  import SubAgentDock from "./SubAgentDock.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
 
@@ -38,14 +36,10 @@
     }
   });
 
-  // Smart visibility: reveal the sub-agent dock while Task/Agent work is in
-  // flight and slide it away once everything finishes. The dock controller
-  // handles the grace delay + user-pin overrides.
-  $effect(() => {
-    const sp = assistant.activeTab?.agentSpawns ?? [];
-    const running = sp.filter((a) => a.completedAt == null).length;
-    activityDock.syncActivity(running, sp.length);
-  });
+  // Sub-agent visibility is now PER-PANE: each AssistantPane mounts its own
+  // SubAgentDock scoped to its tab, and that dock runs its own auto-reveal
+  // controller off its pane's agentSpawns. The page no longer drives a single
+  // global dock (it showed the focused pane's agents in every pane).
 
   // ── Resizable dividers ────────────────────────────────────────────────────
   // Per pane-count storage. fracs[i] is pane i's share; sum ≈ 1. Drag on the
@@ -187,7 +181,6 @@
 <div class="assistant">
   <div
     class="workbench"
-    class:dock-reserve={activityDock.enabled && activityDock.open && (assistant.activeTab?.agentSpawns?.length ?? 0) > 0}
     bind:this={workbenchEl}
     data-dock-dragging={dockDragging}
   >
@@ -266,15 +259,9 @@
     </div>
   {/if}
 
-  <!-- Sub-agent activity: a floating top-right overlay (card ↔ idle pill), NOT a
-       reserved column. Anchored to .workbench (position:relative); SubAgentDock
-       renders the card when expanded, the pill when collapsed, nothing when idle
-       + empty. -->
-  {#if activityDock.enabled}
-    <div class="subagent-float" style="right: {(browserDock.open ? browserDock.width + 6 : 0) + 12}px">
-      <SubAgentDock />
-    </div>
-  {/if}
+  <!-- Sub-agent activity now floats PER-PANE inside each AssistantPane (scoped to
+       that pane's tab) — see AssistantPane's .pane-subagent-float. The page-level
+       global dock was removed: it showed the focused pane's agents in every pane. -->
 
   </div>
 </div>
@@ -302,17 +289,6 @@
     display: flex;
     overflow: hidden;
     position: relative;
-    /* When the sub-agent card is expanded it reserves a right gutter so wide
-       chat messages stop sliding under the float (the overlap bug). The float
-       still overlays this gutter; the content lane just stops short of it.
-       Card is 360px + 12px float inset + 16px breathing room. Only applies on
-       wide enough windows — on a narrow pane the card max-width clamps + the
-       reserve would crush the chat, so we drop it under 720px. */
-    transition: padding-right var(--dur-base) var(--ease-soft);
-  }
-  .workbench.dock-reserve .layout { padding-right: 388px; }
-  @media (max-width: 720px) {
-    .workbench.dock-reserve .layout { padding-right: 0; }
   }
   /* Animated reveal container. Width is content-derived at rest (it shrink-
      wraps .dock-inner's fixed width) so the dockSlide transition is free to
@@ -341,20 +317,6 @@
     border-left: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
   }
 
-  /* Sub-agent float — anchored to the workbench's top-right, above the chat. It
-     overlays (doesn't reserve a column), so the conversation keeps full width.
-     pointer-events:none on the wrapper lets clicks pass through the empty gutter;
-     the card/pill themselves re-enable it. Sits left of the browser dock when
-     that's open via a CSS var the dock sets, falling back to a small inset. */
-  /* top clears the split-pane header row (≈34px tall from the workbench top) so
-     the card/pill never covers a pane's title; in single-pane mode there's no
-     header, so this just reads as comfortable top inset. */
-  .subagent-float {
-    position: absolute; top: 38px; z-index: 20;
-    display: flex; justify-content: flex-end;
-    pointer-events: none;
-  }
-  .subagent-float > :global(*) { pointer-events: auto; }
   .dock-divider {
     position: relative;
     flex: 0 0 3px;

@@ -2,22 +2,26 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.71.5 — Fix: split-pane crosstalk + drag-a-project-onto-a-pane
+## v0.71.6 — Split-pane stays in its lane: per-pane sub-agents, steer feedback, no lost messages
 
 ### What you'll notice
-- **Split panes are truly independent again.** When two chats were open side-by-side, the *inactive* pane mirrored the active one's "thinking" timer and live token/context readout — both panes showed the same "Still waiting… · 109s" even though only one was working. Each pane now shows only its own turn state, context %, and `/usage` context bar.
-- **Dragging a project onto a pane works.** Dropping a project chip onto a split pane did nothing — the cursor showed "no-drop" and the drop never registered. Fixed; the project now opens in the pane you drop it on.
+- **Sub-agents now belong to their own pane.** With two chats side-by-side, the sub-agent activity panel showed the *focused* pane's agents in both panes. Now each pane has its own panel — a sub-agent running in the background pane shows in *that* pane. The panel also looks better: each finished agent shows a "3 steps · 408ms" summary, every tool step has a type icon (read / edit / search / shell / web / git), and the card is now a softer glass surface that blends with the chat instead of a hard floating panel.
+- **Steering tells you what happened.** If you Alt+Enter to steer a reply but the turn finishes a split-second before it lands, your message used to silently vanish into the queue with no feedback — it read as "steer ignored." Now it clears the box and says "Turn finished — message queued" so you always know whether it injected or queued.
+- **Closing a background tab no longer loses its last messages.** Closing a chat you weren't looking at could drop its unsaved tail. It's now flushed to History before the tab is retired, same as the active tab.
+- **Background-pane notifications and the browser dock stay put.** A notification or `open_browser` from a background pane's turn no longer pops in the pane you're actually looking at.
 
 ### Under the hood
-- The shared-state leak was a read-path bug, not a state bug: per-pane components (`StreamTurn`, `MessageBubble`, the composer context ring, and the `/usage` popover) read the store's bare `streaming`/`activity`/`ctx*` getters, which all delegate to the single focused tab. Each now reads its own pane's `tab` via the `*For(tab)` helpers.
-- The drag failure was a drag-effect mismatch: project chips start the drag with `effectAllowed="copy"`, but the pane's dragover handler hard-coded `dropEffect="move"`. A copy-source + move-target pair makes Chromium/WebView2 reject the drop outright, so the `drop` event never fired. The handler now matches the effect to the drag type (copy for projects, move for tabs); the underlying drop → open-in-pane logic was already correct.
-- Ruled out (investigated, not a bug): warm-pool CLI session collision — each tab keys its CLI session off its own unique conversation id, so there's no actual conversation bleed.
-- **Verified.** svelte-check clean (4134) · 387/387 frontend unit tests.
+- All of the above trace to one root cause: nearly everything keyed off a single global "focused tab", so any operation meant for a *specific* pane leaked to the focused one. Diagnosed with a multi-agent audit (5 parallel finders → 24 adversarial verifiers → synthesis): 31 candidate findings, 16 confirmed, 15 refuted — including several plausible-but-wrong hypotheses the verifiers killed. The backend session isolation was already clean (everything keys by session id); the fixes are all on the frontend read path.
+- The sub-agent panel moved from one page-level float to one per pane (scoped to that pane's tab); its expand/collapse + auto-reveal moved into each panel instance, leaving the global singleton as just the Settings on/off switch.
+- Small cleanup: the "is auth ready to send?" check was copy-pasted in four places — now a single `authReady` getter.
+- **Verified live.** Drove the running app over CDP through real sub-agent turns and split-pane navigation. svelte-check clean (4134) · 390/390 frontend unit tests (+3 split-pane regressions).
 
 ### Where these came from
-A live split-pane session: the user saw both panes share one "thinking" timer (screenshot-confirmed) and a project chip refuse to drop onto pane 2. Root-caused inline, then a same-class sweep of every per-pane component.
+A live multi-session test: the user confirmed two-folder isolation working, then asked for sub-agents to "stay in their lanes" per pane and to show more detail / blend in better. Caught and reverted one self-inflicted reactive-loop freeze mid-session (per-pane file-list rework) before it shipped.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.71.5** — Fix: split-pane crosstalk (the inactive pane mirrored the active one's thinking timer + context readout) and dragging a project chip onto a pane (a copy/move drag-effect mismatch made WebView2 reject the drop).
 
 - **v0.71.4** — Fix: a reused warm CLI process could fire an instant, off-topic reply (stale pipe frame) after an `ask_user` round-trip, plus a permission-prompt pairing race and broken per-turn latency telemetry (Issues #72 + #73).
 

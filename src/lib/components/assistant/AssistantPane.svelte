@@ -8,6 +8,8 @@
   import { uiPrefs } from "$lib/state/ui-prefs.svelte";
   import AssistantWelcome from "./AssistantWelcome.svelte";
   import Composer from "./Composer.svelte";
+  import SubAgentDock from "./SubAgentDock.svelte";
+  import { activityDock } from "../../state/activityDock.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
   let {
@@ -592,6 +594,15 @@
     </div>
   {/if}
 
+  {#if tabId && activityDock.enabled}
+    <!-- Per-pane sub-agent activity float — scoped to THIS pane's tab so a
+         background pane's sub-agents show in their own pane, not the focused
+         one. Anchored top-right inside .pane; clears the split-pane header. -->
+    <div class="pane-subagent-float" class:split={assistant.splitActive}>
+      <SubAgentDock {tabId} />
+    </div>
+  {/if}
+
   {#if dragging}
     {#if assistant.splitActive}
       <div class="drop-zone full" class:hover={hoverHalf === "full"} aria-hidden="true">
@@ -638,6 +649,19 @@
     animation: paneIn var(--dur-base) var(--ease-page) backwards;
   }
   .pane.split:not(.focused) { opacity: 0.84; }
+
+  /* Per-pane sub-agent float — anchored top-right inside this pane (the .pane is
+     position:relative). Overlays the chat (no reserved column) so the message
+     lane keeps full width; pointer-events pass through the empty gutter, the
+     card/pill re-enable them. In split mode, drop below the pane header row so
+     the card never covers the title. */
+  .pane-subagent-float {
+    position: absolute; top: 12px; right: 12px; z-index: 20;
+    display: flex; justify-content: flex-end;
+    pointer-events: none;
+  }
+  .pane-subagent-float.split { top: 42px; }
+  .pane-subagent-float > :global(*) { pointer-events: auto; }
   .pane.split.focused { box-shadow: inset 0 0 0 1px var(--ghost-border); }
   .pane-shell:last-child .pane.split { margin-right: 6px; }
   @keyframes paneIn { from { transform: scale(0.985); } to { transform: none; } }

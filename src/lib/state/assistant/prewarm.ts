@@ -95,7 +95,7 @@ export function requestPrewarm(store: AssistantStore): void {
   if (!root) return;
   // Auth gate: a logged-out user can't spawn a usable child (the backend turn
   // would error) — don't burn a spawn. Mirrors send()'s auth chokepoint.
-  if (!(store.auth?.pill === "green" || store.auth?.pill === "yellow")) return;
+  if (!store.authReady) return;
 
   const sig = signatureOf(store, sessionId, root, isFirstTurn);
   if (sig === lastFiredKey) return; // identical spare already requested

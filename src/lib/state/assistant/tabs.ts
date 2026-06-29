@@ -403,6 +403,14 @@ export async function closeTab(host: TabsHost, id: string) {
     if (host.messages.length > 0 && host.convoCreatedAt) {
       host.scheduleSave(true);
     }
+  } else {
+    // Split-pane: closing a BACKGROUND tab (wasActive=false) skipped the flush
+    // above entirely — host.messages reads the ACTIVE tab, so the closing tab's
+    // unsaved tail was lost when dropTab retired its TabState. Flush by convoId
+    // (scheduleSave guards empty messages internally, persistence.ts) so a
+    // bg-tab close persists like closeAllTabs does. MUST precede dropTab —
+    // dropTab cancels the tab's saveTimer.
+    host.scheduleSave(true, id);
   }
   host.dropTab(id);
   if (wasActive) {

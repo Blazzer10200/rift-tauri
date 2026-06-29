@@ -417,6 +417,13 @@ class AssistantStore {
   auth = $state<AuthStatus | null>(null);
   authChecking = $state(false);
   authError = $state<string | null>(null);
+  /** Auth is usable for a turn — green (signed in) or yellow (API key / degraded
+   *  but functional). The single source of truth for the "can we send?" gate,
+   *  which was copy-pasted as `pill === "green" || pill === "yellow"` across the
+   *  composer, send orchestrator, and pre-warm. */
+  get authReady(): boolean {
+    return this.auth?.pill === "green" || this.auth?.pill === "yellow";
+  }
   /** True while an in-app `claude auth login` is running + being polled. Drives
    *  the recovery banner's "Signing in…" state. */
   loginInProgress = $state(false);
@@ -1074,19 +1081,35 @@ class AssistantStore {
       ),
       // mcp__rift__open_browser: the bridge validated the scheme; show the
       // page in the dock (opens it if closed — WebBrowserPage consumes
-      // browserDock.pendingUrl on mount).
+      // browserDock.pendingUrl on mount). The dock is a focused-pane-modal
+      // singleton (browserDock.svelte.ts) — a BACKGROUND pane's turn must NOT
+      // hijack it out from under the pane the user is looking at. Route by
+      // session_id (like every other session-bearing event) and only open when
+      // the owning tab is the focused one; a bg-pane open_browser is dropped
+      // rather than stealing the dock.
       await listen<{ url: string; session_id: string }>(
         "assistant://open-browser",
-        (e) => browserDock.openUrl(e.payload.url),
+        (e) => {
+          const tab = this.tabByCliSession(e.payload.session_id);
+          if (tab && tab === this.activeTab) browserDock.openUrl(e.payload.url);
+        },
       ),
       // mcp__rift__notify: severity is allowlisted bridge-side, lengths capped.
+      // Route by session_id so a background pane's turn doesn't fire a toast
+      // attributed to the focused pane (every other session-bearing event —
+      // stream/done/error/ask-user/permission — routes through tabByCliSession;
+      // this one was the lone exception). Unknown session = drop, don't pop a
+      // toast that belongs to no visible tab.
       await listen<{ title: string; detail: string | null; severity: "info" | "ok" | "warn" | "danger"; session_id: string }>(
         "assistant://notify",
-        (e) => toast.push({
-          severity: e.payload.severity ?? "info",
-          title: e.payload.title,
-          detail: e.payload.detail ?? undefined,
-        }),
+        (e) => {
+          if (!this.tabByCliSession(e.payload.session_id)) return;
+          toast.push({
+            severity: e.payload.severity ?? "info",
+            title: e.payload.title,
+            detail: e.payload.detail ?? undefined,
+          });
+        },
       ),
       // #37 multi-window: another window mutated the shared conversation store
       // (broadcast_convos_changed skips the origin, so this only fires for
