@@ -1089,10 +1089,13 @@
      light backdrop-blur so the clipped code reads as "more below" not "cut". */
   .md :global(.code-more .cm-fade) {
     position: absolute; inset: 0;
+    /* Fade to the shiki block's OWN base tone (accent-tinted graphite, same
+       expression as .shiki-block above) so the dissolve blends seamlessly —
+       was a stale hardcoded #22272e that no longer matched the v0.72 block bg. */
     background: linear-gradient(to bottom,
       transparent 0,
-      color-mix(in oklab, #22272e 55%, transparent) 45%,
-      #22272e 100%);
+      color-mix(in oklch, var(--accent) 4%, oklch(0.18 0.012 245 / 0.55)) 45%,
+      color-mix(in oklch, var(--accent) 4%, oklch(0.18 0.012 245)) 100%);
     -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 60%);
     mask-image: linear-gradient(to bottom, transparent 0, #000 60%);
     backdrop-filter: blur(1.5px);

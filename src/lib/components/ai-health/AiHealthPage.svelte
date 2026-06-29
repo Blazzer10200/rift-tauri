@@ -884,6 +884,20 @@
   .ah-scroll { flex: 1; min-height: 0; overflow-y: auto; }
   .ah-wrap { max-width: 820px; margin: 0 auto; padding: 18px 40px 28px; display: flex; flex-direction: column; gap: 14px; }
 
+  /* Staggered rise-in for the dashboard cards — reuses the shared `enter` motion
+     (app.css) so the page assembles top-down instead of flashing in all at once.
+     nth-child cascade avoids threading `--idx` through every section's markup. */
+  @media (prefers-reduced-motion: no-preference) {
+    .ah-wrap > :global(*) { animation: enter 360ms var(--ease-page) both; }
+    .ah-wrap > :global(*:nth-child(1)) { animation-delay: 20ms; }
+    .ah-wrap > :global(*:nth-child(2)) { animation-delay: 70ms; }
+    .ah-wrap > :global(*:nth-child(3)) { animation-delay: 120ms; }
+    .ah-wrap > :global(*:nth-child(4)) { animation-delay: 170ms; }
+    .ah-wrap > :global(*:nth-child(5)) { animation-delay: 220ms; }
+    .ah-wrap > :global(*:nth-child(6)) { animation-delay: 270ms; }
+    .ah-wrap > :global(*:nth-child(n+7)) { animation-delay: 320ms; }
+  }
+
   .ah-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--fg-muted); box-shadow: inset 0 0 0 1px var(--ghost-border); }
   .ah-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-subtle); }
   .ah-chip.ok .dot { background: var(--accent); }

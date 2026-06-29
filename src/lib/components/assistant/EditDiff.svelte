@@ -55,6 +55,17 @@
     const out: DiffPair[] = [];
     if (input.replace_all === true) out.push({ kind: "meta", text: "replace_all: true" });
 
+    // A write (new-file creation) has no prior content. `"".split("\n")` yields
+    // `[""]` — one empty line — which diffs as a phantom removed-blank row (a
+    // lone `−` gutter with no line number) before the real additions. A created
+    // file has nothing to remove, so emit every line as a pure addition and skip
+    // the diff entirely. (replace_all can't apply to a write, so the meta above
+    // is a no-op here.)
+    if (isWrite) {
+      for (const line of newStr.split("\n")) out.push({ kind: "add", left: null, right: line });
+      return out;
+    }
+
     const oldLines = oldStr.split("\n");
     const newLines = newStr.split("\n");
     const chunks = diffArrays(oldLines, newLines);

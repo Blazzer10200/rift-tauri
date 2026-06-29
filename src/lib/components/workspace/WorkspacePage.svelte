@@ -5,7 +5,7 @@
     FolderOpen, Plus, Trash2, Check, X, Pencil,
     ArrowRight, Filter, FolderGit2, GitBranch, Folder, MessageSquare,
     Sparkles, History, Activity as ActivityIcon, Loader2, Flame, Cpu, Wrench, DollarSign,
-    Newspaper, ChevronDown, SplitSquareHorizontal,
+    Newspaper, ChevronDown, SplitSquareHorizontal, AlertTriangle, RotateCw,
   } from "lucide-svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import NewsFeed from "./NewsFeed.svelte";
@@ -58,12 +58,15 @@
   let statsError = $state<string | null>(null);
   let range = $state<StatRange>("all");
   let statsNow = $state(Date.now());
-  onMount(() => {
+  function loadStats() {
+    statsLoading = true;
+    statsError = null;
     invoke<ConvoStat[]>("assistant_stats")
       .then((s) => { statsRaw = s; })
       .catch((e) => { statsError = String(e); })
       .finally(() => { statsLoading = false; });
-  });
+  }
+  onMount(loadStats);
   $effect(() => {
     void range;
     statsNow = Date.now();
@@ -412,7 +415,14 @@
         {#if statsLoading}
           <div class="act-state"><Loader2 size={16} class="spin" /><span>Reading conversations…</span></div>
         {:else if statsError}
-          <div class="act-state err">Couldn't load stats: {statsError}</div>
+          <div class="act-state err">
+            <AlertTriangle size={18} />
+            <span>Couldn't load activity stats.</span>
+            <span class="act-state-sub">{statsError}</span>
+            <button class="act-retry" type="button" onclick={loadStats}>
+              <RotateCw size={13} /> Retry
+            </button>
+          </div>
         {:else if statsEmpty}
           <div class="act-state">No conversations yet — your activity will show up here.</div>
         {:else}
@@ -692,6 +702,18 @@
     font-size: var(--fs-sm); color: var(--fg-subtle); border-radius: var(--radius-2xl);
     border: 1px solid var(--border); background: var(--bg-elev-1); }
   .act-state.err { color: var(--danger); }
+  .act-state.err :global(svg) { color: var(--danger); }
+  .act-state-sub { font-size: var(--fs-xs); color: var(--fg-subtle); max-width: 46ch;
+    overflow-wrap: anywhere; }
+  .act-retry { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px;
+    height: 28px; padding: 0 12px; border-radius: var(--radius-sm);
+    border: 1px solid color-mix(in oklab, var(--danger) 30%, var(--border));
+    background: var(--danger-soft); color: var(--danger); font-size: var(--fs-sm); font-weight: 500;
+    transition: background var(--dur-fast), border-color var(--dur-fast), transform 80ms ease; }
+  .act-retry:hover { background: color-mix(in oklab, var(--danger) 18%, transparent);
+    border-color: var(--danger); }
+  .act-retry:active { transform: translateY(1px); }
+  .act-retry:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
 
   /* ── Row 2 — Projects (full-width hero) ─────────────────────────────────── */
   /* Projects is the launch target, so it owns the full width and flows at its

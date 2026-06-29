@@ -944,6 +944,13 @@
   .set-railbody { min-width: 0; min-height: 440px; }
   .set-railbody > .card { margin-bottom: 16px; animation: blockIn var(--dur-base) var(--ease-page) both; }
   .set-railbody > .card:last-child { margin-bottom: 0; }
+  /* Gentle top-down stagger so a section's cards assemble in order rather than
+     flashing in together — same cadence as the AI Health dashboard. */
+  .set-railbody > .card:nth-child(2) { animation-delay: 50ms; }
+  .set-railbody > .card:nth-child(3) { animation-delay: 100ms; }
+  .set-railbody > .card:nth-child(4) { animation-delay: 150ms; }
+  .set-railbody > .card:nth-child(n+5) { animation-delay: 190ms; }
+  @media (prefers-reduced-motion: reduce) { .set-railbody > .card { animation: none; } }
 
   /* card */
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; }

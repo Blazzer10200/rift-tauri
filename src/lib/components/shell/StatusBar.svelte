@@ -75,5 +75,7 @@
   .rl { display: inline-flex; align-items: center; gap: 7px; color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
   .rl-t { color: var(--fg-faint); }
   .rl-bar { width: 46px; height: 4px; border-radius: 999px; background: color-mix(in oklab, var(--fg) 8%, transparent); overflow: hidden; }
-  .rl-bar i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+  .rl-bar i { display: block; height: 100%; background: var(--accent); border-radius: 999px;
+    transition: width var(--dur-slow) var(--ease-soft); }
+  @media (prefers-reduced-motion: reduce) { .rl-bar i { transition: none; } }
 </style>
