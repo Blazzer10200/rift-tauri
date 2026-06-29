@@ -4,6 +4,9 @@
 
 ## v0.71.8 — Maintenance: de-duplicated path helpers (no behavior change)
 
+### Fixed (in-tree, unshipped — folds into the next version)
+- **Plan mode no longer freezes (#75).** When the model finished planning and called the native "exit plan mode" step, the turn could hang on a multi-minute "Working…" (observed: 223 seconds) and never continue. Rift now auto-approves that step instead of waiting on an approval prompt that had no surface — the plan you see streamed is the plan, and Rift just lets the work proceed. (Backend-only; `cargo check` clean. Verified against the CLI: the same scenario that hung for 223s now completes in ~10s.)
+
 ### Under the hood
 - The path-string helpers had drifted into ~7 separate copies across the codebase. Consolidated into one canonical home, `src/lib/utils/path.ts`, unit-tested in one place; every call site now imports from there:
   - **`leafName`** (the folder/file name shown on pane headers, file menus, the conversation list, and tool captions) — was two named functions, an inline arrow, and three hand-rolled `replace().split().pop()` chains. Two copies even disagreed on trailing-slash handling; now uniform (the more-correct way).

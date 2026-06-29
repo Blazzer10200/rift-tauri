@@ -420,6 +420,29 @@ async fn handle_permission_request(
         return Ok(());
     }
 
+    // ExitPlanMode is the native plan-approval gate (only surfaced in `plan`
+    // mode). In headless `-p` mode the CLI emits the tool_use and blocks waiting
+    // for an approval decision — but it does NOT reliably round-trip through the
+    // can_use_tool channel the way Edit/Write/Bash do, so a turn that reached
+    // ExitPlanMode wedged the whole stream (the model's plan text had already
+    // streamed; the freeze was a multi-minute "Working…" until the no-progress
+    // watchdog finally tripped — observed as a 223s hang, longer than the 120s
+    // permission timeout, confirming the Allow/Deny card never rendered). Rift
+    // is a single-screen assistant with no separate plan-mode UI to approve into,
+    // so auto-approve here: the plan already streamed, and exiting plan mode just
+    // lets the model continue. Mirrors the AskUserQuestion special-case above
+    // (auto-deny) — same "never surface the raw bar" treatment, opposite verdict.
+    // The CLI requires `updatedInput` on an allow, so backfill the original input.
+    if tool_name == "ExitPlanMode" {
+        log::info!("permission ask: auto-approving ExitPlanMode (no plan-mode UI to gate into) session={session_id} request_id={request_id}");
+        let mut decision = serde_json::json!({ "behavior": "allow" });
+        if let Value::Object(ref mut map) = decision {
+            map.insert("updatedInput".into(), original_input);
+        }
+        write_control_response(stdin, &request_id, decision).await?;
+        return Ok(());
+    }
+
     let registry = match app.try_state::<std::sync::Arc<PermissionRegistry>>() {
         Some(r) => r.inner().clone(),
         None => {
@@ -2409,9 +2432,18 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                         if let Some(content) = v.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_array()) {
                             for block in content {
                                 let block_ty = block.get("type").and_then(|t| t.as_str());
+                                let block_name = block.get("name").and_then(|n| n.as_str());
                                 // A tool starts → suspend the watchdog (a long Bash
                                 // build / grep / ask_user is silent-but-healthy).
-                                if block_ty == Some("tool_use") {
+                                // EXCEPTION: ExitPlanMode is the plan-approval gate
+                                // (auto-approved in handle_permission_request). If the
+                                // CLI ever emits its tool_use WITHOUT the can_use_tool
+                                // control_request (so the auto-approve never fires),
+                                // counting it as in-flight would suspend the watchdog
+                                // and the turn would freeze for minutes (the original
+                                // 223s hang) instead of recovering as Stalled at the
+                                // no-progress ceiling. Don't let it disable the net.
+                                if block_ty == Some("tool_use") && block_name != Some("ExitPlanMode") {
                                     tools_in_flight += 1;
                                     // WS6: clock the tool open so its result adds the
                                     // gap to pre-text tool time (only matters pre-text).
@@ -2420,7 +2452,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                                     }
                                 }
                                 if block_ty == Some("tool_use")
-                                    && block.get("name").and_then(|n| n.as_str()) == Some("Bash")
+                                    && block_name == Some("Bash")
                                     && block.get("input").and_then(|i| i.get("run_in_background")).and_then(|b| b.as_bool()) == Some(true)
                                 {
                                     bg_evict.store(true, std::sync::atomic::Ordering::Release);
