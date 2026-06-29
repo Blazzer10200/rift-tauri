@@ -2,21 +2,16 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.71.8 — Maintenance: de-duplicated path helpers (no behavior change)
+## v0.72.0 — Plan-mode unfreeze, terminal-grade work habits, unified modern blocks
 
-### Fixed / improved (in-tree, unshipped — folds into the next version)
+### Fixed / improved
 - **Plan mode no longer freezes (#75).** When the model finished planning and called the native "exit plan mode" step, the turn could hang on a multi-minute "Working…" (observed: 223 seconds) and never continue. Rift now auto-approves that step instead of waiting on an approval prompt that had no surface — the plan you see streamed is the plan, and Rift just lets the work proceed. (Backend-only; `cargo check` clean. Verified against the CLI: the same scenario that hung for 223s now completes in ~10s.)
 - **The assistant now works the way it does in the terminal/VS Code (#76).** Rift's per-turn instructions to the model already said "batch independent tool calls, don't re-read files, act first" — but they were buried mid-paragraph in a ~14 KB wall of prose, so the model ignored them (a real session ran 350 turns with *zero* batched tool calls + 80 redundant re-reads). The five load-bearing work-habits now lead in a tight, scannable block, so the model batches its reads/greps and skips the re-reads. Live-verified: a fresh multi-file turn now fires 3 reads + 2 searches in one batch (was one-at-a-time). (Backend-only `--append-system-prompt`; rides the cached prefix so zero per-turn cost.)
 - **Code, terminal, and edit/create blocks got a modern, unified look (#77).** Every block in the chat — fenced code, shell/terminal output, file-read results, and the create/edit diff cards — now shares one Rift-native surface: rounded corners, a soft emerald-tinted glassy panel built from the design tokens (no more the bare GitHub-gray rectangle), a hairline accent glow along the top edge, a gentle drop-shadow, a language/shell pill with a glowing dot, and a subtle rise-in entrance animation (reduced-motion respected). The create/edit diff previews — which used to bleed frameless into the chat — now sit in the same card as everything else. (Frontend-only; svelte-check 0/0 · vitest 394/394 · CDP-verified live.)
 
-### Under the hood
-- The path-string helpers had drifted into ~7 separate copies across the codebase. Consolidated into one canonical home, `src/lib/utils/path.ts`, unit-tested in one place; every call site now imports from there:
-  - **`leafName`** (the folder/file name shown on pane headers, file menus, the conversation list, and tool captions) — was two named functions, an inline arrow, and three hand-rolled `replace().split().pop()` chains. Two copies even disagreed on trailing-slash handling; now uniform (the more-correct way).
-  - **`rootKey`** (the "is this the same folder?" comparison key — trailing-slash-strip + lowercase for Windows) — was duplicated between the project registry and the conversation-list scope filter.
-  - **`shortPath` / `prettyPath`** moved alongside them.
-- No user-visible change. Pure consolidation: svelte-check clean (4136) · 394/394 frontend unit tests.
-
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.71.8** — Maintenance (no behavior change): finished the path-helper de-dup — the path-string helpers had drifted into ~7 copies across the codebase; consolidated into one canonical, unit-tested home (`src/lib/utils/path.ts`). `leafName` (folder/file name on pane headers, file menus, conversation list, tool captions) and `rootKey` (the "same folder?" comparison key) each had multiple drifted copies — two even disagreed on trailing-slash handling; now uniform.
 
 - **v0.71.7** — Maintenance (no behavior change): first half of the path-helper de-dup — consolidated `leafName`/`shortPath`/`prettyPath` into `utils/path.ts` (v0.71.8 folded in the `rootKey` half).
 
