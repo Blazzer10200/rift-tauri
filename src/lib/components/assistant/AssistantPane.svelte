@@ -321,7 +321,10 @@
     // without this on BOTH dragenter and dragover, Chromium shows "no-drop".
     if (!assistant.draggingTabId && !assistant.draggingProjectRoot) return;
     e.preventDefault();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    // dropEffect MUST be compatible with the source's effectAllowed or the
+    // drop is rejected (no-drop cursor, no drop event fires). Project chips
+    // start the drag with effectAllowed="copy"; tab drags use "move".
+    if (e.dataTransfer) e.dataTransfer.dropEffect = assistant.draggingProjectRoot ? "copy" : "move";
     const next = computeHalf(e);
     if (hoverHalf !== next) hoverHalf = next;
   }
@@ -482,12 +485,14 @@
               {#if uiPrefs.streamMode && m.role === "assistant"}
                 <StreamTurn
                   message={m}
+                  {tab}
                   isLast={mi === messages.length - 1}
                   streaming={streaming && mi === messages.length - 1}
                 />
               {:else}
                 <MessageBubble
                   message={m}
+                  {tab}
                   isLast={mi === messages.length - 1}
                   streaming={streaming
                     && mi === messages.length - 1

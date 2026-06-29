@@ -5,7 +5,7 @@
   const reducedMotion =
     typeof window !== "undefined" &&
     window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
-  import { assistant, type Block, type ChatMessage } from "../../state/assistant.svelte";
+  import { assistant, type Block, type ChatMessage, type TabState } from "../../state/assistant.svelte";
   import { RotateCcw } from "lucide-svelte";
   import Markdown from "./Markdown.svelte";
   import EditDiff from "./EditDiff.svelte";
@@ -32,7 +32,11 @@
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  let { message, streaming = false, isLast = false }: { message: ChatMessage; streaming?: boolean; isLast?: boolean } = $props();
+  // `tab` is THIS pane's tab; the heartbeat reads its turn start, not the
+  // global activeTab getter (which would mirror the focused pane in split mode).
+  let { message, streaming = false, isLast = false, tab = null }:
+    { message: ChatMessage; streaming?: boolean; isLast?: boolean; tab?: TabState | null } = $props();
+  const liveTab = $derived(tab ?? assistant.activeTab);
 
   function onBubbleContext(e: MouseEvent) {
     if (e.defaultPrevented) return;
@@ -77,7 +81,7 @@
   // updates every 500ms while streaming.
   const heartbeatLabel = $derived.by<string | null>(() => {
     if (!streaming) return null;
-    const start = assistant.activity.turnStartedAt;
+    const start = liveTab?.activity.turnStartedAt;
     if (!start) return null;
     void tickNow;
     const s = Math.floor((Date.now() - start) / 1000);

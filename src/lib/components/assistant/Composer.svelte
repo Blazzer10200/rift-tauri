@@ -98,6 +98,12 @@
   const textAttachments = $derived(tab?.textAttachments ?? []);
   const queue = $derived(tab?.queue ?? []);
   const streaming = $derived(tab?.streaming ?? false);
+  // Per-pane context readout — the bare assistant.ctx* getters delegate to the
+  // focused activeTab, so in split-pane both composers showed the focused
+  // pane's ctx%. Read this pane's own tab instead.
+  const paneCtxTokens = $derived(assistant.ctxTokensFor(tab));
+  const paneCtxPct = $derived(assistant.ctxPctFor(tab));
+  const paneCtxWindow = $derived(assistant.ctxWindowFor(tab));
 
   // Pending rail (queue chips + steer/clear) extracted to composer/QueueRail.svelte
   // (C3) — `steer()`/`steerFlash` stay here and flow down as props.
@@ -1161,7 +1167,7 @@
     {/if}
 
     {#if assistant.ui.usageOpen}
-      <UsagePanel onClose={() => (assistant.ui.usageOpen = false)} />
+      <UsagePanel {tab} onClose={() => (assistant.ui.usageOpen = false)} />
     {/if}
 
     {#if mentionState && mentionResults.length > 0}
@@ -1464,11 +1470,11 @@
           {/if}
           {/if}
 
-          {#if !localLlm.enabled && assistant.ctxTokens > 0}
+          {#if !localLlm.enabled && paneCtxTokens > 0}
             <CtxRing
-              pct={assistant.ctxPct}
-              tokens={assistant.ctxTokens}
-              window={assistant.ctxWindow}
+              pct={paneCtxPct}
+              tokens={paneCtxTokens}
+              window={paneCtxWindow}
               open={assistant.ui.usageOpen}
               onClick={() => (assistant.ui.usageOpen = !assistant.ui.usageOpen)}
             />

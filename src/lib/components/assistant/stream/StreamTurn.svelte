@@ -11,12 +11,19 @@
   import StreamAgent from "./StreamAgent.svelte";
   import StreamAskUser from "./StreamAskUser.svelte";
   import { messageToTurn, groupBlocks, fmtDur, isFillerSay, VERB_ING, tasksToPlanItems, type StreamTool } from "./streamModel";
-  import { assistant, type ChatMessage } from "$lib/state/assistant.svelte";
+  import { assistant, type ChatMessage, type TabState } from "$lib/state/assistant.svelte";
   import { fmtTokens } from "$lib/state/assistant/helpers";
   import AnimatedCount from "./AnimatedCount.svelte";
   import { tooltip } from "$lib/actions/tooltip";
 
-  let { message, streaming = false, isLast = false }: { message: ChatMessage; streaming?: boolean; isLast?: boolean } = $props();
+  // `tab` is THIS pane's tab. Live-turn status (activity timer, live tokens,
+  // plan tasks) must read from it, not the global `assistant.*` getters — those
+  // delegate to the single focused activeTab, so in split-pane every pane would
+  // otherwise mirror the focused pane's "Working… 109s". Falls back to the
+  // active tab when omitted (single-pane callers).
+  let { message, streaming = false, isLast = false, tab = null }:
+    { message: ChatMessage; streaming?: boolean; isLast?: boolean; tab?: TabState | null } = $props();
+  const liveTab = $derived(tab ?? assistant.activeTab);
 
   const turn = $derived(messageToTurn(message));
   const groups = $derived(groupBlocks(turn.blocks));
@@ -29,7 +36,7 @@
   // mirror the live state — older plan blocks resolve to empty and are skipped
   // (the {#if planItemsFor(...).length} guard at the render site), so a plan-turn
   // followed by an update-turn shows ONE card, not a duplicate per turn.
-  const livePlanItems = $derived(isLast ? tasksToPlanItems(assistant.tasks) : []);
+  const livePlanItems = $derived(isLast ? tasksToPlanItems(liveTab?.tasks ?? []) : []);
   const planItemsFor = (tool: StreamTool) => (tool.items?.length ? tool.items : livePlanItems);
 
   const plainText = $derived(
@@ -82,12 +89,13 @@
     return () => clearInterval(h);
   });
   const liveSecs = $derived.by(() => {
-    const t = assistant.activity.turnStartedAt;
+    const t = liveTab?.activity.turnStartedAt;
     return streaming && t != null && now > 0 ? Math.max(0, Math.round((now - t) / 1000)) : null;
   });
-  const liveTokens = $derived.by(() =>
-    streaming && assistant.liveOutputTokens > 0 ? assistant.liveOutputTokens : null,
-  );
+  const liveTokens = $derived.by(() => {
+    const lt = liveTab?.liveOutputTokens ?? 0;
+    return streaming && lt > 0 ? lt : null;
+  });
 
   // The head is the TURN-level status: "Working…" live, "Worked for Xs" done.
   // EXCEPTION — a thinking block that's active before any tool/text lands: Opus

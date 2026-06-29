@@ -6,16 +6,18 @@
   import { onMount } from "svelte";
   import { X, Gauge } from "lucide-svelte";
   import { usage, type LimitWindow } from "../../../state/usage.svelte";
-  import { assistant } from "../../../state/assistant.svelte";
+  import { assistant, type TabState } from "../../../state/assistant.svelte";
   import { fmtTokens } from "../../../state/assistant/helpers";
 
-  let { onClose }: { onClose: () => void } = $props();
+  let { onClose, tab = null }: { onClose: () => void; tab?: TabState | null } = $props();
   let el = $state<HTMLDivElement | undefined>();
 
   // Live conversation context (the same value the composer ring fills toward).
-  const ctxPct = $derived(Math.max(0, Math.min(100, assistant.ctxPct)));
-  const ctxTokens = $derived(assistant.ctxTokens);
-  const ctxWindow = $derived(assistant.ctxWindow);
+  // Read this pane's own tab — the bare assistant.ctx* getters delegate to the
+  // focused activeTab, so in split-pane both popovers showed the focused pane's.
+  const ctxPct = $derived(Math.max(0, Math.min(100, assistant.ctxPctFor(tab))));
+  const ctxTokens = $derived(assistant.ctxTokensFor(tab));
+  const ctxWindow = $derived(assistant.ctxWindowFor(tab));
   const showCtx = $derived(ctxTokens > 0 && ctxWindow > 0);
   function ctxZone(u: number): string {
     return u < 75 ? "ok" : u < 90 ? "warn" : "hot";

@@ -2,19 +2,24 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.71.4 — Fix: instant, off-topic replies while a tool/sub-agent is running
+## v0.71.5 — Fix: split-pane crosstalk + drag-a-project-onto-a-pane
 
 ### What you'll notice
-- **No more instant, nonsensical replies.** If you sent a follow-up message right after the assistant had asked you a question (or while a sub-agent was working in the background), it could fire back an instant, completely off-topic answer — it was replaying a leftover scrap of the *previous* turn's output instead of actually answering you. Fixed: a reused chat process now clears any stale output still sitting in its pipe before starting your next message.
-- **Allow/Deny prompts can't get crossed up between turns.** A rare timing race could bind a fresh permission/question prompt to an already-finished request, leaving a dead or wrong-acting button. The pairing state now resets cleanly at the start of every turn.
+- **Split panes are truly independent again.** When two chats were open side-by-side, the *inactive* pane mirrored the active one's "thinking" timer and live token/context readout — both panes showed the same "Still waiting… · 109s" even though only one was working. Each pane now shows only its own turn state, context %, and `/usage` context bar.
+- **Dragging a project onto a pane works.** Dropping a project chip onto a split pane did nothing — the cursor showed "no-drop" and the drop never registered. Fixed; the project now opens in the pane you drop it on.
 
 ### Under the hood
-- **Root cause was confirmed from your real session logs** — a reused warm CLI process logged a `0ms` first response (a literal stale-frame replay) right after an `ask_user` round-trip. The drain that fixes it is bounded (≤75ms, and only when there's actually leftover output), so a clean turn pays nothing.
-- **Fixed broken latency telemetry.** The per-turn "time outside the model API" stat was subtracting the CLI's *cumulative* session API time from a single turn's wall-clock, logging impossible negative values that were polluting the AI-Health latency analysis. It now uses the real per-turn delta.
-- **Verified.** cargo test 125/125 (+2 regression) · clippy 0 warnings · svelte-check clean (4134) · 387/387 frontend unit tests.
+- The shared-state leak was a read-path bug, not a state bug: per-pane components (`StreamTurn`, `MessageBubble`, the composer context ring, and the `/usage` popover) read the store's bare `streaming`/`activity`/`ctx*` getters, which all delegate to the single focused tab. Each now reads its own pane's `tab` via the `*For(tab)` helpers.
+- The drag failure was a drag-effect mismatch: project chips start the drag with `effectAllowed="copy"`, but the pane's dragover handler hard-coded `dropEffect="move"`. A copy-source + move-target pair makes Chromium/WebView2 reject the drop outright, so the `drop` event never fired. The handler now matches the effect to the drag type (copy for projects, move for tabs); the underlying drop → open-in-pane logic was already correct.
+- Ruled out (investigated, not a bug): warm-pool CLI session collision — each tab keys its CLI session off its own unique conversation id, so there's no actual conversation bleed.
+- **Verified.** svelte-check clean (4134) · 387/387 frontend unit tests.
 
 ### Where these came from
-A real user-reported incident ("I talk to it while a sub-agent runs and it replies instantly + totally off-topic"), root-caused from the live production log, then a two-sweep adversarial audit of the turn lifecycle + frontend state machine that surfaced two more same-family fixes. (Issues #72 + #73.)
+A live split-pane session: the user saw both panes share one "thinking" timer (screenshot-confirmed) and a project chip refuse to drop onto pane 2. Root-caused inline, then a same-class sweep of every per-pane component.
+
+## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.71.4** — Fix: a reused warm CLI process could fire an instant, off-topic reply (stale pipe frame) after an `ask_user` round-trip, plus a permission-prompt pairing race and broken per-turn latency telemetry (Issues #72 + #73).
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
 
