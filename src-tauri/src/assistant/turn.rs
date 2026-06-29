@@ -2753,8 +2753,12 @@ fn record_turn_perf(
         store_cumulative_cli_api(stream_sid, api);
         let dur = turn_start.elapsed().as_millis() as i64;
         let overhead = dur - per_turn_api;
+        // #69: include the actual sent effort + thinking state so a slow turn's
+        // log line names the lever (a "high"-keyed turn that floored to low w/
+        // thinking off explains a fast turn; thinking on explains a slow one).
+        let sent_effort = if thinking_on { effort } else { "low" };
         log::info!(
-            "turn-attrib: cli_api={per_turn_api}ms (turn) cli_ttft={}ms rift_wall={dur}ms non_api_overhead={overhead}ms session={stream_sid}",
+            "turn-attrib: cli_api={per_turn_api}ms (turn) cli_ttft={}ms rift_wall={dur}ms non_api_overhead={overhead}ms effort={effort} sent={sent_effort} thinking={thinking_on} session={stream_sid}",
             cli_ttft_ms.map(|v| v as i64).unwrap_or(-1),
         );
     }
