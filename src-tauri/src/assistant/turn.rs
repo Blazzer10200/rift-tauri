@@ -597,6 +597,20 @@ pub async fn assistant_prewarm(
     ).await
 }
 
+/// Everything `resolve_spawn` produces that the spawn/stream phase needs: a
+/// fully-built `claude` command, the warm-pool signature it keys on, the
+/// per-turn user envelope, the MCP-config lifetime guard, and the resolved
+/// model (after pin/fallback). `run_or_prewarm` hands this straight to
+/// `prewarm_spawn` / `dispatch_turn` — those own `app`/`window_label`/
+/// `session_id`/`is_first_turn` directly, so they're NOT carried here.
+struct ResolvedSpawn {
+    cmd: tokio::process::Command,
+    key: warm_pool::SpawnKey,
+    user_line: Vec<u8>,
+    mcp_guard: Option<McpConfigGuard>,
+    model: String,
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_or_prewarm(
     app: AppHandle,
@@ -638,6 +652,63 @@ async fn run_or_prewarm(
     // #37: the window that fired this turn — all turn events (stream/done/error/
     // permission) emit_to this label so a second window never sees another's turn.
     let window_label = window.label().to_string();
+
+    // Resolve model/effort/thinking/perm/roots/caps + build the `claude` command
+    // and per-turn envelope. Extracted so this orchestrator stays readable; the
+    // body is behavior-identical to the former inline prologue.
+    let ResolvedSpawn { cmd, key, user_line, mcp_guard, model } = resolve_spawn(
+        &app, &window_label, &prompt, &session_id, is_first_turn, model, attachments,
+        dyslexia_mode, thinking_effort, thinking_enabled, permission_mode,
+        prior_context_summary, root,
+    )
+    .await?;
+
+    // #67 pre-warm path: spawn the child, run the init handshake, and PARK it in
+    // the warm pool with NO first turn. The real `assistant_send` that follows
+    // reuses it via `dispatch_turn`'s existing warm path.
+    if prewarm {
+        return prewarm_spawn(app, window_label, session_id, key, cmd, mcp_guard, model);
+    }
+
+    // Dispatch through the warm pool: reuse a live child whose key matches, else
+    // cold-spawn one and keep it warm. `mcp_guard` outlives the process via the
+    // WarmChild so the per-turn config file survives every reused turn.
+    dispatch_turn(
+        app,
+        window_label,
+        session_id,
+        key,
+        cmd,
+        user_line,
+        mcp_guard,
+        is_first_turn,
+        model,
+    )
+    .await
+}
+
+/// Resolve every per-turn spawn input (model pin/fallback, effort/thinking,
+/// permission mode, workspace roots, MCP config, CLI caps, tool allowlist, env)
+/// and assemble the `claude` command + user envelope + warm-pool key. Pure
+/// preparation: spawns nothing, runs no turn. Split out of `run_or_prewarm` so
+/// the orchestrator is readable; the body below is the former inline prologue,
+/// behavior-identical.
+#[allow(clippy::too_many_arguments)]
+async fn resolve_spawn(
+    app: &AppHandle,
+    window_label: &str,
+    prompt: &str,
+    session_id: &str,
+    is_first_turn: bool,
+    model: Option<String>,
+    attachments: Option<Vec<AssistantAttachment>>,
+    dyslexia_mode: Option<bool>,
+    thinking_effort: Option<String>,
+    thinking_enabled: Option<bool>,
+    permission_mode: Option<String>,
+    prior_context_summary: Option<String>,
+    root: Option<String>,
+) -> Result<ResolvedSpawn, String> {
     let cfg = load_config();
     let api_key = current_api_key_with(&cfg);
     let use_api_key = api_key.is_some();
@@ -659,7 +730,7 @@ async fn run_or_prewarm(
         // session_model_path). On resume, the model the session was created with wins
         // over a live picker change; the new model only takes effect in a new chat.
         if !is_first_turn {
-            if let Some(pinned) = load_session_model(&session_id) {
+            if let Some(pinned) = load_session_model(session_id) {
                 if pinned != model {
                     log::info!(
                         "assistant_send: session {session_id} pinned to model {pinned} (picker={model}) — preserving thinking-block signatures"
@@ -717,7 +788,7 @@ async fn run_or_prewarm(
     let pinned_cwd: Option<PathBuf> = if is_first_turn {
         None
     } else {
-        load_session_cwd(&session_id).filter(|p| p.is_dir())
+        load_session_cwd(session_id).filter(|p| p.is_dir())
     };
     // Per-tab root: the renderer passes the tab's chosen folder so each pane
     // (and each window) can run turns in a different directory. Wins over the
@@ -761,15 +832,15 @@ async fn run_or_prewarm(
     // workspace is currently active and locks the session there.
     if let Some(first) = roots.first() {
         if is_first_turn || pinned_cwd.is_none() {
-            save_session_cwd(&session_id, first);
+            save_session_cwd(session_id, first);
         }
     }
     // Capture the model the first turn runs under so every later --resume targets
     // the same model the thinking blocks were signed by (see session_model_path).
     // Also back-fill legacy/pre-pin conversations on their first turn after
     // upgrade so they stop wedging on a subsequent model switch.
-    if is_first_turn || load_session_model(&session_id).is_none() {
-        save_session_model(&session_id, &model);
+    if is_first_turn || load_session_model(session_id).is_none() {
+        save_session_model(session_id, &model);
     }
 
     // Trust level for the local git tools — explicit setting wins, else readonly.
@@ -791,7 +862,7 @@ async fn run_or_prewarm(
     let (mcp_config_path, _mcp_guard, addendum) = if roots.is_empty() {
         (None, None, RIFT_SYSTEM_ADDENDUM_NO_WS)
     } else {
-        match write_mcp_config(&session_id, &roots, &trust_level, &window_label, &proj_include, &proj_exclude) {
+        match write_mcp_config(session_id, &roots, &trust_level, window_label, &proj_include, &proj_exclude) {
             Ok(p) => {
                 let guard = McpConfigGuard(p.clone());
                 (Some(p), Some(guard), RIFT_SYSTEM_ADDENDUM_TOOLS)
@@ -940,9 +1011,9 @@ async fn run_or_prewarm(
     // persists the conversation under `~/.claude/projects/<cwd-hash>/`; the
     // user can clear it with `claude project purge` if needed.
     if is_first_turn {
-        cmd.arg("--session-id").arg(&session_id);
+        cmd.arg("--session-id").arg(session_id);
     } else {
-        cmd.arg("--resume").arg(&session_id);
+        cmd.arg("--resume").arg(session_id);
     }
 
     // Gated: older CLI rejects `--max-budget-usd`. Without it the per-turn spend
@@ -1222,7 +1293,7 @@ async fn run_or_prewarm(
     // there's something to report, so quiet sessions add zero tokens.
     {
         let mut bits: Vec<String> = Vec::new();
-        if let Ok(url) = crate::browser::current_url(&app) {
+        if let Ok(url) = crate::browser::current_url(app) {
             if !url.is_empty() && url != "about:blank" {
                 bits.push(format!("the in-app browser dock is open at {url}"));
             }
@@ -1285,7 +1356,7 @@ async fn run_or_prewarm(
         ));
     }
     let effective_prompt = if reminder_parts.is_empty() {
-        prompt.clone()
+        prompt.to_string()
     } else {
         format!(
             "<system-reminder>\n{}\n</system-reminder>\n\n{}",
@@ -1296,7 +1367,7 @@ async fn run_or_prewarm(
 
     // Clear any stale stop marker for this session (e.g. retry after a
     // previous stop) before we spawn.
-    take_session_stopped(&session_id);
+    take_session_stopped(session_id);
     // The per-turn user message — always a stream-json `user` envelope (text +
     // optional image blocks). Sent by the reader loop once the `initialize`
     // handshake is acknowledged. Shares build_user_envelope with steer injection.
@@ -1321,30 +1392,7 @@ async fn run_or_prewarm(
         addendum_ptr: addendum.as_ptr() as usize,
     };
 
-    // #67 pre-warm path: spawn the child, run the init handshake, and PARK it in
-    // the warm pool with NO first turn. The real `assistant_send` that follows
-    // reuses it via `dispatch_turn`'s existing warm path. Returns as soon as the
-    // child is registered (the handshake completes inside the reader loop).
-    if prewarm {
-        return prewarm_spawn(app, window_label, session_id, key, cmd, _mcp_guard, model);
-    }
-
-    // Dispatch through the warm pool: reuse a live child whose key matches, else
-    // cold-spawn one and keep it warm. `_mcp_guard` outlives the process via the
-    // WarmChild so the per-turn config file survives every reused turn. The
-    // whole spawn + reader loop + reaping moved into `dispatch_turn`.
-    dispatch_turn(
-        app,
-        window_label,
-        session_id,
-        key,
-        cmd,
-        user_line,
-        _mcp_guard,
-        is_first_turn,
-        model,
-    )
-    .await
+    Ok(ResolvedSpawn { cmd, key, user_line, mcp_guard: _mcp_guard, model })
 }
 
 /// Reuse-or-cold-spawn a warm `claude` child for this turn, run the turn, and
