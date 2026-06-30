@@ -694,7 +694,7 @@ fn tools_list_payload() -> Value {
     if bridge_enabled() {
         tools.push(json!({
             "name": "ask_user",
-            "description": "Ask the user a multiple-choice question and wait for their answer. Use this when you need to make a decision the user should weigh in on — picking between approaches, confirming a destructive action, clarifying an ambiguous request, narrowing scope. The standard Anthropic `AskUserQuestion` tool is unavailable in this environment; this is the Rift-native replacement and renders as an interactive card in the chat. Each question gets a list of options the user clicks to answer; set `multiSelect: true` if more than one option can apply. Keep questions short (≤120 chars) and labels concise (≤5 words). Returns the user's selections as the tool result; if they dismiss without picking, returns a `cancelled` marker so you can fall back to asking in plain text.",
+            "description": "Ask the user a multiple-choice question and wait for their answer. Use this when you need to make a decision the user should weigh in on — picking between approaches, confirming a destructive action, clarifying an ambiguous request, narrowing scope. The standard Anthropic `AskUserQuestion` tool is unavailable in this environment; this is the Rift-native replacement and renders as an interactive card in the chat. Each question gets a list of options the user clicks to answer. IMPORTANT: set `multiSelect: true` whenever the options are NOT mutually exclusive — i.e. any 'select all that apply', 'which of these', 'pick the features/files/items you want' question where the user could reasonably want more than one. Default single-select is only correct for genuinely either/or choices. Keep questions short (≤120 chars) and labels concise (≤5 words). Returns the user's selections as the tool result; if they dismiss without picking, returns a `cancelled` marker so you can fall back to asking in plain text.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -708,7 +708,7 @@ fn tools_list_payload() -> Value {
                             "properties": {
                                 "question": { "type": "string", "description": "Full question text. Ends with '?'." },
                                 "header": { "type": "string", "description": "Short chip-label shown above the question (≤12 chars). Examples: 'Library', 'Approach', 'Confirm'." },
-                                "multiSelect": { "type": "boolean", "description": "True if multiple options can be selected. Defaults to false (single-select)." },
+                                "multiSelect": { "type": "boolean", "description": "Set true when the options are not mutually exclusive and the user may want to choose several ('select all that apply'). Defaults to false (single-select), which is only right for either/or choices." },
                                 "options": {
                                     "type": "array",
                                     "description": "2-4 distinct, mutually-exclusive choices (unless multiSelect). An 'Other' freeform option is always added automatically — do not include it manually.",

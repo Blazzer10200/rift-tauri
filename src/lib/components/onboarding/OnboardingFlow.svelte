@@ -10,7 +10,7 @@
   import RiftLogo from "$lib/components/shell/RiftLogo.svelte";
   import { uiPrefs, ACCENTS } from "$lib/state/ui-prefs.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
-  import { fableAvailable } from "$lib/state/assistant/helpers";
+  import { fableAvailable, haikuAvailable } from "$lib/state/assistant/helpers";
   import { MODE_OPTIONS } from "$lib/components/assistant/composer/modelMatrix";
   import type { ModelSel, ThinkingEffort } from "$lib/state/assistant/types";
   import {
@@ -82,7 +82,7 @@
     ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", effort: true, maxEffort: "ultra" as ThinkingEffort }] : []),
     { id: "opus",   label: "Opus",   version: "4.8", effort: true,  maxEffort: "ultra" },
     { id: "sonnet", label: "Sonnet", version: "4.6", effort: true,  maxEffort: "smart" },
-    { id: "haiku",  label: "Haiku",  version: "4.5", effort: false, maxEffort: "none" },
+    ...(haikuAvailable() ? [{ id: "haiku" as ModelSel, label: "Haiku", version: "4.5", effort: false, maxEffort: "none" as ThinkingEffort }] : []),
   ];
   function pickModel(m: ModelOpt) {
     assistant.setModel(m.id);
@@ -252,7 +252,7 @@
                   </div>
                 </div>
               {/if}
-              <p class="ob-hint"><span>Or skip — Rift works in a private scratch space until you pick a folder, and you can open one anytime from the title bar.</span></p>
+              <p class="ob-hint"><span>Or skip — Rift works in a private scratch space until you pick a folder, and you can open one anytime from the Workspace page.</span></p>
             {/if}
           {:else}
             <ObStage kind="defaults" caption="tuned to you" />

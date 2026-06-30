@@ -2,19 +2,25 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.77.0 — See command output, cleaner projects, one calm block style
-
-### Added
-- **Command output now shows in the stream — the in-and-out, not just the command line.** When Claude runs a shell command you see its actual stdout/stderr, with a new three-way **Command output** control in Settings → Chat rendering: **Peek** (default — exit status + the last few lines, click to expand the rest), **Full** (the whole terminal output streams live as it runs), or **Minimal** (just the command line, the old behavior). A command with no output stays a quiet one-liner.
+## v0.78.0 — Queued images, voice profanity, onboarding polish
 
 ### Fixed
-- **Removing a project no longer leaves a ghost.** Deleting a project used to leave its folder lingering in the "recent folders" list, so it kept re-appearing as if it were still a thing (e.g. a removed `exfil-v1` haunting the picker). Delete now fully forgets the folder. The Add-a-project area was also cleaned up: one quiet "Save this folder as a project" prompt instead of a grid of random recent-folder tiles, and recent folders moved into the new-project picker with a per-row "forget" (×) button to prune stale ones.
-- **The same command no longer prints twice in the live stream** — it was showing once as the work row and again in the muted footer; the footer now keeps just the verb + timer + tokens.
+- **A queued message now keeps its image.** If you attached an image (or text file) and sent it *while the assistant was already working*, the message parked in the queue but the attachment was silently dropped — it fired off later as text-only. The queue now snapshots attachments when you queue, and replays them with the message when it sends, so the image rides along exactly as if you'd sent it normally.
+- **Voice dictation: short swear phrases are no longer left bleeped.** The Web Speech engine masks profanity ("f***"), and the cleanup pass that restores it was skipping anything under three words — so the most common case ("f*** you") shipped with asterisks. Masked phrases now always get the restore pass regardless of length. *(Full uncensored dictation still wants the on-device Whisper engine — see Known Issues.)*
+- **First-run onboarding fixes.** The model picker no longer offers Haiku 4.5 (currently unavailable — it was silently falling back to Sonnet after you "chose" it). Two stale hints that pointed at a non-existent title-bar button now point at the Workspace page, and the sign-in recovery instructions in the tester guide were corrected (they named a Settings path that doesn't exist).
 
 ### Changed
-- **Every chat block now shares one neutral surface.** Terminals, file reads, grep/glob results, create/edit diffs, and the model's own code blocks were a mix of emerald-tinted "glassy" cards (v0.72.0) and plain gray, at different widths — so a single answer could show two clashing colors and crooked edges. They're all one neutral-gray, full-width, aligned family now; accent is reserved for live "running now" cues and prose (links, callouts). (CDP-verified: terminal, command output, and JSON code blocks render identical; svelte-check 0/0, vitest 128/128.)
+- **`ask_user` multiple-choice now reliably offers multi-select when it should.** The "pick all that apply" checkbox mode was fully built but the model rarely triggered it; the tool description now nudges it to use multi-select whenever the options aren't mutually exclusive.
+
+### Internal
+- Backend hardening: a pre-warm CLI child spawned during a stop is now reaped instead of orphaned; a per-session timing map is pruned on session end instead of growing for the process lifetime; `git rev-parse` env-hardening brought in line with the other git calls. (cargo test 128/128, svelte-check 0/0, vitest 405/405.)
+
+### Known issues
+- **Voice profanity on Web Speech:** fully-masked words (`******`, no leading letter) can't be recovered from Azure's servers — the real fix is the on-device **Whisper** engine (transcribes verbatim, fully local), which is built but not yet in the shipped binary. Planned.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.77.0** — See command output in the stream (Peek/Full/Minimal), project-ghost fix, and one neutral surface for every chat block.
 
 - **v0.76.0** — A calmer activity stream: between-step narration is demoted to quiet inline notes (new three-way **Narration** control: Focused / Balanced / Chatty), so a working turn reads as work-with-commentary, not chat-between-tools.
 - **v0.75.0** — Removed the half-working "steer" feature (Alt+Enter live-injection) front-and-back; the message queue (type while it works → fires as the next turn) is now the single way to address a running turn.

@@ -1,6 +1,6 @@
 [package]
 name = "rift-tauri"
-version = "0.77.0"
+version = "0.78.0"
 description = "Rift — local-workspace coding assistant powered by Claude"
 authors = ["Blazzer"]
 edition = "2021"
@@ -68,7 +68,9 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"
 # process-default provider so reqwest's no-provider build finds one at runtime.
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 
-# M13: structured cancellation tokens for in-flight downloads.
+# M13: structured cancellation tokens for in-flight downloads (CancellationToken
+# lives in tokio_util::sync, which needs no extra feature in 0.7.x — there is no
+# `sync` feature; `rt` is the historical, harmless feature value).
 tokio-util = { version = "0.7", features = ["rt"] }
 
 # Auto-updater: Velopack (v0.4.47+). Background download + apply-on-exit +

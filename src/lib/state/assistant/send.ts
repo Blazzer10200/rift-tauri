@@ -42,9 +42,27 @@ export async function send(store: AssistantStore, prompt: string) {
     void store.refreshAuth();
     return;
   }
-  // Already streaming on this tab → queue instead of dropping.
+  // Already streaming on this tab → queue instead of dropping. Snapshot the
+  // composer attachments NOW: send() clears them right after enqueue, so a
+  // queued message that didn't capture them would drain with its image/files
+  // silently dropped (the user's "I queued an image and it vanished" bug).
   if (store.streaming) {
-    store.queue = [...store.queue, { id: crypto.randomUUID(), text: trimmed }];
+    const images = store.composerAttachments.map((a) => ({
+      id: a.id, mime: a.mime, dataBase64: a.dataBase64, sizeBytes: a.sizeBytes,
+    }));
+    const textFiles = store.composerTextAttachments.map((t) => ({
+      id: t.id, name: t.name, text: t.text, sizeBytes: t.sizeBytes, truncated: t.truncated,
+    }));
+    store.queue = [...store.queue, {
+      id: crypto.randomUUID(),
+      text: trimmed,
+      ...(images.length ? { images } : {}),
+      ...(textFiles.length ? { textFiles } : {}),
+    }];
+    // Clear the composer so the snapshotted attachments don't ALSO ride the
+    // current turn / linger as a double-send. Mirrors send()'s own clear.
+    store.composerAttachments = [];
+    store.composerTextAttachments = [];
     return;
   }
   // Phase 2 (S72): the CLI owns conversation state now. First turn mints a
@@ -94,7 +112,7 @@ export async function send(store: AssistantStore, prompt: string) {
   // the signal, so stay quiet.
   if (!store.workspace.current && !store.localScratchPath) {
     notify.warn("No folder open", {
-      detail: "The assistant can't read or edit files this turn. Open one from the title bar.",
+      detail: "The assistant can't read or edit files this turn. Open one from the Workspace page.",
     });
   }
   // turn.rs swaps Fable to Opus silently once the limited run ends — warn ahead.
@@ -280,6 +298,17 @@ export function drainQueue(store: AssistantStore, tab: TabState | null) {
     // to sending. If it's already gone (raced drain), bail.
     if (!tab.queue.some((q) => q.id === next.id)) return;
     tab.queue = tab.queue.filter((q) => q.id !== next.id);
+    // Restore the snapshotted attachments onto the DRAINING tab so send() picks
+    // them up. Write directly to the tab fields (not the store proxy, which
+    // targets the focused pane) — store.send(text, tabId) below retargets
+    // currentConvoId to this tab first, so its composerAttachments getter then
+    // resolves to exactly these. Without this the queued image is lost on drain.
+    tab.attachments = next.images
+      ? next.images.map((a) => ({ id: a.id, mime: a.mime, dataBase64: a.dataBase64, sizeBytes: a.sizeBytes }))
+      : [];
+    tab.textAttachments = next.textFiles
+      ? next.textFiles.map((t) => ({ id: t.id, name: t.name, text: t.text, sizeBytes: t.sizeBytes, truncated: t.truncated }))
+      : [];
     // Route through the STORE wrapper (not the bare sendImpl) with the draining
     // tab's id: sendImpl keys off currentConvoId, so a drain on a non-focused
     // pane-visible tab must retarget first or the queued message fires into the

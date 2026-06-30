@@ -20,6 +20,7 @@ import type {
   ConversationRecord,
   ModelSel,
   PaneState,
+  QueueItem,
 } from "./types";
 
 /** Subset of TabState fields the save plumbing reads/writes. Structural —
@@ -69,7 +70,7 @@ type PersistenceHost = {
   lastError: string | null;
   lastNotice: string | null;
   messages: ChatMessage[];
-  queue: { id: string; text: string }[];
+  queue: QueueItem[];
   // Effective folder of the focused tab — fallback scope for a save whose tab
   // has no explicit per-pane root (matches AssistantStore.activeRoot).
   activeRoot: string | null;

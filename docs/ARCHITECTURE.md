@@ -93,7 +93,7 @@ Other stores: `environment.svelte.ts` (host-tool presence — git/node/npm/cargo
 ### Components (`src/lib/components/`)
 - `assistant/` — the Chat surface: `MessageBubble`, `ToolChip`, `EditDiff`, `Markdown`, `Composer` (split into `composer/*`), `AssistantPane`, `AssistantPage`, `AssistantWelcome` (warm/cold welcome), `PermissionBar`, `SubAgentDock`.
 - `workspace/` — `WorkspacePage.svelte`, the merged Workspace (home) surface; `globPreview.ts` + `welcomeShared.ts` back its glob validation and shared greeting.
-- `shell/` — `Titlebar` (custom drag region — needs `core:window:allow-start-dragging`), `WorkspaceShell`, `Sidebar`, `Topbar`, `StatusBar`, `ConversationList`, `ProjectSwitcher`, `ContextMenuHost`, `RiftLogo`. (`tabsbar/` holds only pure helpers now — `ChatTabsBar` was folded in.)
+- `shell/` — `Titlebar` (custom drag region — needs `core:window:allow-start-dragging`), `WorkspaceShell`, `Sidebar`, `Topbar`, `StatusBar`, `ConversationList`, `ProjectRail`, `ContextMenuHost`, `RiftLogo`. (`tabsbar/` holds only pure helpers now — `ChatTabsBar` was folded in.)
 - `home/` (`statsHelpers.ts` — the pure usage-stat aggregation WorkspacePage + AiHealth both read) · `settings/` · `local-llm/` · `ai-health/` · `webview/` · `onboarding/` — the other workspaces, onboarding, and browser pane.
 
 ### Cross-cutting invariants

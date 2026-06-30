@@ -232,7 +232,17 @@ pub fn workspace_branch_sync(root: &std::path::Path) -> Option<String> {
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_ASKPASS", "")
-        .env_remove("GIT_DIR");
+        // Mirror run_git's env hardening posture (git_local.rs): strip the env
+        // vars that could redirect the git binary (GIT_EXEC_PATH), inject config
+        // (GIT_CONFIG_*), or repoint the repo/work-tree out from under us. A
+        // read-only rev-parse is low-risk, but the parity keeps the defense
+        // consistent across every git invocation.
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_EXEC_PATH")
+        .env_remove("GIT_CONFIG_GLOBAL")
+        .env_remove("GIT_CONFIG_SYSTEM")
+        .env("GIT_CONFIG_NOSYSTEM", "1");
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

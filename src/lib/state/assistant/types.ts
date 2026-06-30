@@ -133,6 +133,20 @@ export type ImageBlock = {
 
 export type Block = TextBlock | ToolBlock | ThinkingBlock | BoundaryBlock | ImageBlock;
 
+/** A queued outbound message (sent while the tab was already streaming).
+ *  `images`/`textFiles` snapshot the composer attachments at enqueue time so
+ *  the message carries its attachments when it later drains — the composer
+ *  arrays are cleared immediately after enqueue, so without the snapshot the
+ *  attachments were silently dropped. The queue is in-memory, in-session state
+ *  (never serialized to disk — neither persistTabs nor the conversation record
+ *  includes it), so holding base64 images here for the session is safe. */
+export type QueueItem = {
+  id: string;
+  text: string;
+  images?: { id: string; mime: string; dataBase64: string; sizeBytes: number }[];
+  textFiles?: { id: string; name: string; text: string; sizeBytes: number; truncated: boolean }[];
+};
+
 export type ChatMessage = {
   id: string;
   role: "user" | "assistant" | "system";

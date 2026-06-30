@@ -1693,6 +1693,20 @@ fn prewarm_spawn(
         log::warn!("prewarm_spawn: child PID unavailable for session {session_id} (process already exited?)");
     }
 
+    // Mirror cold_spawn_and_run's stop-on-spawn guard (#39): a stop/teardown
+    // arriving in the prewarm spawn window would otherwise find no PID, drop,
+    // then the spare gets inserted into the pool and parks — an orphaned child
+    // the Stop button can't reach until idle-evict ages it out. Re-check now
+    // that the PID is registered: if stopped, kill + clear + bail before insert.
+    if take_session_stopped(&session_id) {
+        log::info!("prewarm_spawn: stop arrived during spawn for {session_id} — killing spare");
+        if let Err(e) = child.start_kill() {
+            log::warn!("prewarm_spawn: start_kill failed for {session_id} during stop-on-spawn: {e}");
+        }
+        if let Some(p) = turn_pid { clear_session_pid_if(&session_id, p); }
+        return Ok(());
+    }
+
     // A1: same take()+guard as the cold path — None means the child died between
     // spawn and now.
     let Some(stdin) = child.stdin.take() else {
@@ -2025,6 +2039,7 @@ async fn loop_cleanup(
 ) {
     warm_pool::remove_if(session_id, warm);
     if let Some(p) = turn_pid { clear_session_pid_if(session_id, p); }
+    forget_cumulative_cli_api(session_id);
     let _ = child.start_kill();
     let _ = child.wait().await;
 }
@@ -2520,6 +2535,14 @@ fn prev_cumulative_cli_api(session_id: &str) -> u64 {
 fn store_cumulative_cli_api(session_id: &str, cumulative: u64) {
     let mut g = match CUMULATIVE_CLI_API.lock() { Ok(g) => g, Err(p) => p.into_inner() };
     g.get_or_insert_with(HashMap::new).insert(session_id.to_string(), cumulative);
+}
+
+/// Drop a session's cumulative-API entry when its reader loop ends, so the map
+/// only ever holds live sessions (the doc comment's "pruned lazily" promise —
+/// previously the map only ever grew, one stale entry per dead session).
+fn forget_cumulative_cli_api(session_id: &str) {
+    let mut g = match CUMULATIVE_CLI_API.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+    if let Some(m) = g.as_mut() { m.remove(session_id); }
 }
 
 /// B2: build a `TurnPerf` from the result frame + accumulated TTFT milestones,

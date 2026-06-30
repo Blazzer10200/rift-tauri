@@ -29,6 +29,7 @@ export type {
   ThinkingEffort,
   ModelSel,
   PaneState,
+  QueueItem,
 } from "./assistant/types";
 export { MAX_PANES } from "./assistant/types";
 import type {
@@ -55,6 +56,7 @@ import type {
   PermissionSuggestion,
   TurnRecord,
   PaneState,
+  QueueItem,
 } from "./assistant/types";
 import { MAX_PANES } from "./assistant/types";
 
@@ -262,8 +264,12 @@ export class TabState {
   /** Outbound message queue for THIS tab. send() pushes here when the tab is
    *  already streaming; onDone() pops the next one (queue order = send order,
    *  drag-to-reorder in the rail). Per-tab so a queued msg in Tab A can't drain
-   *  into Tab B if the user switches mid-turn. */
-  queue = $state<{ id: string; text: string }[]>([]);
+   *  into Tab B if the user switches mid-turn. `images`/`textFiles` snapshot the
+   *  composer attachments at enqueue time so a queued message carries its image
+   *  when it drains (the composer arrays are cleared right after enqueue). Both
+   *  optional — text-only queued messages omit them; images are NOT persisted
+   *  to disk (stripped on save) to keep localStorage lean. */
+  queue = $state<QueueItem[]>([]);
   /** Per-tab composer draft. Was store-level before split-pane v2 — moved
    *  here so each pane can compose into its own tab concurrently w/o the
    *  focus-change stash/restore dance dropping characters under fast typing.
@@ -511,7 +517,7 @@ class AssistantStore {
   get lastModelId(): string | null { return this.activeTab?.lastModelId ?? null; }
   get promptHistory(): string[] { return this.activeTab?.promptHistory ?? []; }
   get queue() { return this.activeTab?.queue ?? []; }
-  set queue(v: { id: string; text: string }[]) {
+  set queue(v: QueueItem[]) {
     if (this.activeTab) this.activeTab.queue = v;
   }
 

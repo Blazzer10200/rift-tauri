@@ -908,7 +908,14 @@ class SttStore {
   private async polishWebSpeechFinal() {
     if (this.polishing) return; // pre-send pass already in flight — don't double-spawn from onEnd
     const raw = this.finalText.trim();
-    if (!this.config.cleanup_enabled || raw.split(/\s+/).length < 3) return;
+    // The <3-word gate skips cleanup for short dictations — but a masked short
+    // phrase ("f*** you", "****") is EXACTLY what needs de-censoring and is the
+    // most common profanity case. So when the text carries an asterisk mask,
+    // run cleanup regardless of length (the engine censored the speaker; the
+    // cleanup pass restores it). Non-masked short phrases still skip — nothing
+    // to fix there.
+    const hasMask = raw.includes("*");
+    if (!this.config.cleanup_enabled || (raw.split(/\s+/).length < 3 && !hasMask)) return;
     const committed = this.composeDraft(raw, "");
     // Non-blocking: the raw transcript is already committed to the draft and
     // is immediately editable/sendable. The cleanup pass is cosmetic, so it must

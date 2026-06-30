@@ -695,6 +695,35 @@ describe("playback — queue while streaming, drain on completion", () => {
     expect(assistant.telemetry.turns).toHaveLength(2);
     expect(assistant.telemetry.turns[1]).toMatchObject({ promptPreview: "second", isFirstTurn: false });
   });
+
+  it("carries a queued message's image attachment through the drain (regression: queued image was dropped)", async () => {
+    const { tab } = readyStore();
+    await assistant.send("first");
+    expect(tab.streaming).toBe(true);
+
+    // Stage an image, then send while streaming → the message queues AND the
+    // queue item snapshots the image (the composer is cleared on enqueue).
+    tab.attachments = [{ id: "img-1", mime: "image/png", dataBase64: "QUJD", sizeBytes: 3 }];
+    await assistant.send("with image");
+    expect(tab.queue).toHaveLength(1);
+    expect(tab.queue[0].images).toEqual([
+      { id: "img-1", mime: "image/png", dataBase64: "QUJD", sizeBytes: 3 },
+    ]);
+    expect(tab.attachments).toEqual([]); // composer cleared on enqueue, no double-send
+
+    // Finish the first turn → drain. The drained turn's user message must carry
+    // the image as an image block (was previously dropped — only text survived).
+    feed(tab, [textDelta("first reply")]);
+    tab.onDone();
+    await settle();
+
+    expect(tab.queue).toHaveLength(0);
+    const drainedUser = tab.messages.findLast((m) => m.role === "user");
+    expect(drainedUser?.blocks).toContainEqual({
+      type: "image", mime: "image/png", dataBase64: "QUJD", sizeBytes: 3,
+    });
+    expect(drainedUser?.blocks).toContainEqual({ type: "text", text: "with image" });
+  });
 });
 
 describe("playback — queue (type while streaming → fires after the turn)", () => {
