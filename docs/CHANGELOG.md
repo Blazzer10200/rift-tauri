@@ -2,23 +2,25 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.78.0 — Queued images, voice profanity, onboarding polish
+## v0.79.0 — Claude Sonnet 5
 
 ### Fixed
-- **A queued message now keeps its image.** If you attached an image (or text file) and sent it *while the assistant was already working*, the message parked in the queue but the attachment was silently dropped — it fired off later as text-only. The queue now snapshots attachments when you queue, and replays them with the message when it sends, so the image rides along exactly as if you'd sent it normally.
-- **Voice dictation: short swear phrases are no longer left bleeped.** The Web Speech engine masks profanity ("f***"), and the cleanup pass that restores it was skipping anything under three words — so the most common case ("f*** you") shipped with asterisks. Masked phrases now always get the restore pass regardless of length. *(Full uncensored dictation still wants the on-device Whisper engine — see Known Issues.)*
-- **First-run onboarding fixes.** The model picker no longer offers Haiku 4.5 (currently unavailable — it was silently falling back to Sonnet after you "chose" it). Two stale hints that pointed at a non-existent title-bar button now point at the Workspace page, and the sign-in recovery instructions in the tester guide were corrected (they named a Settings path that doesn't exist).
+- **"Sonnet" now actually runs Sonnet 5, not 4.6.** Anthropic released Claude Sonnet 5 (June 9) — the best speed/intelligence balance, with quality approaching Opus 4.8 at the same Sonnet price. Rift's picker already said "Sonnet 5", but every turn was silently running the previous generation (4.6): the shipped Claude CLI still resolves the bare `sonnet` alias to `claude-sonnet-4-6`, so passing the alias ran 4.6. Rift now pins the explicit `claude-sonnet-5` id before the turn, so picking Sonnet runs Sonnet 5. *(The `opus`/`haiku` aliases already resolved to their newest models — only `sonnet` lagged.)*
+- **Sonnet now reaches the X-High effort tier.** Sonnet 5 honors `xhigh` server-side (Sonnet 4.6 rejected it and capped at High), so the thinking dial's top rungs and the ultracode workflow are now available on Sonnet — verified against the live model.
 
 ### Changed
-- **`ask_user` multiple-choice now reliably offers multi-select when it should.** The "pick all that apply" checkbox mode was fully built but the model rarely triggered it; the tool description now nudges it to use multi-select whenever the options aren't mutually exclusive.
+- **Model labels read cleanly for major releases.** The model name shown on each turn now handles the dateless id format Anthropic uses from the 4.6 generation on (e.g. `claude-sonnet-5` → "Sonnet 5", `claude-fable-5` → "Fable 5"), instead of falling back to the raw id string.
+- Pricing table + the voice-transcript cleanup helper updated to the current Sonnet id. In-flight conversations created on Sonnet 4.6 keep running 4.6 on resume (their reasoning is signed to that model) — only new chats move to Sonnet 5.
 
 ### Internal
-- Backend hardening: a pre-warm CLI child spawned during a stop is now reaped instead of orphaned; a per-session timing map is pruned on session end instead of growing for the process lifetime; `git rev-parse` env-hardening brought in line with the other git calls. (cargo test 128/128, svelte-check 0/0, vitest 405/405.)
+- Alias→id resolution lives in one place per side (`canonical_model_alias` / `canonicalModelAlias`) with a regression test. Full green: cargo check 0/0 · cargo test (config) 9/9 · svelte-check 0/0 (4138) · vitest 405/405, plus live-CLI verification.
 
 ### Known issues
-- **Voice profanity on Web Speech:** fully-masked words (`******`, no leading letter) can't be recovered from Azure's servers — the real fix is the on-device **Whisper** engine (transcribes verbatim, fully local), which is built but not yet in the shipped binary. Planned.
+- **Voice profanity on Web Speech:** fully-masked words (`******`, no leading letter) can't be recovered from Azure's servers — the real fix is the on-device **Whisper** engine (built but not yet in the shipped binary). Planned.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.78.0** — Queued messages keep their image attachments, short bleeped swear phrases get de-censored in voice dictation, and first-run onboarding fixes (no phantom Haiku option, corrected hints).
 
 - **v0.77.0** — See command output in the stream (Peek/Full/Minimal), project-ghost fix, and one neutral surface for every chat block.
 
@@ -29,5 +31,4 @@
 
 - **v0.71.x** — Path-helper de-dup (one canonical `utils/path.ts`), split-pane isolation (per-pane sub-agent panel, no cross-pane crosstalk), a warm-CLI stale-frame/permission-race bug-fix sweep, the turn-spawn refactor (orchestrator + `resolve_spawn`, lints 14→0), and first-run onboarding rework.
 - **v0.66.0–v0.70.0** — Workspace + projects UI overhaul, no-folder scratch workspace, fast-by-default (thinking split into its own toggle), and the warm-pool persistent-process fix.
-- **v0.60.0–v0.65.0** — Cross-machine + diagnostics era: unified queue/steer model, honest mid-chat model switching, guided first-run setup, human-readable errors, live per-subsystem diagnostics console.
-- **v0.20.7–v0.53.0** — Foundation era: the full redesign port + stream design language, the warm-CLI process, multi-window sync, the Workspace dashboard + AI Health, voice mode, and the notification center.
+- **v0.20.7–v0.65.0** — Foundation + diagnostics era: full redesign port, stream design language, warm-CLI process, multi-window sync, Workspace dashboard + AI Health, voice mode, honest mid-chat model switching, and the diagnostics console.

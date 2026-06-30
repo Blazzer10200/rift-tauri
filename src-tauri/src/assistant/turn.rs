@@ -21,7 +21,8 @@ use super::warm_pool::kill_child_tree;
 use super::auth_update::assistant_auth_probe;
 use super::cli_install::{claude_command, resolve_claude_exe};
 use super::config::{
-    clamp_effort, current_api_key, current_api_key_with, effective_trust_level, effort_tier_to_flag,
+    canonical_model_alias, clamp_effort, current_api_key, current_api_key_with,
+    effective_trust_level, effort_tier_to_flag,
     fable_unavailable, haiku_unavailable, HAIKU_FALLBACK_MODEL, HAIKU_MODEL,
     is_valid_effort_tier,
     is_valid_local_model_name, is_valid_model_name, is_valid_permission_mode, load_config,
@@ -723,6 +724,24 @@ async fn resolve_spawn(
             log::info!("assistant_send: {HAIKU_MODEL} unavailable — falling back to {HAIKU_FALLBACK_MODEL}");
             model = HAIKU_FALLBACK_MODEL.to_string();
         }
+        // Resolve the lagging `sonnet` alias to an explicit id: the shipped CLI
+        // alias still maps `sonnet` → claude-sonnet-4-6, so sending the bare alias
+        // silently runs the previous generation. Direction depends on history:
+        //   • FIRST turn (fresh chat / picker) → claude-sonnet-5 (the new default).
+        //   • RESUMED session pinned to the literal `sonnet` → claude-sonnet-4-6:
+        //     it was CREATED running 4.6, and its replayed thinking blocks are
+        //     4.6-signed — upgrading mid-conversation would 400 on the replay.
+        // Either way the explicit id (not the alias) is what reaches `--model` and
+        // gets pinned by save_session_model below, so the alias never lands again.
+        if model == "sonnet" {
+            let resolved = if is_first_turn {
+                canonical_model_alias(&model) // → claude-sonnet-5
+            } else {
+                "claude-sonnet-4-6" // legacy pin ran 4.6; keep signatures valid
+            };
+            log::info!("assistant_send: resolved model alias sonnet → {resolved} (first_turn={is_first_turn})");
+            model = resolved.to_string();
+        }
     }
     // Effort tier: per-turn override wins, else stored default, else "smart"
     // (--effort high, the API default — mirrors the frontend's loadEffort()).
@@ -1194,13 +1213,12 @@ async fn resolve_spawn(
     // renderer-supplied string can't reach the log stream. The CLI flag itself
     // was safe (string-arg passthrough) but the log line was unredacted.
     // Clamp the requested tier to the model's ceiling before mapping to a flag,
-    // and reject a tier the ladder doesn't define. Sonnet 4.6 tops out at
-    // "smart" (medium); xhigh + the ultracode workflow key are Opus-tier only — so
-    // a stale out-of-range tier (e.g. a workspace pinned to `ultra` under Opus,
-    // then switched to Sonnet) can't push Sonnet to xhigh/ultracode. This is the
-    // only point that builds the actual CLI args, so it's the authoritative
-    // gate; the frontend coerces too. `clamp_effort`/`model_max_effort` mirror
-    // MODEL_MAX_EFFORT in src/lib/state/assistant/helpers.ts.
+    // and reject a tier the ladder doesn't define. Sonnet 5/Opus/Fable all reach
+    // "ultra" (xhigh + the ultracode workflow key); only Haiku is floored (effort
+    // rejected wholesale). This is the only point that builds the actual CLI
+    // args, so it's the authoritative gate; the frontend coerces too.
+    // `clamp_effort`/`model_max_effort` mirror MODEL_MAX_EFFORT in
+    // src/lib/state/assistant/helpers.ts.
     if !is_valid_effort_tier(&effort) {
         log::warn!("assistant_send: unknown effort tier {effort:?} — treating as deep (high)");
     }

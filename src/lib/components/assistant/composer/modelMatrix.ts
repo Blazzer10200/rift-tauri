@@ -44,10 +44,10 @@ export type ModelOpt = {
   // ignores server-side. Grounded in the model capability docs:
   //   • effort     — accepts the CLI `--effort` flag at all. The API rejects
   //                  effort on Haiku 4.5 wholesale, so this is false for Haiku.
-  //   • maxEffort  — highest effort tier the model honors. Opus + Fable reach
-  //                  "ultra" (xhigh + ultracode); Sonnet 4.6 reaches "deep"
-  //                  (high) — it accepts high but not xhigh, so ultracode is
-  //                  Opus-tier only.
+  //   • maxEffort  — highest effort tier the model honors. Opus, Fable, and
+  //                  Sonnet 5 reach "ultra" (xhigh + ultracode); Sonnet 5
+  //                  honors xhigh + max server-side, where Sonnet 4.6 rejected
+  //                  xhigh and stopped at deep. Haiku rejects effort entirely.
   effort: boolean;
   maxEffort: ThinkingEffort;
 };
@@ -61,7 +61,7 @@ export type ModelOpt = {
 export const MODEL_OPTIONS: ModelOpt[] = [
   ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", tagline: "Anthropic's most capable model — limited run", blurb: "Most capable — limited run", ctx: "1M ctx", suffix: "1M context", legacy: false, limited: true, effort: true, maxEffort: MODEL_MAX_EFFORT["claude-fable-5"], icon: Sparkles }] : []),
   { id: "opus",            label: "Opus",   version: "4.8", tagline: "Newest + most capable — complex reasoning & agentic coding", blurb: "Deep reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.opus, icon: Gem },
-  { id: "sonnet",          label: "Sonnet", version: "4.6", tagline: "Best speed + intelligence balance — the default",            blurb: "Everyday default — speed + smarts", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.sonnet, icon: Feather },
+  { id: "sonnet",          label: "Sonnet", version: "5",   tagline: "Best speed + intelligence balance — the default",            blurb: "Everyday default — speed + smarts", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.sonnet, icon: Feather },
   ...(haikuAvailable() ? [{ id: "haiku" as ModelSel, label: "Haiku", version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups", blurb: "Fastest — quick edits & lookups", ctx: "200K ctx", suffix: "200K context", legacy: false, effort: false, maxEffort: MODEL_MAX_EFFORT.haiku, icon: Rabbit }] : []),
   { id: "claude-opus-4-7", label: "Opus",   version: "4.7", tagline: "Previous-generation Opus — proven for complex reasoning",    blurb: "Previous-generation Opus", ctx: "1M ctx",   suffix: "1M context",   legacy: true,  effort: true,  maxEffort: MODEL_MAX_EFFORT["claude-opus-4-7"], icon: Gem },
 ];
@@ -117,8 +117,8 @@ export const DIAL_STOPS: DialStop[] = [
 
 /** The dial rungs a model actually supports. Models with no effort capability
  *  (Haiku) get only `Off` — they can't extend-think at all. Otherwise the rungs
- *  are truncated at the model's effort ceiling: Sonnet (max "deep") stops at
- *  High, Opus/Fable (max "ultra") reach Max. Off is always present. */
+ *  are truncated at the model's effort ceiling: Sonnet/Opus/Fable (max "ultra")
+ *  reach Max; Haiku (no effort) gets only Off. Off is always present. */
 export function dialStopsFor(m: ModelOpt | undefined): DialStop[] {
   if (!m?.effort) return [DIAL_STOPS[0]];
   const capIdx = EFFORT_OPTIONS.findIndex((e) => e.id === m.maxEffort);

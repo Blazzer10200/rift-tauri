@@ -24,7 +24,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$modelId = @{ opus = 'claude-opus-4-8'; sonnet = 'claude-sonnet-4-6'; haiku = 'claude-haiku-4-5' }[$Model]
+$modelId = @{ opus = 'claude-opus-4-8'; sonnet = 'claude-sonnet-5'; haiku = 'claude-haiku-4-5' }[$Model]
 
 if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
   Write-Error "claude CLI not found on PATH -- install @anthropic-ai/claude-code (DEVELOPING.md section 3)."

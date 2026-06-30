@@ -172,8 +172,7 @@ pub(super) fn is_valid_effort_tier(s: &str) -> bool {
 pub(super) fn model_max_effort(model: &str) -> &'static str {
     match model {
         "haiku" => "none",
-        "sonnet" => "deep", // accepts low/medium/high but NOT xhigh — tops out at deep(high)
-        _ => "ultra", // opus / claude-opus-4-7 / claude-fable-5 / unknown
+        _ => "ultra", // opus / sonnet / claude-opus-4-7 / claude-fable-5 / unknown
     }
 }
 
@@ -273,6 +272,26 @@ pub(super) const HAIKU_FALLBACK_MODEL: &str = "sonnet";
 pub(super) const HAIKU_DISABLED: bool = true;
 pub(super) fn haiku_unavailable() -> bool {
     HAIKU_DISABLED
+}
+
+/// Claude Sonnet 5 — released 2026-06-09. The bare CLI alias `sonnet` still
+/// resolves to `claude-sonnet-4-6` on shipped CLIs (the alias table lags the
+/// release), so a turn sent as `sonnet` silently runs the previous generation.
+/// `opus`/`haiku` aliases already resolve to their newest snapshot, so only
+/// `sonnet` needs pinning. Mirror of `SONNET_MODEL` in helpers.ts.
+pub(super) const SONNET_MODEL: &str = "claude-sonnet-5";
+
+/// Resolve a renderer model selection to the explicit id sent to the CLI. Maps
+/// the lagging `sonnet` alias → the pinned `claude-sonnet-5`; every other value
+/// (opus/haiku/fable aliases + already-explicit ids) passes through unchanged.
+/// Mirrors `canonicalModelAlias` in state/assistant/helpers.ts. Run AFTER the
+/// per-conversation pin + Fable/Haiku guards so a new chat pins the canonical id.
+pub(super) fn canonical_model_alias(model: &str) -> &str {
+    if model == "sonnet" {
+        SONNET_MODEL
+    } else {
+        model
+    }
 }
 
 /// Read config.json with NO side effects — does not run the keychain
@@ -552,8 +571,9 @@ pub fn assistant_set_api_key(api_key: Option<String>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        clamp_effort, effort_tier_to_flag, is_valid_effort_tier, is_valid_local_base_url,
-        model_max_effort, send_effort_flag, DEFAULT_MODEL, FABLE_FALLBACK_MODEL,
+        canonical_model_alias, clamp_effort, effort_tier_to_flag, is_valid_effort_tier,
+        is_valid_local_base_url, model_max_effort, send_effort_flag, DEFAULT_MODEL,
+        FABLE_FALLBACK_MODEL, SONNET_MODEL,
     };
 
     #[test]
@@ -581,21 +601,21 @@ mod tests {
         assert_eq!(model_max_effort("opus"), "ultra");
         assert_eq!(model_max_effort("claude-opus-4-7"), "ultra");
         assert_eq!(model_max_effort("claude-fable-5"), "ultra");
-        assert_eq!(model_max_effort("sonnet"), "deep"); // accepts high, not xhigh
+        assert_eq!(model_max_effort("sonnet"), "ultra"); // Sonnet 5 honors xhigh
         assert_eq!(model_max_effort("haiku"), "none");
         assert_eq!(model_max_effort("some-future-model"), "ultra"); // unknown → top
     }
 
     #[test]
-    fn clamp_caps_sonnet_and_leaves_opus_untouched() {
-        // Sonnet tops out at deep(high): a stale ultra(xhigh) pref must come down,
-        // but deep(high) is now in range (Sonnet accepts high, just not xhigh).
-        assert_eq!(clamp_effort("ultra", "sonnet"), "deep");
-        assert_eq!(clamp_effort("deep", "sonnet"), "deep"); // in range now
+    fn clamp_caps_haiku_and_leaves_full_effort_models_untouched() {
+        // Haiku floors to none; Sonnet 5/Opus/Fable all reach ultra now, so an
+        // ultra(xhigh) pref passes through untouched.
+        assert_eq!(clamp_effort("ultra", "haiku"), "none"); // floored
+        assert_eq!(clamp_effort("ultra", "sonnet"), "ultra"); // Sonnet 5 in range
+        assert_eq!(clamp_effort("deep", "sonnet"), "deep"); // in range
         assert_eq!(clamp_effort("quick", "sonnet"), "quick"); // already in range
         assert_eq!(clamp_effort("ultra", "opus"), "ultra");
         assert_eq!(clamp_effort("ultra", "claude-fable-5"), "ultra");
-        assert_eq!(clamp_effort("ultra", "haiku"), "none"); // floored
     }
 
     #[test]
@@ -643,5 +663,26 @@ mod tests {
         assert_eq!(FABLE_FALLBACK_MODEL, "opus");
         assert_eq!(DEFAULT_MODEL, "sonnet");
         assert_ne!(FABLE_FALLBACK_MODEL, "claude-fable-5");
+    }
+
+    // The shipped CLI alias `sonnet` resolves to claude-sonnet-4-6, so the bare
+    // alias silently ran the previous generation — the "still detected as 4.6"
+    // bug. canonical_model_alias pins it to the explicit Sonnet 5 id; everything
+    // else (opus/haiku/fable aliases + already-explicit ids) passes through. The
+    // `sonnet`→claude-sonnet-5 mapping MUST mirror canonicalModelAlias in
+    // helpers.ts. (The 4.6 RESUME-pin path is asserted by turn.rs's own logic,
+    // not here — this helper only handles the forward `sonnet`→5 direction.)
+    #[test]
+    fn canonical_alias_pins_sonnet_and_passes_others() {
+        assert_eq!(canonical_model_alias("sonnet"), SONNET_MODEL);
+        assert_eq!(SONNET_MODEL, "claude-sonnet-5");
+        // Other aliases resolve correctly in the CLI already — leave untouched.
+        assert_eq!(canonical_model_alias("opus"), "opus");
+        assert_eq!(canonical_model_alias("haiku"), "haiku");
+        assert_eq!(canonical_model_alias("claude-fable-5"), "claude-fable-5");
+        // Already-explicit ids (incl. an explicit Sonnet pin) pass through.
+        assert_eq!(canonical_model_alias("claude-sonnet-5"), "claude-sonnet-5");
+        assert_eq!(canonical_model_alias("claude-sonnet-4-6"), "claude-sonnet-4-6");
+        assert_eq!(canonical_model_alias("claude-opus-4-8"), "claude-opus-4-8");
     }
 }

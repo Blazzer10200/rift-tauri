@@ -26,8 +26,10 @@ commentary, nothing else.";
 
 // Transcript-cleanup model. Was claude-haiku-4-5 until Anthropic pulled Haiku
 // 4.5 (v0.51.3) — repointed to Sonnet, matching the picker's HAIKU_FALLBACK_MODEL
-// kill-switch target. Cleanup is a tiny text task, so Sonnet's cost is negligible.
-const CLEANUP_MODEL: &str = "claude-sonnet-4-6";
+// kill-switch target. Pinned to the explicit current Sonnet id (Sonnet 5 and 4.6
+// are the same price; the bare `sonnet` alias still resolves to 4.6 on shipped
+// CLIs). Cleanup is a tiny text task, so Sonnet's cost is negligible.
+const CLEANUP_MODEL: &str = "claude-sonnet-5";
 const CLEANUP_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Polish a raw Whisper transcript via Claude Haiku. Returns the cleaned text

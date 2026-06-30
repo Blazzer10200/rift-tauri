@@ -254,7 +254,7 @@ export function hourLabel(h: number | null): string {
 }
 
 const KNOWN_MODELS: Record<string, string> = {
-  sonnet: "Sonnet 4.6",
+  sonnet: "Sonnet 5",
   haiku: "Haiku 4.5",
   opus: "Opus 4.8",
   "claude-opus-4-7": "Opus 4.7",

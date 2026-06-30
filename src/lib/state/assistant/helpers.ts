@@ -30,6 +30,24 @@ export function haikuAvailable(): boolean {
   return !HAIKU_DISABLED;
 }
 
+// Claude Sonnet 5 — released 2026-06-09. The bare CLI alias `sonnet` still
+// resolves to claude-sonnet-4-6 on shipped CLIs (the alias table lags the
+// release), so the backend pins the explicit id before `--model` (turn.rs ·
+// config.rs canonical_model_alias). The frontend keeps `sonnet` as the picker
+// SELECTION id (so per-workspace pins + hotkeys are stable) — this const exists
+// so display/test code can reference the resolved id, and to mirror the backend
+// SONNET_MODEL so the two-file lockstep is visible. `opus`/`haiku` aliases
+// already resolve to their newest snapshot, so only `sonnet` needs pinning.
+export const SONNET_MODEL = "claude-sonnet-5";
+
+/** Resolve a model selection to the explicit id the CLI runs. Maps the lagging
+ *  `sonnet` alias → claude-sonnet-5; everything else passes through. Mirrors
+ *  `canonical_model_alias` in config.rs. The send path itself sends the bare
+ *  selection (the backend resolves it); this is for display/telemetry parity. */
+export function canonicalModelAlias(model: string): string {
+  return model === "sonnet" ? SONNET_MODEL : model;
+}
+
 const MODEL_KEY = "rift.assistant.model";
 const EFFORT_KEY = "rift.assistant.thinkingEffort";
 const THINKING_KEY = "rift.assistant.thinkingEnabled";
@@ -291,7 +309,7 @@ export function fmtTokens(n: number): string {
 }
 
 /** The model's NATIVE context window (tokens), ignoring plan entitlement. Haiku
- *  is 200K; current-gen Opus 4.8 / Sonnet 4.6 / Fable 5 are 1M. Matches the FULL
+ *  is 200K; current-gen Opus 4.8 / Sonnet 5 / Fable 5 are 1M. Matches the FULL
  *  pinned ids (claude-opus-4-8 …) AND the bare aliases Rift sends to the CLI
  *  (`opus`/`sonnet`/`fable` — see modelMatrix.ts MODEL_OPTIONS). Without the alias
  *  arm these fell through to 200K, so the ctx gauge read ~5× too full (16% at real
@@ -302,7 +320,7 @@ export function modelNativeWindow(model: string | null): number {
   const id = model.toLowerCase();
   if (id.includes("haiku")) return 200_000;
   if (/^(opus|sonnet|fable)$/.test(id)) return 1_000_000;
-  if (/sonnet-4-[56]/.test(id) || /opus-4-[678]/.test(id) || /fable-5/.test(id)) return 1_000_000;
+  if (/sonnet-(4-[56]|5)/.test(id) || /opus-4-[678]/.test(id) || /fable-5/.test(id)) return 1_000_000;
   return 200_000;
 }
 
@@ -325,16 +343,15 @@ export const EFFORT_ORDER: readonly ThinkingEffort[] = [
 /** Highest effort tier each model honors server-side — the single source of
  *  truth for the capability ceiling. `MODEL_OPTIONS.maxEffort` (the picker's
  *  slider) and `clampEffort` (the value actually sent) both derive from this so
- *  they can't disagree. Opus/Fable reach `ultra` (xhigh + ultracode); Sonnet 4.6
- *  reaches `deep` (high) — it accepts low/medium/high but NOT xhigh (the API
- *  rejects xhigh on Sonnet, falling back to high), so the slider must stop at
- *  Deep; Haiku rejects effort wholesale (`none`). Mirror the Sonnet ceiling in
- *  src-tauri/src/assistant/turn.rs (model_max_effort). */
+ *  they can't disagree. Opus/Fable/Sonnet reach `ultra` (xhigh + ultracode) —
+ *  Sonnet 5 honors xhigh + max server-side (unlike Sonnet 4.6, which rejected
+ *  xhigh and capped at deep); Haiku rejects effort wholesale (`none`). Mirror
+ *  the Sonnet ceiling in src-tauri/src/assistant/turn.rs (model_max_effort). */
 export const MODEL_MAX_EFFORT: Record<ModelSel, ThinkingEffort> = {
   opus: "ultra",
   "claude-opus-4-7": "ultra",
   "claude-fable-5": "ultra",
-  sonnet: "deep",
+  sonnet: "ultra",
   haiku: "none",
 };
 

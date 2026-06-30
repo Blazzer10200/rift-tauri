@@ -81,7 +81,7 @@
   const MODEL_OPTIONS: ModelOpt[] = [
     ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", effort: true, maxEffort: "ultra" as ThinkingEffort }] : []),
     { id: "opus",   label: "Opus",   version: "4.8", effort: true,  maxEffort: "ultra" },
-    { id: "sonnet", label: "Sonnet", version: "4.6", effort: true,  maxEffort: "smart" },
+    { id: "sonnet", label: "Sonnet", version: "5",   effort: true,  maxEffort: "ultra" },
     ...(haikuAvailable() ? [{ id: "haiku" as ModelSel, label: "Haiku", version: "4.5", effort: false, maxEffort: "none" as ThinkingEffort }] : []),
   ];
   function pickModel(m: ModelOpt) {

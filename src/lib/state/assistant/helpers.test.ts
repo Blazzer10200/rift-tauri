@@ -137,17 +137,17 @@ describe("effortToFlag (must mirror src-tauri assistant turn.rs mapping)", () =>
     expect(effortToFlag("ultra", "claude-fable-5")).toBe("xhigh");
   });
   it("clamps an out-of-range tier to the model ceiling before mapping", () => {
-    // Sonnet tops out at deep(high): a stale ultra(xhigh) pref must NOT send xhigh.
-    expect(effortToFlag("ultra", "sonnet")).toBe("high");
+    // Sonnet 5 reaches ultra(xhigh) — an ultra pref passes straight through.
+    expect(effortToFlag("ultra", "sonnet")).toBe("xhigh");
     // smart on Sonnet is the responsive default → medium (not the old high).
     expect(effortToFlag("smart", "sonnet")).toBe("medium");
   });
 });
 
 describe("clampEffort (model effort ceiling)", () => {
-  it("caps Sonnet at deep(high) and leaves Opus/Fable untouched", () => {
-    expect(clampEffort("ultra", "sonnet")).toBe("deep"); // xhigh not accepted on Sonnet → down to high
-    expect(clampEffort("deep", "sonnet")).toBe("deep");  // in range now (Sonnet accepts high)
+  it("leaves Sonnet 5/Opus/Fable at ultra (all reach xhigh)", () => {
+    expect(clampEffort("ultra", "sonnet")).toBe("ultra"); // Sonnet 5 accepts xhigh
+    expect(clampEffort("deep", "sonnet")).toBe("deep");  // in range
     expect(clampEffort("quick", "sonnet")).toBe("quick"); // already in range
     expect(clampEffort("ultra", "opus")).toBe("ultra");
     expect(clampEffort("ultra", "claude-fable-5")).toBe("ultra");
@@ -167,9 +167,9 @@ describe("effortToFlag — default tier maps to medium (responsive interactive d
     expect(effortToFlag("deep", "opus")).toBe("high");
     expect(effortToFlag("ultra", "opus")).toBe("xhigh");
   });
-  it("Sonnet reaches deep(high) but xhigh clamps to high (no xhigh on Sonnet)", () => {
+  it("Sonnet 5 reaches deep(high) and ultra(xhigh)", () => {
     expect(effortToFlag("deep", "sonnet")).toBe("high");
-    expect(effortToFlag("ultra", "sonnet")).toBe("high"); // ultra clamps to sonnet's deep ceiling → high
+    expect(effortToFlag("ultra", "sonnet")).toBe("xhigh"); // Sonnet 5 accepts xhigh
   });
   it("haiku rejects effort wholesale → null", () => {
     expect(effortToFlag("smart", "haiku")).toBeNull();

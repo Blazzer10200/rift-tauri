@@ -254,15 +254,21 @@ export function summarizeGroup(blocks: Block[]): string {
   return parts.length > 4 ? `${shown} +${parts.length - 4}` : shown;
 }
 
-// Tighten the resolved model id into a short human label.
+// Tighten the resolved model id into a short human label. Handles both the
+// dated/minor form and the dateless major-only form the 4.6 generation onward
+// uses (a major release like Sonnet 5 omits the minor segment):
 //   claude-sonnet-4-6-20251001  → Sonnet 4.6
 //   claude-opus-4-7[1m]         → Opus 4.7
 //   claude-haiku-4-5            → Haiku 4.5
+//   claude-sonnet-5             → Sonnet 5    (dateless major-only)
+//   claude-fable-5              → Fable 5
 export function shortModel(id: string): string {
-  const m = /claude-(opus|sonnet|haiku)-(\d+)-(\d+)/i.exec(id);
+  // name, major, optional `-minor`. The minor group is non-greedy-optional so
+  // `claude-sonnet-5` (no minor) still matches and renders as just "Sonnet 5".
+  const m = /claude-(opus|sonnet|haiku|fable|mythos)-(\d+)(?:-(\d+))?/i.exec(id);
   if (!m) return id;
   const name = m[1][0].toUpperCase() + m[1].slice(1).toLowerCase();
-  return `${name} ${m[2]}.${m[3]}`;
+  return m[3] ? `${name} ${m[2]}.${m[3]}` : `${name} ${m[2]}`;
 }
 
 export function lineDelta(oldS: unknown, newS: unknown): { adds: number; dels: number } {

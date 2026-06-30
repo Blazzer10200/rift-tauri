@@ -106,14 +106,14 @@ npm install -g @anthropic-ai/claude-code
 claude  # first run: opens browser for Pro auth
 ```
 
-Verify: `claude --version` v2.1.111+ and `claude config` shows `model: claude-sonnet-4-6`.
+Verify: `claude --version` v2.1.111+ and `claude config` shows `model: claude-sonnet-5`. (The bare `sonnet` alias still resolves to 4.6 on shipped CLIs — pin the explicit id.)
 
 ### `~/.claude/settings.json`
 
 ```json
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "model": "claude-sonnet-4-6",
+  "model": "claude-sonnet-5",
   "autoUpdatesChannel": "stable",
   "effortLevel": "medium",
   "env": {
@@ -134,13 +134,13 @@ Verify: `claude --version` v2.1.111+ and `claude config` shows `model: claude-so
 ```
 
 **Why each line:**
-- Sonnet 4.6 default — handles 90%+ of coding at ~3× lower quota burn than Opus.
+- Sonnet 5 default — handles 90%+ of coding at ~3× lower quota burn than Opus.
 - Haiku for subagents — recon/grep agents fire at ~5% of Sonnet cost.
 - `effortLevel: medium` — caps output ~2500 tok. Xhigh burns the 5-hour window ~3× faster.
 - `CLAUDE_CODE_AUTO_COMPACT_WINDOW: "250000"` + `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: "80"` — bound + trigger the CLI's own auto-compaction at 80% of a 250K window. Pro plan can't afford the 300K cliff. (This is the `claude` CLI's built-in compaction — Rift's in-app compaction UI was removed in the 2026-06-12 minimal-core strip.)
 - Skill overrides — fork-mode skills user-invocable-only; auto-firing burns 10-30K tokens each.
 - `autoUpdatesChannel: stable` — avoids regression releases (v2.1.89+ caused 3-50x quota burn for some).
-- Opus on-demand only — every Opus turn competes w/ your Sonnet budget. `/model claude-opus-4-8` per-session, then `/model claude-sonnet-4-6` back.
+- Opus on-demand only — every Opus turn competes w/ your Sonnet budget. `/model claude-opus-4-8` per-session, then `/model claude-sonnet-5` back.
 
 ### Usage tracking
 

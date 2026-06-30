@@ -99,9 +99,10 @@ describe("assistant.ctxWindowFor()", () => {
     expect(assistant.ctxWindowFor(tab)).toBe(200_000);
   });
 
-  it("returns 1M for sonnet 4.5/4.6 + opus 4.6/4.7", () => {
+  it("returns 1M for sonnet 4.5/4.6/5 + opus 4.6/4.7", () => {
     expect(assistant.ctxWindowFor({ lastModelId: "claude-sonnet-4-5", lastTurnUsage: null } as any)).toBe(1_000_000);
     expect(assistant.ctxWindowFor({ lastModelId: "claude-sonnet-4-6", lastTurnUsage: null } as any)).toBe(1_000_000);
+    expect(assistant.ctxWindowFor({ lastModelId: "claude-sonnet-5", lastTurnUsage: null } as any)).toBe(1_000_000);
     expect(assistant.ctxWindowFor({ lastModelId: "claude-opus-4-6", lastTurnUsage: null } as any)).toBe(1_000_000);
     expect(assistant.ctxWindowFor({ lastModelId: "claude-opus-4-7", lastTurnUsage: null } as any)).toBe(1_000_000);
   });

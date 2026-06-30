@@ -216,7 +216,9 @@ describe("formatters", () => {
   it("shortModel tightens ids and passes unknowns through", () => {
     expect(shortModel("claude-sonnet-4-6-20251001")).toBe("Sonnet 4.6");
     expect(shortModel("claude-opus-4-7[1m]")).toBe("Opus 4.7");
-    expect(shortModel("claude-fable-5")).toBe("claude-fable-5");
+    expect(shortModel("claude-sonnet-5")).toBe("Sonnet 5"); // dateless major-only
+    expect(shortModel("claude-fable-5")).toBe("Fable 5");
+    expect(shortModel("ollama/llama3")).toBe("ollama/llama3"); // unknown passes through
   });
   it("lineDelta counts real diffs, rejects non-strings, approximates huge inputs", () => {
     expect(lineDelta("a\nb\nc", "a\nx\nc")).toEqual({ adds: 1, dels: 1 });
