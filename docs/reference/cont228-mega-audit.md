@@ -1,5 +1,7 @@
 # Rift Mega-Audit cont.228 — Master Report
 
+> _Relocated cont.249 from `docs/audit/cont228/MASTER-REPORT.md` → `docs/reference/`. Historical-recovery paths below still point at the original `docs/audit/cont228/` location (that's where the now-deleted artifacts lived in git history — don't "fix" them to the new path or `git log` recovery breaks)._
+
 > Self-directed ULTRACODE full-codebase audit (user: "get it all done correctly, all angles, FE→BE, CLI-compat, perf — it feels like a mess and slow"). Four parallel sweeps: **static** (line-level bugs/dead-code/perf), **dynamic** (telemetry forensics + live CLI-compat + deps/build + test-coverage), **architecture** (structural coherence), and a **perf ground-truth** baseline from prod telemetry. Branch `mega-audit-cont228`, NOT shipped.
 >
 > Baseline held green throughout: `cargo check` clean · `svelte-check` 0/0 (4134) · vitest 378/378.
