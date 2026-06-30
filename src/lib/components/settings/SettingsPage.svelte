@@ -37,6 +37,12 @@
     { id: "chatty", label: "Chatty" },
   ] as const;
 
+  const COMMAND_OUTPUTS = [
+    { id: "minimal", label: "Minimal" },
+    { id: "peek", label: "Peek" },
+    { id: "full", label: "Full" },
+  ] as const;
+
   type Section = "appearance" | "chat" | "speech" | "about";
   const ST_SECTIONS: { id: Section; label: string; icon: typeof Cog; sub: string; dot?: "ok" | "warn" }[] = [
     { id: "appearance", label: "Appearance", icon: Palette,  sub: "Theme, density, and chat rendering — applied instantly across Rift." },
@@ -588,6 +594,14 @@
                 <div class="seg" role="radiogroup" aria-label="Narration density">
                   {#each NARRATIONS as n (n.id)}
                     <button class:on={uiPrefs.narration === n.id} role="radio" aria-checked={uiPrefs.narration === n.id} type="button" onclick={() => uiPrefs.setNarration(n.id)}>{n.label}</button>
+                  {/each}
+                </div>
+              </div>
+              <div class="ctl-row tight">
+                <div><div class="ctl-t">Command output</div><div class="ctl-s">How much of a shell command's output (the in-and-out) shows in the stream. <b>Peek</b> shows the exit status and a few trailing lines, click to expand the rest; <b>Full</b> streams the whole terminal output live as it runs; <b>Minimal</b> shows just the command line.</div></div>
+                <div class="seg" role="radiogroup" aria-label="Command output detail">
+                  {#each COMMAND_OUTPUTS as c (c.id)}
+                    <button class:on={uiPrefs.commandOutput === c.id} role="radio" aria-checked={uiPrefs.commandOutput === c.id} type="button" onclick={() => uiPrefs.setCommandOutput(c.id)}>{c.label}</button>
                   {/each}
                 </div>
               </div>

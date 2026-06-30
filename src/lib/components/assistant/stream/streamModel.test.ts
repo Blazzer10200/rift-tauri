@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { messageToTurn, parseAskUserResult, groupNames, isFillerSay, classifySay } from "./streamModel";
+import { messageToTurn, parseAskUserResult, groupNames, isFillerSay, classifySay, outputPeek, groupBlocks } from "./streamModel";
 import type { StreamTool } from "./streamModel";
 import type { ChatMessage } from "$lib/state/assistant.svelte";
 
@@ -329,5 +329,48 @@ describe("classifySay — narration weight (filler / connective / prose)", () =>
   it("multi-line or code-bearing → prose", () => {
     expect(classifySay("Done.\nHere's what changed and why.")).toBe("prose");
     expect(classifySay("Run ```npm test``` to confirm.")).toBe("prose");
+  });
+});
+
+describe("outputPeek — trailing-lines preview for command output", () => {
+  it("null / empty → no lines", () => {
+    expect(outputPeek(null)).toEqual({ lines: [], more: 0 });
+    expect(outputPeek("")).toEqual({ lines: [], more: 0 });
+    expect(outputPeek("   \n  ")).toEqual({ lines: [], more: 0 });
+  });
+
+  it("short output → all lines, nothing elided", () => {
+    expect(outputPeek("one\ntwo")).toEqual({ lines: ["one", "two"], more: 0 });
+  });
+
+  it("long output → last N lines + elided count, skipping blanks", () => {
+    const out = "a\nb\n\nc\nd\ne"; // 5 non-empty lines
+    expect(outputPeek(out, 3)).toEqual({ lines: ["c", "d", "e"], more: 2 });
+  });
+});
+
+describe("adaptTool — shell carries its stdout; rich only when it has output", () => {
+  // Build a Bash tool block with a real result (the `tool` helper forces null).
+  const bash = (result: string | null, status: "done" | "pending" = "done") =>
+    ({ type: "tool", id: "b" + Math.random(), name: "Bash", input: { command: "ls" }, result, isError: false, status });
+
+  it("a Bash result is forwarded onto the adapted shell tool", () => {
+    const t = messageToTurn(msg([bash("file1.txt\nfile2.txt")])).blocks.find((b) => b.type === "tool")!.tool;
+    expect(t.kind).toBe("shell");
+    expect(t.result).toBe("file1.txt\nfile2.txt");
+  });
+
+  it("a shell command WITH output groups as its own rich block", () => {
+    const groups = groupBlocks(messageToTurn(msg([bash("some output")])).blocks);
+    const work = groups.find((g) => g.type === "work");
+    expect(work?.type).toBe("work");
+    // rich = its own seg carrying the single tool (not batched into 'other')
+    expect(work && work.type === "work" && work.segs.some((s) => s.seg === "rich" && s.tool.kind === "shell")).toBe(true);
+  });
+
+  it("a bare command with NO output stays in the lightweight WorkLine batch", () => {
+    const groups = groupBlocks(messageToTurn(msg([bash(null)])).blocks);
+    const work = groups.find((g) => g.type === "work");
+    expect(work && work.type === "work" && work.segs.every((s) => s.seg !== "rich")).toBe(true);
   });
 });

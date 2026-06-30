@@ -10,6 +10,7 @@
   import StreamResult from "./StreamResult.svelte";
   import StreamAgent from "./StreamAgent.svelte";
   import StreamAskUser from "./StreamAskUser.svelte";
+  import StreamShell from "./StreamShell.svelte";
   import PermissionBar from "../PermissionBar.svelte";
   import { messageToTurn, groupBlocks, fmtDur, classifySay, VERB_ING, tasksToPlanItems, type StreamTool } from "./streamModel";
   import { assistant, type ChatMessage, type TabState } from "$lib/state/assistant.svelte";
@@ -233,6 +234,8 @@
             <StreamAgent tool={seg.tool} />
           {:else if seg.tool.kind === "ask"}
             <StreamAskUser tool={seg.tool} />
+          {:else if seg.tool.kind === "shell"}
+            <StreamShell tool={seg.tool} streaming={streaming && gi === groups.length - 1} />
           {/if}
           {#each pendingPerms([seg.tool]) as pt (pt.id)}
             <PermissionBar toolUseId={pt.id} toolName={pt.name} />
@@ -260,9 +263,9 @@
              model's), no token meter. Just the calm verb + a nudge. -->
         <span class="sf-meta sf-await-hint">— choose an option above to continue</span>
       {:else}
-        {#if liveTool?.cap}
-          <span class="sf-meta">{liveTool.cap}</span>
-        {/if}
+        <!-- The command/file caption is intentionally NOT repeated here — it
+             already shows in the active work row above (was a duplicate). -->
+
         {#if liveSecs != null}
           <span class="sf-pip">·</span>
           <span class="sf-meta"><AnimatedCount value={liveSecs} durationMs={300} />s</span>

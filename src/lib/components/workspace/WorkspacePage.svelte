@@ -103,13 +103,6 @@
   // recent folder that isn't yet a project can be "adopted" into one in a click.
   const knownKeys = $derived(new Set(projects.items.map((p) => projectRootKey(p.root))));
   const activeIsProject = $derived(hasRoot && knownKeys.has(projectRootKey(paneRoot)));
-  // Recent folders not yet projects — and not the active folder, which has its
-  // own dedicated "Add <folder> as a project" CTA (avoid a duplicate pill).
-  const adoptableRecents = $derived(
-    assistant.workspace.recent
-      .filter((r) => !knownKeys.has(projectRootKey(r)) && projectRootKey(r) !== projectRootKey(paneRoot))
-      .slice(0, 4),
-  );
 
   // ── Project editor state ────────────────────────────────────────────────────
   let editing = $state<Project | null>(null);
@@ -152,7 +145,6 @@
 
   // "Adopt" = New project pre-seeded from a folder the user already has open.
   const adoptActive = () => { if (paneRoot) startNew(paneRoot); };
-  const adoptRecent = (r: string) => startNew(r);
 
   function startEdit(p: Project) {
     isNew = false;
@@ -170,6 +162,14 @@
     dRoot = prettyPath(r);
     if (!dName.trim()) dName = folderName(r);
     recentOpen = false;
+  }
+
+  // Evict a recent folder from the MRU — lets the user prune stale entries
+  // (e.g. a renamed/retired folder) so the picker stays clean. Close the popover
+  // if that was the last recent.
+  async function forgetRecent(r: string) {
+    await assistant.removeRecentRoot(r);
+    if (editorRecents.length === 0) recentOpen = false;
   }
 
   async function browse() {
@@ -348,11 +348,17 @@
                     <div class="recent-pop">
                       <div class="recent-h">Recent folders</div>
                       {#each editorRecents as r (r)}
-                        <button class="recent-row" type="button" onclick={() => pickRecentInEditor(r)}>
-                          <Folder size={13} />
-                          <span class="recent-name">{leafName(r)}</span>
-                          <span class="recent-path mono">{shortPath(r)}</span>
-                        </button>
+                        <div class="recent-row">
+                          <button class="recent-pick" type="button" onclick={() => pickRecentInEditor(r)}>
+                            <Folder size={13} />
+                            <span class="recent-name">{leafName(r)}</span>
+                            <span class="recent-path mono">{shortPath(r)}</span>
+                          </button>
+                          <button class="recent-forget" type="button" use:tooltip={"Forget this folder"}
+                            aria-label="Forget folder" onclick={() => forgetRecent(r)}>
+                            <X size={12} />
+                          </button>
+                        </div>
                       {/each}
                     </div>
                   {/if}
@@ -501,10 +507,10 @@
               <div class="empty-sub">{projects.lastError}</div>
               <button class="save-btn" type="button" onclick={() => projects.refresh()}>Retry</button>
             </div>
-          {:else if projects.items.length === 0 && !(hasRoot && !activeIsProject) && adoptableRecents.length === 0}
-            <!-- True empty-state only when there's no adopt path (no active folder
-                 to adopt + no recent folders). The adopt zone already guides the
-                 common case, so we don't repeat the instruction. -->
+          {:else if projects.items.length === 0 && !(hasRoot && !activeIsProject)}
+            <!-- True empty-state only when there's no active folder to save. When
+                 a folder IS open, the "Save … as a project" prompt below guides
+                 the user, so we don't repeat the instruction here. -->
             <div class="empty lean">
               <div class="empty-tt">No projects yet</div>
               <div class="empty-sub">Name a workspace folder and scope which files Rift can read.</div>
@@ -578,28 +584,21 @@
             {/if}
           {/if}
 
-          <!-- ── Add a project — one consistent adopt zone ──────────────────── -->
-          {#if (hasRoot && !activeIsProject && !editing) || adoptableRecents.length > 0}
-            <div class="add-zone">
-              <div class="add-zone-h">Add a project</div>
-              <div class="add-list">
-                {#if hasRoot && !activeIsProject && !editing}
-                  <button class="add-tile active-folder" type="button" onclick={adoptActive}>
-                    <span class="add-ic"><Sparkles size={14} /></span>
-                    <span class="add-tx">
-                      <b>{ctxName}</b>
-                      <small>Current folder · click to scope it</small>
-                    </span>
-                  </button>
-                {/if}
-                {#each adoptableRecents as r (r)}
-                  <button class="add-tile" type="button" onclick={() => adoptRecent(r)} use:tooltip={prettyPath(r)}>
-                    <span class="add-ic ghost"><Folder size={14} /></span>
-                    <span class="add-tx"><b>{leafName(r)}</b><small>Recent folder</small></span>
-                  </button>
-                {/each}
-              </div>
-            </div>
+          <!-- ── Save the current folder as a project — a SINGLE, quiet prompt.
+               Only the active, not-yet-projectified folder gets a one-click
+               "save it" affordance. Recent folders are NOT surfaced here as
+               competing tiles (that read as noise + resurrected ghosts of
+               folders the user opened once); they live inside the editor's
+               folder picker, where they're a convenience, not a to-do list. ── -->
+          {#if hasRoot && !activeIsProject && !editing}
+            <button class="save-current" type="button" onclick={adoptActive}>
+              <span class="sc-ic"><Sparkles size={14} /></span>
+              <span class="sc-tx">
+                Save <b>{ctxName}</b> as a project
+                <small>Scope which files Rift reads and pin it to the sidebar</small>
+              </span>
+              <ArrowRight size={15} class="sc-go" />
+            </button>
           {/if}
         </section>
 
@@ -820,12 +819,19 @@
     border-radius: var(--radius-xl); border: 1px solid var(--border-strong); background: var(--bg-elev-2);
     box-shadow: var(--shadow-lg); display: flex; flex-direction: column; gap: 1px; }
   .recent-h { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--fg-faint); padding: 4px 8px 6px; }
-  .recent-row { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: var(--radius); text-align: left; font: inherit;
-    color: var(--fg-2); transition: background var(--dur-fast); }
+  /* Row = a pick-button (most of the width) + a quiet forget (×) button. */
+  .recent-row { display: flex; align-items: center; border-radius: var(--radius); transition: background var(--dur-fast); }
   .recent-row:hover { background: var(--surface-hover); }
-  .recent-row :global(svg) { color: var(--fg-faint); flex: none; }
+  .recent-pick { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; padding: 7px 8px; text-align: left;
+    font: inherit; color: var(--fg-2); cursor: pointer; }
+  .recent-pick :global(svg) { color: var(--fg-faint); flex: none; }
   .recent-name { font-size: var(--fs-sm); font-weight: 550; flex: none; }
   .recent-path { font-size: var(--fs-xs); color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .recent-forget { flex: none; display: grid; place-items: center; width: 22px; height: 22px; margin-right: 5px;
+    border-radius: var(--radius); color: var(--fg-faint); opacity: 0; cursor: pointer;
+    transition: opacity var(--dur-fast), background var(--dur-fast), color var(--dur-fast); }
+  .recent-row:hover .recent-forget { opacity: 1; }
+  .recent-forget:hover { background: var(--danger-soft, color-mix(in oklab, red 14%, transparent)); color: var(--danger, #f87171); }
 
   .pat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   .ed-foot { display: flex; align-items: center; justify-content: space-between; padding-top: 4px; }
@@ -941,26 +947,23 @@
   .gcard-edit:hover { background: var(--surface-hover); color: var(--fg); opacity: 1; }
   .gcard-split:hover { background: var(--surface-hover); color: var(--accent); opacity: 1; }
 
-  /* ── Add-a-project zone — unified adopt tiles ───────────────────────────── */
-  .add-zone { width: 100%; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
-  .add-zone-h { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-faint); margin: 0 2px 9px; }
-  /* Auto-fill so recent folders flow into one wide row at fullscreen instead of
-     stacking into 2 rows — keeps the block short. */
-  .add-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; }
-  @media (max-width: 560px) { .add-list { grid-template-columns: minmax(0, 1fr); } }
-  .add-tile { display: flex; align-items: center; gap: 10px; padding: 9px 11px; text-align: left; cursor: pointer; font: inherit; min-width: 0;
-    border-radius: var(--radius-lg); border: 1px dashed var(--border-strong); background: color-mix(in oklab, var(--fg) 2%, transparent);
+  /* ── Save-current-folder prompt — ONE quiet, accent-tinted CTA ──────────────
+     Replaces the old multi-tile "adopt zone". Only shows for an open folder
+     that isn't yet a project; recent folders live in the editor's picker, not
+     here, so the page never resurrects folders the user opened once. */
+  .save-current { display: flex; align-items: center; gap: 11px; width: 100%; margin-top: 12px; padding: 11px 13px;
+    text-align: left; cursor: pointer; font: inherit; min-width: 0;
+    border-radius: var(--radius-lg); border: 1px solid var(--ghost-border);
+    background: linear-gradient(180deg, var(--accent-soft), transparent);
     transition: border-color var(--dur-fast), background var(--dur-fast), transform var(--dur-fast); }
-  .add-tile:hover { border-style: solid; border-color: var(--ghost-border); background: var(--accent-soft); transform: translateY(-1px); }
-  .add-tile.active-folder { border-color: var(--ghost-border); background: linear-gradient(180deg, var(--accent-soft), transparent); }
-  .add-tile.active-folder:hover { border-color: var(--accent); }
-  .add-ic { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: var(--radius);
+  .save-current:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .sc-ic { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: var(--radius);
     background: var(--accent-soft); color: var(--accent); }
-  .add-ic.ghost { background: color-mix(in oklab, var(--fg) 5%, transparent); color: var(--fg-muted); }
-  .add-tile:hover .add-ic.ghost { background: var(--accent-soft); color: var(--accent); }
-  .add-tx { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-  .add-tx b { font-size: var(--fs-sm); font-weight: 620; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .add-tx small { font-size: 10.5px; color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sc-tx { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; font-size: var(--fs-sm); color: var(--fg); }
+  .sc-tx b { font-weight: 660; }
+  .sc-tx small { font-size: 10.5px; color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  :global(.save-current .sc-go) { flex: none; color: var(--fg-faint); transition: color var(--dur-fast), transform var(--dur-fast); }
+  .save-current:hover :global(.sc-go) { color: var(--accent); transform: translateX(2px); }
 
   /* ── What's new strip — collapsible disclosure below Projects ───────────── */
   .news-strip { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }

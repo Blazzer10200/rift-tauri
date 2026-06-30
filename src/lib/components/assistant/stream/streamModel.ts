@@ -264,7 +264,24 @@ function adaptTool(tb: ToolBlock): StreamTool {
     t.input = inp;
     t.result = tb.result ?? null;
   }
+  if (kind === "shell") {
+    // Carry the full stdout/stderr through so the live stream can show the
+    // command's in-and-out (gated by the `commandOutput` pref at render time).
+    // Already on the tool block (streaming.ts fillToolResult) — just forward it.
+    t.result = tb.result ?? null;
+  }
   return t;
+}
+
+// Trailing-lines preview of a shell result for "peek" mode: the last `n`
+// non-empty lines, so the user sees the tail (exit message / final output)
+// without expanding. Returns the lines + whether anything was elided.
+export function outputPeek(result: string | null | undefined, n = 3): { lines: string[]; more: number } {
+  if (!result) return { lines: [], more: 0 };
+  const all = result.replace(/\s+$/, "").split("\n");
+  const nonEmpty = all.filter((l) => l.trim().length > 0);
+  if (nonEmpty.length <= n) return { lines: nonEmpty, more: 0 };
+  return { lines: nonEmpty.slice(-n), more: nonEmpty.length - n };
 }
 
 // Map one live assistant ChatMessage → the StreamTurn render model.
@@ -339,7 +356,14 @@ export function groupBlocks(blocks: StreamBlock[]): Group[] {
   return out;
 }
 
-const isRich = (k: TKind) => k === "plan" || k === "web" || k === "fetch" || k === "test" || k === "lint" || k === "agent" || k === "ask";
+const isRichKind = (k: TKind) => k === "plan" || k === "web" || k === "fetch" || k === "test" || k === "lint" || k === "agent" || k === "ask";
+
+// A tool gets its own rich block when its KIND is inherently rich, OR it's a
+// shell command that produced output (so the live stream can show the in-and-
+// out). A bare command with no output stays in the lightweight WorkLine batch,
+// keeping quick `cd`-style steps calm. Pref-gating of the body happens at render.
+const isRich = (t: StreamTool) =>
+  isRichKind(t.kind) || (t.kind === "shell" && typeof t.result === "string" && t.result.trim().length > 0);
 
 // Split a work run: rich tools each get their own block; edits batch; the rest
 // collapse to one quiet WorkLine. Order preserved.
@@ -347,7 +371,7 @@ function segmentWork(tools: StreamTool[]): WorkSeg[] {
   const segs: WorkSeg[] = [];
   let cur: { seg: "edit" | "other"; tools: StreamTool[] } | null = null;
   for (const t of tools) {
-    if (isRich(t.kind)) {
+    if (isRich(t)) {
       cur = null;
       // Coalesce consecutive plan blocks: the newer CLI emits one TaskCreate /
       // TaskUpdate per item, so a 4-item plan would otherwise render 4 separate

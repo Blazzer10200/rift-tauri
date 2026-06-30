@@ -206,12 +206,28 @@ pub fn assistant_delete_project(id: String) -> Result<Vec<ProjectDto>, String> {
         return Err(format!("invalid project id: {id}"));
     }
     let mut cfg = load_config();
-    let before = cfg.projects.len();
-    cfg.projects.retain(|p| p.id != id);
-    if cfg.projects.len() != before {
+    let changed = remove_project_in_place(&mut cfg, &id);
+    if changed {
         save_config(&cfg)?;
     }
     Ok(projects_dto(&cfg))
+}
+
+/// Remove the project with `id` AND evict its root from the recent-roots MRU,
+/// mutating `cfg` in place. Returns whether anything changed. Pulled out of the
+/// command so the ghost-eviction (deleting a project must not leave its folder
+/// lingering in `recent_roots`) is unit-testable without disk I/O.
+fn remove_project_in_place(cfg: &mut AssistantConfig, id: &str) -> bool {
+    let before = cfg.projects.len();
+    let removed_root = cfg.projects.iter().find(|p| p.id == id).map(|p| p.root.clone());
+    cfg.projects.retain(|p| p.id != id);
+    if cfg.projects.len() == before {
+        return false;
+    }
+    if let Some(root) = removed_root {
+        cfg.recent_roots.retain(|r| r != &root);
+    }
+    true
 }
 
 #[cfg(test)]
@@ -251,5 +267,42 @@ mod tests {
         let cfg = AssistantConfig::default();
         let (inc, exc) = patterns_for_root(&cfg, std::path::Path::new("/no/such/project"));
         assert!(inc.is_empty() && exc.is_empty());
+    }
+
+    #[test]
+    fn deleting_a_project_also_evicts_its_recent_root() {
+        // Regression: deleting a project used to leave its root in recent_roots,
+        // so the folder re-surfaced as a ghost in the picker / "recent" UI.
+        let root = PathBuf::from("/ws/exfil-v1");
+        let mut cfg = AssistantConfig {
+            projects: vec![Project {
+                id: "p1".into(),
+                name: "exfil-v1".into(),
+                root: root.clone(),
+                include: vec![],
+                exclude: vec![],
+                created_at: 0,
+            }],
+            recent_roots: vec![root.clone(), PathBuf::from("/ws/other")],
+            ..Default::default()
+        };
+
+        let changed = remove_project_in_place(&mut cfg, "p1");
+
+        assert!(changed);
+        assert!(cfg.projects.is_empty());
+        // The ghost is gone, but unrelated recents are untouched.
+        assert_eq!(cfg.recent_roots, vec![PathBuf::from("/ws/other")]);
+    }
+
+    #[test]
+    fn deleting_an_unknown_project_changes_nothing() {
+        let mut cfg = AssistantConfig {
+            recent_roots: vec![PathBuf::from("/ws/keep")],
+            ..Default::default()
+        };
+        let changed = remove_project_in_place(&mut cfg, "nope");
+        assert!(!changed);
+        assert_eq!(cfg.recent_roots, vec![PathBuf::from("/ws/keep")]);
     }
 }

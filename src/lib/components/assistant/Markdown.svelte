@@ -612,22 +612,14 @@
     position: relative;
     margin: 14px 0;
     padding: 12px 15px;
-    background:
-      radial-gradient(140% 120% at 0% 0%, color-mix(in oklch, var(--accent) 6%, transparent), transparent 55%),
-      color-mix(in oklch, var(--accent) 3.5%, oklch(0.185 0.012 245));
-    border: 1px solid color-mix(in oklch, var(--accent) 10%, var(--border));
+    background: color-mix(in oklab, var(--fg) 2%, transparent);
+    border: 1px solid var(--border);
     border-radius: var(--radius-xl);
     overflow-x: auto;
     font-size: var(--fs-sm);
     line-height: 1.6;
     box-shadow: var(--shadow), inset 0 1px 0 color-mix(in oklch, #fff 4%, transparent);
     animation: code-rise var(--dur-rise) var(--ease-page) both;
-  }
-  .md :global(pre)::before {
-    content: "";
-    position: absolute; inset: 0 0 auto 0; height: 1px;
-    background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--accent) 45%, transparent), transparent);
-    opacity: 0.7; pointer-events: none;
   }
   .md :global(pre code) {
     background: transparent;
@@ -935,28 +927,17 @@
      ToolChip can reuse the exact same look. ─────────────────────────────── */
   .md :global(.shiki-block) {
     margin: 14px 0;
-    border: 1px solid color-mix(in oklch, var(--accent) 10%, var(--border));
+    border: 1px solid var(--border);
     border-radius: var(--radius-xl);
     overflow: hidden;
-    background:
-      radial-gradient(140% 120% at 0% 0%, color-mix(in oklch, var(--accent) 7%, transparent), transparent 55%),
-      color-mix(in oklch, var(--accent) 4%, oklch(0.18 0.012 245));
+    background: color-mix(in oklab, var(--fg) 2%, transparent);
     position: relative;
-    box-shadow:
-      var(--shadow),
-      inset 0 1px 0 color-mix(in oklch, #fff 5%, transparent);
+    box-shadow: none;
     animation: code-rise var(--dur-rise) var(--ease-page) both;
   }
   @keyframes code-rise {
     from { opacity: 0; transform: translateY(6px) scale(0.992); }
     to   { opacity: 1; transform: translateY(0) scale(1); }
-  }
-  /* hairline accent glow along the top edge */
-  .md :global(.shiki-block::before) {
-    content: "";
-    position: absolute; inset: 0 0 auto 0; height: 1px;
-    background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--accent) 50%, transparent), transparent);
-    opacity: 0.7; pointer-events: none;
   }
   @media (prefers-reduced-motion: reduce) {
     .md :global(.shiki-block) { animation: none; }

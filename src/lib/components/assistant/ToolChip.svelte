@@ -500,9 +500,8 @@
 
 <style>
   .chip {
-    align-self: flex-start;
-    max-width: min(100%, 78ch);
-    width: fit-content;
+    align-self: stretch;
+    width: 100%;
     margin: 2px 0;
     background: color-mix(in oklch, var(--bg-elev-1) 70%, transparent);
     border: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
@@ -569,8 +568,10 @@
     background: transparent;
   }
   .chip[data-status="pending"] {
-    background: color-mix(in oklch, var(--accent-soft) 45%, var(--bg-elev-1));
-    border-color: color-mix(in oklab, var(--accent) 28%, var(--border));
+    /* Neutral resting surface like every other block; a faint accent border is
+       the only "running now" cue (status signal, not a card color). */
+    background: color-mix(in oklch, var(--bg-elev-1) 70%, transparent);
+    border-color: color-mix(in oklab, var(--accent) 22%, var(--border));
     opacity: 1;
   }
   .chip[data-status="error"] {
@@ -763,27 +764,17 @@
     animation: chip-spin 1s linear infinite;
   }
 
-  /* Result — terminal style (Bash, remote_bash, BashOutput). A deep terminal
-     surface w/ a shell-colored left spine (cyan-ish info for PowerShell, neutral
-     for bash) + header chrome, matching the code-block family in Markdown. */
+  /* Result — terminal style (Bash, remote_bash, BashOutput). Neutral-gray
+     surface shared with every other block (no accent tint), so terminals,
+     reads, edits and the live stream blocks all read as one family. */
   .terminal {
-    background:
-      radial-gradient(140% 120% at 0% 0%, color-mix(in oklch, var(--accent) 6%, transparent), transparent 55%),
-      oklch(0.17 0.01 245);
-    border: 1px solid color-mix(in oklch, var(--accent) 8%, var(--border));
+    background: color-mix(in oklab, var(--fg) 2%, transparent);
+    border: 1px solid var(--border);
     border-radius: var(--radius-xl);
     overflow: hidden;
     position: relative;
-    box-shadow: var(--shadow), inset 0 1px 0 color-mix(in oklch, #fff 4%, transparent);
+    box-shadow: none;
     animation: tool-rise var(--dur-rise) var(--ease-page) both;
-  }
-  .terminal::before {
-    content: ""; position: absolute; inset: 0 0 auto 0; height: 1px;
-    background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--accent) 45%, transparent), transparent);
-    opacity: 0.7; pointer-events: none;
-  }
-  .terminal[data-shell="pwsh"]::before {
-    background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--info) 50%, transparent), transparent);
   }
   @keyframes tool-rise {
     from { opacity: 0; transform: translateY(5px); }
@@ -842,38 +833,36 @@
     font-size: 10px;
     color: var(--fg-muted);
     border-top: 1px solid color-mix(in oklch, var(--border) 40%, transparent);
-    background: color-mix(in oklch, var(--accent) 4%, oklch(0.195 0.01 245));
+    background: color-mix(in oklab, var(--fg) 4%, transparent);
     font-style: italic;
   }
 
-  /* Result — code style (Read). Emerald-spined read surface, matching the
-     code-block + terminal family. */
+  /* Result — code style (Read). Neutral-gray surface, same family as the
+     terminal + every other block (accent tint removed). */
   .result.code {
-    background:
-      radial-gradient(140% 120% at 0% 0%, color-mix(in oklch, var(--accent) 6%, transparent), transparent 55%),
-      color-mix(in oklch, var(--accent) 3%, var(--bg-elev-1));
-    border: 1px solid color-mix(in oklch, var(--accent) 10%, var(--border));
+    background: color-mix(in oklab, var(--fg) 2%, transparent);
+    border: 1px solid var(--border);
     border-radius: var(--radius-xl);
     padding: 9px 13px;
     max-height: 320px;
-    box-shadow: var(--shadow-sm), inset 0 1px 0 color-mix(in oklch, var(--accent) 6%, transparent);
+    box-shadow: none;
     animation: tool-rise var(--dur-rise) var(--ease-page) both;
   }
 
-  /* Result — list style (Grep, Glob, list_dir). */
+  /* Result — list style (Grep, Glob, list_dir). Neutral-gray, same family. */
   .list {
     list-style: none;
     margin: 0;
     padding: 5px 0;
-    background: color-mix(in oklch, var(--accent) 3%, var(--bg-elev-1));
-    border: 1px solid color-mix(in oklch, var(--accent) 9%, var(--border));
+    background: color-mix(in oklab, var(--fg) 2%, transparent);
+    border: 1px solid var(--border);
     border-radius: var(--radius-xl);
     max-height: 320px;
     overflow: auto;
     font-family: var(--font-mono, monospace);
     font-size: 10.5px;
     line-height: 1.55;
-    box-shadow: var(--shadow-sm);
+    box-shadow: none;
     animation: tool-rise var(--dur-rise) var(--ease-page) both;
   }
   @media (prefers-reduced-motion: reduce) {

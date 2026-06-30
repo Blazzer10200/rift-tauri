@@ -913,9 +913,11 @@
   .work-chev.open { transform: rotate(90deg); }
   .work-spark {
     display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; flex: none;
-    background: var(--accent-soft); color: var(--accent);
+    background: color-mix(in oklch, var(--fg) 6%, transparent); color: var(--fg-muted);
   }
-  .work.live .work-spark { animation: nodePulse var(--pulse-live) var(--ease-soft) infinite; }
+  /* Only the LIVE group lights the badge accent — a "running now" cue, not a
+     resting color. */
+  .work.live .work-spark { background: var(--accent-soft); color: var(--accent); animation: nodePulse var(--pulse-live) var(--ease-soft) infinite; }
   @keyframes nodePulse {
     0%, 100% { box-shadow: 0 0 0 0 transparent; }
     50% { box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 20%, transparent); }

@@ -8,6 +8,7 @@ const ACCENT_KEY = "rift.ui.accent.v1";
 const CODE_KEY = "rift.ui.code.v1";
 const STREAM_MODE_KEY = "rift.ui.stream-mode.v1";
 const NARRATION_KEY = "rift.ui.narration.v1";
+const COMMAND_OUTPUT_KEY = "rift.ui.command-output.v1";
 const DOTFIELD_KEY = "rift.ui.dotfield.v1";
 const VIVIDNESS_KEY = "rift.ui.vividness.v1";
 
@@ -20,6 +21,16 @@ const VIVIDNESS_KEY = "rift.ui.vividness.v1";
 //  - "chatty": every narration line as a full prose block (the original behavior).
 export type Narration = "focused" | "balanced" | "chatty";
 const NARRATION_IDS = new Set<string>(["focused", "balanced", "chatty"]);
+
+// How much of a shell command's output (stdout/stderr + exit) to surface in the
+// live stream. The output already rides the tool block; this only governs render.
+//  - "minimal": command line only, no output body (the original behavior).
+//  - "peek" (default): exit status + a few trailing lines, click to expand the
+//    full output — calm stream, detail one click away.
+//  - "full": stream the whole stdout/stderr in a terminal body as it runs
+//    (VS Code-style in-and-out), exit code on finish.
+export type CommandOutput = "minimal" | "peek" | "full";
+const COMMAND_OUTPUT_IDS = new Set<string>(["minimal", "peek", "full"]);
 
 // Background texture driving `.app[data-dots]` (variant CSS lives in AppShell).
 // "dots" = the default base field (no override); "off" hides it entirely.
@@ -72,6 +83,9 @@ class UiPrefs {
   streamMode = $state(true);
   // Live-stream narration density (see Narration type). Default "balanced".
   narration = $state<Narration>("balanced");
+  // How much shell command output to render in the live stream (see
+  // CommandOutput type). Default "peek".
+  commandOutput = $state<CommandOutput>("peek");
 
   init() {
     if (typeof window === "undefined") return;
@@ -115,6 +129,9 @@ class UiPrefs {
 
     const narrRaw = localStorage.getItem(NARRATION_KEY);
     if (narrRaw !== null && NARRATION_IDS.has(narrRaw)) this.narration = narrRaw as Narration;
+
+    const cmdOutRaw = localStorage.getItem(COMMAND_OUTPUT_KEY);
+    if (cmdOutRaw !== null && COMMAND_OUTPUT_IDS.has(cmdOutRaw)) this.commandOutput = cmdOutRaw as CommandOutput;
 
     this.apply();
   }
@@ -164,6 +181,11 @@ class UiPrefs {
   setNarration(n: Narration) {
     this.narration = n;
     localStorage.setItem(NARRATION_KEY, n);
+  }
+
+  setCommandOutput(c: CommandOutput) {
+    this.commandOutput = c;
+    localStorage.setItem(COMMAND_OUTPUT_KEY, c);
   }
 
 

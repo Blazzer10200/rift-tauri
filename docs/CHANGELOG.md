@@ -2,23 +2,24 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.76.0 — A calmer activity stream: work first, commentary quiet
+## v0.77.0 — See command output, cleaner projects, one calm block style
+
+### Added
+- **Command output now shows in the stream — the in-and-out, not just the command line.** When Claude runs a shell command you see its actual stdout/stderr, with a new three-way **Command output** control in Settings → Chat rendering: **Peek** (default — exit status + the last few lines, click to expand the rest), **Full** (the whole terminal output streams live as it runs), or **Minimal** (just the command line, the old behavior). A command with no output stays a quiet one-liner.
+
+### Fixed
+- **Removing a project no longer leaves a ghost.** Deleting a project used to leave its folder lingering in the "recent folders" list, so it kept re-appearing as if it were still a thing (e.g. a removed `exfil-v1` haunting the picker). Delete now fully forgets the folder. The Add-a-project area was also cleaned up: one quiet "Save this folder as a project" prompt instead of a grid of random recent-folder tiles, and recent folders moved into the new-project picker with a per-row "forget" (×) button to prune stale ones.
+- **The same command no longer prints twice in the live stream** — it was showing once as the work row and again in the muted footer; the footer now keeps just the verb + timer + tokens.
 
 ### Changed
-- **The live activity stream now reads as work-with-commentary instead of chat-between-tools — and you can dial how much commentary shows.** As Claude works it narrates between steps ("Now creating notes.txt:", "Compiled clean — now the release build:"). Those lines were rendered as full prose blocks with the same visual weight as Claude's actual answer, so a turn that was mostly *working* could feel mostly *talking*. Now there's a three-way **Narration** control in Settings → Chat rendering:
-  - **Balanced** (new default) — keeps every narration line but demotes the short connective "did-X, now-Y" beats to a quiet, dotted inline note that hugs the work rows. You still see each step; the work rows and the real answer carry the visual weight.
-  - **Focused** — hides the pure connective filler entirely (the work rows already name the file/command).
-  - **Chatty** — every line as a full prose block (the previous behavior), for when you want the running monologue.
-- **Claude also narrates *with* its work rather than between it.** Sharpened the work-habit guidance so a turn explains a step once and then fires all the independent reads/greps/edits that step needs together, instead of narrate → one tool → narrate → one tool. Same visibility, less ping-pong, more actual work per turn. (CDP-verified live: connective beats demote to muted inline notes while real answers stay full-weight; svelte-check 0/0, cargo check clean, vitest 398/398.)
+- **Every chat block now shares one neutral surface.** Terminals, file reads, grep/glob results, create/edit diffs, and the model's own code blocks were a mix of emerald-tinted "glassy" cards (v0.72.0) and plain gray, at different widths — so a single answer could show two clashing colors and crooked edges. They're all one neutral-gray, full-width, aligned family now; accent is reserved for live "running now" cues and prose (links, callouts). (CDP-verified: terminal, command output, and JSON code blocks render identical; svelte-check 0/0, vitest 128/128.)
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
 
-- **v0.75.0** — Removed the half-working "steer" feature (Alt+Enter live-injection) front-and-back; the message queue (type while it works → fires as the next turn, no derail) is now the single way to address a running turn.
-- **v0.74.0** — Two bug fixes: permission prompts (Allow/Deny bar) now appear on the live turn in every non-Bypass mode (they were only wired into persisted history, so gated tools silently auto-denied after 2 min), and sub-agents now reliably register as finished instead of spinning "working…" forever.
-
-- **v0.72.0** — Plan-mode unfreeze (the native "exit plan mode" step no longer hangs the turn for minutes, #75), terminal-grade work habits (the model now batches tool calls + skips redundant re-reads like it does in the CLI, #76), and a modern unified look for every chat block — code, terminal, file-read, and create/edit diff cards now share one emerald-tinted glassy Rift surface with a top accent glow and rise-in entrance (#77).
-
-- **v0.71.8** — Maintenance (no behavior change): finished the path-helper de-dup — the path-string helpers had drifted into ~7 copies across the codebase; consolidated into one canonical, unit-tested home (`src/lib/utils/path.ts`). `leafName` (folder/file name on pane headers, file menus, conversation list, tool captions) and `rootKey` (the "same folder?" comparison key) each had multiple drifted copies — two even disagreed on trailing-slash handling; now uniform.
+- **v0.76.0** — A calmer activity stream: between-step narration is demoted to quiet inline notes (new three-way **Narration** control: Focused / Balanced / Chatty), so a working turn reads as work-with-commentary, not chat-between-tools.
+- **v0.75.0** — Removed the half-working "steer" feature (Alt+Enter live-injection) front-and-back; the message queue (type while it works → fires as the next turn) is now the single way to address a running turn.
+- **v0.74.0** — Two bug fixes: permission prompts now appear on the live turn in every non-Bypass mode (gated tools were silently auto-denying after 2 min), and sub-agents reliably register as finished instead of spinning "working…" forever.
+- **v0.72.0** — Plan-mode unfreeze (#75), terminal-grade work habits — batches tool calls + skips redundant re-reads (#76), and a unified look for every chat block (#77; the emerald tint from this is what v0.77.0 replaced with neutral gray).
 
 - **v0.71.7** — Maintenance (no behavior change): first half of the path-helper de-dup — consolidated `leafName`/`shortPath`/`prettyPath` into `utils/path.ts` (v0.71.8 folded in the `rootKey` half).
 
