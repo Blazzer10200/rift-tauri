@@ -178,9 +178,9 @@ fn validate_attachments(attachments: &[AssistantAttachment]) -> Result<(), Strin
     Ok(())
 }
 
-/// Build a stream-json `user` message NDJSON line (trailing `\n`). Shared by
-/// the per-turn message and mid-turn steer injection. `parent_tool_use_id:
-/// null` matches the Agent SDK's user-message shape.
+/// Build a stream-json `user` message NDJSON line (trailing `\n`) for the
+/// per-turn message. `parent_tool_use_id: null` matches the Agent SDK's
+/// user-message shape.
 fn build_user_envelope(text: &str, attachments: &[AssistantAttachment]) -> Result<Vec<u8>, String> {
     let mut content: Vec<Value> = Vec::with_capacity(1 + attachments.len());
     content.push(serde_json::json!({ "type": "text", "text": text }));
@@ -607,7 +607,7 @@ async fn run_or_prewarm(
     // save_session_cwd's filename derivation.
     // RR9: cap the renderer-supplied prompt + prior_context_summary before they
     // flow into build_user_envelope → blocking stdin write_all (mirrors the
-    // attachment 20 MiB cap + steer 1 MiB cap). A renderer bug could otherwise
+    // attachment 20 MiB cap). A renderer bug could otherwise
     // push tens of MB into a single synchronous pipe write, stalling the worker
     // + allocating heap proportional to the input. 2 MiB is generous for any
     // real prompt or compaction summary.
@@ -1342,7 +1342,7 @@ async fn resolve_spawn(
     take_session_stopped(session_id);
     // The per-turn user message — always a stream-json `user` envelope (text +
     // optional image blocks). Sent by the reader loop once the `initialize`
-    // handshake is acknowledged. Shares build_user_envelope with steer injection.
+    // handshake is acknowledged.
     let user_line: Vec<u8> = build_user_envelope(&effective_prompt, &attachments)?;
 
     // #48 warm pool: the spawn "signature". Every field below is baked into the

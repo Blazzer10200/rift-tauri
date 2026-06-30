@@ -54,7 +54,7 @@ Key properties:
 ### `assistant/` — the engine
 | File | Role |
 |---|---|
-| `turn.rs` | Live-turn nervous system: session registry, CLI spawn, stream/permission/error event emit, steer/stop, per-turn env snapshot. The hot file. |
+| `turn.rs` | Live-turn nervous system: session registry, CLI spawn, stream/permission/error event emit, stop, per-turn env snapshot. The hot file. |
 | `mcp_server.rs` | stdio JSON-RPC MCP server: `read_file` / `list_dir` / `grep` + `git_*` + the bridge-gated UI tools (dispatched from here, implemented in `mcp_bridge.rs`). Workspace-scoped, trust-gated. |
 | `mcp_bridge.rs` | The bridge-gated UI MCP tools — `ask_user` / `open_browser` / `notify` + the loopback `bridge_call` round-trip. Split out of `mcp_server.rs` (v0.60.0). |
 | `git_local.rs` | Hardened `run_git` (no shell, args pre-split, env stripped, non-interactive) + path/message validators. Backs the `git_*` MCP tools in `mcp_server.rs` (there is no `commands/git.rs`). |
@@ -117,9 +117,9 @@ Tag-driven CI: push a `v*` tag → `.github/workflows/release.yml` builds + pack
 
 Four hot files were split into module dirs (cont.207); step detail in `git log`. Forward-looking invariants a future refactor must preserve:
 
-- **`assistant/mod.rs`** — every `#[tauri::command]` is registered by path in `lib.rs`; extracted modules re-export commands (`pub use cli_install::*;`) so the registry never churns. `kill_all_session_children()` is load-bearing for the Velopack apply — keep it on whatever module owns `SESSION_PIDS`. Process-state statics (`SESSION_PIDS`/`SESSION_STOPPED`/`STEER_TX`/`CLAUDE_EXE`/`MCP_CFG_SEQ`/`CONFIG_WRITE_LOCK`) move with their accessor cluster, never duplicated. `McpConfigGuard` (Drop) stays paired with `write_mcp_config` (the Drop deletes the temp config — splitting invites a leak).
+- **`assistant/mod.rs`** — every `#[tauri::command]` is registered by path in `lib.rs`; extracted modules re-export commands (`pub use cli_install::*;`) so the registry never churns. `kill_all_session_children()` is load-bearing for the Velopack apply — keep it on whatever module owns `SESSION_PIDS`. Process-state statics (`SESSION_PIDS`/`SESSION_STOPPED`/`CLAUDE_EXE`/`MCP_CFG_SEQ`/`CONFIG_WRITE_LOCK`) move with their accessor cluster, never duplicated. `McpConfigGuard` (Drop) stays paired with `write_mcp_config` (the Drop deletes the temp config — splitting invites a leak).
 - **`assistant.svelte.ts`** — per-tab fields live on `TabState` with a getter on `AssistantStore`, never back on the store (compaction/queue/draft/attachments/messages/streaming/agentSpawns/askUser bindings are all per-tab). `import { assistant } from "$lib/state/assistant.svelte"` MUST keep working — extracted concerns re-export at the same shape. Persisted JSON contract (`compactionHistory[]` camelCase, `openTabs`/`panes`/`currentConvoId` shapes) is locked; shared defs live in `types.ts`. `TabState` ctor signature locked (`ensureTab` passes `(cliSessionId)`).
-- **`Composer.svelte`** — `onKey` is the one keyboard handler (slash menu, mention popover, queue recall, Enter/Alt+Enter fire/steer); stays in the parent, children get open/close/index via props. `fire()`/`steer()`/`onBtnClick`/send-button `mode` stay in the parent. `.composer-wrap` sets `--model-color`; children consume the variable, never `:global()`.
+- **`Composer.svelte`** — `onKey` is the one keyboard handler (slash menu, mention popover, queue recall, Enter to fire-or-queue); stays in the parent, children get open/close/index via props. `fire()`/`onBtnClick`/send-button `mode` stay in the parent. (Enter while streaming queues for the next turn — no mid-turn steer; removed v0.75.0.) `.composer-wrap` sets `--model-color`; children consume the variable, never `:global()`.
 - **`shell/tabsbar/`** (was `ChatTabsBar.svelte`) — `portal` action is canonical at `$lib/actions/portal.ts` (`portalFocus` is the focus-first variant); don't re-fork. Drag-reorder moves as ONE unit — the six handlers + the `window` `dragend` listener (WebView2 missed-dragend workaround) + its `onDestroy` teardown. `:global` selectors move with their element's owner.
 
 ## 10. What was removed (so you don't go looking)
