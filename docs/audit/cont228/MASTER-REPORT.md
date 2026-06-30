@@ -4,7 +4,7 @@
 >
 > Baseline held green throughout: `cargo check` clean · `svelte-check` 0/0 (4134) · vitest 378/378.
 >
-> **Data artifacts (this dir, `docs/audit/cont228/`):** `report-data.json` (static 52+19+21) · `dynamic-result.json` (56 confirmed) · `architecture-result.json` (27 endorsed). Perf baseline = `PERF-BASELINE.md` (session scratchpad; key numbers inlined in §D).
+> **Data artifacts — REMOVED cont.243** (the raw per-sweep JSON dumps `report-data.json` (static 52+19+21) · `dynamic-result.json` (56 confirmed) · `architecture-result.json` (27 endorsed) were deleted as stale ~590KB cruft; this report inlines every count, so the "Full detail: *.json" pointers below are historical — `git log -- docs/audit/cont228/` recovers them if ever needed). Perf baseline was `PERF-BASELINE.md` (session scratchpad, never committed; key numbers inlined in §D).
 
 ## TL;DR — the verdict on "feels like a mess"
 
