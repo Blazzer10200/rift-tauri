@@ -10,6 +10,7 @@
   import StreamResult from "./StreamResult.svelte";
   import StreamAgent from "./StreamAgent.svelte";
   import StreamAskUser from "./StreamAskUser.svelte";
+  import PermissionBar from "../PermissionBar.svelte";
   import { messageToTurn, groupBlocks, fmtDur, isFillerSay, VERB_ING, tasksToPlanItems, type StreamTool } from "./streamModel";
   import { assistant, type ChatMessage, type TabState } from "$lib/state/assistant.svelte";
   import { fmtTokens } from "$lib/state/assistant/helpers";
@@ -38,6 +39,19 @@
   // followed by an update-turn shows ONE card, not a duplicate per turn.
   const livePlanItems = $derived(isLast ? tasksToPlanItems(liveTab?.tasks ?? []) : []);
   const planItemsFor = (tool: StreamTool) => (tool.items?.length ? tool.items : livePlanItems);
+
+  // In a prompting permission mode (default / acceptEdits / plan) the CLI raises a
+  // `can_use_tool` ask for a gated tool mid-turn. The Allow/Deny bar (PermissionBar)
+  // historically rendered ONLY in MessageBubble (persisted history) — never in this
+  // LIVE timeline — so a default-mode user could never approve: no bar appeared, the
+  // ask timed out at 120s, and the turn died "Changes failed". This surfaces the bar
+  // inline on the live tool row(s) holding a pending prompt, keyed by tool_use_id.
+  // Reads liveTab.permissionPrompts (reactive Map) so it appears the instant the ask
+  // lands. `pendingPerms` returns the tools in a segment that currently have an ask.
+  const pendingPerms = (tools: StreamTool[]): StreamTool[] =>
+    liveTab && liveTab.permissionPrompts.size > 0
+      ? tools.filter((t) => liveTab.permissionPrompts.has(t.id))
+      : [];
 
   const plainText = $derived(
     message.blocks.map((b) => (b.type === "text" ? b.text : "")).join("").trim(),
@@ -206,10 +220,19 @@
           {:else if seg.tool.kind === "ask"}
             <StreamAskUser tool={seg.tool} />
           {/if}
+          {#each pendingPerms([seg.tool]) as pt (pt.id)}
+            <PermissionBar toolUseId={pt.id} toolName={pt.name} />
+          {/each}
         {:else if seg.seg === "edit"}
           <WriteBatch tools={seg.tools} />
+          {#each pendingPerms(seg.tools) as pt (pt.id)}
+            <PermissionBar toolUseId={pt.id} toolName={pt.name} />
+          {/each}
         {:else}
           <WorkLine tools={seg.tools} />
+          {#each pendingPerms(seg.tools) as pt (pt.id)}
+            <PermissionBar toolUseId={pt.id} toolName={pt.name} />
+          {/each}
         {/if}
       {/each}
     {/if}

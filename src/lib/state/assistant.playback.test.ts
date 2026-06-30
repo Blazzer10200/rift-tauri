@@ -266,6 +266,13 @@ const nestedToolResultEnv = (parentId: string, toolUseId: string, content: unkno
   parent_tool_use_id: parentId,
   message: { content: [{ type: "tool_result", tool_use_id: toolUseId, content, is_error: isError }] },
 });
+// The CLI's per-sub-agent terminal envelope: a `result` carrying the spawn's
+// parent_tool_use_id. This is the live "this agent finished" signal.
+const nestedResultEnv = (parentId: string, subtype = "success") => ({
+  type: "result",
+  subtype,
+  parent_tool_use_id: parentId,
+});
 
 describe("playback — sub-agent live routing", () => {
   it("diverts parent-tagged frames into the spawn's sub-transcript, not the main bubble", () => {
@@ -304,6 +311,50 @@ describe("playback — sub-agent live routing", () => {
     expect(agent.completedAt).not.toBeNull();
     expect(agent.isError).toBe(false);
     expect(agent.blocks.map((b) => b.type)).toEqual(["text"]); // sub-transcript intact
+  });
+
+  it("marks the spawn done on its own per-agent result envelope (no top-level Task tool_result)", () => {
+    // The reported bug: recon's frames all land (incl. its result) but the
+    // top-level Task tool_result never arrives, so the spawn stays running
+    // forever. The per-agent `result` envelope must flip it done LIVE.
+    const tab = freshTab();
+    beginTurn(tab);
+    feed(tab, [
+      agentSpawnEnv("task-r", "recon", "find stale refs"),
+      nestedTextEnv("task-r", "scanning"),
+      nestedResultEnv("task-r"), // sub-agent's own terminal signal — no top-level tool_result
+    ]);
+    const agent = tab.agentSpawns.find((a) => a.id === "task-r")!;
+    expect(agent.completedAt).not.toBeNull();
+    expect(agent.isError).toBe(false);
+    expect(agent.blocks.map((b) => b.type)).toEqual(["text"]); // sub-transcript intact
+  });
+
+  it("an error result envelope marks the spawn done + errored", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    feed(tab, [
+      agentSpawnEnv("task-e", "recon", "boom"),
+      nestedResultEnv("task-e", "error_during_execution"),
+    ]);
+    const agent = tab.agentSpawns.find((a) => a.id === "task-e")!;
+    expect(agent.completedAt).not.toBeNull();
+    expect(agent.isError).toBe(true);
+  });
+
+  it("turn-end sweep closes any spawn whose terminal signal never arrived", () => {
+    // Safety net: even if neither the top-level tool_result NOR the per-agent
+    // result envelope lands, onDone must close the orphan so the dock never
+    // spins forever and the model never reads a finished spawn as live.
+    const tab = freshTab();
+    beginTurn(tab);
+    feed(tab, [
+      agentSpawnEnv("task-x", "recon", "orphaned"),
+      nestedTextEnv("task-x", "working"),
+    ]);
+    expect(tab.agentSpawns.find((a) => a.id === "task-x")!.completedAt).toBeNull(); // still running mid-turn
+    tab.onDone();
+    expect(tab.agentSpawns.find((a) => a.id === "task-x")!.completedAt).not.toBeNull(); // swept closed
   });
 
   it("drops a frame whose parent matches no tracked spawn — no phantom agent, no main leak", () => {

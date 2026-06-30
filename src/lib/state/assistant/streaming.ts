@@ -622,6 +622,23 @@ function mutateAgent(tab: TabState, agentId: string, fn: (blocks: Block[]) => Bl
   tab.agentSpawns = next;
 }
 
+/** Mark a spawn done if it isn't already. The dock's ONLY pre-existing completion
+ *  signal was the top-level Task `tool_result` (fillToolResult) — but that
+ *  envelope can be missed, mis-ordered, or absent entirely for forking-skill
+ *  spawns promoted under a Skill id, leaving the spawn stuck `completedAt: null`
+ *  forever (perpetual spinner / "N working", and the model reasoning off a
+ *  spawn it thinks is still running). This closes a spawn from any terminal
+ *  signal: its own per-agent `result` envelope (live) or the turn-end sweep.
+ *  Idempotent — a no-op once already completed, so the live path and the sweep
+ *  can't double-fire. */
+function markSpawnDone(tab: TabState, agentId: string, isError: boolean) {
+  const idx = tab.agentSpawns.findIndex((a) => a.id === agentId);
+  if (idx === -1 || tab.agentSpawns[idx].completedAt != null) return;
+  const next = tab.agentSpawns.slice();
+  next[idx] = { ...next[idx], completedAt: Date.now(), isError };
+  tab.agentSpawns = next;
+}
+
 /** A nested sub-agent frame (parent_tool_use_id === a known spawn's id). The CLI
  *  multiplexes Task/Agent sub-agent output into the same stream; we divert it
  *  here into that agent's own transcript for the live dock — and OUT of the main
@@ -669,6 +686,15 @@ function applySubAgentFrame(tab: TabState, agentId: string, env: StreamEnvelope)
         );
       }
     }
+  } else if (env.type === "result") {
+    // The sub-agent emitted its own terminal `result` envelope (carrying this
+    // spawn's parent_tool_use_id) — the live "this agent finished" signal. Flip
+    // the parent spawn to done NOW so the dock settles the moment recon/scout
+    // returns, instead of waiting on the top-level Task tool_result (which may
+    // never match — see markSpawnDone). subtype "success" → done; anything else
+    // → error.
+    const isError = typeof env.subtype === "string" && env.subtype !== "success";
+    markSpawnDone(tab, agentId, isError);
   }
 }
 
@@ -971,6 +997,18 @@ export function finalizeInflightBlocks(tab: TabState) {
   tab.activeThinkingIndex = null;
   if (tab.activity.currentLabel === "Thinking…") {
     tab.activity = { ...tab.activity, currentLabel: null };
+  }
+  // Safety net: this turn is settling (normal done, error, or user Stop), so no
+  // spawn can still be running. Close any spawn left `completedAt: null` — its
+  // terminal signal (top-level Task tool_result OR per-agent result envelope)
+  // was missed or absent. Without this a dock section spins forever and the
+  // model reads the spawn as live (the reported bug). Shared by every terminal
+  // path via onStreamError/stop, not just onStreamDone.
+  if (tab.agentSpawns.some((a) => a.completedAt == null)) {
+    const now = Date.now();
+    tab.agentSpawns = tab.agentSpawns.map((a) =>
+      a.completedAt == null ? { ...a, completedAt: now } : a,
+    );
   }
   if (tab.streamingMsgId) {
     mutateStreaming(tab, (m) => ({
