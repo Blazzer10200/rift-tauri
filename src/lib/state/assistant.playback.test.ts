@@ -357,6 +357,22 @@ describe("playback — sub-agent live routing", () => {
     expect(tab.agentSpawns.find((a) => a.id === "task-x")!.completedAt).not.toBeNull(); // swept closed
   });
 
+  it("the error-terminal path (backend Stalled) also sweeps a spinning spawn closed", () => {
+    // The 40-min-hang fix: when a wedged sub-agent trips the backend watchdog,
+    // the turn ends via ERROR_EVENT → tab.onError, NOT onDone. That path must
+    // sweep the still-spinning spawn the same way, or the dock keeps spinning
+    // even after the backend killed the wedged child.
+    const tab = freshTab();
+    beginTurn(tab);
+    feed(tab, [
+      agentSpawnEnv("task-w", "recon", "wedged then watchdog-killed"),
+      nestedTextEnv("task-w", "Starting up"),
+    ]);
+    expect(tab.agentSpawns.find((a) => a.id === "task-w")!.completedAt).toBeNull(); // mid-turn, spinning
+    tab.onError("Claude stopped responding — no output, so Rift ended the turn.");
+    expect(tab.agentSpawns.find((a) => a.id === "task-w")!.completedAt).not.toBeNull(); // swept on error too
+  });
+
   it("drops a frame whose parent matches no tracked spawn — no phantom agent, no main leak", () => {
     const tab = freshTab();
     beginTurn(tab);

@@ -2,24 +2,22 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.79.0 — Claude Sonnet 5
+## v0.80.0 — Stuck sub-agents now get caught
 
 ### Fixed
-- **"Sonnet" now actually runs Sonnet 5, not 4.6.** Anthropic released Claude Sonnet 5 (June 9) — the best speed/intelligence balance, with quality approaching Opus 4.8 at the same Sonnet price. Rift's picker already said "Sonnet 5", but every turn was silently running the previous generation (4.6): the shipped Claude CLI still resolves the bare `sonnet` alias to `claude-sonnet-4-6`, so passing the alias ran 4.6. Rift now pins the explicit `claude-sonnet-5` id before the turn, so picking Sonnet runs Sonnet 5. *(The `opus`/`haiku` aliases already resolved to their newest models — only `sonnet` lagged.)*
-- **Sonnet now reaches the X-High effort tier.** Sonnet 5 honors `xhigh` server-side (Sonnet 4.6 rejected it and capped at High), so the thinking dial's top rungs and the ultracode workflow are now available on Sonnet — verified against the live model.
-
-### Changed
-- **Model labels read cleanly for major releases.** The model name shown on each turn now handles the dateless id format Anthropic uses from the 4.6 generation on (e.g. `claude-sonnet-5` → "Sonnet 5", `claude-fable-5` → "Fable 5"), instead of falling back to the raw id string.
-- Pricing table + the voice-transcript cleanup helper updated to the current Sonnet id. In-flight conversations created on Sonnet 4.6 keep running 4.6 on resume (their reasoning is signed to that model) — only new chats move to Sonnet 5.
+- **A wedged sub-agent no longer hangs the turn forever.** If Claude spawned a sub-agent (a Task/recon/scout) that got stuck — showing "Starting up…" in the activity dock — the turn could run indefinitely (observed: 40 minutes, spinner never stopping, nothing detecting it). Root cause: the stall watchdog re-armed on *every* line of output, and a stuck-but-chatty sub-agent kept dribbling frames that reset the watchdog, so it never tripped. Rift now tracks how long any tool has been continuously running with a **hard 15-minute ceiling that stream activity can't extend** — so a genuinely stuck sub-agent is force-ended, its process tree is killed, and the dock settles, instead of spinning forever. A legitimately long but live sub-agent finishes well within the ceiling and is unaffected.
 
 ### Internal
-- Alias→id resolution lives in one place per side (`canonical_model_alias` / `canonicalModelAlias`) with a regression test. Full green: cargo check 0/0 · cargo test (config) 9/9 · svelte-check 0/0 (4138) · vitest 405/405, plus live-CLI verification.
+- The watchdog's stall decision is now a pure, unit-tested function (`watchdog_should_stall`): the dead-silent grace net AND the new absolute in-flight ceiling, either trips. Regression tests pin both the backend decision (the chatty-wedge case the old grace path missed) and the frontend cleanup (a Stalled turn ends via the error path → the spinning dock spawn is swept closed — previously only the normal-done path was covered). Full green: cargo check 0/0 · cargo test (turn) 5/5 · svelte-check 0/0 (4138) · vitest 406/406.
+
+## v0.79.0 — Claude Sonnet 5
 
 ### Known issues
 - **Voice profanity on Web Speech:** fully-masked words (`******`, no leading letter) can't be recovered from Azure's servers — the real fix is the on-device **Whisper** engine (built but not yet in the shipped binary). Planned.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
 
+- **v0.79.0** — Claude Sonnet 5: "Sonnet" now actually runs Sonnet 5 (the shipped CLI's bare `sonnet` alias still resolved to 4.6, so Rift now pins the explicit id), reaches the X-High effort tier, and shows clean dateless model labels.
 - **v0.78.0** — Queued messages keep their image attachments, short bleeped swear phrases get de-censored in voice dictation, and first-run onboarding fixes (no phantom Haiku option, corrected hints).
 
 - **v0.77.0** — See command output in the stream (Peek/Full/Minimal), project-ghost fix, and one neutral surface for every chat block.

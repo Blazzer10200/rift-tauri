@@ -2137,6 +2137,46 @@ const STREAM_NO_PROGRESS_SECS: u64 = 180;
 /// the net forever (2 ≈ 6min). Any received line resets the counter.
 const STREAM_TOOL_GRACE_WINDOWS: u32 = 2;
 
+/// Absolute ceiling on how long ANY tool may stay continuously in flight before
+/// the turn is force-stalled — the net for the wedged-but-CHATTY sub-agent that
+/// `STREAM_TOOL_GRACE_WINDOWS` misses. A spawned Task counts as a tool in flight
+/// until its top-level `tool_result` lands; if that sub-agent wedges yet keeps
+/// dribbling nested frames, every line resets `tool_grace_fires` AND pushes the
+/// no-progress deadline forward, so the dead-silent grace path never trips and
+/// the parent hangs indefinitely (observed: a sub-agent stuck "Starting up…" for
+/// 40min, turn never ending → the dock spins forever). This ceiling is measured
+/// from when `tools_in_flight` first went positive and is NEVER reset by a line —
+/// so chatter cannot extend it. Set well above any legitimate long tool: a real
+/// Bash build / deep grep / long sub-agent finishes inside this; only a genuinely
+/// stuck one reaches it. 900s (15min) bounds the hang without false-positiving a
+/// slow-but-live agent. Keep > STREAM_NO_PROGRESS_SECS (the silent-pipe net fires
+/// first when there's no chatter; this only governs the chatty-wedge case).
+const STREAM_TOOL_CEILING_SECS: u64 = 900;
+
+/// Pure watchdog decision: on a no-progress fire with a tool in flight, do we
+/// re-arm (grace) or force-stall? Extracted as a seam so the wedged-sub-agent
+/// regression is unit-testable without the async IO loop.
+///
+/// `tool_inflight_secs` = how long the OLDEST still-open tool has been in flight,
+/// measured continuously (NOT reset by stream lines). Returns `true` to STALL.
+///
+/// Two independent triggers, either fires:
+///   1. Dead-silent grace exhausted (`tool_grace_fires >= STREAM_TOOL_GRACE_WINDOWS`)
+///      — the original net for a tool that goes fully silent.
+///   2. A tool has been in flight past `STREAM_TOOL_CEILING_SECS` — the new net for
+///      a tool that stays "running" forever while emitting sparse output.
+fn watchdog_should_stall(
+    tools_in_flight: i32,
+    tool_grace_fires: u32,
+    tool_inflight_secs: u64,
+) -> bool {
+    if tools_in_flight <= 0 {
+        return true; // silent pipe, no tool → the plain no-progress stall
+    }
+    tool_grace_fires >= STREAM_TOOL_GRACE_WINDOWS
+        || tool_inflight_secs >= STREAM_TOOL_CEILING_SECS
+}
+
 /// Max time spent discarding stale buffered stdout at the start of a reused
 /// turn. Only drains what's ALREADY sitting in the pipe from the previous turn
 /// (post-`result` dribble / late MCP-bridge frames) — each read either returns
@@ -2264,6 +2304,12 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
     // Reset to 0 by ANY received line (real progress); when it exceeds the grace
     // cap with the pipe still dead, the "tool" is wedged → stall anyway.
     let mut tool_grace_fires: u32 = 0;
+    // When `tools_in_flight` first went positive (the start of a continuous
+    // in-flight stretch). Set on the 0→positive edge, cleared on the →0 edge.
+    // Deliberately NOT touched by the line-reset arm: a wedged-but-chatty tool
+    // keeps emitting frames that reset `tool_grace_fires`, so this absolute clock
+    // is the only signal that catches it (STREAM_TOOL_CEILING_SECS).
+    let mut tool_in_flight_since: Option<std::time::Instant> = None;
 
     // No-progress watchdog: a deadline that any received line pushes forward.
     // Parked on `next_line()` with a silent pipe → fires once at the ceiling and
@@ -2275,10 +2321,15 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
     loop {
         tokio::select! {
         () = &mut watchdog => {
-            // In-flight tool → silent-but-healthy, re-arm; but bound the grace so a
-            // never-completing tool can't disable the net forever (see read arm: a
-            // line resets tool_grace_fires).
-            if tools_in_flight > 0 && tool_grace_fires < STREAM_TOOL_GRACE_WINDOWS {
+            // In-flight tool → silent-but-healthy, re-arm; but bound it two ways
+            // (watchdog_should_stall): the dead-silent grace cap (a tool that goes
+            // fully quiet) AND an absolute in-flight ceiling (a tool that stays
+            // "running" forever while dribbling frames — the wedged sub-agent that
+            // the grace path alone misses, since each line resets the grace count).
+            let inflight_secs = tool_in_flight_since
+                .map(|t| t.elapsed().as_secs())
+                .unwrap_or(0);
+            if !watchdog_should_stall(tools_in_flight, tool_grace_fires, inflight_secs) {
                 tool_grace_fires += 1;
                 watchdog.as_mut().reset(
                     tokio::time::Instant::now() + std::time::Duration::from_secs(STREAM_NO_PROGRESS_SECS),
@@ -2286,7 +2337,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                 continue;
             }
             log::warn!(
-                "warm_pool: no stdout for {STREAM_NO_PROGRESS_SECS}s (user_sent={user_sent}, tools_in_flight={tools_in_flight}, grace={tool_grace_fires}) — child wedged, session={stream_sid}"
+                "warm_pool: stall (user_sent={user_sent}, tools_in_flight={tools_in_flight}, grace={tool_grace_fires}, inflight={inflight_secs}s) — child wedged, session={stream_sid}"
             );
             return TurnOutcome::Stalled;
         }
@@ -2394,6 +2445,14 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                                 // 223s hang) instead of recovering as Stalled at the
                                 // no-progress ceiling. Don't let it disable the net.
                                 if block_ty == Some("tool_use") && block_name != Some("ExitPlanMode") {
+                                    // 0→positive edge: start the absolute in-flight
+                                    // clock (the wedged-chatty-tool ceiling). Not
+                                    // restarted while already positive, so a stream
+                                    // of nested sub-agent tool_uses can't keep pushing
+                                    // it forward.
+                                    if tools_in_flight == 0 {
+                                        tool_in_flight_since = Some(std::time::Instant::now());
+                                    }
                                     tools_in_flight += 1;
                                     // WS6: clock the tool open so its result adds the
                                     // gap to pre-text tool time (only matters pre-text).
@@ -2420,6 +2479,11 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                             for block in content {
                                 if block.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
                                     tools_in_flight = (tools_in_flight - 1).max(0);
+                                    // →0 edge: the in-flight stretch ended, so clear
+                                    // the absolute clock (the next tool restarts it).
+                                    if tools_in_flight == 0 {
+                                        tool_in_flight_since = None;
+                                    }
                                     // WS6: a tool finished before any text → bank the
                                     // round-trip into pre-text tool time. Only the
                                     // outermost open (the one we clocked) closes here.
@@ -2800,7 +2864,10 @@ pub async fn assistant_stop(
 
 #[cfg(test)]
 mod tests {
-    use super::{drain_stale_buffered_lines, plan_usage_is_hot};
+    use super::{
+        drain_stale_buffered_lines, plan_usage_is_hot, watchdog_should_stall,
+        STREAM_TOOL_CEILING_SECS, STREAM_TOOL_GRACE_WINDOWS,
+    };
     use tokio::io::{AsyncBufReadExt, BufReader};
 
     #[tokio::test]
@@ -2848,5 +2915,36 @@ mod tests {
         assert!(plan_usage_is_hot(95.0, 0.0));
         assert!(plan_usage_is_hot(0.0, 95.0), "weekly at threshold");
         assert!(plan_usage_is_hot(100.0, 100.0));
+    }
+
+    // The reported bug: a sub-agent activates, wedges, but keeps dribbling nested
+    // frames — every line resets `tool_grace_fires`, so the dead-silent grace path
+    // NEVER trips and the parent turn hangs forever (observed: "Starting up…" for
+    // 40min, the dock spinning, nothing detecting the stall). The absolute in-flight
+    // ceiling is the net that catches it; this pins the decision logic.
+    #[test]
+    fn watchdog_stalls_a_wedged_chatty_tool_via_the_absolute_ceiling() {
+        let under = STREAM_TOOL_CEILING_SECS - 1;
+        let over = STREAM_TOOL_CEILING_SECS;
+
+        // Healthy long tool: grace not exhausted, under the ceiling → keep re-arming.
+        // This is the case that USED to (correctly) re-arm and the case the bug
+        // exploited — a chatty wedge looks identical until the ceiling bites.
+        assert!(!watchdog_should_stall(1, 0, under), "live tool under ceiling re-arms");
+        assert!(!watchdog_should_stall(3, STREAM_TOOL_GRACE_WINDOWS - 1, under),
+            "multiple nested tools, grace not yet exhausted, under ceiling → re-arm");
+
+        // THE FIX: a tool in flight past the ceiling stalls even with grace fresh
+        // (grace=0 because chatter kept resetting it) — the previously-infinite hang.
+        assert!(watchdog_should_stall(1, 0, over), "tool past ceiling stalls despite fresh grace");
+        assert!(watchdog_should_stall(5, 0, over + 3600), "deeply wedged sub-agent stalls");
+
+        // Original net still works: dead-silent grace exhausted → stall, even well
+        // under the ceiling (no chatter to reset grace).
+        assert!(watchdog_should_stall(1, STREAM_TOOL_GRACE_WINDOWS, 0),
+            "dead-silent grace exhausted stalls immediately");
+
+        // No tool in flight → the plain no-progress stall (silent pipe).
+        assert!(watchdog_should_stall(0, 0, 0), "silent pipe, no tool → stall");
     }
 }
