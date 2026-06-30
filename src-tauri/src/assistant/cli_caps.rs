@@ -33,7 +33,7 @@ mod mins {
     use super::Version;
 
     /// Stream-json I/O + the idempotent `initialize` control handshake that
-    /// Rift's permission + steer plumbing rides (the `control_request`/
+    /// Rift's permission plumbing rides (the `control_request`/
     /// `control_response` round-trip with `pending_permission_requests`). This is
     /// the HARD floor — below it Rift can't drive the CLI as designed. Basic
     /// `--input/--output-format stream-json` is 2.0.x-era, but the FULL handshake

@@ -374,12 +374,6 @@
               <div class="tn-think-body" transition:slide={{ duration: reducedMotion ? 0 : 180 }}><Markdown text={b.text} /></div>
             {/if}
           </div>
-        {:else if b.type === "steer"}
-          <div class="steer-marker">
-            <Navigation size={11} class="steer-marker-icon" />
-            <span class="steer-marker-label">You steered</span>
-            <span class="steer-marker-text">{b.text}</span>
-          </div>
         {:else if b.type === "tool" && isInlineDiffTool(b.name)}
           {#if b.name === "MultiEdit" && Array.isArray(b.input.edits)}
             {@const inp = b.input as { file_path?: string; edits?: Array<{ file_path?: string; old_string?: string; new_string?: string }> }}
@@ -1030,39 +1024,6 @@
   }
   .tl-divider-label {
     padding-right: 2px;
-  }
-
-  /* Mid-turn steer marker — the user's interjection, shown inline in the
-     assistant timeline at the point it landed. Accent-tinted so it reads as
-     a user action breaking into the agent's flow, distinct from prose. */
-  .steer-marker {
-    display: flex; align-items: baseline; gap: 6px;
-    margin: 6px 0;
-    padding: 5px 10px;
-    background: color-mix(in oklab, var(--accent) 9%, transparent);
-    border-left: 2px solid color-mix(in oklab, var(--accent) 60%, var(--border));
-    border-radius: 4px;
-    font-size: 12px;
-    line-height: 1.4;
-    animation: enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  }
-  :global(.steer-marker-icon) {
-    color: color-mix(in oklab, var(--accent) 85%, var(--fg));
-    flex: none;
-    transform: translateY(1px);
-  }
-  .steer-marker-label {
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    color: color-mix(in oklab, var(--accent) 70%, var(--fg-muted));
-    flex: none;
-  }
-  .steer-marker-text {
-    color: var(--fg);
-    overflow-wrap: anywhere;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .steer-marker { animation: none; }
   }
 
   @media (prefers-reduced-motion: reduce) {

@@ -1,8 +1,8 @@
 //! The live-turn nervous system — R8 split (2026-06-09) out of `assistant/mod.rs`.
-//! Session registry (per-session child PIDs, stop flags, steer channels),
+//! Session registry (per-session child PIDs, stop flags),
 //! the `assistant://*` event consts, user-envelope build, control-response +
-//! permission-request plumbing, and the `assistant_send` / `assistant_stop` /
-//! `assistant_steer` commands. See docs/design/assistant-mod-split.md R8.
+//! permission-request plumbing, and the `assistant_send` / `assistant_stop`
+//! commands. See docs/design/assistant-mod-split.md R8.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -88,9 +88,9 @@ fn clear_session_pid(session_id: &str) {
     with_session_pids(|m| { m.remove(session_id); });
 }
 
-/// Same overlapping-turn guard as `clear_steer_tx_if`: only remove the entry
-/// when the stored PID is this turn's own — the next turn may have already
-/// re-registered under the same session key while this turn reaps its child.
+/// Overlapping-turn guard: only remove the entry when the stored PID is this
+/// turn's own — the next turn may have already re-registered under the same
+/// session key while this turn reaps its child.
 fn clear_session_pid_if(session_id: &str, pid: u32) {
     with_session_pids(|m| {
         if m.get(session_id) == Some(&pid) {
@@ -135,56 +135,6 @@ fn take_session_stopped(session_id: &str) -> bool {
     with_session_stopped(|s| s.remove(session_id))
 }
 
-/// A mid-turn steer: a user message injected into the RUNNING turn's stdin so
-/// the agent course-corrects at its next loop step (no restart, no lost work).
-struct SteerMsg {
-    text: String,
-    attachments: Vec<AssistantAttachment>,
-}
-
-/// Per-session steer channel sender, registered while a turn streams. Mirrors
-/// the SESSION_PIDS convention: const-init `Mutex<Option<HashMap>>` + a
-/// poison-recovering accessor. `assistant_steer` looks up the sender; the
-/// reader task owns the receiver and writes each `SteerMsg` to the live stdin.
-static STEER_TX: Mutex<Option<HashMap<String, mpsc::UnboundedSender<SteerMsg>>>> =
-    Mutex::new(None);
-
-fn with_steer_tx<R>(
-    f: impl FnOnce(&mut HashMap<String, mpsc::UnboundedSender<SteerMsg>>) -> R,
-) -> Option<R> {
-    let mut g = match STEER_TX.lock() {
-        Ok(g) => g,
-        Err(p) => {
-            log::error!("STEER_TX mutex poisoned — recovering inner state");
-            p.into_inner()
-        }
-    };
-    let map = g.get_or_insert_with(HashMap::new);
-    Some(f(map))
-}
-
-fn register_steer_tx(session_id: &str, tx: mpsc::UnboundedSender<SteerMsg>) {
-    with_steer_tx(|m| { m.insert(session_id.to_string(), tx); });
-}
-
-/// Remove the session's steer sender only if it still belongs to THIS turn.
-/// The reader emits DONE on `result` — BEFORE the child is reaped — so the
-/// frontend can start the next turn (re-registering under the same session
-/// key) while this turn's tail is still running. An unconditional remove here
-/// wiped the new turn's sender, making every drained follow-up turn answer
-/// `no_active_turn` to steers for its first seconds.
-fn clear_steer_tx_if(session_id: &str, tx: &mpsc::UnboundedSender<SteerMsg>) {
-    with_steer_tx(|m| {
-        if m.get(session_id).is_some_and(|cur| cur.same_channel(tx)) {
-            m.remove(session_id);
-        }
-    });
-}
-
-fn get_steer_tx(session_id: &str) -> Option<mpsc::UnboundedSender<SteerMsg>> {
-    with_steer_tx(|m| m.get(session_id).cloned()).flatten()
-}
-
 /// 20 MiB total cap across all attachments — protects the CLI's JSON parser
 /// from a runaway paste. Per-image cap equals the cumulative since one big
 /// image is the realistic worst case.
@@ -194,8 +144,7 @@ const ATTACHMENT_BYTES_CAP: usize = 20 * 1024 * 1024;
 const ALLOWED_IMAGE_MIMES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 
 /// Validate inline image attachments: cumulative decoded size ≤ cap, mime in
-/// the strict allowlist. Shared by the send path and `assistant_steer` so a
-/// steered image gets the same gate as a first-turn one (#49).
+/// the strict allowlist (#49).
 fn validate_attachments(attachments: &[AssistantAttachment]) -> Result<(), String> {
     if attachments.is_empty() {
         return Ok(());
@@ -1421,7 +1370,7 @@ async fn resolve_spawn(
 /// Reuse-or-cold-spawn a warm `claude` child for this turn, run the turn, and
 /// return once its `result` frame lands (DONE already emitted by the reader
 /// loop). The highest-risk function in the file — see warm_pool.rs + the design
-/// doc. Keeps the existing per-turn streaming/permission/steer plumbing intact;
+/// doc. Keeps the existing per-turn streaming/permission plumbing intact;
 /// the only structural change vs the old inline path is that the reader loop is
 /// LONG-LIVED (one per warm child) and parks on `result` instead of EOF-ing.
 #[allow(clippy::too_many_arguments)]
@@ -1645,12 +1594,6 @@ async fn cold_spawn_and_run(
     let stdout = child.stdout.take().ok_or_else(|| "claude stdout missing".to_string())?;
     let stderr = child.stderr.take().ok_or_else(|| "claude stderr missing".to_string())?;
 
-    // Steer channel — registered for the WARM CHILD's whole life (not per-turn).
-    // `assistant_steer` looks it up; the reader loop owns the receiver and gates
-    // on `turn_in_progress` so an idle-between-turns steer answers no_active_turn.
-    let (steer_tx, steer_rx) = mpsc::unbounded_channel::<SteerMsg>();
-    register_steer_tx(&session_id, steer_tx.clone());
-
     // Per-child turn channel: dispatch_turn sends a TurnCmd; the loop runs it.
     let (turn_tx, turn_rx) = mpsc::unbounded_channel::<warm_pool::TurnCmd>();
     let turn_in_progress = Arc::new(std::sync::atomic::AtomicBool::new(true)); // first turn starts in-progress
@@ -1678,21 +1621,19 @@ async fn cold_spawn_and_run(
     };
 
     // Spawn the long-lived reader loop. It owns child/stdin/stdout/stderr, the
-    // steer receiver, the turn receiver, the mcp guard, and the warm-pool Arc —
-    // all dropped together when the loop exits (death / evict / signature drain).
+    // turn receiver, the mcp guard, and the warm-pool Arc — all dropped together
+    // when the loop exits (death / evict / signature drain).
     tokio::spawn(run_turn_loop(RunCtx {
         child,
         stdin,
         stdout,
         stderr,
-        steer_rx,
         turn_rx,
         first_turn: Some(first_turn),
         session_id: session_id.clone(),
         turn_pid,
         turn_in_progress: turn_in_progress.clone(),
         warm: warm.clone(),
-        steer_tx,
         mcp_guard,
         app: app.clone(),
         window_label: window_label.clone(),
@@ -1762,11 +1703,6 @@ fn prewarm_spawn(
     let stdout = child.stdout.take().ok_or_else(|| "prewarm: claude stdout missing".to_string())?;
     let stderr = child.stderr.take().ok_or_else(|| "prewarm: claude stderr missing".to_string())?;
 
-    // Steer channel registered for the spare's whole life (the first real turn
-    // rides this same registration — no re-register on adoption).
-    let (steer_tx, steer_rx) = mpsc::unbounded_channel::<SteerMsg>();
-    register_steer_tx(&session_id, steer_tx.clone());
-
     let (turn_tx, turn_rx) = mpsc::unbounded_channel::<warm_pool::TurnCmd>();
     // A spare is IDLE from birth: no turn in progress. (A racing real send sees
     // turn_in_progress=false and reuses it via dispatch_turn's warm path.)
@@ -1787,14 +1723,12 @@ fn prewarm_spawn(
         stdin,
         stdout,
         stderr,
-        steer_rx,
         turn_rx,
         first_turn: None,
         session_id: session_id.clone(),
         turn_pid,
         turn_in_progress,
         warm,
-        steer_tx,
         mcp_guard,
         app,
         window_label,
@@ -1815,7 +1749,6 @@ struct RunCtx {
     stdin: tokio::process::ChildStdin,
     stdout: tokio::process::ChildStdout,
     stderr: tokio::process::ChildStderr,
-    steer_rx: mpsc::UnboundedReceiver<SteerMsg>,
     turn_rx: mpsc::UnboundedReceiver<warm_pool::TurnCmd>,
     /// The first turn to run, or `None` for a #67 pre-warm spare: the loop runs
     /// the init handshake then parks on `turn_rx` for the real first turn.
@@ -1824,7 +1757,6 @@ struct RunCtx {
     turn_pid: Option<u32>,
     turn_in_progress: Arc<std::sync::atomic::AtomicBool>,
     warm: Arc<std::sync::Mutex<warm_pool::WarmChild>>,
-    steer_tx: mpsc::UnboundedSender<SteerMsg>,
     mcp_guard: Option<McpConfigGuard>,
     /// App handle + window label used ONLY to surface a handshake-write failure
     /// (the per-turn app/window ride each TurnCmd). For a pre-warm spare there's
@@ -1840,8 +1772,8 @@ struct RunCtx {
 
 /// The long-lived per-warm-child reader loop. Owns stdin/stdout for the child's
 /// whole life. Runs the `initialize` handshake ONCE, then for each turn: writes
-/// the user envelope, streams NDJSON (forwarding + control-channel handling +
-/// steer injection) exactly as the old inline path did, and on `result` emits
+/// the user envelope, streams NDJSON (forwarding + control-channel handling)
+/// exactly as the old inline path did, and on `result` emits
 /// DONE, signals the turn's `done` channel, clears `turn_in_progress`, and
 /// PARKS on the turn channel for the next envelope — instead of EOF-ing.
 ///
@@ -1854,7 +1786,6 @@ async fn run_turn_loop(mut ctx: RunCtx) {
 
     let mut stdin = ctx.stdin;
     let mut lines = BufReader::new(ctx.stdout).lines();
-    let mut steer_rx = ctx.steer_rx;
     let mut turn_rx = ctx.turn_rx;
 
     // Persistent stderr reader (M2): on the warm path `child.wait()` never
@@ -1915,7 +1846,7 @@ async fn run_turn_loop(mut ctx: RunCtx) {
         if let Some(t) = current.take() {
             let _ = t.done.send(Err(msg));
         }
-        loop_cleanup(&ctx.session_id, ctx.turn_pid, &ctx.steer_tx, &ctx.warm, &mut ctx.child).await;
+        loop_cleanup(&ctx.session_id, ctx.turn_pid, &ctx.warm, &mut ctx.child).await;
         stderr_handle.abort();
         drop(ctx.mcp_guard);
         return;
@@ -1975,7 +1906,6 @@ async fn run_turn_loop(mut ctx: RunCtx) {
         let outcome = stream_one_turn(StreamCtx {
             stdin: &mut stdin,
             lines: &mut lines,
-            steer_rx: &mut steer_rx,
             app_out: &app_out,
             win_label: &win_label,
             stream_sid: &stream_sid,
@@ -2078,25 +2008,23 @@ async fn run_turn_loop(mut ctx: RunCtx) {
         }
     }
 
-    // Loop exited — tear down. Clear registry entry (if still ours), PID, steer.
-    loop_cleanup(&ctx.session_id, ctx.turn_pid, &ctx.steer_tx, &ctx.warm, &mut ctx.child).await;
+    // Loop exited — tear down. Clear registry entry (if still ours), PID.
+    loop_cleanup(&ctx.session_id, ctx.turn_pid, &ctx.warm, &mut ctx.child).await;
     stderr_handle.abort();
     drop(ctx.mcp_guard); // delete the per-session MCP config file now (not per-turn)
     log::debug!("warm_pool: reader loop exited for {} (model={})", ctx.session_id, ctx.model);
 }
 
 /// Common loop-exit teardown: drop the warm registry entry if it's still ours,
-/// clear the PID + steer-tx, and best-effort reap the child.
+/// clear the PID, and best-effort reap the child.
 async fn loop_cleanup(
     session_id: &str,
     turn_pid: Option<u32>,
-    steer_tx: &mpsc::UnboundedSender<SteerMsg>,
     warm: &Arc<std::sync::Mutex<warm_pool::WarmChild>>,
     child: &mut tokio::process::Child,
 ) {
     warm_pool::remove_if(session_id, warm);
     if let Some(p) = turn_pid { clear_session_pid_if(session_id, p); }
-    clear_steer_tx_if(session_id, steer_tx);
     let _ = child.start_kill();
     let _ = child.wait().await;
 }
@@ -2131,13 +2059,12 @@ enum TurnOutcome {
 }
 
 /// Borrowed per-turn context for `stream_one_turn` — keeps the long-lived
-/// owned state (`stdin`, `lines`, `steer_rx`) borrowed mutably while the
-/// per-turn values are passed by ref. One arg-bundle struct so the fn stays
-/// under clippy's arg limit.
+/// owned state (`stdin`, `lines`) borrowed mutably while the per-turn values
+/// are passed by ref. One arg-bundle struct so the fn stays under clippy's
+/// arg limit.
 struct StreamCtx<'a> {
     stdin: &'a mut tokio::process::ChildStdin,
     lines: &'a mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
-    steer_rx: &'a mut mpsc::UnboundedReceiver<SteerMsg>,
     app_out: &'a AppHandle,
     win_label: &'a str,
     stream_sid: &'a str,
@@ -2227,8 +2154,8 @@ where
 }
 
 /// Stream ONE turn: write the user envelope, forward NDJSON, handle the control
-/// channel (init ack, `can_use_tool` permission asks) + mid-turn steers, and
-/// return when `result` lands / stdout EOFs / a fatal write fails. Ported
+/// channel (init ack, `can_use_tool` permission asks), and return when `result`
+/// lands / stdout EOFs / a fatal write fails. Ported
 /// verbatim from the old inline reader task — the only structural change is that
 /// it runs per-turn against borrowed long-lived stdin/stdout instead of owning
 /// them, and on `result` it RETURNS (the loop parks) instead of dropping stdin.
@@ -2236,7 +2163,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
     use tokio::io::AsyncWriteExt;
 
     let StreamCtx {
-        stdin, lines, steer_rx, app_out, win_label, stream_sid, model, effort, thinking_on,
+        stdin, lines, app_out, win_label, stream_sid, model, effort, thinking_on,
         user_line, handshake_done, bg_evict, turn_start,
     } = ctx;
 
@@ -2282,9 +2209,6 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
     let mut perf_first_line_ms: Option<u64> = None;
     let mut perf_pre_text_tool_ms: u64 = 0;
     let mut tool_open_at: Option<std::time::Instant> = None;
-    // Steers that arrive before the (first-turn) handshake completes are
-    // buffered, then flushed the instant the user turn is sent.
-    let mut steer_pending: Vec<SteerMsg> = Vec::new();
 
     // B2: per-turn perf accumulators — filled at the existing TTFT log sites +
     // the result frame, finalised into a TurnPerf record before the result
@@ -2357,23 +2281,6 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                         }
                         if let Err(e) = stdin.flush().await {
                             return TurnOutcome::Fatal(format!("flush user turn: {e}"));
-                        }
-                        for m in steer_pending.drain(..) {
-                            match build_user_envelope(&m.text, &m.attachments) {
-                                Ok(env) => {
-                                    if let Err(e) = stdin.write_all(&env).await {
-                                        return TurnOutcome::Fatal(format!("write steer: {e}"));
-                                    }
-                                }
-                                Err(e) => {
-                                    let _ = app_out.emit_to(win_label, ERROR_EVENT, serde_json::json!({
-                                        "session_id": stream_sid, "message": e,
-                                    }));
-                                }
-                            }
-                        }
-                        if let Err(e) = stdin.flush().await {
-                            return TurnOutcome::Fatal(format!("flush steer: {e}"));
                         }
                         continue;
                     }
@@ -2535,39 +2442,6 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                 return TurnOutcome::Fatal(format!("stdout read error: {e}"));
             }
         }
-        }
-        // Mid-turn steer: write the injected user message to the live stdin.
-        Some(msg) = steer_rx.recv() => {
-            if !user_sent {
-                const STEER_PENDING_CAP: usize = 8;
-                if steer_pending.len() < STEER_PENDING_CAP {
-                    steer_pending.push(msg);
-                } else {
-                    log::warn!("steer_pending cap reached — dropping steer during init handshake");
-                }
-            } else {
-                match build_user_envelope(&msg.text, &msg.attachments) {
-                    Ok(env) => {
-                        if let Err(e) = stdin.write_all(&env).await {
-                            let _ = app_out.emit_to(win_label, ERROR_EVENT, serde_json::json!({
-                                "session_id": stream_sid, "message": format!("write steer: {e}"),
-                            }));
-                            return TurnOutcome::Fatal(format!("write steer: {e}"));
-                        }
-                        if let Err(e) = stdin.flush().await {
-                            let _ = app_out.emit_to(win_label, ERROR_EVENT, serde_json::json!({
-                                "session_id": stream_sid, "message": format!("flush steer: {e}"),
-                            }));
-                            return TurnOutcome::Fatal(format!("flush steer: {e}"));
-                        }
-                    }
-                    Err(e) => {
-                        let _ = app_out.emit_to(win_label, ERROR_EVENT, serde_json::json!({
-                            "session_id": stream_sid, "message": e,
-                        }));
-                    }
-                }
-            }
         }
         }
     }
@@ -2882,47 +2756,6 @@ pub async fn assistant_stop(
     }
 }
 
-/// Inject a steer message into the RUNNING turn for `session_id`. Unlike the
-/// queue (which fires a fresh turn after `result`), a steer is written to the
-/// live CLI stdin and folded into the current turn at the agent's next loop
-/// step — no restart, no lost work. Returns `"steered"` when an active turn
-/// accepted it, or `"no_active_turn"` when the turn already ended (the caller
-/// should fall back to queueing a fresh turn).
-#[tauri::command]
-pub async fn assistant_steer(
-    session_id: String,
-    text: String,
-    attachments: Option<Vec<AssistantAttachment>>,
-) -> Result<String, String> {
-    if !is_valid_session_id(&session_id) {
-        return Err(format!(
-            "invalid session_id: must be a UUID (got {} chars)",
-            session_id.len()
-        ));
-    }
-    let trimmed = text.trim();
-    let attachments = attachments.unwrap_or_default();
-    // A steer with no text but with images is valid (#49: an image-only steer).
-    if trimmed.is_empty() && attachments.is_empty() {
-        return Err("empty steer text".into());
-    }
-    validate_attachments(&attachments)?;
-    // RR7: cap a renderer-supplied steer message before it enters the unbounded
-    // mpsc channel and gets serialized + written to the CLI child's stdin. A
-    // multi-megabyte payload would otherwise allocate unbounded heap and force a
-    // huge synchronous write on the stdin task. 1 MiB is far above any real steer.
-    if trimmed.len() > 1_048_576 {
-        return Err("steer text too large (max 1 MiB)".into());
-    }
-    let Some(tx) = get_steer_tx(&session_id) else {
-        return Ok("no_active_turn".into());
-    };
-    match tx.send(SteerMsg { text: trimmed.to_string(), attachments }) {
-        Ok(()) => Ok("steered".into()),
-        // Receiver dropped between lookup and send → turn just ended.
-        Err(_) => Ok("no_active_turn".into()),
-    }
-}
 
 #[cfg(test)]
 mod tests {

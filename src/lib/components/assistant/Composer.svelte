@@ -45,7 +45,6 @@
   // timers fire on torn-down $state, a PTT hold leaves the mic recording on the
   // global stt singleton, and an in-flight enhance keeps billing a CLI spawn.
   onDestroy(() => {
-    if (steerFlashTimer) clearTimeout(steerFlashTimer);
     if (undoTimer) clearTimeout(undoTimer);
     pttRelease();
     dictKeyHeld = false;
@@ -110,8 +109,7 @@
   // model. Read this pane's own tab override, falling back to the global model.
   const paneEffectiveModel = $derived(tab?.modelOverride ?? assistant.model);
 
-  // Pending rail (queue chips + steer/clear) extracted to composer/QueueRail.svelte
-  // (C3) — `steer()`/`steerFlash` stay here and flow down as props.
+  // Pending rail (queue chips + clear) extracted to composer/QueueRail.svelte (C3).
 
   // Live-activity pills + idle kbd-hint (the toolbar's middle slot) extracted
   // to composer/LivePills.svelte (C4) — incl. the 1s `now` ticker.
@@ -469,53 +467,6 @@
     stt.consume();
     fireKey++;
     onsubmit(text);
-    void tick().then(autosize);
-  }
-
-  // Alt+Enter while streaming: steer the running turn instead of queueing.
-  // Injects the draft into the live CLI stdin (assistant.steer) so the agent
-  // course-corrects mid-turn. Shift+Enter stays newline; Enter stays queue.
-  // Brief "Steered ✓" confirmation on the rail button — feedback at the point
-  // of action, not just a corner toast.
-  let steerFlash = $state(false);
-  let steerFlashTimer: ReturnType<typeof setTimeout> | null = null;
-  function steer() {
-    const text = draft.trim();
-    if (!text || !streaming) return;
-    // Snapshot attachments before clearing (pass with the steer).
-    const steerAttachments = attachments.map((a) => ({ mime: a.mime, dataBase64: a.dataBase64 }));
-    stt.consume();
-    // Clear draft + attachments only after the IPC resolves (defect 2 + 3).
-    void assistant.steer(text, tabId, steerAttachments.length > 0 ? steerAttachments : undefined).then((result) => {
-      if (result === "steered") {
-        setDraft("");
-        setAttachments([]);
-        steerFlash = true;
-        if (steerFlashTimer) clearTimeout(steerFlashTimer);
-        steerFlashTimer = setTimeout(() => { steerFlash = false; }, 1400);
-      } else if (result === "no_active_turn") {
-        // The turn ENDED in the IPC round-trip between Alt+Enter and the
-        // backend lookup — assistant.steer already enqueued the message as a
-        // normal follow-up. Without this branch the steer just "vanished" (no
-        // flash, draft lingering) — the long-standing "my steer is ignored
-        // every time" report. Clear the draft (it's now a visible queue chip)
-        // and say what happened so the inject-vs-queue outcome is never silent.
-        setDraft("");
-        setAttachments([]);
-        notify.info("Turn finished — message queued", {
-          detail: "The reply ended before the steer landed, so it'll send as the next message.",
-        });
-      } else if (result === "queued") {
-        // Not streaming when fired (e.g. Alt+Enter just after the turn ended).
-        // Already enqueued by assistant.steer — clear + tell the user it queued
-        // rather than steered, so the box isn't left looking like nothing fired.
-        setDraft("");
-        setAttachments([]);
-        notify.info("Message queued", {
-          detail: "No turn was running, so it'll send as the next message.",
-        });
-      }
-    });
     void tick().then(autosize);
   }
 
@@ -1015,13 +966,6 @@
         return;
       }
     }
-    // Alt+Enter steers the running turn (must precede the plain-Enter branch
-    // below, which also matches when Alt is held).
-    if (e.key === "Enter" && e.altKey && streaming && draft.trim().length > 0) {
-      e.preventDefault();
-      steer();
-      return;
-    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (slashOpen && slashFiltered.length >= 1) {
@@ -1127,12 +1071,8 @@
 <div class="composer-wrap" data-model={modelFamily(paneEffectiveModel)}>
   <QueueRail
     tab={tab ?? null}
-    {tabId}
     {queue}
     {streaming}
-    {steerFlash}
-    {draft}
-    onSteer={steer}
   />
 
   <div
@@ -1249,7 +1189,7 @@
         {:else if draft.length === 0 && !streaming && attachments.length === 0}
           <span class="placeholder-ghost static" aria-hidden="true">Ask {localLlm.askLabel} · <span class="ph-k">/</span> for commands · <span class="ph-k">@</span> to mention a file{#if stt.config.enabled} · <span class="ph-k">Ctrl+D</span> to dictate{/if}</span>
         {:else if streaming && draft.length === 0}
-          <span class="placeholder-ghost static" aria-hidden="true"><span class="ph-k">Enter</span> queues · <span class="ph-k">Alt+Enter</span> steers this turn · <span class="ph-k">/stop</span> halts</span>
+          <span class="placeholder-ghost static" aria-hidden="true"><span class="ph-k">Enter</span> queues for the next turn · <span class="ph-k">/stop</span> halts</span>
         {:else if attachments.length > 0 && draft.length === 0}
           <span class="placeholder-ghost static" aria-hidden="true">Ask about the image…</span>
         {/if}
@@ -1279,7 +1219,7 @@
           use:tooltip={mode === "stop"
             ? { text: "Halt the current turn", kbd: "Esc" }
             : mode === "queue"
-            ? { text: "Queue after current turn — or Alt+Enter to steer it into this turn", kbd: "Enter" }
+            ? { text: "Queue for the next turn", kbd: "Enter" }
             : { text: "Send", kbd: "Enter" }}
         >
           <span class="icon-stack">

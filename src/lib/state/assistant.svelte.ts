@@ -157,13 +157,12 @@ import {
   onStreamError as streamOnError,
 } from "./assistant/streaming";
 // M9 split (2026-06-09): send orchestrator (turn dispatch + slash commands +
-// queue drain + steer + stop + retry/copy/recall) in `./assistant/send`.
+// queue drain + stop + retry/copy/recall) in `./assistant/send`.
 // enhancePrompt + the turn-complete hook wiring stay on the store.
 import {
   send as sendImpl,
   drainQueue as sendDrainQueue,
   stop as sendStop,
-  steer as sendSteer,
   removeQueued as sendRemoveQueued,
   retryLast as sendRetryLast,
   copyLastAssistant as sendCopyLastAssistant,
@@ -263,9 +262,7 @@ export class TabState {
   /** Outbound message queue for THIS tab. send() pushes here when the tab is
    *  already streaming; onDone() pops the next one (queue order = send order,
    *  drag-to-reorder in the rail). Per-tab so a queued msg in Tab A can't drain
-   *  into Tab B if the user switches mid-turn. To redirect the RUNNING turn,
-   *  the rail's "Send now" promotes a chip via steer() — that's a live inject,
-   *  not a queue mode. */
+   *  into Tab B if the user switches mid-turn. */
   queue = $state<{ id: string; text: string }[]>([]);
   /** Per-tab composer draft. Was store-level before split-pane v2 — moved
    *  here so each pane can compose into its own tab concurrently w/o the
@@ -1743,11 +1740,6 @@ class AssistantStore {
   /** Stop a tab's in-flight stream — see ./assistant/send. */
   async stop(tabId?: string | null) {
     return sendStop(this, tabId);
-  }
-
-  /** Steer the RUNNING turn via live CLI stdin — see ./assistant/send. */
-  async steer(text: string, tabId?: string | null, attachments?: { mime: string; dataBase64: string }[]) {
-    return sendSteer(this, text, tabId, attachments);
   }
 
   removeQueued(id: string, tabId?: string) {

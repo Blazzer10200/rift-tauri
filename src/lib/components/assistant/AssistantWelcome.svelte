@@ -34,8 +34,8 @@
     },
     {
       icon: Zap,
-      title: "Watch it work — steer or stop anytime",
-      body: "Claude plans, edits files, and runs checks live in the thread. Nudge it mid-run or stop with a single click.",
+      title: "Watch it work — queue or stop anytime",
+      body: "Claude plans, edits files, and runs checks live in the thread. Queue your next message while it works, or stop with a single click.",
     },
   ];
 

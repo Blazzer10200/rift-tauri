@@ -185,11 +185,10 @@ export function statusOf(b: Block): NodeStatus {
   if (b.type === "thinking") return b.status === "active" ? "pending" : "done";
   return "neutral";
 }
-export function nodeKind(b: Block): "thinking" | "prose" | "tool" | "edit" | "image" | "steer" {
+export function nodeKind(b: Block): "thinking" | "prose" | "tool" | "edit" | "image" {
   if (b.type === "thinking") return "thinking";
   if (b.type === "text") return "prose";
   if (b.type === "image") return "image";
-  if (b.type === "steer") return "steer";
   if (b.type === "tool") return isInlineDiffTool(b.name) ? "edit" : "tool";
   return "prose";
 }

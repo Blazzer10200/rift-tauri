@@ -1,7 +1,7 @@
 // M9 (per docs/design/assistant-svelte-split.md) — the send orchestrator
 // lifted out of `src/lib/state/assistant.svelte.ts` as free fns over the
 // AssistantStore ref: turn dispatch (send + slash commands), the per-tab
-// outbound queue (drain + remove), mid-turn steer, stop, retry, copy and
+// outbound queue (drain + remove), stop, retry, copy and
 // prompt recall. enhancePrompt (stateless wand) and the turn-complete hook
 // wiring stay on the store.
 //
@@ -337,76 +337,6 @@ export async function stop(store: AssistantStore, tabId?: string | null) {
   // never fires onTurnComplete, so without this the queue strands until a
   // tab-switch. Mirrors onStreamError's completion-hook call.
   tab.onTurnComplete?.(tab);
-}
-
-/** Steer the RUNNING turn: inject `text` into the live CLI stdin so the agent
- *  course-corrects at its next loop step (no restart, no lost work). Unlike
- *  the queue, this does NOT wait for the turn to finish. Falls back to the
- *  queue if the turn already ended (or the tab isn't streaming). Defaults to
- *  the focused-pane tab when `tabId` is omitted. */
-export async function steer(
-  store: AssistantStore,
-  text: string,
-  tabId?: string | null,
-  attachments?: { mime: string; dataBase64: string }[],
-): Promise<"steered" | "no_active_turn" | "queued"> {
-  const trimmed = text.trim();
-  if (!trimmed) return "queued";
-  const tab = tabId ? store.tabFor(tabId) : store.activeTab;
-  if (!tab) return "queued";
-  const enqueue = () => {
-    tab.queue = [...tab.queue, { id: crypto.randomUUID(), text: trimmed }];
-  };
-  // No active turn locally → nothing to steer; queue as a normal follow-up.
-  if (!tab.streaming) {
-    enqueue();
-    return "queued";
-  }
-  const sid = tab.cliSessionId;
-  try {
-    const turnAttachments = attachments && attachments.length > 0 ? attachments : null;
-    const res = await invoke<string>("assistant_steer", {
-      sessionId: sid,
-      text: trimmed,
-      attachments: turnAttachments,
-    });
-    if (res === "no_active_turn") {
-      // Turn ended between keypress and IPC — don't lose the message.
-      enqueue();
-      return "no_active_turn";
-    }
-    store.telemetry.event("turn.steer", { convoId: sid });
-    // Make the steer VISIBLE: drop an inline marker into the streaming
-    // assistant bubble at the point it landed, so the user sees their
-    // interjection in the transcript instead of it vanishing into stdin.
-    tab.messages = tab.messages.map((m) =>
-      m.id === tab.streamingMsgId
-        ? {
-            ...m,
-            blocks: [
-              ...m.blocks,
-              {
-                type: "steer" as const,
-                text: trimmed,
-                at: Date.now(),
-                ...(turnAttachments ? { attachments: turnAttachments } : {}),
-              },
-            ],
-          }
-        : m,
-    );
-    toast.push({
-      severity: "info",
-      title: "Steering",
-      detail: trimmed.length > 60 ? trimmed.slice(0, 60) + "…" : trimmed,
-      timeoutMs: 2500,
-    });
-    return "steered";
-  } catch (e) {
-    console.warn("assistant_steer failed", e);
-    enqueue();
-    return "queued";
-  }
 }
 
 export function removeQueued(store: AssistantStore, id: string, tabId?: string) {

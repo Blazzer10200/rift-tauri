@@ -72,9 +72,9 @@ pub(crate) use workspace::current_root;
 pub use projects::*;
 pub use permission::PermissionRegistry;
 // R8 split (2026-06-09): the live-turn nervous system — session registry
-// (PIDs/stop/steer + `kill_all_session_children`, load-bearing for the
+// (PIDs/stop + `kill_all_session_children`, load-bearing for the
 // Velopack apply), control-response + permission plumbing, and
-// assistant_send/stop/steer in `turn.rs`. Glob re-export for the __cmd__
+// assistant_send/stop in `turn.rs`. Glob re-export for the __cmd__
 // items + `crate::assistant::kill_all_session_children` path stability.
 pub use turn::*;
 pub(crate) use turn::kill_all_session_children;

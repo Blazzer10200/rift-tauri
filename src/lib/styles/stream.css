@@ -180,12 +180,6 @@
 .msg-act svg { flex: none; }
 @media (prefers-reduced-motion: reduce) { .msg-acts { transition: none; } }
 
-/* steer note */
-.ssteer { display: flex; align-items: flex-start; gap: 8px; margin: 12px 0; font-size: 12.5px; color: var(--fg-muted);
-  animation: blockIn var(--dur-base) var(--ease-page) both; }
-.ssteer-ic { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; background: color-mix(in oklab, var(--fg) 6%, transparent); color: var(--fg-2); flex: none; }
-.ssteer-tag { color: var(--fg); font-weight: 600; }
-
 /* ── plan / todo checklist ── boxless, transparent (matches the inline diff):
    no card fill, a thin left rule instead of a full border so the page texture
    reads through it. ── */

@@ -17,7 +17,7 @@
 //! each `result` frame (instead of `break`-ing → stdin-drop → EOF → exit). The
 //! `assistant_send` command computes a `SpawnKey` (the respawn-trigger set),
 //! looks up the warm child, and either reuses it (send a `TurnCmd`) or cold-
-//! spawns a new one. All per-turn streaming/permission/steer plumbing stays
+//! spawns a new one. All per-turn streaming/permission plumbing stays
 //! exactly where it was — see `turn.rs::run_turn_loop`.
 //!
 //! Red-team blockers handled (see docs/design/warm-cli-process.md):
@@ -153,7 +153,7 @@ pub(super) struct WarmChild {
 }
 
 /// `static Mutex<Option<HashMap>>` + poison-recovering accessor — matches the
-/// existing SESSION_PIDS / STEER_TX registry idiom (no new dependency). Keyed
+/// existing SESSION_PIDS registry idiom (no new dependency). Keyed
 /// by CLI session_id. Values are `Arc<Mutex<WarmChild>>` so the reuse path can
 /// clone the Arc, release the registry lock, then lock the child (M5/M7: never
 /// hold both at once).

@@ -1,6 +1,6 @@
 <script lang="ts">
   import "$lib/styles/stream.css";
-  import { Check, Send, Copy, RotateCcw, AlertTriangle } from "lucide-svelte";
+  import { Check, Copy, RotateCcw, AlertTriangle } from "lucide-svelte";
   import Markdown from "../Markdown.svelte";
   import StreamThinking from "./StreamThinking.svelte";
   import WorkLine from "./WorkLine.svelte";
@@ -200,11 +200,6 @@
       {:else}
         <div class="snarr"><Markdown text={g.text} {streaming} /></div>
       {/if}
-    {:else if g.type === "steer"}
-      <div class="ssteer">
-        <span class="ssteer-ic"><Send size={12} strokeWidth={2} /></span>
-        <span><span class="ssteer-tag">Steered</span> {g.text}</span>
-      </div>
     {:else}
       {#each g.segs as seg, si (si)}
         {#if seg.seg === "rich"}

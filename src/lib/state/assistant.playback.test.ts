@@ -8,8 +8,8 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: vi.fn().mockResolvedValue(() => {}),
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
-// toast is a UI singleton; the send/steer orchestrator calls toast.push on the
-// steer-success path. Stub it so the harness stays headless.
+// toast is a UI singleton the send orchestrator pushes to (e.g. error paths).
+// Stub it so the harness stays headless.
 vi.mock("./toast.svelte", () => {
   const push = vi.fn();
   return {
@@ -605,10 +605,10 @@ describe("playback — full recorded turn", () => {
   });
 });
 
-// ── Send / queue / steer orchestrator ────────────────────────────────────────
+// ── Send / queue orchestrator ────────────────────────────────────────────────
 // These drive the REAL send() entry point with a mocked backend (invoke), so the
-// turn-init, auth gate, queue-while-streaming, queue drain on completion, and
-// steer paths are all exercised end-to-end — not the hand-rolled beginTurn setup
+// turn-init, auth gate, queue-while-streaming, and queue drain on completion
+// paths are all exercised end-to-end — not the hand-rolled beginTurn setup
 // the stream-pump tests above use.
 
 let convoSeq = 0;
@@ -697,40 +697,7 @@ describe("playback — queue while streaming, drain on completion", () => {
   });
 });
 
-describe("playback — steer", () => {
-  it("injects into the live stream when the tab is streaming", async () => {
-    const { tab } = readyStore();
-    await assistant.send("go");
-    mockInvoke.mockClear();
-
-    await assistant.steer("focus on the tests");
-
-    expect(mockInvoke).toHaveBeenCalledWith(
-      "assistant_steer",
-      expect.objectContaining({ text: "focus on the tests" }),
-    );
-    expect(tab.queue).toHaveLength(0); // steered, not queued
-    expect(assistant.telemetry.snapshot().summary.eventCounts["turn.steer"]).toBe(1);
-  });
-
-  it("falls back to the queue when the tab isn't streaming", async () => {
-    const { tab } = readyStore();
-    mockInvoke.mockClear();
-    await assistant.steer("do this next");
-    expect(tab.queue.map((q) => q.text)).toEqual(["do this next"]);
-    expect(mockInvoke).not.toHaveBeenCalledWith("assistant_steer", expect.anything());
-  });
-
-  it("re-queues when the backend reports the turn already ended (no_active_turn)", async () => {
-    const { tab } = readyStore();
-    await assistant.send("go");
-    mockInvoke.mockResolvedValueOnce("no_active_turn");
-    await assistant.steer("too late");
-    expect(tab.queue.map((q) => q.text)).toEqual(["too late"]);
-  });
-});
-
-describe("playback — unified queue (one model: type → queue, Send-now → steer)", () => {
+describe("playback — queue (type while streaming → fires after the turn)", () => {
   it("drains the queue head as the next turn, in queue order", async () => {
     const { tab } = readyStore();
     await assistant.send("first");
@@ -751,38 +718,15 @@ describe("playback — unified queue (one model: type → queue, Send-now → st
     expect(tab.queue.map((q) => q.text)).toEqual(["third"]);
   });
 
-  it("Send-now steers a parked chip into the running turn and drops it", async () => {
+  it("removeQueued drops a parked chip before it drains", async () => {
     const { tab } = readyStore();
     await assistant.send("go");
     feed(tab, [textDelta("working")]);
-    tab.queue = [{ id: "c1", text: "actually focus on tests" }];
-    mockInvoke.mockClear();
+    tab.queue = [{ id: "c1", text: "drop me" }, { id: "c2", text: "keep me" }];
 
-    // Rail "Send now" promotes the chip via steer() while the turn runs.
-    await assistant.steer("actually focus on tests", null);
     assistant.removeQueued("c1");
-    await settle();
 
-    expect(mockInvoke).toHaveBeenCalledWith(
-      "assistant_steer",
-      expect.objectContaining({ text: "actually focus on tests" }),
-    );
-    expect(tab.queue).toHaveLength(0);
-  });
-
-  it("steer re-queues AND reports when the turn ended in the IPC round-trip (no_active_turn)", async () => {
-    // The "my steer is ignored every time" report: when assistant_steer returns
-    // no_active_turn, send.ts enqueues the message — it must NOT silently vanish.
-    const { tab } = readyStore();
-    await assistant.send("go");
-    feed(tab, [textDelta("working")]);
-    mockInvoke.mockResolvedValueOnce("no_active_turn");
-
-    const res = await assistant.steer("too late", null);
-
-    expect(res).toBe("no_active_turn");
-    // The message survives as a queued follow-up (not dropped).
-    expect(tab.queue.map((q) => q.text)).toEqual(["too late"]);
+    expect(tab.queue.map((q) => q.text)).toEqual(["keep me"]);
   });
 });
 
