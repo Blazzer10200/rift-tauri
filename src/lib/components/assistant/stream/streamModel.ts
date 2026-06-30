@@ -422,22 +422,56 @@ export function groupNames(tools: StreamTool[]): string {
   return `${verb} ${shown}${more}`;
 }
 
-// Trivial transitional narration ("Let me look at the layout file.", "Now I'll
-// check the routes.") reads as filler once the work rows name their targets.
-// Drop a `say` block when it's a single short sentence opening with a known
-// throwaway lead-in AND it sits adjacent to a work group (the work shows what
-// the sentence was about to announce). Real prose — answers, multi-sentence
-// explanation, anything long — is never touched.
+// ── Narration classification ────────────────────────────────────────────────
+// The model narrates between tool calls — "Now I'll build:", "Compiled clean —
+// copy to bin and launch:", "The exe is still locked, kill it harder:". In the
+// CLI that reads as dim connective tissue hugging the work stream; rendered as a
+// full prose block it reads as *chat between tools* and makes a working turn feel
+// chatty. We classify each `say` block into one of three weights, and the
+// narration-density pref decides what each weight does on screen.
+//
+//  - "filler"  : a short single-sentence lead-in ("Let me check the routes.") —
+//                pure announcement, the work row says the same thing.
+//  - "connective": a short between-tools beat that DOES carry a fact ("Compiled
+//                clean — now the release build:", "exe still locked, kill harder:").
+//                Trailing colon, or "<did X>. <now Y>" shape, ≤2 sentences, short.
+//  - "prose"   : everything else — real answers, explanations, anything long /
+//                multi-line / code-bearing. NEVER demoted or hidden.
+export type SayWeight = "filler" | "connective" | "prose";
+
 const FILLER_LEAD = /^(?:let me|let's|now (?:i'?ll|let)|i'?ll|i'?m going to|first,?\s|next,?\s|then,?\s|okay,?\s|alright,?\s|sure,?\s)/i;
-export function isFillerSay(text: string): boolean {
+// A between-tools beat typically ends by pointing at the next action — a trailing
+// colon ("…launch-test:") — or pairs a result with the next step ("Compiled
+// clean. Now …"). Verbs that report a just-finished step lead these often.
+const STEP_REPORT_LEAD = /^(?:compiled|built|done|ok|good|great|confirmed|fixed|that|the |both |running|installed|copied|removed|deleted|created|added|now |all )/i;
+
+export function classifySay(text: string): SayWeight {
   const t = text.trim();
-  if (t.length === 0 || t.length > 120) return false; // long → real content
-  if (/\n/.test(t)) return false;                     // multi-line → real content
-  if (/```/.test(t)) return false;                    // has code → keep
-  // One sentence only (allow a trailing period/colon).
+  if (t.length === 0) return "prose";
+  if (/\n/.test(t)) return "prose";   // multi-line → real content
+  if (/```/.test(t)) return "prose";  // has code → keep
+  if (/`[^`]+`/.test(t) && t.length > 90) return "prose"; // code-heavy explanation
+
   const sentences = t.split(/[.!?]+\s/).filter(Boolean);
-  if (sentences.length > 1) return false;
-  return FILLER_LEAD.test(t);
+
+  // Pure filler: one short sentence opening with a throwaway lead-in.
+  if (t.length <= 120 && sentences.length <= 1 && FILLER_LEAD.test(t)) return "filler";
+
+  // Connective beat: short (≤200), ≤2 sentences, AND it either points forward
+  // (ends with ":") or reports-then-pivots (a step-report lead). These are the
+  // "Now kill the instance and build:" / "Compiled clean. Copy to bin:" lines.
+  if (t.length <= 200 && sentences.length <= 2) {
+    if (/:$/.test(t)) return "connective";
+    if (STEP_REPORT_LEAD.test(t) && /\b(now|next|then|let|copy|launch|build|run|kill|update|commit|check)\b/i.test(t)) {
+      return "connective";
+    }
+  }
+  return "prose";
+}
+
+// Back-compat for the existing unit test + any caller wanting the old boolean.
+export function isFillerSay(text: string): boolean {
+  return classifySay(text) === "filler";
 }
 
 export const VERB_PAST: Record<TKind, string> = {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { messageToTurn, parseAskUserResult, groupNames, isFillerSay } from "./streamModel";
+import { messageToTurn, parseAskUserResult, groupNames, isFillerSay, classifySay } from "./streamModel";
 import type { StreamTool } from "./streamModel";
 import type { ChatMessage } from "$lib/state/assistant.svelte";
 
@@ -300,5 +300,34 @@ describe("isFillerSay — trim throwaway transitional prose", () => {
 
   it("empty / whitespace → not filler (nothing to drop)", () => {
     expect(isFillerSay("   ")).toBe(false);
+  });
+});
+
+describe("classifySay — narration weight (filler / connective / prose)", () => {
+  it("pure lead-in → filler", () => {
+    expect(classifySay("Let me look at the layout file.")).toBe("filler");
+    expect(classifySay("Now I'll check the routes.")).toBe("filler");
+  });
+
+  it("the real between-tools beats from a build session → connective", () => {
+    // These are the exact lines that read as 'chat' in the screenshots.
+    expect(classifySay("Now kill any running instance and build:")).toBe("connective");
+    expect(classifySay("Frontend built clean. Now the Tauri release build (compiles Rust + embeds frontend):")).toBe("connective");
+    expect(classifySay("The bin exe is still running (locked). Kill it harder, then copy:")).toBe("connective");
+    expect(classifySay("4.56MB exe copied. Launch it:")).toBe("connective");
+  });
+
+  it("a trailing-colon pointer is connective even without a step-report lead", () => {
+    expect(classifySay("Wiring the Normal-reset behavior into store.rs:")).toBe("connective");
+  });
+
+  it("real answers / explanations → prose (never demoted)", () => {
+    expect(classifySay("The answer is 42.")).toBe("prose");
+    expect(classifySay("Your second monitor was a different color because vibrance was only ever written to the primary output.")).toBe("prose");
+  });
+
+  it("multi-line or code-bearing → prose", () => {
+    expect(classifySay("Done.\nHere's what changed and why.")).toBe("prose");
+    expect(classifySay("Run ```npm test``` to confirm.")).toBe("prose");
   });
 });

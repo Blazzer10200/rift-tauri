@@ -7,8 +7,19 @@ const RAIL_PINNED_KEY = "rift.ui.rail-pinned.v1";
 const ACCENT_KEY = "rift.ui.accent.v1";
 const CODE_KEY = "rift.ui.code.v1";
 const STREAM_MODE_KEY = "rift.ui.stream-mode.v1";
+const NARRATION_KEY = "rift.ui.narration.v1";
 const DOTFIELD_KEY = "rift.ui.dotfield.v1";
 const VIVIDNESS_KEY = "rift.ui.vividness.v1";
+
+// How much of the model's between-tool narration to surface in the live stream.
+//  - "focused": hide pure connective filler ("Now I'll build:") — the work rows
+//    already name the target; keeps only substantive reasoning.
+//  - "balanced" (default): keep every narration line but DEMOTE short connective
+//    beats to a muted inline note hugging the work rows, so the turn reads as
+//    work-with-commentary, not chat-between-tools.
+//  - "chatty": every narration line as a full prose block (the original behavior).
+export type Narration = "focused" | "balanced" | "chatty";
+const NARRATION_IDS = new Set<string>(["focused", "balanced", "chatty"]);
 
 // Background texture driving `.app[data-dots]` (variant CSS lives in AppShell).
 // "dots" = the default base field (no override); "off" hides it entirely.
@@ -59,6 +70,8 @@ class UiPrefs {
   // display, redesign-port.md §"Net-new"). Default ON; only an explicit opt-out
   // ("0") falls back to the legacy MessageBubble path.
   streamMode = $state(true);
+  // Live-stream narration density (see Narration type). Default "balanced".
+  narration = $state<Narration>("balanced");
 
   init() {
     if (typeof window === "undefined") return;
@@ -99,6 +112,9 @@ class UiPrefs {
     }
 
     this.streamMode = localStorage.getItem(STREAM_MODE_KEY) !== "0";
+
+    const narrRaw = localStorage.getItem(NARRATION_KEY);
+    if (narrRaw !== null && NARRATION_IDS.has(narrRaw)) this.narration = narrRaw as Narration;
 
     this.apply();
   }
@@ -143,6 +159,11 @@ class UiPrefs {
   toggleStreamMode() {
     this.streamMode = !this.streamMode;
     localStorage.setItem(STREAM_MODE_KEY, this.streamMode ? "1" : "0");
+  }
+
+  setNarration(n: Narration) {
+    this.narration = n;
+    localStorage.setItem(NARRATION_KEY, n);
   }
 
 

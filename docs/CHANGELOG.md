@@ -2,13 +2,18 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.75.0 — One way to line up your next message: the queue
+## v0.76.0 — A calmer activity stream: work first, commentary quiet
 
 ### Changed
-- **Removed the "steer" feature; the message queue is now the single way to talk to a running turn.** Pressing Enter while the assistant is working has always queued your message — it's parked as a chip on the composer and sent automatically the moment the current turn finishes, the way the Claude Code editor extensions behave. The older "steer" path (Alt+Enter, which injected your text into the *live* turn mid-stream) was a second, half-working way to do a similar thing, and it could knock the assistant off the task it was in the middle of. It's gone now — front end and back end — leaving one predictable behavior: type while it works, and your message lands as the next turn without derailing the current one. Queued messages can still be edited, reordered, or removed before they send. (CDP-verified live: a message typed mid-stream queued and then ran as its own turn after the first completed; svelte-check 0/0, vitest 35/35, cargo check clean.)
+- **The live activity stream now reads as work-with-commentary instead of chat-between-tools — and you can dial how much commentary shows.** As Claude works it narrates between steps ("Now creating notes.txt:", "Compiled clean — now the release build:"). Those lines were rendered as full prose blocks with the same visual weight as Claude's actual answer, so a turn that was mostly *working* could feel mostly *talking*. Now there's a three-way **Narration** control in Settings → Chat rendering:
+  - **Balanced** (new default) — keeps every narration line but demotes the short connective "did-X, now-Y" beats to a quiet, dotted inline note that hugs the work rows. You still see each step; the work rows and the real answer carry the visual weight.
+  - **Focused** — hides the pure connective filler entirely (the work rows already name the file/command).
+  - **Chatty** — every line as a full prose block (the previous behavior), for when you want the running monologue.
+- **Claude also narrates *with* its work rather than between it.** Sharpened the work-habit guidance so a turn explains a step once and then fires all the independent reads/greps/edits that step needs together, instead of narrate → one tool → narrate → one tool. Same visibility, less ping-pong, more actual work per turn. (CDP-verified live: connective beats demote to muted inline notes while real answers stay full-weight; svelte-check 0/0, cargo check clean, vitest 398/398.)
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
 
+- **v0.75.0** — Removed the half-working "steer" feature (Alt+Enter live-injection) front-and-back; the message queue (type while it works → fires as the next turn, no derail) is now the single way to address a running turn.
 - **v0.74.0** — Two bug fixes: permission prompts (Allow/Deny bar) now appear on the live turn in every non-Bypass mode (they were only wired into persisted history, so gated tools silently auto-denied after 2 min), and sub-agents now reliably register as finished instead of spinning "working…" forever.
 
 - **v0.72.0** — Plan-mode unfreeze (the native "exit plan mode" step no longer hangs the turn for minutes, #75), terminal-grade work habits (the model now batches tool calls + skips redundant re-reads like it does in the CLI, #76), and a modern unified look for every chat block — code, terminal, file-read, and create/edit diff cards now share one emerald-tinted glassy Rift surface with a top accent glow and rise-in entrance (#77).

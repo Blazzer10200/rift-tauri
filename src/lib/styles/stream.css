@@ -29,6 +29,27 @@
 .snarr { color: var(--fg-2); margin: 13px 0; animation: blockIn var(--dur-base) var(--ease-page) both; }
 .snarr :global(.md-p), .snarr :global(.md-li) { color: var(--fg-2); }
 
+/* demoted connective beat (balanced narration) — a between-tools line ("now the
+   release build:", "exe still locked, kill harder:") rendered as quiet inline
+   tissue that hugs the work rows instead of a full prose block. Muted, smaller,
+   tight margins, a leading dot to read as a step marker not a sentence. */
+.snarr-beat {
+  display: block;
+  margin: 3px 0 3px 2px;
+  padding-left: 12px;
+  position: relative;
+  color: var(--fg-faint);
+  font-size: 12px;
+  line-height: 1.45;
+  animation: blockIn var(--dur-base) var(--ease-page) both;
+}
+.snarr-beat::before {
+  content: "";
+  position: absolute; left: 2px; top: 0.62em;
+  width: 4px; height: 4px; border-radius: 50%;
+  background: color-mix(in oklch, var(--accent) 55%, var(--fg-faint));
+}
+
 /* collapsed reasoning */
 .sthink { margin: 12px 0; }
 .sthink-row { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-faint);

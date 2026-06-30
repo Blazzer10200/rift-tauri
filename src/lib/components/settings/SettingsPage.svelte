@@ -31,6 +31,11 @@
   import PageHero from "../shared/PageHero.svelte";
 
   const DENSITIES = ["compact", "regular", "comfy"] as const;
+  const NARRATIONS = [
+    { id: "focused", label: "Focused" },
+    { id: "balanced", label: "Balanced" },
+    { id: "chatty", label: "Chatty" },
+  ] as const;
 
   type Section = "appearance" | "chat" | "speech" | "about";
   const ST_SECTIONS: { id: Section; label: string; icon: typeof Cog; sub: string; dot?: "ok" | "warn" }[] = [
@@ -577,6 +582,16 @@
               <div><div class="ctl-t">Stream view</div><div class="ctl-s">A boxless, text-first activity stream — a "Working for Ns" header, collapsed reasoning, and grouped tool lines.</div></div>
               <button class="toggle" class:on={uiPrefs.streamMode} role="switch" aria-checked={uiPrefs.streamMode} aria-label="Stream view" type="button" onclick={() => uiPrefs.toggleStreamMode()}><span class="toggle-knob"></span></button>
             </div>
+            {#if uiPrefs.streamMode}
+              <div class="ctl-row tight">
+                <div><div class="ctl-t">Narration</div><div class="ctl-s">How much of Claude's between-step commentary shows. <b>Balanced</b> keeps it but demotes connective beats to quiet inline notes so the turn reads as work-with-commentary; <b>Focused</b> hides filler; <b>Chatty</b> shows every line as prose.</div></div>
+                <div class="seg" role="radiogroup" aria-label="Narration density">
+                  {#each NARRATIONS as n (n.id)}
+                    <button class:on={uiPrefs.narration === n.id} role="radio" aria-checked={uiPrefs.narration === n.id} type="button" onclick={() => uiPrefs.setNarration(n.id)}>{n.label}</button>
+                  {/each}
+                </div>
+              </div>
+            {/if}
             <div class="ctl-row tight">
               <div><div class="ctl-t">Activity dock</div><div class="ctl-s">A slide-in side panel showing live sub-agent activity. Reveals itself while sub-agents run and tidies away when they finish.</div></div>
               <button class="toggle" class:on={activityDock.enabled} role="switch" aria-checked={activityDock.enabled} aria-label="Activity dock" type="button" onclick={() => activityDock.setEnabled(!activityDock.enabled)}><span class="toggle-knob"></span></button>

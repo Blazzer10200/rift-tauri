@@ -11,8 +11,9 @@
   import StreamAgent from "./StreamAgent.svelte";
   import StreamAskUser from "./StreamAskUser.svelte";
   import PermissionBar from "../PermissionBar.svelte";
-  import { messageToTurn, groupBlocks, fmtDur, isFillerSay, VERB_ING, tasksToPlanItems, type StreamTool } from "./streamModel";
+  import { messageToTurn, groupBlocks, fmtDur, classifySay, VERB_ING, tasksToPlanItems, type StreamTool } from "./streamModel";
   import { assistant, type ChatMessage, type TabState } from "$lib/state/assistant.svelte";
+  import { uiPrefs } from "$lib/state/ui-prefs.svelte";
   import { fmtTokens } from "$lib/state/assistant/helpers";
   import AnimatedCount from "./AnimatedCount.svelte";
   import { tooltip } from "$lib/actions/tooltip";
@@ -56,6 +57,21 @@
   const plainText = $derived(
     message.blocks.map((b) => (b.type === "text" ? b.text : "")).join("").trim(),
   );
+
+  // Decide how a `say` block renders given the narration-density pref. Returns
+  // "full" (normal prose block), "muted" (demoted inline connective beat), or
+  // "hide". The live-streaming LAST block is always shown full — never demote the
+  // text that's actively typing. `prose` is always full regardless of pref.
+  function sayMode(text: string, isLiveLast: boolean): "full" | "muted" | "hide" {
+    if (isLiveLast) return "full";
+    const w = classifySay(text);
+    if (w === "prose") return "full";
+    const pref = uiPrefs.narration;
+    if (pref === "chatty") return "full";
+    if (pref === "focused") return "hide";
+    // balanced: hide pure filler, demote connective beats to a muted line.
+    return w === "filler" ? "hide" : "muted";
+  }
 
   let copied = $state(false);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
@@ -195,8 +211,11 @@
 
   {#each groups as g, gi (gi)}
     {#if g.type === "say"}
-      {#if !(streaming && gi === groups.length - 1) && isFillerSay(g.text)}
-        <!-- trivial transitional narration; the work rows below name the target -->
+      {@const sm = sayMode(g.text, streaming && gi === groups.length - 1)}
+      {#if sm === "hide"}
+        <!-- connective narration demoted to nothing (focused mode / pure filler) -->
+      {:else if sm === "muted"}
+        <div class="snarr-beat">{g.text.trim()}</div>
       {:else}
         <div class="snarr"><Markdown text={g.text} {streaming} /></div>
       {/if}
