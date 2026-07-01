@@ -6,6 +6,7 @@
     ArrowRight, Filter, FolderGit2, GitBranch, Folder, MessageSquare,
     Sparkles, History, Activity as ActivityIcon, Loader2, Flame, Cpu, Wrench, DollarSign,
     Newspaper, ChevronDown, SplitSquareHorizontal, AlertTriangle, RotateCw,
+    TrendingUp, TrendingDown,
   } from "lucide-svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import NewsFeed from "./NewsFeed.svelte";
@@ -75,6 +76,26 @@
   });
   const stats = $derived(filterRange(statsRaw, range, statsNow));
   const totals = $derived(summarize(stats));
+  // Trend vs the equal-length window immediately before this one — turns each
+  // stat tile from a trophy into a signal. Only meaningful for a bounded range
+  // ("all" has no "previous all"), so it's null there and the tiles stay plain.
+  const DAY = 86_400_000;
+  const trends = $derived.by(() => {
+    if (range === "all") return null;
+    const span = range === "7d" ? 7 * DAY : 30 * DAY;
+    const curFrom = statsNow - span;
+    const prevFrom = statsNow - span * 2;
+    const prev = summarize(statsRaw.filter((s) => s.updatedAt >= prevFrom && s.updatedAt < curFrom));
+    // Signed % change vs prior window; null when the prior window is empty (no
+    // baseline → showing "+∞%" or "new" is noise, so we render nothing).
+    const pct = (cur: number, was: number): number | null =>
+      was === 0 ? null : Math.round(((cur - was) / was) * 100);
+    return {
+      sessions: pct(totals.sessions, prev.sessions),
+      toolCalls: pct(totals.toolCalls, prev.toolCalls),
+      cost: pct(totals.cost, prev.cost),
+    };
+  });
   const strk = $derived(streaks(stats, statsNow));
   const peak = $derived(peakHour(stats));
   const models = $derived(perModel(stats).filter((m) => m.messages > 0).slice(0, 5));
@@ -86,10 +107,21 @@
   const statsEmpty = $derived(!statsLoading && !statsError && statsRaw.length === 0);
   const SEG_HUES = [163, 220, 285, 35, 130];
   const segs = $derived(models.map((m, i) => ({ ...m, hue: SEG_HUES[i % SEG_HUES.length] })));
-  // Legend lists only models that round to ≥1% — sub-1% slivers still ride in the
-  // bar's colored tail, but a "0%" legend row is dead clutter. Keep at least the
-  // top entry so the legend never empties on a tiny all-one-model sample.
-  const legendSegs = $derived(segs.filter((m, i) => i === 0 || Math.round(m.share * 100) >= 1));
+  // Sub-1% models collapse into ONE muted "Other" tail (bar + legend row) —
+  // colored slivers with no legend entry read as mystery meat. segs arrive
+  // sorted by share desc, so the ≥1% cut is a prefix and slice() is safe.
+  const mix = $derived.by(() => {
+    const shown = segs.filter((m, i) => i === 0 || Math.round(m.share * 100) >= 1);
+    const rest = segs.slice(shown.length);
+    const other = rest.length
+      ? {
+          labels: rest.map((r) => r.label).join(" · "),
+          share: rest.reduce((n, r) => n + r.share, 0),
+          messages: rest.reduce((n, r) => n + r.messages, 0),
+        }
+      : null;
+    return { shown, other };
+  });
 
   $effect(() => {
     if (paneRoot && assistant.workspaceFiles.length === 0) void assistant.loadWorkspaceFiles();
@@ -103,6 +135,26 @@
   // recent folder that isn't yet a project can be "adopted" into one in a click.
   const knownKeys = $derived(new Set(projects.items.map((p) => projectRootKey(p.root))));
   const activeIsProject = $derived(hasRoot && knownKeys.has(projectRootKey(paneRoot)));
+
+  // The greeting asks "What's next for X?" — so give it an answer: the most
+  // recent chat in this folder, one click to resume. Ranks by real activity
+  // (never open/switch bumps), matching the sidebar list's own comparator.
+  const resumeChat = $derived.by(() => {
+    if (!paneRoot) return null;
+    const key = projectRootKey(paneRoot);
+    let best: (typeof assistant.conversations)[number] | null = null;
+    let bestAt = -Infinity;
+    for (const c of assistant.conversations) {
+      if (projectRootKey(c.workspaceRoot ?? "") !== key) continue;
+      const at = c.lastActivityAt ?? c.createdAt;
+      if (at > bestAt) { bestAt = at; best = c; }
+    }
+    return best;
+  });
+  function resume(id: string) {
+    workspace.setActive("chat");
+    void assistant.openTab(id).catch(console.error);
+  }
 
   // ── Project editor state ────────────────────────────────────────────────────
   let editing = $state<Project | null>(null);
@@ -281,6 +333,19 @@
   }
 </script>
 
+<!-- Δ vs the prior equal-length window. Green = up, red = down; cost inverts
+     (spending MORE is not "good"). Neutral grey at 0. Hidden when the prior
+     window was empty (no baseline) or range is "all". -->
+{#snippet trendChip(pct: number | null, invert = false)}
+  {#if pct !== null && pct !== 0}
+    {@const good = invert ? pct < 0 : pct > 0}
+    <span class="delta" class:up={good} class:down={!good}>
+      {#if pct > 0}<TrendingUp size={11} strokeWidth={2.2} />{:else}<TrendingDown size={11} strokeWidth={2.2} />{/if}
+      {Math.abs(pct)}%
+    </span>
+  {/if}
+{/snippet}
+
 <div class="sb-main">
   <div class="sb-scroll">
     <div class="sb-wrap">
@@ -306,6 +371,13 @@
               <button class="chip-btn" type="button" onclick={() => void assistant.pickTabFolder(null)}>
                 <Folder size={13} /> Switch folder
               </button>
+              {#if resumeChat}
+                <button class="chip-btn resume" type="button" onclick={() => resume(resumeChat.id)}
+                  use:tooltip={"Pick up your most recent chat here"}>
+                  <History size={13} /> Resume <b>{resumeChat.title || "Untitled"}</b>
+                  <ArrowRight size={12} />
+                </button>
+              {/if}
             </div>
           {/if}
         </div>
@@ -460,24 +532,43 @@
 
             <div class="act-side">
               <div class="strip">
-                <div class="st"><Cpu size={13} /><b>{fmtInt(totals.sessions)}</b><span>sessions</span></div>
-                <div class="st"><Wrench size={13} /><b>{fmtCompact(totals.toolCalls)}</b><span>tool calls</span></div>
-                <div class="st"><DollarSign size={13} /><b>{fmtCost(totals.cost)}</b><span>spent</span></div>
-                <div class="st"><Flame size={13} /><b>{strk.current}d</b><span>streak · best {strk.longest}d</span></div>
+                <div class="st">
+                  <div class="st-top"><Cpu size={13} /><b>{fmtInt(totals.sessions)}</b>{@render trendChip(trends?.sessions ?? null)}</div>
+                  <span>sessions</span>
+                </div>
+                <div class="st">
+                  <div class="st-top"><Wrench size={13} /><b>{fmtCompact(totals.toolCalls)}</b>{@render trendChip(trends?.toolCalls ?? null)}</div>
+                  <span>tool calls</span>
+                </div>
+                <button class="st link" type="button" onclick={() => workspace.setActive("ai-health")} use:tooltip={"Open AI Health — cost breakdown"}>
+                  <div class="st-top"><DollarSign size={13} /><b>{fmtCost(totals.cost)}</b>{@render trendChip(trends?.cost ?? null, true)}</div>
+                  <span>spent</span>
+                </button>
+                <div class="st">
+                  <div class="st-top"><Flame size={13} /><b>{strk.current}d</b></div>
+                  <span>streak · best {strk.longest}d</span>
+                </div>
               </div>
               {#if segs.length}
                 <section class="mix">
                   <div class="mix-h">Model mix{#if topMdl}<span class="mix-sub">· mostly {topMdl}</span>{/if}</div>
                   <div class="mix-bar" role="img" aria-label="Model usage share">
-                    {#each segs as m (m.model)}
+                    {#each mix.shown as m (m.model)}
                       <span class="mseg" style="flex:{Math.max(0.04, m.share)}; --mh:{m.hue}"
                         use:tooltip={`${m.label} · ${fmtInt(m.messages)} msg · ${Math.round(m.share * 100)}%`}></span>
                     {/each}
+                    {#if mix.other}
+                      <span class="mseg other" style="flex:{Math.max(0.04, mix.other.share)}"
+                        use:tooltip={`${mix.other.labels} · ${fmtInt(mix.other.messages)} msg · <1%`}></span>
+                    {/if}
                   </div>
                   <div class="mix-legend">
-                    {#each legendSegs as m (m.model)}
+                    {#each mix.shown as m (m.model)}
                       <span class="lg"><i style="--mh:{m.hue}"></i>{m.label}<small>{Math.round(m.share * 100)}%</small></span>
                     {/each}
+                    {#if mix.other}
+                      <span class="lg"><i class="other"></i>Other<small>&lt;1%</small></span>
+                    {/if}
                   </div>
                 </section>
               {/if}
@@ -740,16 +831,32 @@
   .ch-col.zero { height: 2px; background: color-mix(in oklab, var(--fg) 8%, transparent); border-radius: 2px; }
 
   .strip { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px; padding: 1px; border-radius: 12px; background: var(--border); overflow: hidden; }
-  .st { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 11px 13px; background: var(--bg-inset); }
-  .st :global(svg) { color: var(--accent); opacity: 0.8; margin-bottom: 2px; }
+  .st { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; padding: 11px 13px; background: var(--bg-inset); text-align: left; }
+  .st-top { display: flex; align-items: center; gap: 6px; }
+  .st-top :global(svg) { color: var(--accent); opacity: 0.8; flex: none; }
   .st b { font-size: 17px; font-weight: 700; color: var(--fg); font-variant-numeric: tabular-nums; line-height: 1; }
   .st span { font-size: 10px; color: var(--fg-subtle); }
+  /* The one tile that's a real destination (→ AI Health cost view). */
+  .st.link { cursor: pointer; transition: background var(--dur-fast); -webkit-app-region: no-drag; }
+  .st.link:hover { background: var(--surface-hover); }
+  .st.link:hover b { color: var(--accent); }
+
+  /* Δ vs prior window — a compact signed chip riding beside the number. */
+  .delta { display: inline-flex; align-items: center; gap: 2px; font-size: 10px; font-weight: 700;
+    font-variant-numeric: tabular-nums; padding: 1px 5px 1px 3px; border-radius: 999px; line-height: 1.4; }
+  .delta :global(svg) { opacity: 1; margin: 0; }
+  .delta.up { color: var(--ok); background: color-mix(in oklab, var(--ok) 13%, transparent); }
+  .delta.up :global(svg) { color: var(--ok); }
+  .delta.down { color: var(--fg-subtle); background: color-mix(in oklab, var(--fg) 8%, transparent); }
+  .delta.down :global(svg) { color: var(--fg-subtle); }
 
   .mix-h { font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--fg-faint); margin-bottom: 9px; }
   .mix-sub { margin-left: 7px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--fg-subtle); }
   .mix-bar { display: flex; gap: 2px; height: 14px; border-radius: 7px; overflow: hidden; }
   .mseg { min-width: 3px; border-radius: 2px; background: linear-gradient(180deg, oklch(0.78 0.15 var(--mh)), oklch(0.62 0.13 var(--mh))); transition: filter var(--dur-fast); }
   .mseg:hover { filter: brightness(1.15); }
+  .mseg.other { background: linear-gradient(180deg, oklch(0.55 0 0), oklch(0.44 0 0)); }
+  .lg i.other { background: oklch(0.52 0 0); }
   .mix-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; }
   .lg { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--fg-2); }
   .lg i { width: 9px; height: 9px; border-radius: 3px; flex: none; background: oklch(0.72 0.14 var(--mh)); }
@@ -772,6 +879,13 @@
     transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast); }
   .chip-btn:hover { background: var(--surface-hover); color: var(--fg-2); border-color: var(--border-strong); }
   .chip-btn :global(svg) { color: var(--fg-faint); }
+  /* Resume chip = the greeting's answer. Accent-tinted so it reads as the
+     primary "pick up where you left off", with the chat title truncating. */
+  .chip-btn.resume { max-width: 300px; color: var(--accent);
+    background: color-mix(in oklab, var(--accent) 8%, transparent); border-color: color-mix(in oklab, var(--accent) 22%, transparent); }
+  .chip-btn.resume:hover { background: color-mix(in oklab, var(--accent) 15%, transparent); color: var(--accent); border-color: color-mix(in oklab, var(--accent) 34%, transparent); }
+  .chip-btn.resume b { font-weight: 650; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip-btn.resume :global(svg) { color: var(--accent); opacity: 0.85; flex: none; }
 
   /* Projects section header: count badge + a compact "New" affordance. */
   .projects-col .count { display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 5px; margin-left: 2px;

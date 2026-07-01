@@ -251,13 +251,13 @@
   // own API time (avg_cli_api_ms) against the overhead Rift adds on top
   // (p50_non_api_overhead_ms). Only shown once both exist AND the model clearly
   // dominates (≥2× overhead), so the claim is always true for this user's data.
-  const splitAttribution = $derived.by((): { model: string; rift: string; pct: number } | null => {
+  const splitAttribution = $derived.by((): { rift: string; pct: number } | null => {
     const api = perfStats?.avg_cli_api_ms;
     const overhead = perfStats?.p50_non_api_overhead_ms;
     if (api == null || overhead == null || api <= 0) return null;
     if (api < overhead * 2) return null;
     const pct = Math.round((api / (api + overhead)) * 100);
-    return { model: fmtMs(api), rift: fmtMs(overhead), pct };
+    return { rift: fmtMs(overhead), pct };
   });
   // Show the cold-start aside only when warm is genuinely faster than cold
   // (≥2s gap) so "keeping a chat going stays fast" is a true claim, not hollow
@@ -559,11 +559,10 @@
   >
     {#snippet icon()}<HeartPulse size={22} strokeWidth={1.75} />{/snippet}
     {#snippet chip()}
-      {#if healthScore}
-        <span class="ah-chip {healthScore.tint}" aria-label="Overall health: {healthScore.label}. {healthScore.note}">
-          <span class="dot"></span>{healthScore.label}
-        </span>
-      {:else}
+      <!-- Verdict lives in the verdict strip below (label + note + value pills);
+           a chip repeating the same label 150px above it was a duplicate readout.
+           The chip only covers the pre-data gap. -->
+      {#if !healthScore}
         <span class="ah-chip" aria-label="No health data yet — send a few Claude turns to start measuring.">
           <span class="dot"></span>Getting started
         </span>
@@ -738,6 +737,10 @@
         <div class="ah-card-h"><Wrench size={15} strokeWidth={1.9} />Where your usage goes</div>
         {#if statsError}
           <p class="ah-muted">Couldn't load your history: {statsError}</p>
+        {:else if stats === null}
+          <!-- Still fetching — don't flash the "no conversations yet" copy at a
+               user with hundreds of sessions while the async load races in. -->
+          <p class="ah-muted">Reading your history…</p>
         {:else if !hasHistory}
           <p class="ah-muted">Once you've had a few conversations, your usage breakdown shows up here.</p>
         {:else if totals}
@@ -815,7 +818,7 @@
           <!-- cont.219: model-vs-Rift split — proves the wait is the model, not
                Rift's plumbing, on the user's own turns. -->
           {#if splitAttribution}
-            <p class="ah-attrib subtle"><Gauge size={13} strokeWidth={1.9} />Of a typical reply, about {splitAttribution.pct}% is Claude thinking ({splitAttribution.model}); Rift's own overhead adds just {splitAttribution.rift}. The wait is the model, not the app.</p>
+            <p class="ah-attrib subtle"><Gauge size={13} strokeWidth={1.9} />About {splitAttribution.pct}% of any wait is Claude itself working; Rift's own overhead adds just {splitAttribution.rift} per reply. The wait is the model, not the app.</p>
           {/if}
           <!-- G1: cold-start shown as the one-time warm-up it is, never as a
                problem with the user's setup. Only when warm is meaningfully
@@ -929,7 +932,7 @@
   @keyframes ah-vs-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 45%, transparent); } 50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 0%, transparent); } }
   @media (prefers-reduced-motion: reduce) { .ah-verdict-strip.hot .ah-vs-dot { animation: none; } }
   .ah-vs-label { font-size: 13px; font-weight: 680; letter-spacing: -0.01em; flex: none; }
-  .ah-vs-note { font-size: var(--fs-sm); color: var(--fg-muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ah-vs-note { font-size: var(--fs-sm); color: var(--fg-muted); min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.35; }
   /* All-clear: three dimension dots stand in for "nothing to flag". */
   .ah-vs-dims { display: inline-flex; gap: 5px; margin-left: auto; flex: none; }
   .ah-vs-dim { width: 7px; height: 7px; border-radius: 999px; background: var(--fg-faint); }

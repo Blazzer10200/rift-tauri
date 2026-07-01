@@ -589,7 +589,7 @@
             </div>
             {#if uiPrefs.streamMode}
               <div class="ctl-row tight">
-                <div><div class="ctl-t">Density preset</div><div class="ctl-s">Sets tool detail, narration, and command output together. <b>Calm</b> keeps the stream clean; <b>Standard</b> is the balanced default; <b>Verbose</b> shows everything. Pick one, then fine-tune any axis below.</div></div>
+                <div><div class="ctl-t">Density preset{#if uiPrefs.activePreset === null}<span class="preset-custom">Custom mix</span>{/if}</div><div class="ctl-s">Sets tool detail, narration, and command output together. <b>Calm</b> keeps the stream clean; <b>Standard</b> is the balanced default; <b>Verbose</b> shows everything. Pick one, then fine-tune any axis below.</div></div>
                 <div class="seg" role="radiogroup" aria-label="Density preset">
                   {#each DENSITY_PRESETS as p (p.id)}
                     <button class:on={uiPrefs.activePreset === p.id} role="radio" aria-checked={uiPrefs.activePreset === p.id} type="button" onclick={() => uiPrefs.applyPreset(p.id)}>{p.label}</button>
@@ -1016,6 +1016,11 @@
   .ctl-row.overridden .ctl-t, .ctl-row.overridden .ctl-s { opacity: 0.5; }
   .ctl-note { font-weight: 400; font-size: 11px; color: var(--accent); opacity: 0.9; }
   .ctl-t { font-size: 13px; font-weight: 500; }
+  /* "you've drifted off a preset" tag — the seg shows no active pill then */
+  .preset-custom { margin-left: 8px; font-size: 10px; font-weight: 600; letter-spacing: 0.03em;
+    padding: 1.5px 7px; border-radius: 999px; color: var(--fg-subtle); vertical-align: 1px;
+    background: color-mix(in oklab, var(--fg) 7%, transparent);
+    border: 1px solid color-mix(in oklab, var(--fg) 9%, transparent); }
   .ctl-s { font-size: 11.5px; color: var(--fg-subtle); margin-top: 2px; }
   .ctl-actions { display: flex; align-items: center; gap: 8px; flex: none; }
 

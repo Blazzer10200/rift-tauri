@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Pin, PinOff, MoreHorizontal, Pencil, Trash2, Circle } from "lucide-svelte";
+  import { Pin, PinOff, MoreHorizontal, Pencil, Trash2, ChevronDown } from "lucide-svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { shell } from "$lib/state/shell.svelte";
   import { workspace } from "$lib/state/workspace.svelte";
@@ -110,8 +110,24 @@
   // ── row state ────────────────────────────────────────────────────────
   // Convos with an in-flight turn — drives the per-row workdots shimmer.
   const workingIds = $derived(new Set(assistant.liveTabs.map((t) => t.convoId)));
+  // Live-turn elapsed timer — beginTurn stamps activity.turnStartedAt; a 1s
+  // tick (running only while something streams) drives the readout.
+  const liveStarts = $derived(new Map(assistant.liveTabs.map((t) => [t.convoId, t.tab.activity.turnStartedAt])));
+  let nowTick = $state(Date.now());
+  $effect(() => {
+    if (workingIds.size === 0) return;
+    nowTick = Date.now();
+    const iv = setInterval(() => { nowTick = Date.now(); }, 1000);
+    return () => clearInterval(iv);
+  });
+  function fmtElapsed(start: number | null | undefined): string {
+    if (!start) return "";
+    const s = Math.max(0, Math.floor((nowTick - start) / 1000));
+    const m = Math.floor(s / 60);
+    if (m >= 60) return `${Math.floor(m / 60)}h ${m % 60}m`;
+    return `${m}:${String(s % 60).padStart(2, "0")}`;
+  }
   function isActive(id: string) { return assistant.currentConvoId === id && workspace.activeId === "chat"; }
-  function isOpen(id: string) { return assistant.openTabs.includes(id) && !isActive(id); }
 
   function open(id: string) {
     if (renaming) return;
@@ -183,11 +199,11 @@
   });
 </script>
 
-{#snippet convRow(c: ConversationMeta)}
+{#snippet convRow(c: ConversationMeta, i: number)}
   <div
     class="crow"
+    style="--i:{i}"
     class:on={isActive(c.id)}
-    class:open={isOpen(c.id)}
     class:pinned={shell.isPinned(c.id)}
     class:menu-open={menuId === c.id}
     role="button"
@@ -204,8 +220,6 @@
       </span>
     {:else if shell.isPinned(c.id)}
       <span class="crow-pin"><Pin size={11} /></span>
-    {:else if isOpen(c.id)}
-      <span class="crow-open"><Circle size={7} fill="currentColor" /></span>
     {/if}
 
     {#if renaming === c.id}
@@ -224,7 +238,11 @@
       {#if shell.allProjects}
         <span class="crow-proj" title={c.workspaceRoot ?? "Unfiled"}>{projLabel(c.workspaceRoot)}</span>
       {/if}
-      <span class="crow-time">{relTime(c.lastActivityAt ?? c.createdAt)}</span>
+      {#if workingIds.has(c.id)}
+        <span class="crow-time busy">{fmtElapsed(liveStarts.get(c.id))}</span>
+      {:else}
+        <span class="crow-time">{relTime(c.lastActivityAt ?? c.createdAt)}</span>
+      {/if}
       <span class="crow-acts">
         <button
           class="crow-act"
@@ -248,21 +266,31 @@
     <div class="conv-empty">No conversations yet.{"\n"}Start one from Home or Chat.</div>
   {/if}
 
-  <!-- Most-recent day (+ pinned) render FLAT, no date header — implied default. -->
-  {#each recentGroups as g (g.label)}
-    {#if g.label === "Pinned"}<div class="conv-group-label plain"><span class="cgl-txt">Pinned</span></div>{/if}
-    {#each g.items as c (c.id)}{@render convRow(c)}{/each}
-  {/each}
+  <!-- Most-recent day (+ pinned) render FLAT, no date header — implied default.
+       Keyed on the scope toggle so flipping This/All remounts the rows and
+       replays the stagger-in cascade. -->
+  {#key shell.allProjects}
+    {#each recentGroups as g (g.label)}
+      {#if g.label === "Pinned"}<div class="conv-group-label plain"><span class="cgl-txt">Pinned</span></div>{/if}
+      {#each g.items as c, i (c.id)}{@render convRow(c, i)}{/each}
+    {/each}
+  {/key}
 
   <!-- Everything older tucks behind one quiet "Show earlier" toggle. -->
   {#if olderCount > 0}
-    <button class="showmore conv-showmore" type="button" onclick={() => shell.toggleHistoryExpanded()}>
-      {shell.historyExpanded ? "Show less" : `Show earlier (${olderCount})`}
+    <button class="showmore conv-showmore" class:x={shell.historyExpanded} type="button" onclick={() => shell.toggleHistoryExpanded()}>
+      <span class="sm-rule" aria-hidden="true"></span>
+      <span class="sm-lbl">
+        <ChevronDown size={12} class="sm-ch" />
+        {shell.historyExpanded ? "Show less" : "Show earlier"}
+        {#if !shell.historyExpanded}<span class="sm-ct">{olderCount}</span>{/if}
+      </span>
+      <span class="sm-rule" aria-hidden="true"></span>
     </button>
     {#if shell.historyExpanded}
       {#each olderGroups as g (g.label)}
         <div class="conv-group-label plain"><span class="cgl-txt">{g.label}</span><span class="cgl-ct">{g.items.length}</span></div>
-        {#each g.items as c (c.id)}{@render convRow(c)}{/each}
+        {#each g.items as c, i (c.id)}{@render convRow(c, i)}{/each}
       {/each}
     {/if}
   {/if}
@@ -285,11 +313,24 @@
 {/if}
 
 <style>
-  /* "show more/less" affordance — quiet text link, left-aligned with the row
-     titles above. */
-  .showmore { display: block; width: 100%; text-align: left; padding: 8px 11px 6px 11px;
-    font-size: 11.5px; font-weight: 500; color: var(--fg-subtle); transition: color var(--dur-fast); }
-  .showmore:hover { color: var(--accent); }
+  /* "show earlier/less" affordance — a fold line in the timeline: hairline on
+     each side of a centered chevron + label + count. Reads as the seam where
+     older history is tucked, not a dangling text row. */
+  .showmore { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 6px 6px;
+    font-size: 11px; font-weight: 550; color: var(--fg-subtle); transition: color var(--dur-fast); }
+  .showmore .sm-rule { flex: 1; height: 1px; background: color-mix(in oklab, var(--border) 55%, transparent);
+    transition: background var(--dur-fast); }
+  .showmore .sm-lbl { display: inline-flex; align-items: center; gap: 5px; flex: none; }
+  .showmore :global(.sm-ch) { color: var(--fg-faint); transition: transform 0.22s var(--ease-page), color var(--dur-fast); }
+  .showmore.x :global(.sm-ch) { transform: rotate(180deg); }
+  .showmore:hover { color: var(--fg-2); }
+  .showmore:hover .sm-rule { background: color-mix(in oklab, var(--fg) 14%, transparent); }
+  .showmore:hover :global(.sm-ch) { color: var(--fg-2); }
+  .sm-ct { font-size: 9.5px; font-weight: 600; padding: 1px 6px; border-radius: 999px; color: var(--fg-faint);
+    background: color-mix(in oklab, var(--fg) 7%, transparent); font-variant-numeric: tabular-nums;
+    transition: color var(--dur-fast); }
+  .showmore:hover .sm-ct { color: var(--fg-2); }
+  @media (prefers-reduced-motion: reduce) { .showmore :global(.sm-ch) { transition: transform 0s; } }
 
   /* per-row project label (All-projects mode only) */
   .crow-proj { flex: none; max-width: 84px; padding: 1px 6px; border-radius: 5px;
@@ -314,7 +355,8 @@
   .conv-empty { padding: 22px 14px; text-align: center; font-size: 11.5px; line-height: 1.6; color: var(--fg-subtle); white-space: pre-line; }
 
   .crow { position: relative; display: flex; align-items: center; gap: 9px; height: 34px; padding: 0 6px 0 11px; flex: none;
-    border-radius: 8px; color: var(--fg-muted); cursor: pointer; transition: background var(--dur-fast), color var(--dur-fast); }
+    border-radius: 8px; color: var(--fg-muted); cursor: pointer; transition: background var(--dur-fast), color var(--dur-fast);
+    animation: rowIn 0.22s var(--ease-page) both; animation-delay: calc(min(var(--i, 0), 12) * 14ms); }
   .crow:hover { background: var(--surface-hover); color: var(--fg-2); }
   .crow.on { background: color-mix(in oklab, var(--fg) 10%, transparent); color: var(--fg); }
   .crow.on::before { content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
@@ -324,14 +366,11 @@
      active-row treatment so an active pinned row still wins. */
   .crow.pinned:not(.on) { background: color-mix(in oklab, var(--accent) 5%, transparent); }
   .crow.pinned:not(.on):hover { background: color-mix(in oklab, var(--accent) 9%, transparent); }
-  .crow.open:not(.on) { color: var(--fg-2); }
-  .crow.open:not(.on)::before { content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-    width: 3px; height: 11px; border-radius: 0 3px 3px 0; background: color-mix(in oklab, var(--accent) 45%, transparent); }
-  .crow-open { display: inline-flex; flex: none; color: var(--accent); opacity: 0.85; }
-  .crow:hover .crow-open, .crow.menu-open .crow-open { display: none; }
   .crow-pin { display: inline-flex; flex: none; color: var(--accent); }
   .crow-title { flex: 1; min-width: 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
   .crow-time { font-size: 10.5px; color: var(--fg-faint); font-variant-numeric: tabular-nums; flex: none; opacity: 0.85; transition: opacity var(--dur-fast); }
+  /* live-turn elapsed — activity color (§9: running = busy, not accent) */
+  .crow-time.busy { color: var(--status-busy); opacity: 1; font-weight: 600; }
   /* Resting rows stay calm (title + relative time). On hover the time swaps for
      quick actions — pin + more (rename/delete live behind more). */
   .crow-acts { display: none; align-items: center; gap: 1px; flex: none; }
@@ -339,7 +378,7 @@
     transition: background var(--dur-fast), color var(--dur-fast); }
   .crow-act:hover { background: var(--surface-active); color: var(--fg); }
   .crow:hover .crow-time, .crow.menu-open .crow-time { display: none; }
-  .crow:hover .crow-acts, .crow.menu-open .crow-acts { display: flex; }
+  .crow:hover .crow-acts, .crow.menu-open .crow-acts { display: flex; animation: actsIn 0.14s var(--ease-page) both; }
   .crow-rename { flex: 1; min-width: 0; height: 25px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border-focus);
     background: var(--bg-inset); color: var(--fg); font-size: 12.5px; outline: 0; box-shadow: 0 0 0 3px var(--ring); }
 
@@ -359,6 +398,11 @@
   :global(.conv-menu .pop-item.danger:hover svg) { color: var(--danger); }
 
   @keyframes barPop { from { transform: translateY(-50%) scaleY(0.25); } to { transform: translateY(-50%) scaleY(1); } }
+  /* row entrance — a short cascade (capped at 12 rows so deep lists don't lag) */
+  @keyframes rowIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+  /* hover actions ease in instead of popping (display swap retriggers this) */
+  @keyframes actsIn { from { opacity: 0; transform: translateX(5px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) { .crow, .crow-acts { animation: none !important; } }
   /* global so the portaled (re-parented) menu/preview can reference it by name */
   @keyframes -global-convPopIn { from { opacity: 0; transform: scale(0.97) translateY(-2px); } to { opacity: 1; transform: none; } }
 

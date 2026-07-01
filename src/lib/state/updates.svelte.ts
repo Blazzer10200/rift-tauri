@@ -162,6 +162,9 @@ class UpdateStore {
       case "checking":
         return { kind: "busy", label: "checking…" };
       case "error":
+        // Dev binary is never Velopack-installed — "reinstall needed" there is
+        // noise, not a broken install. Real packaged installs keep the alarm.
+        if (this.installBroken && import.meta.env.DEV) return { kind: "busy", label: "dev build" };
         return { kind: "danger", label: this.installBroken ? "reinstall needed" : "update check failed" };
       case "uptodate":
         return { kind: "ok", label: "up to date" };

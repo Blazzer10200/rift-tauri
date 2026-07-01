@@ -43,7 +43,7 @@
     }
     return [
       { key: "now", label: "Now", items: buckets.now },
-      { key: "earlier", label: "Earlier", items: buckets.earlier },
+      { key: "earlier", label: "Past hour", items: buckets.earlier },
       { key: "today", label: "Today", items: buckets.today },
       { key: "older", label: "Older", items: buckets.older },
     ].filter((g) => g.items.length > 0);
@@ -139,7 +139,9 @@
                   <Icon size={13} />
                 </span>
                 <div class="row-text">
-                  <span class="row-title">{r.title}</span>
+                  <span class="row-title">
+                    {r.title}{#if (r.count ?? 1) > 1}<span class="row-count">×{r.count}</span>{/if}
+                  </span>
                   {#if r.detail}
                     <span class="row-detail" class:mono={r.mono}>{r.detail}</span>
                   {/if}
@@ -278,6 +280,17 @@
     word-break: break-word;
   }
   .row-detail.mono { font-family: var(--font-mono); }
+  .row-count {
+    margin-left: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    color: var(--fg-subtle);
+    background: var(--bg-elev-3);
+    border-radius: 5px;
+    padding: 1px 5px;
+    vertical-align: 1px;
+  }
   .row-time { font-size: 10.5px; color: var(--fg-faint); margin-top: 1px; }
 
   .row-action {

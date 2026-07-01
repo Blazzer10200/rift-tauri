@@ -86,6 +86,12 @@ type PersistenceHost = {
 // session). Each call captures the token; only the latest may write host fields.
 const loadGeneration = new WeakMap<PersistenceHost, number>();
 
+// Tombstones for convos deleted this session. A save racing past its delete —
+// the 700ms debounce timer, or maybeGenerateTitle's in-flight model call —
+// silently re-creates the file on disk, leaving an undeletable ghost row in the
+// sidebar. Every save path checks this before writing.
+const deletedIds = new Set<string>();
+
 export async function refreshConversations(host: PersistenceHost): Promise<void> {
   try {
     host.conversations = await invoke<ConversationMeta[]>("assistant_list_conversations");
@@ -161,7 +167,7 @@ export function buildSaveRecord(
  *  process exit. #145: iterate every tab with content, not just the active one. */
 export function flushNow(host: PersistenceHost): void {
   for (const [convoId, tab] of host.tabs) {
-    if (tab.messages.length === 0) continue;
+    if (tab.messages.length === 0 || deletedIds.has(convoId)) continue;
     if (tab.saveTimer) {
       clearTimeout(tab.saveTimer);
       tab.saveTimer = null;
@@ -192,6 +198,7 @@ export function scheduleSave(host: PersistenceHost, flush = false, forConvoId?: 
   }
   const doSave = async () => {
     tab.saveTimer = null;
+    if (deletedIds.has(convoId)) return;
     const record = buildSaveRecord(host, convoId, tab);
     tab.convoTitle = record.title;
     tab.convoCreatedAt = record.createdAt;
@@ -234,7 +241,7 @@ async function maybeGenerateTitle(
   tab.titleGenerated = true;
   try {
     const title = (await invoke<string>("assistant_generate_title", { prompt: text })).trim();
-    if (!title) return;
+    if (!title || deletedIds.has(convoId)) return;
     tab.convoTitle = title;
     // Re-persist with the new title + refresh so tiles/History pick it up.
     const record = buildSaveRecord(host, convoId, tab);
@@ -253,7 +260,7 @@ export async function renameConversation(
   title: string,
 ): Promise<void> {
   const trimmed = title.trim();
-  if (!trimmed) return;
+  if (!trimmed || deletedIds.has(id)) return;
   const newTitle = trimmed.slice(0, 120);
   try {
     // RR10: a live tab is authoritative over its disk snapshot — load-then-save
@@ -362,6 +369,9 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
 }
 
 export async function deleteConversation(host: PersistenceHost, id: string): Promise<void> {
+  // Tombstone FIRST so a debounced save / title-gen landing mid-delete can't
+  // re-create the file. Rolled back only on a failed delete.
+  deletedIds.add(id);
   try {
     await invoke("assistant_delete_conversation", { id });
     if (host.openTabs.includes(id)) {
@@ -386,6 +396,7 @@ export async function deleteConversation(host: PersistenceHost, id: string): Pro
       await host.closeTab(id);
     }
   } catch (e) {
+    deletedIds.delete(id); // delete failed — the convo still exists; let saves resume
     host.lastError = `Failed to delete conversation: ${String(e)}`;
   }
 }
@@ -409,6 +420,7 @@ export async function deleteAllConversations(host: PersistenceHost): Promise<voi
     ids.map((id) => invoke("assistant_delete_conversation", { id })),
   );
   const deletedOk = new Set(ids.filter((_, i) => results[i]?.status === "fulfilled"));
+  for (const id of deletedOk) deletedIds.add(id); // tombstone vs racing saves
   const failed = ids.length - deletedOk.size;
   if (failed > 0) {
     host.lastError = `Failed to delete ${failed} of ${ids.length} conversation(s)`;

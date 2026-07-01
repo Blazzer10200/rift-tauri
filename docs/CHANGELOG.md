@@ -2,6 +2,19 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## Unreleased — Collapsed mini-rail, Workspace dashboard signals, full-app polish
+
+### Added
+- **Collapsed sidebar is now a mini-rail, not a disappearance.** Collapsing the sidebar leaves a slim 52px icon column: the Rift mark (which becomes an expand button on hover), a **New chat** button, chat **search**, and your **Workspace / Chat / AI Health / Settings** nav — all still one click away. Collapse to reclaim width without losing the essentials.
+- **Workspace dashboard now shows momentum, not just totals.** In the 7-day and 30-day views, each stat tile carries a small trend chip comparing it to the previous window (e.g. sessions ▲ 142%). Rising spend reads as neutral, never as a win. The **spent** tile is now clickable — it jumps straight to the AI Health cost breakdown.
+- **The Workspace greeting resolves to an action.** "What's next for *project*?" now sits beside a one-click **Resume** chip that reopens your most recent chat in that folder.
+
+### Fixed
+- **Deleting a chat right after a reply no longer resurrects it.** A background auto-save or title-generation could re-create a conversation moments after you deleted it, leaving a ghost row that wouldn't delete. Deletions now hold, even mid-save.
+- **Notifications stop piling up duplicates.** Repeated identical notifications (e.g. switching folders) now collapse into a single entry with a count, instead of stacking and pinning the unread badge. The "Past hour" group is also labeled correctly.
+- **AI Health reads honestly.** Dropped a misleading "typical reply" figure that mixed averages, and the status banner no longer truncates mid-word.
+- **Dev builds don't cry wolf.** A development build no longer shows a red "reinstall needed" chip; packaged installs still surface real install problems.
+
 ## v0.83.0 — Sidebar redesign + Fable 5 always in the picker
 
 ### Changed

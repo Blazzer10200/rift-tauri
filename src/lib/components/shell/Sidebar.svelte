@@ -1,10 +1,9 @@
 <script lang="ts">
-  import { PanelLeftClose, Plus, Search } from "lucide-svelte";
+  import { PanelLeftClose, PanelLeftOpen, Plus, Search } from "lucide-svelte";
   import { workspace, type WorkspaceId } from "$lib/state/workspace.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { shell } from "$lib/state/shell.svelte";
   import { commandPalette } from "$lib/state/command-palette.svelte";
-  import { MODEL_OPTIONS } from "../assistant/composer/modelMatrix";
   import { WORKSPACES } from "../workspaces";
   import RiftLogo from "./RiftLogo.svelte";
   import ConversationList from "./ConversationList.svelte";
@@ -14,9 +13,10 @@
   import { rootKey } from "$lib/utils/path";
 
   // Footer icon nav — the destinations that used to stack as full rows above the
-  // history now collapse into a compact icon strip, so nearly the whole rail is
-  // conversations. Order: Workspace · Chat · AI Health (Settings sits in the
-  // status strip). Excludes legacy/disabled ids.
+  // history now collapse into ONE compact icon strip: Workspace · Chat · AI
+  // Health left, Settings right. Model + connection state deliberately live
+  // elsewhere (composer model pill / app status bar) — no duplicate readouts.
+  // Excludes legacy/disabled ids.
   const footNav = $derived(
     workspace.order.filter(
       (id) => id !== "settings" && id !== "projects" && !WORKSPACES[id].disabled,
@@ -36,7 +36,7 @@
     workspace.setActive(id);
   }
 
-  // ── scope segment + status strip data ────────────────────────────────────
+  // ── scope segment data ────────────────────────────────────────────────
   // Live count of chats in the current scope — mirrors ConversationList's own
   // filter so the number the segment shows matches the list below it.
   const scopeCount = $derived(
@@ -50,10 +50,14 @@
     return (r ?? "").replace(/[/\\]+$/, "").replace(/[/\\]/g, "/").toLowerCase();
   }
 
-  const connected = $derived(!!(assistant.auth?.loggedIn || assistant.hasApiKey));
-  const modelLabel = $derived.by(() => {
-    const m = MODEL_OPTIONS.find((o) => o.id === assistant.effectiveModel);
-    return m ? `${m.label} ${m.version}` : "Claude";
+  // Sliding thumb under the active scope button — measured (labels differ in
+  // width), re-measured on every scope flip.
+  let segEl = $state<HTMLElement>();
+  let segThumb = $state({ x: 2, w: 0 });
+  $effect(() => {
+    void shell.allProjects;
+    const on = segEl?.querySelector<HTMLElement>(".seg-btn.on");
+    if (on) segThumb = { x: on.offsetLeft, w: on.offsetWidth };
   });
 
   // ── rail resize ──────────────────────────────────────────────────────
@@ -79,9 +83,9 @@
   class="side-rail"
   class:collapsed={shell.collapsed}
   class:resizing={shell.resizing}
-  style="width:{shell.collapsed ? 0 : shell.width}px"
+  style="width:{shell.collapsed ? 52 : shell.width}px"
 >
-  <aside class="sidebar" class:home={isNavActive("home")}>
+  <aside class="sidebar" class:home={isNavActive("home")} inert={shell.collapsed}>
     <div class="side-head" data-tauri-drag-region>
       <span class="brand">
         <RiftLogo size={22} class="brand-mk" />
@@ -104,7 +108,6 @@
       <button class="new-chat" type="button" onclick={() => goHome()} use:tooltip={"New chat · Ctrl+N"}>
         <span class="nc-ic"><Plus size={16} strokeWidth={2.4} /></span>
         <span class="nc-lbl">New chat</span>
-        <kbd class="nc-kbd">Ctrl N</kbd>
       </button>
       <button class="ic-btn" type="button" onclick={() => commandPalette.show()} use:tooltip={"Search chats · Ctrl+K"} aria-label="Search chats">
         <Search size={16} />
@@ -113,7 +116,8 @@
 
     <!-- Scope segment: This project / All (binds shell.allProjects) + live count. -->
     <div class="tool-row">
-      <div class="seg" role="group" aria-label="Conversation scope">
+      <div class="seg" role="group" aria-label="Conversation scope" bind:this={segEl}>
+        <span class="seg-thumb" aria-hidden="true" style="transform:translateX({segThumb.x}px); width:{segThumb.w}px"></span>
         <button class="seg-btn" class:on={!shell.allProjects} type="button" onclick={() => shell.setAllProjects(false)} aria-pressed={!shell.allProjects}>This project</button>
         <button class="seg-btn" class:on={shell.allProjects} type="button" onclick={() => shell.setAllProjects(true)} aria-pressed={shell.allProjects}>All</button>
       </div>
@@ -139,30 +143,69 @@
           <def.icon class="snav-ic snav-ic-{ICON_KEY[id]}" size={17} />
         </button>
       {/each}
-    </nav>
-
-    <!-- Status strip — grounds the rail: identity monogram, active model, a live
-         connection dot, Settings one click away. No user name/plan (Anthropic
-         exposes no such signal), so the monogram is a generic identity mark. -->
-    <div class="status-strip">
-      <span class="ss-avatar" aria-hidden="true"><RiftLogo size={16} /></span>
-      <span class="ss-meta">
-        <span class="ss-model">{modelLabel}</span>
-        <span class="ss-conn"><span class="ss-dot" class:off={!connected}></span>{connected ? "Connected" : "Not connected"}</span>
-      </span>
+      <span class="fnav-spacer" aria-hidden="true"></span>
       <button
-        class="ss-set"
-        class:on={workspace.activeId === "settings"}
+        class="fnav-item"
+        class:on={isNavActive("settings")}
         type="button"
         onclick={() => goto("settings")}
         use:tooltip={"Settings"}
         aria-label="Settings"
-        aria-current={workspace.activeId === "settings" ? "page" : undefined}
+        aria-current={isNavActive("settings") ? "page" : undefined}
       >
-        <WORKSPACES.settings.icon class="snav-ic snav-ic-settings" size={16} />
+        <WORKSPACES.settings.icon class="snav-ic snav-ic-settings" size={17} />
       </button>
-    </div>
+    </nav>
   </aside>
+
+  <!-- Collapsed mini-rail: icon-only column so collapse never costs the core
+       affordances (new chat / search / nav). Always mounted; opacity+inert
+       gated so the width tween and the rail cross-fade read as one motion.
+       The brand slot doubles as the expand control (logo ⇢ open-icon on hover). -->
+  <div class="mini" inert={!shell.collapsed}>
+    <button
+      class="mini-brand"
+      type="button"
+      onclick={() => shell.toggleCollapsed()}
+      use:tooltip={"Open sidebar"}
+      aria-label="Open sidebar"
+    >
+      <span class="mb-logo"><RiftLogo size={22} /></span>
+      <span class="mb-open"><PanelLeftOpen size={16} /></span>
+    </button>
+    <button class="mini-btn nc" type="button" onclick={() => goHome()} use:tooltip={"New chat · Ctrl+N"} aria-label="New chat">
+      <Plus size={17} strokeWidth={2.4} />
+    </button>
+    <button class="mini-btn" type="button" onclick={() => commandPalette.show()} use:tooltip={"Search chats · Ctrl+K"} aria-label="Search chats">
+      <Search size={16} />
+    </button>
+    <span class="mini-spacer" aria-hidden="true"></span>
+    {#each footNav as id (id)}
+      {@const def = WORKSPACES[id]}
+      <button
+        class="mini-btn nav"
+        class:on={isNavActive(id)}
+        type="button"
+        onclick={() => goto(id)}
+        use:tooltip={def.title}
+        aria-label={def.title}
+        aria-current={isNavActive(id) ? "page" : undefined}
+      >
+        <def.icon size={17} />
+      </button>
+    {/each}
+    <button
+      class="mini-btn nav"
+      class:on={isNavActive("settings")}
+      type="button"
+      onclick={() => goto("settings")}
+      use:tooltip={"Settings"}
+      aria-label="Settings"
+      aria-current={isNavActive("settings") ? "page" : undefined}
+    >
+      <WORKSPACES.settings.icon size={17} />
+    </button>
+  </div>
 
   <div
     class="side-resize"
@@ -181,6 +224,38 @@
     transition: width 0.36s var(--ease-page); }
   .side-rail.resizing, .side-rail.resizing .sidebar { transition: none; }
   .side-rail.collapsed .sidebar { transform: translateX(-18px); opacity: 0; pointer-events: none; }
+  .side-rail.collapsed .side-resize { display: none; }
+
+  /* ── collapsed mini-rail ── an icon column that fades in as the full rail
+     fades out; slight delay so the two never overlap mid-tween. */
+  .mini { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; gap: 5px;
+    padding: 8px 0 10px; border-right: 1px solid var(--border); box-sizing: border-box;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--fg) 3.6%, var(--bg)), color-mix(in oklab, var(--fg) 1.6%, var(--bg)) 260px);
+    opacity: 0; pointer-events: none; transform: translateX(-8px);
+    transition: opacity 0.2s var(--ease-page), transform 0.26s var(--ease-page); }
+  .side-rail.collapsed .mini { opacity: 1; pointer-events: auto; transform: none; transition-delay: 0.1s; }
+  .mini button { -webkit-app-region: no-drag; }
+
+  .mini-brand { position: relative; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 9px; flex: none;
+    transition: background var(--dur-fast); }
+  .mini-brand .mb-logo, .mini-brand .mb-open { grid-area: 1 / 1; display: grid; place-items: center; transition: opacity var(--dur-fast); }
+  .mini-brand :global(.mb-logo svg) { border-radius: 7px; display: block; }
+  .mini-brand .mb-open { opacity: 0; color: var(--fg-2); }
+  .mini-brand:hover { background: var(--surface-hover); }
+  .mini-brand:hover .mb-logo { opacity: 0; }
+  .mini-brand:hover .mb-open { opacity: 1; }
+
+  .mini-btn { width: 36px; height: 36px; flex: none; display: grid; place-items: center; border-radius: 9px;
+    color: var(--fg-muted); transition: background var(--dur-fast), color var(--dur-fast); }
+  .mini-btn:hover { background: var(--surface-hover); color: var(--fg); }
+  .mini-btn:active { transform: translateY(1px); }
+  .mini-btn.nc { color: var(--accent); background: color-mix(in oklab, var(--accent) 10%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 24%, transparent); }
+  .mini-btn.nc:hover { background: color-mix(in oklab, var(--accent) 18%, transparent); }
+  .mini-btn.nav.on { color: var(--accent); background: color-mix(in oklab, var(--fg) 8%, transparent); }
+  .mini-spacer { flex: 1; }
+  @media (prefers-reduced-motion: reduce) { .mini { transition: none; } }
+
   .side-resize { position: absolute; top: 0; right: 0; width: 8px; height: 100%; z-index: 6; cursor: col-resize; -webkit-app-region: no-drag; }
   .side-resize::after { content: ""; position: absolute; top: 0; right: 0; width: 2px; height: 100%; background: transparent; transition: background var(--dur-fast); }
   .side-resize:hover::after, .side-rail.resizing .side-resize::after { background: var(--accent); }
@@ -217,11 +292,14 @@
 
   /* scope toolrow — This project / All segment + live chat count. */
   .tool-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 2px 2px; flex: none; }
-  .seg { display: inline-flex; padding: 2px; gap: 2px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-inset); }
-  .seg-btn { height: 22px; padding: 0 10px; border-radius: 6px; color: var(--fg-subtle); font-size: 11px; font-weight: 600;
-    transition: background var(--dur-fast), color var(--dur-fast); }
+  .seg { position: relative; display: inline-flex; padding: 2px; gap: 2px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-inset); }
+  .seg-thumb { position: absolute; top: 2px; left: 0; height: 22px; border-radius: 6px; background: var(--surface-active);
+    transition: transform 0.18s var(--ease-page), width 0.18s var(--ease-page); }
+  .seg-btn { position: relative; z-index: 1; height: 22px; padding: 0 10px; border-radius: 6px; color: var(--fg-subtle); font-size: 11px; font-weight: 600;
+    transition: color var(--dur-fast); }
   .seg-btn:hover { color: var(--fg-2); }
-  .seg-btn.on { background: var(--surface-active); color: var(--fg); }
+  .seg-btn.on { color: var(--fg); }
+  @media (prefers-reduced-motion: reduce) { .seg-thumb { transition: none; } }
   .count-note { font-size: 10.5px; font-weight: 500; color: var(--fg-faint); font-variant-numeric: tabular-nums; padding-right: 2px; }
 
   /* footer icon nav — destinations collapse from full rows to a compact icon
@@ -229,29 +307,15 @@
   .foot-nav { display: flex; align-items: center; gap: 2px; flex: none; padding-top: 8px; margin-top: 4px;
     border-top: 1px solid color-mix(in oklab, var(--border) 60%, transparent); }
   .fnav-item { position: relative; width: 40px; height: 34px; display: grid; place-items: center; border-radius: 8px;
-    color: var(--fg-muted); transition: background var(--dur-fast), color var(--dur-fast); }
+    color: var(--fg-muted); transition: background var(--dur-fast), color var(--dur-fast), transform var(--dur-fast); }
+  .fnav-item:active { transform: scale(0.92); }
   .fnav-item:hover { background: var(--surface-hover); color: var(--fg-2); }
   .fnav-item.on { color: var(--accent); background: color-mix(in oklab, var(--fg) 8%, transparent); }
-  .fnav-item:hover :global(.snav-ic-home)   { transform: translateY(-2.5px) scale(1.06); }
-  .fnav-item:hover :global(.snav-ic-chat)   { transform: rotate(-10deg) scale(1.06); }
-  .fnav-item:hover :global(.snav-ic-health) { transform: scale(1.1); }
-
-  /* status strip — identity monogram + active model + connection dot + Settings. */
-  .status-strip { display: flex; align-items: center; gap: 9px; height: 46px; padding: 0 4px 0 4px; flex: none; margin-top: 2px;
-    border-top: 1px solid color-mix(in oklab, var(--border) 60%, transparent); }
-  .ss-avatar { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: 8px;
-    background: color-mix(in oklab, var(--fg) 8%, transparent); }
-  .ss-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-  .ss-model { font-size: 12px; font-weight: 600; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .ss-conn { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--fg-faint); }
-  .ss-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--ok);
-    box-shadow: 0 0 0 2px color-mix(in oklab, var(--ok) 22%, transparent); }
-  .ss-dot.off { background: var(--fg-faint); box-shadow: none; }
-  .ss-set { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: 8px;
-    color: var(--fg-faint); transition: background var(--dur-fast), color var(--dur-fast); }
-  .ss-set:hover { background: var(--surface-hover); color: var(--fg-2); }
-  .ss-set.on { color: var(--accent); }
-  .ss-set:hover :global(.snav-ic-settings) { transform: rotate(140deg); }
+  .fnav-item:hover :global(.snav-ic-home)     { transform: translateY(-2.5px) scale(1.06); }
+  .fnav-item:hover :global(.snav-ic-chat)     { transform: rotate(-10deg) scale(1.06); }
+  .fnav-item:hover :global(.snav-ic-health)   { transform: scale(1.1); }
+  .fnav-item:hover :global(.snav-ic-settings) { transform: rotate(140deg); }
+  .fnav-spacer { flex: 1; }
 
   /* primary action — New chat. Reads as primary via an accent-tinted surface +
      accent icon, not a saturated slab, so it stays in the rail's soft language. */
@@ -265,12 +329,7 @@
   .new-chat:active { transform: translateY(1px); }
   .new-chat .nc-ic { display: inline-flex; flex: none; }
   .new-chat .nc-lbl { flex: 1; text-align: left; }
-  .new-chat :global(svg) { flex: none; color: var(--accent); transition: transform 0.34s var(--ease-page); }
-  .new-chat:hover :global(svg) { transform: rotate(90deg); }
-  .nc-kbd { flex: none; font-family: var(--font-mono); font-size: 9.5px; font-weight: 600; letter-spacing: 0.02em;
-    padding: 2px 5px; border-radius: 5px; color: var(--fg-faint); background: color-mix(in oklab, var(--fg) 6%, transparent);
-    border: 1px solid color-mix(in oklab, var(--fg) 7%, transparent); transition: color var(--dur-fast); }
-  .new-chat:hover .nc-kbd { color: var(--fg-subtle); }
+  .new-chat :global(svg) { flex: none; color: var(--accent); }
 
   /* conversation-list section wrapper */
   .side-sec { display: flex; flex-direction: column; flex: 1; min-height: 0; margin-top: 2px; }

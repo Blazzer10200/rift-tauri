@@ -43,9 +43,11 @@ export type NotifyRecord = {
   title: string;
   detail?: string;
   mono?: boolean;
-  /** epoch ms — drives the Now / Earlier / Today / older grouping. */
+  /** epoch ms — drives the Now / Past hour / Today / older grouping. */
   ts: number;
   read: boolean;
+  /** How many consecutive identical pushes this record absorbed (≥2 renders "×N"). */
+  count?: number;
   /** Static label of the action this notification carried (e.g. "View"),
    *  shown as a muted tag in history even after the live closure is gone. */
   actionLabel?: string;
@@ -103,6 +105,7 @@ class ToastStore {
             mono: !!r.mono,
             ts: r.ts,
             read: !!r.read,
+            count: r.count,
             actionLabel: r.actionLabel,
           }));
         // Continue ids past the largest persisted one so live + history don't collide.
@@ -156,20 +159,39 @@ class ToastStore {
     this.items = next;
 
     // Archive into history (newest-first), capped. The badge counts it unread
-    // until the center is opened.
-    const rec: NotifyRecord = {
-      id,
-      severity: opts.severity,
-      title: opts.title,
-      detail: opts.detail,
-      mono: opts.mono,
-      ts: Date.now(),
-      read: false,
-      actionLabel: opts.action?.label,
-      action: opts.action,
-    };
+    // until the center is opened. A push identical to the newest record
+    // coalesces into it (count++ / fresh ts) instead of stacking dupes.
     this.pruneOld();
-    this.history = [rec, ...this.history].slice(0, HISTORY_CAP);
+    const head = this.history[0];
+    if (
+      head &&
+      head.title === opts.title &&
+      head.detail === opts.detail &&
+      head.severity === opts.severity
+    ) {
+      const merged: NotifyRecord = {
+        ...head,
+        ts: Date.now(),
+        read: false,
+        count: (head.count ?? 1) + 1,
+        actionLabel: opts.action?.label,
+        action: opts.action,
+      };
+      this.history = [merged, ...this.history.slice(1)];
+    } else {
+      const rec: NotifyRecord = {
+        id,
+        severity: opts.severity,
+        title: opts.title,
+        detail: opts.detail,
+        mono: opts.mono,
+        ts: Date.now(),
+        read: false,
+        actionLabel: opts.action?.label,
+        action: opts.action,
+      };
+      this.history = [rec, ...this.history].slice(0, HISTORY_CAP);
+    }
     this.persist();
 
     if (!opts.sticky) {
