@@ -1,0 +1,153 @@
+<!-- @dsCard group="Pages" name="AI Health" subtitle="Experimental workspace — usage dashboard: analyze-usage hero, API-latency banner, current setup, plan-limit windows + credits, usage breakdown, speed & efficiency KPIs" -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Rift — AI Health</title>
+<link rel="stylesheet" href="../styles.css" />
+<style>
+  body { padding: 0; height: 980px; overflow: hidden; background: radial-gradient(1000px 500px at 50% -10%, oklch(0.2 0.006 160) 0%, transparent 60%), var(--bg); }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 26px 40px; }
+
+  /* PageHero */
+  .hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+  .hero-l { display: flex; align-items: flex-start; gap: 14px; min-width: 0; }
+  .hero-ic { width: 44px; height: 44px; border-radius: 12px; flex: none; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--ghost-border); }
+  .eyebrow { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-subtle); }
+  .h-tt { font-size: 24px; font-weight: 760; letter-spacing: -0.025em; line-height: 1.1; margin-top: 1px; }
+  .h-sub { font-size: var(--fs-sm); color: var(--fg-muted); margin-top: 4px; line-height: 1.5; max-width: 62ch; }
+  .status-pill { display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 13px; border-radius: 999px; background: var(--warn-soft, color-mix(in oklab, var(--warn) 14%, transparent)); border: 1px solid color-mix(in oklab, var(--warn) 30%, transparent); color: var(--warn); font-size: 11px; font-weight: 600; flex: none; }
+  .status-pill .d { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-2xl); padding: 20px 24px; margin-top: 16px; }
+
+  /* analyze hero card */
+  .analyze { display: flex; align-items: center; gap: 18px; border-color: color-mix(in oklab, var(--accent) 30%, var(--border)); background: linear-gradient(120deg, color-mix(in oklab, var(--accent) 8%, var(--surface)), var(--surface) 70%); }
+  .analyze .aic { width: 46px; height: 46px; border-radius: 12px; flex: none; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--ghost-border); }
+  .analyze .at { flex: 1; }
+  .analyze .at h3 { margin: 0; font-size: var(--fs-lg); font-weight: 650; }
+  .analyze .at p { margin: 4px 0 0; font-size: var(--fs-sm); color: var(--fg-muted); line-height: 1.5; max-width: 58ch; }
+  .btn-lg { display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 20px; border-radius: var(--radius-lg); background: var(--accent); color: var(--accent-fg); font-weight: 650; font-size: var(--fs-md); flex: none; }
+  .btn-lg svg { width: 15px; height: 15px; }
+
+  /* latency banner */
+  .banner { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-radius: var(--radius-lg); background: color-mix(in oklab, var(--warn) 9%, var(--surface)); border: 1px solid color-mix(in oklab, var(--warn) 22%, var(--border)); border-left: 3px solid var(--warn); margin-top: 16px; }
+  .banner .d { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); flex: none; }
+  .banner .bt { font-weight: 650; font-size: var(--fs-md); }
+  .banner .bx { color: var(--fg-muted); font-size: var(--fs-sm); flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lat-pill { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 999px; background: var(--danger-soft); color: var(--danger); font-size: 11px; font-weight: 600; flex: none; }
+
+  .card-h { display: flex; align-items: center; gap: 8px; }
+  .card-h svg { width: 16px; height: 16px; color: var(--accent); }
+  .card-h h3 { margin: 0; font-size: var(--fs-md); font-weight: 650; }
+  .card-h .ts { margin-left: auto; font-size: var(--fs-xs); color: var(--fg-faint); }
+  .card-h + .cdesc { font-size: var(--fs-sm); color: var(--fg-muted); margin: 6px 0 0; }
+
+  /* current setup rows */
+  .kv { display: flex; align-items: center; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid color-mix(in oklab, var(--border) 55%, transparent); }
+  .kv:last-of-type { border-bottom: 0; }
+  .kv .k { color: var(--fg-muted); font-size: var(--fs-md); }
+  .kv .v { color: var(--fg); font-weight: 650; font-size: var(--fs-md); }
+  .note { font-size: var(--fs-sm); color: var(--fg-subtle); margin-top: 12px; }
+
+  /* plan limits */
+  .lim { margin-top: 18px; }
+  .lim .top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 7px; }
+  .lim .lab { font-size: var(--fs-sm); color: var(--fg-2); }
+  .lim .pct { font-size: var(--fs-md); font-weight: 700; color: var(--fg); }
+  .lim .rst { font-size: var(--fs-xs); color: var(--fg-faint); margin-left: 8px; }
+  .bar { height: 8px; border-radius: 999px; background: var(--track); overflow: hidden; }
+  .bar i { display: block; height: 100%; border-radius: 999px; background: var(--accent); }
+  .credits { display: flex; align-items: center; justify-content: space-between; margin-top: 20px; padding-top: 16px; border-top: 1px solid color-mix(in oklab, var(--border) 55%, transparent); }
+  .credits .k { color: var(--fg-muted); font-size: var(--fs-md); }
+  .credits .v { color: var(--fg); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  /* speed KPIs */
+  .kpis { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 16px; }
+  .kpi { background: var(--bg-elev-1); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 14px; }
+  .kpi.warnk { border-color: color-mix(in oklab, var(--danger) 28%, var(--border)); background: color-mix(in oklab, var(--danger) 6%, var(--bg-elev-1)); }
+  .kpi.okk { border-color: color-mix(in oklab, var(--ok) 26%, var(--border)); background: color-mix(in oklab, var(--ok) 6%, var(--bg-elev-1)); }
+  .kpi .n { font-size: var(--fs-xl); font-weight: 700; color: var(--fg); }
+  .kpi .k { font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 3px; }
+
+  .ic { stroke: currentColor; fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <!-- PageHero -->
+  <div class="hero">
+    <div class="hero-l">
+      <div class="hero-ic"><svg class="ic" viewBox="0 0 24 24" style="width:22px;height:22px"><path d="M20.8 5.6a5.5 5.5 0 0 0-7.8 0L12 6.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 22l7.8-7.6 1-1a5.5 5.5 0 0 0 0-7.8z"/></svg></div>
+      <div>
+        <div class="eyebrow">Experimental</div>
+        <div class="h-tt">AI Health</div>
+        <div class="h-sub">See how you're using Claude through Rift — your plan limits, where your usage goes, and one-tap advice on how to stretch your plan further.</div>
+      </div>
+    </div>
+    <span class="status-pill"><span class="d"></span>API is slow right now</span>
+  </div>
+
+  <!-- analyze hero card -->
+  <div class="card analyze">
+    <div class="aic"><svg class="ic" viewBox="0 0 24 24" style="width:22px;height:22px"><path d="M5 3v4M3 5h4M6 17v4M4 19h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5z"/></svg></div>
+    <div class="at">
+      <h3>Let Rift tune itself to how you work</h3>
+      <p>Rift reads your setup and recent usage, then asks your own Claude for a few plain-English changes that'll make your plan go further. Nothing changes until you say so.</p>
+    </div>
+    <span class="btn-lg">Analyze my usage <svg class="ic" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+  </div>
+
+  <!-- latency banner -->
+  <div class="banner">
+    <span class="d"></span>
+    <span class="bt">API is slow right now</span>
+    <span class="bx">The wait is on Anthropic's side, not your setup — it usually clears on its o…</span>
+    <span class="lat-pill">Latency 13.1s</span>
+  </div>
+
+  <!-- current setup -->
+  <div class="card">
+    <div class="card-h"><svg class="ic" viewBox="0 0 24 24"><path d="M4 7h10M4 12h16M4 17h7"/></svg><h3>Your current setup</h3></div>
+    <div class="kv"><span class="k">Default thinking</span><span class="v">Off</span></div>
+    <div class="kv"><span class="k">Default model</span><span class="v">Sonnet</span></div>
+    <div class="note">These are the knobs Rift can tune for you. Advice above applies straight to them — one tap, undoable.</div>
+  </div>
+
+  <!-- plan limits -->
+  <div class="card">
+    <div class="card-h"><svg class="ic" viewBox="0 0 24 24"><path d="M12 12l4-2M12 21a9 9 0 1 1 9-9"/><circle cx="12" cy="12" r="1.4"/></svg><h3>Plan limits</h3><span class="ts">just now</span></div>
+    <p class="cdesc">How much of each usage window you've used. When a bar fills up, Claude pauses until it resets at the time shown.</p>
+    <div class="lim">
+      <div class="top"><span class="lab">5-hour window</span><span><span class="pct">13%</span><span class="rst">resets in 1h 41m</span></span></div>
+      <div class="bar"><i style="width:13%"></i></div>
+    </div>
+    <div class="lim">
+      <div class="top"><span class="lab">Weekly · all models</span><span><span class="pct">10%</span><span class="rst">resets Tue, Jul 7</span></span></div>
+      <div class="bar"><i style="width:10%"></i></div>
+    </div>
+    <div class="credits"><span class="k">Usage credits</span><span class="v">$0.00 / $80.00</span></div>
+  </div>
+
+  <!-- usage breakdown -->
+  <div class="card">
+    <div class="card-h"><svg class="ic" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.6 5.6l-6.4 6.4 2 2 6.4-6.4a4 4 0 0 0 5.6-5.6L14 8l-2-2z"/></svg><h3>Where your usage goes</h3></div>
+    <p class="cdesc">Once you've had a few conversations, your usage breakdown shows up here.</p>
+  </div>
+
+  <!-- speed & efficiency -->
+  <div class="card">
+    <div class="card-h"><svg class="ic" viewBox="0 0 24 24"><path d="M12 12l4-2M12 21a9 9 0 1 1 9-9"/><circle cx="12" cy="12" r="1.4"/></svg><h3>Speed &amp; efficiency</h3></div>
+    <p class="cdesc">How fast Claude responds and how efficiently it reuses your conversation — measured across your last 371 replies.</p>
+    <div class="kpis">
+      <div class="kpi"><div class="n">3.2s</div><div class="k">median first token</div></div>
+      <div class="kpi warnk"><div class="n">13.1s</div><div class="k">slowest first token</div></div>
+      <div class="kpi"><div class="n">17.7s</div><div class="k">median full reply</div></div>
+      <div class="kpi okk"><div class="n">100%</div><div class="k">cache hit rate</div></div>
+      <div class="kpi"><div class="n">1.4M</div><div class="k">tokens saved</div></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

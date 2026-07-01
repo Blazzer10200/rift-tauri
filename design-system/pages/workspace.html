@@ -1,4 +1,4 @@
-<!-- @dsCard group="Pages" name="Workspace" subtitle="Home workspace — left sidebar IA, PageHero greeting, activity dashboard, projects list, add-a-project & news strip" -->
+<!-- @dsCard group="Pages" name="Workspace" subtitle="Home workspace — C+ switcher sidebar, greeting hero, activity bento (messages · KPIs · model mix), responsive projects grid, What's-new strip" -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7,238 +7,246 @@
 <title>Rift — Workspace</title>
 <link rel="stylesheet" href="../styles.css" />
 <style>
-  body { padding: 0; height: 800px; overflow: hidden; }
+  body { padding: 0; height: 820px; overflow: hidden; }
 
-  /* ── shell grid: titlebar across top, sidebar + content below ── */
-  .shell { display: grid; grid-template-rows: var(--titlebar-h) 1fr; grid-template-columns: 248px 1fr; height: 800px; }
+  /* ── shell: sidebar + content ── */
+  .shell { display: grid; grid-template-columns: 264px 1fr; height: 820px; }
 
-  /* ── titlebar (logo + window controls only — no nav) ── */
-  .tb { grid-column: 1 / -1; display: grid; grid-template-columns: 248px 1fr auto; align-items: center; height: var(--titlebar-h); background: var(--bg-elev-1); border-bottom: 1px solid var(--border); }
-  .tb .brand { display: inline-flex; align-items: center; gap: 9px; padding-left: 14px; }
-  .tb .brand .mk { width: 20px; height: 20px; border-radius: 5px; background: var(--bg-elev-2); border: 1px solid var(--border-strong); display: grid; place-items: center; font-weight: 700; font-size: 12px; color: var(--fg-2); }
-  .tb .brand .app { font-weight: 600; letter-spacing: -0.01em; }
-  .tb .collapse { justify-self: start; padding-left: 10px; color: var(--fg-subtle); }
-  .tb .r { display: flex; align-items: center; gap: 4px; padding-right: 4px; }
-  .flame { display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 7px; border-radius: 999px; background: var(--ok-soft); color: var(--ok); font-size: 10px; font-weight: 700; }
-  .winctl { display: flex; margin-left: 6px; }
-  .winctl span { width: 40px; height: var(--titlebar-h); display: grid; place-items: center; color: var(--fg-muted); }
-  .ic { stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-
-  /* ── sidebar ── */
-  .side { grid-row: 2; grid-column: 1; background: var(--bg-elev-1); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
-  .newchat { display: flex; align-items: center; gap: 8px; margin: 12px 12px 6px; height: 36px; padding: 0 12px; border-radius: var(--radius-lg); background: var(--accent-soft); border: 1px solid var(--ghost-border); color: var(--accent); font-weight: 600; font-size: var(--fs-sm); }
-  .newchat .kb { margin-left: auto; font-family: var(--font-mono); font-size: 10px; color: var(--fg-muted); background: var(--bg-elev-2); border: 1px solid var(--border-strong); border-radius: 4px; padding: 1px 5px; }
-  .snav { padding: 4px 8px; display: flex; flex-direction: column; gap: 1px; }
-  .snav-item { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 12px; border-radius: var(--radius-sm); color: var(--fg-muted); font-size: var(--fs-sm); font-weight: 500; }
-  .snav-item.on { background: var(--accent-soft); color: var(--accent); }
-  .snav-item .gi { width: 16px; height: 16px; }
-  .sec { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 6px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-faint); }
-  .projrow { display: flex; gap: 7px; padding: 0 14px 8px; }
-  .pav { width: 30px; height: 30px; border-radius: var(--radius-sm); display: grid; place-items: center; font-weight: 700; font-size: 12px; }
-  .pav.on { background: var(--accent-soft); color: var(--accent); border: 1px solid var(--ghost-border); position: relative; }
-  .pav.on::after { content: ""; position: absolute; top: -2px; right: -2px; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); border: 1.5px solid var(--bg-elev-1); }
-  .pav.off { background: var(--bg-elev-2); color: var(--fg-muted); border: 1px solid var(--border); }
-  .search { margin: 2px 12px 8px; display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; background: var(--field); border: 1px solid var(--field-border); border-radius: var(--radius-sm); color: var(--fg-subtle); font-size: var(--fs-sm); }
-  .seg { display: flex; margin: 0 12px 8px; padding: 2px; background: var(--track); border-radius: var(--radius-sm); gap: 2px; }
-  .seg b { flex: 1; text-align: center; padding: 5px 0; border-radius: 4px; font-size: var(--fs-xs); font-weight: 500; color: var(--fg-muted); }
-  .seg b.on { background: var(--bg-elev-2); color: var(--fg); }
-  .convsec { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-faint); padding: 8px 16px 4px; }
-  .convsec b { color: var(--fg-subtle); margin-left: 6px; }
-  .convs { flex: 1; overflow: hidden; padding: 0 8px; display: flex; flex-direction: column; gap: 0; }
-  .crow { display: flex; align-items: center; justify-content: space-between; height: 30px; padding: 0 12px; border-radius: var(--radius-sm); color: var(--fg-2); font-size: var(--fs-sm); }
-  .crow .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .crow .age { color: var(--fg-faint); font-size: var(--fs-xs); flex: none; margin-left: 8px; }
-  .sfoot { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--border); color: var(--fg-muted); font-size: var(--fs-sm); }
+  /* ── sidebar (C+ switcher rail — mirrors components/sidebar.html) ── */
+  .side { display: flex; flex-direction: column; gap: 4px; min-height: 0; padding: 8px 10px 10px; box-sizing: border-box;
+    border-right: 1px solid var(--border);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--fg) 3.6%, var(--bg)), color-mix(in oklab, var(--fg) 1.6%, var(--bg)) 260px); }
+  .side-head { display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 6px 0 8px; flex: none; }
+  .brand { display: inline-flex; align-items: center; gap: 9px; }
+  .brand-mk { width: 22px; height: 22px; border-radius: 7px; display: block; object-fit: contain; }
+  .brand-name { font-size: 14px; font-weight: 650; letter-spacing: -0.012em; }
+  .collapse { width: 28px; height: 28px; display: grid; place-items: center; color: var(--fg-faint); }
+  .switcher { display: flex; align-items: center; gap: 10px; height: 46px; margin: 2px 0; padding: 0 8px; flex: none; border-radius: 11px; border: 1px solid var(--border); background: var(--bg-inset); }
+  .sw-mono { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: 8px; font-size: 12px; font-weight: 700; color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 24%, transparent); }
+  .sw-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .sw-name { font-size: 13px; font-weight: 650; color: var(--fg); }
+  .sw-sub { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--fg-faint); }
+  .branch { display: inline-flex; align-items: center; gap: 3px; height: 15px; padding: 0 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 9.5px; font-weight: 600; }
+  .action-row { display: flex; align-items: center; gap: 6px; flex: none; margin: 2px 0; }
+  .newchat { display: flex; align-items: center; gap: 10px; height: 38px; flex: 1; padding: 0 10px 0 11px; border-radius: 10px; font-size: 13px; font-weight: 580; color: var(--fg); border: 1px solid color-mix(in oklab, var(--accent) 28%, var(--border)); background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 12%, transparent), color-mix(in oklab, var(--accent) 5%, transparent)); }
+  .newchat svg { color: var(--accent); flex: none; }
+  .newchat .lbl { flex: 1; }
+  .nc-kbd { font-family: var(--font-mono); font-size: 9.5px; font-weight: 600; padding: 2px 5px; border-radius: 5px; color: var(--fg-faint); background: color-mix(in oklab, var(--fg) 6%, transparent); border: 1px solid color-mix(in oklab, var(--fg) 7%, transparent); }
+  .ic-btn { width: 38px; height: 38px; flex: none; display: grid; place-items: center; border-radius: 10px; color: var(--fg-muted); border: 1px solid var(--border); background: var(--bg-inset); }
+  .tool-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 2px 2px; flex: none; }
+  .seg2 { display: inline-flex; padding: 2px; gap: 2px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-inset); }
+  .seg2 b { height: 22px; padding: 0 10px; border-radius: 6px; color: var(--fg-subtle); font-size: 11px; font-weight: 600; display: grid; place-items: center; }
+  .seg2 b.on { background: var(--surface-active); color: var(--fg); }
+  .count-note { font-size: 10.5px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+  .convs { flex: 1; overflow: hidden; padding: 8px 0; margin-top: 4px; border-top: 1px solid color-mix(in oklab, var(--border) 45%, transparent); display: flex; flex-direction: column; gap: 3px; }
+  .crow { display: flex; align-items: center; gap: 9px; height: 34px; padding: 0 6px 0 11px; border-radius: 8px; color: var(--fg-muted); }
+  .crow .t { flex: 1; min-width: 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .crow .age { font-size: 10.5px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+  .crow.on { position: relative; background: color-mix(in oklab, var(--fg) 10%, transparent); color: var(--fg); }
+  .crow.on::before { content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 3px; height: 15px; border-radius: 0 3px 3px 0; background: var(--accent); }
+  .showmore { padding: 8px 11px 6px; font-size: 11.5px; color: var(--fg-subtle); }
+  .foot-nav { display: flex; align-items: center; gap: 2px; flex: none; padding-top: 8px; margin-top: 4px; border-top: 1px solid color-mix(in oklab, var(--border) 60%, transparent); }
+  .fnav { width: 40px; height: 34px; display: grid; place-items: center; border-radius: 8px; color: var(--fg-muted); }
+  .fnav.on { color: var(--accent); background: color-mix(in oklab, var(--fg) 8%, transparent); }
+  .status-strip { display: flex; align-items: center; gap: 9px; height: 46px; padding: 0 4px; flex: none; margin-top: 2px; border-top: 1px solid color-mix(in oklab, var(--border) 60%, transparent); }
+  .ss-avatar { width: 28px; height: 28px; border-radius: 8px; display: block; object-fit: contain; }
+  .ss-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .ss-model { font-size: 12px; font-weight: 600; color: var(--fg-2); }
+  .ss-conn { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--fg-faint); }
+  .ss-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 2px color-mix(in oklab, var(--ok) 22%, transparent); }
+  .ss-set { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px; color: var(--fg-faint); }
 
   /* ── content ── */
-  .content { grid-row: 2; grid-column: 2; overflow: hidden; display: flex; flex-direction: column; background: radial-gradient(1200px 700px at 50% -10%, oklch(0.205 0.004 250) 0%, transparent 60%), var(--bg); }
+  .content { overflow: hidden; display: flex; flex-direction: column; background: radial-gradient(1200px 700px at 50% -10%, oklch(0.205 0.004 250) 0%, transparent 60%), var(--bg); }
   .wrap { max-width: 1180px; margin: 0 auto; width: 100%; padding: 22px 40px; overflow: hidden; }
 
-  /* PageHero greeting */
+  /* hero greeting */
   .hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
   .hero h1 { font-size: var(--fs-2xl); font-weight: 600; letter-spacing: -0.02em; margin: 0; }
-  .hero h1 .dim { color: var(--fg-muted); font-weight: 600; }
+  .hero h1 .dim { color: var(--fg-muted); }
   .hero h1 b { color: var(--fg); }
   .hero .meta { display: flex; gap: 8px; margin-top: 12px; }
   .chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--fg-2); font-size: var(--fs-sm); }
+  .chip .br { display: inline-flex; align-items: center; gap: 4px; color: var(--accent); font-weight: 600; }
   .chip b { color: var(--fg); font-weight: 600; }
   .hero .acts { display: flex; gap: 8px; flex: none; }
 
-  .section-label { margin: 26px 0 12px; }
+  .section-label { display: flex; align-items: center; gap: 8px; margin: 26px 0 12px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-faint); }
+  .section-label .sc { display: inline-grid; place-items: center; width: 16px; height: 16px; color: var(--fg-subtle); }
+  .section-label .ct { padding: 1px 7px; border-radius: 999px; background: color-mix(in oklab, var(--fg) 8%, transparent); color: var(--fg-subtle); font-size: 10px; }
   .stat-tag { margin-left: auto; display: flex; gap: 2px; padding: 2px; background: var(--track); border-radius: var(--radius-sm); }
-  .stat-tag b { padding: 3px 10px; border-radius: 4px; font-size: var(--fs-xs); color: var(--fg-muted); }
+  .stat-tag b { padding: 3px 10px; border-radius: 4px; font-size: var(--fs-xs); font-weight: 500; color: var(--fg-muted); }
   .stat-tag b.on { background: var(--bg-elev-2); color: var(--fg); }
 
-  /* activity card */
+  /* activity bento */
   .act { display: grid; grid-template-columns: 1.5fr 1fr; gap: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-2xl); overflow: hidden; }
   .act .l { padding: 22px 24px; }
-  .act .r { padding: 22px 24px; border-left: 1px solid var(--border); }
+  .act .r { padding: 22px 24px; border-left: 1px solid var(--border); display: flex; flex-direction: column; }
   .big { font-size: 46px; font-weight: 700; letter-spacing: -0.03em; line-height: 1; color: var(--fg); }
-  .big + .sub { display: inline; font-size: var(--fs-md); color: var(--fg-muted); margin-left: 8px; }
+  .big + .sub { font-size: var(--fs-md); color: var(--fg-muted); margin-left: 8px; }
   .act .desc { color: var(--fg-muted); font-size: var(--fs-sm); margin-top: 8px; }
   .barlabel { display: flex; justify-content: space-between; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-faint); margin: 18px 0 8px; }
-  .bars { display: flex; align-items: flex-end; gap: 3px; height: 110px; border-bottom: 1px dashed var(--border); }
+  .bars { display: flex; align-items: flex-end; gap: 3px; height: 150px; border-bottom: 1px dashed var(--border); }
   .bars i { flex: 1; background: var(--accent); border-radius: 2px 2px 0 0; opacity: 0.85; }
   .kpi { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--radius-lg); overflow: hidden; }
   .kpi div { background: var(--bg-elev-1); padding: 12px 14px; }
-  .kpi .n { font-size: var(--fs-xl); font-weight: 700; color: var(--fg); }
+  .kpi .kt { display: flex; align-items: center; gap: 6px; color: var(--accent); }
+  .kpi .kt svg { width: 13px; height: 13px; }
+  .kpi .n { font-size: var(--fs-xl); font-weight: 700; color: var(--fg); margin-top: 6px; }
   .kpi .k { font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 2px; }
   .mix { margin-top: 16px; }
   .mix .h { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-faint); margin-bottom: 8px; }
   .mixbar { display: flex; height: 8px; border-radius: 999px; overflow: hidden; gap: 1px; }
   .mixbar i:nth-child(1) { flex: 80; background: var(--accent); }
-  .mixbar i:nth-child(2) { flex: 12; background: var(--info); }
-  .mixbar i:nth-child(3) { flex: 8; background: oklch(0.7 0.16 300); }
+  .mixbar i:nth-child(2) { flex: 13; background: var(--info); }
+  .mixbar i:nth-child(3) { flex: 7; background: oklch(0.7 0.16 300); }
   .mixleg { display: flex; gap: 16px; margin-top: 10px; font-size: var(--fs-xs); color: var(--fg-muted); }
   .mixleg b { color: var(--fg-2); font-weight: 600; }
   .dotmk { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+  .words { margin-top: auto; padding-top: 14px; font-size: var(--fs-xs); color: var(--fg-subtle); font-style: italic; text-align: center; }
 
-  /* projects */
+  /* projects — active card + responsive flat grid */
   .projcard { display: flex; align-items: center; gap: 14px; padding: 16px 18px; border-radius: var(--radius-lg); }
   .projcard.active { background: var(--surface); border: 1px solid color-mix(in oklab, var(--accent) 30%, var(--border)); box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 12%, transparent), 0 6px 24px -10px color-mix(in oklab, var(--accent) 40%, transparent); }
-  .projcard.flat { background: var(--surface); border: 1px solid var(--border); margin-top: 8px; padding: 12px 18px; }
-  .pbadge { width: 40px; height: 40px; border-radius: var(--radius); background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font-weight: 700; }
-  .pmeta { flex: 1; }
+  .pbadge { width: 40px; height: 40px; border-radius: var(--radius); background: var(--accent-soft); color: var(--accent); display: grid; place-items: center; font-weight: 700; box-shadow: inset 0 0 0 1px var(--ghost-border); }
+  .pmeta { flex: 1; min-width: 0; }
   .pmeta .nm { display: flex; align-items: center; gap: 8px; font-weight: 600; }
   .pmeta .path { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-subtle); margin-top: 2px; }
-  .pmeta .sub2 { display: flex; gap: 8px; margin-top: 8px; }
-  .addgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 12px; }
-  .addcard { display: flex; align-items: center; gap: 10px; padding: 14px; border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--border); }
-  .addcard .nm { font-weight: 600; font-size: var(--fs-sm); }
-  .addcard .ty { font-size: var(--fs-xs); color: var(--fg-subtle); margin-top: 1px; }
+  .pmeta .sub2 { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .tag { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 9px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); font-size: var(--fs-xs); color: var(--fg-2); }
+  .pill-ok { display: inline-flex; align-items: center; gap: 5px; height: 18px; padding: 0 8px; border-radius: 999px; background: var(--ok-soft); color: var(--ok); font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+  .pill-ok .d { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+  .pact { display: flex; align-items: center; gap: 8px; flex: none; }
+  .iconbtn { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; color: var(--fg-muted); border: 1px solid var(--border); background: var(--surface); }
+  .flatgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 10px; }
+  .flatcard { display: flex; align-items: center; gap: 11px; padding: 12px 14px; border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--border); }
+  .flatcard .pbadge { width: 32px; height: 32px; font-size: 13px; }
+  .flatcard .fnm { font-weight: 600; font-size: var(--fs-sm); }
+  .flatcard .fpath { font-family: var(--font-mono); font-size: 10px; color: var(--fg-subtle); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .flatcard .ftag { margin-left: auto; }
+
   .news { display: flex; align-items: center; gap: 12px; margin-top: 22px; padding: 16px 18px; border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--border); }
+  .news .nic { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--ghost-border); }
   .news .nm { font-weight: 600; }
   .news .sub3 { color: var(--fg-muted); font-size: var(--fs-sm); }
+
+  .ic { stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .btn svg { width: 14px; height: 14px; }
 </style>
 </head>
 <body>
 <div class="shell">
-  <!-- titlebar -->
-  <div class="tb">
-    <div class="brand"><span class="mk">R</span><span class="app">Rift</span></div>
-    <div class="collapse">
-      <svg width="16" height="16" class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
-    </div>
-    <div class="r">
-      <span class="flame">🔥 9+</span>
-      <div class="winctl">
-        <span><svg width="12" height="12" class="ic" viewBox="0 0 24 24"><path d="M5 12h14"/></svg></span>
-        <span><svg width="11" height="11" class="ic" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/></svg></span>
-        <span><svg width="12" height="12" class="ic" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></span>
-      </div>
-    </div>
-  </div>
-
-  <!-- sidebar -->
+  <!-- ── sidebar ── -->
   <div class="side">
-    <div class="newchat">
-      <svg width="16" height="16" class="ic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-      New chat <span class="kb">Ctrl N</span>
+    <div class="side-head">
+      <span class="brand"><img class="brand-mk" src="../assets/rift-logo.png" alt="" /><span class="brand-name">Rift</span></span>
+      <span class="collapse"><svg width="16" height="16" class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></span>
     </div>
-    <div class="snav">
-      <div class="snav-item on"><svg class="gi ic" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>Workspace</div>
-      <div class="snav-item"><svg class="gi ic" viewBox="0 0 24 24"><path d="M3 12h4l2 6 4-14 2 8h6"/></svg>AI Health</div>
+    <div class="switcher">
+      <span class="sw-mono">R</span>
+      <span class="sw-meta">
+        <span class="sw-name">rift-tauri</span>
+        <span class="sw-sub"><span class="branch"><svg width="9" height="9" class="ic" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><path d="M6 8v8M18 8a6 6 0 0 1-6 6"/><circle cx="18" cy="6" r="2"/></svg>main</span></span>
+      </span>
+      <svg width="15" height="15" class="ic" viewBox="0 0 24 24" style="color:var(--fg-faint)"><path d="M8 9l4-4 4 4M8 15l4 4 4-4"/></svg>
     </div>
-    <div class="sec">Projects <svg width="14" height="14" class="ic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></div>
-    <div class="projrow">
-      <div class="pav on">R</div>
-      <div class="pav off">D</div>
+    <div class="action-row">
+      <span class="newchat"><svg width="16" height="16" class="ic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg><span class="lbl">New chat</span><span class="nc-kbd">Ctrl N</span></span>
+      <span class="ic-btn"><svg width="16" height="16" class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg></span>
     </div>
-    <div class="search">
-      <svg width="14" height="14" class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
-      Search conversations…
+    <div class="tool-row">
+      <span class="seg2"><b class="on">This project</b><b>All</b></span>
+      <span class="count-note">96 chats</span>
     </div>
-    <div class="seg"><b class="on">This project</b><b>All projects</b></div>
-    <div class="convsec">Today <b>18</b></div>
     <div class="convs">
-      <div class="crow"><span class="t">New Session Start</span><span class="age">4h</span></div>
-      <div class="crow"><span class="t">Hello World Echo Test</span><span class="age">4h</span></div>
-      <div class="crow"><span class="t">Project State Audit Breakdown</span><span class="age">7h</span></div>
-      <div class="crow"><span class="t">New Session Start</span><span class="age">7h</span></div>
-      <div class="crow"><span class="t">Starting New Session</span><span class="age">7h</span></div>
-      <div class="crow"><span class="t">Session Start Greeting</span><span class="age">9h</span></div>
-      <div class="crow"><span class="t">New Session Started</span><span class="age">9h</span></div>
-      <div class="crow"><span class="t">New Chat Session</span><span class="age">9h</span></div>
+      <div class="crow on"><span class="t">New Session Start</span><span class="age">now</span></div>
+      <div class="crow"><span class="t">Simple Acknowledgment Request</span><span class="age">19h</span></div>
+      <div class="crow"><span class="t">Check Current Model</span><span class="age">21h</span></div>
+      <div class="crow"><span class="t">Setup Sonnet 5.0 Model Release</span><span class="age">22h</span></div>
+      <div class="crow"><span class="t">Integrate Sonnet 5 Into Rift</span><span class="age">23h</span></div>
+      <div class="showmore">Show earlier (90)</div>
     </div>
-    <div class="sfoot">
-      <svg width="16" height="16" class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.5-2.4 1a7 7 0 0 0-1.7-1l-.3-2.5h-4l-.3 2.5a7 7 0 0 0-1.7 1l-2.4-1-2 3.5 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.5 2.4-1a7 7 0 0 0 1.7 1l.3 2.5h4l.3-2.5a7 7 0 0 0 1.7-1l2.4 1 2-3.5-2-1.5a7 7 0 0 0 .1-1z"/></svg>
-      Settings
+    <div class="foot-nav">
+      <span class="fnav on"><svg width="17" height="17" class="ic" viewBox="0 0 24 24"><path d="M20 10a1 1 0 0 0-1-1h-2.5a1 1 0 0 1-.8-.4l-.9-1.2A1 1 0 0 0 14 7h-2a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1Z"/><path d="M20 19a1 1 0 0 0-1-1h-2.5a1 1 0 0 1-.8-.4l-.9-1.2a1 1 0 0 0-.8-.4H12a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1Z"/><path d="M3 3v2a2 2 0 0 0 2 2h3"/><path d="M3 3v13a2 2 0 0 0 2 2h3"/></svg></span>
+      <span class="fnav"><svg width="17" height="17" class="ic" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+      <span class="fnav"><svg width="17" height="17" class="ic" viewBox="0 0 24 24"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5l7 7Z"/><path d="M3.22 12H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27"/></svg></span>
+    </div>
+    <div class="status-strip">
+      <img class="ss-avatar" src="../assets/rift-logo.png" alt="" />
+      <span class="ss-meta"><span class="ss-model">Sonnet 5</span><span class="ss-conn"><span class="ss-dot"></span>Connected</span></span>
+      <span class="ss-set"><svg width="16" height="16" class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.5-2.4 1a7 7 0 0 0-1.7-1l-.3-2.5h-4l-.3 2.5a7 7 0 0 0-1.7 1l-2.4-1-2 3.5 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.5 2.4-1a7 7 0 0 0 1.7 1l.3 2.5h4l.3-2.5a7 7 0 0 0 1.7-1l2.4 1 2-3.5-2-1.5a7 7 0 0 0 .1-1z"/></svg></span>
     </div>
   </div>
 
-  <!-- content -->
+  <!-- ── content ── -->
   <div class="content">
     <div class="wrap">
       <div class="hero">
         <div>
-          <h1><span class="dim">Good morning.</span> What's next for <b>rgb-orchestrator</b>?</h1>
+          <h1><span class="dim">Good afternoon.</span> What's next for <b>rift-tauri</b>?</h1>
           <div class="meta">
-            <span class="chip"><svg width="13" height="13" class="ic" viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/></svg> <b>305</b> files</span>
+            <span class="chip"><span class="br"><svg width="12" height="12" class="ic" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><path d="M6 8v8M18 8a6 6 0 0 1-6 6"/><circle cx="18" cy="6" r="2"/></svg>main</span><b>275</b> files</span>
             <span class="chip"><svg width="13" height="13" class="ic" viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v9H3z"/></svg> Switch folder</span>
           </div>
         </div>
         <div class="acts">
-          <button class="btn"><svg width="14" height="14" class="ic" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> New chat</button>
-          <button class="btn primary"><svg width="14" height="14" class="ic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> New project</button>
+          <button class="btn"><svg class="ic" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> New chat</button>
+          <button class="btn primary"><svg class="ic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> New project</button>
         </div>
       </div>
 
-      <div class="section-label">Activity <span class="stat-tag"><b>7d</b><b>30d</b><b class="on">All</b></span></div>
+      <div class="section-label"><span class="sc"><svg width="14" height="14" class="ic" viewBox="0 0 24 24"><path d="M3 12h4l2 6 4-14 2 8h6"/></svg></span> Activity <span class="stat-tag"><b>7d</b><b>30d</b><b class="on">All</b></span></div>
       <div class="act">
         <div class="l">
-          <div><span class="big">3,325</span><span class="sub">messages exchanged</span></div>
-          <div class="desc">341 sessions · across 32 active days · busiest around 1 AM</div>
+          <div><span class="big">3,708</span><span class="sub">messages exchanged</span></div>
+          <div class="desc">396 sessions · across 35 active days · busiest around 1 AM</div>
           <div class="barlabel"><span>Per day · last 60</span><span>peak 426</span></div>
           <div class="bars">
-            <i style="height:18%"></i><i style="height:30%"></i><i style="height:22%"></i><i style="height:42%"></i><i style="height:26%"></i><i style="height:34%"></i><i style="height:28%"></i><i style="height:48%"></i><i style="height:30%"></i><i style="height:38%"></i><i style="height:100%"></i><i style="height:44%"></i><i style="height:30%"></i><i style="height:52%"></i><i style="height:34%"></i><i style="height:40%"></i><i style="height:28%"></i><i style="height:46%"></i><i style="height:32%"></i><i style="height:24%"></i>
+            <i style="height:14%"></i><i style="height:22%"></i><i style="height:18%"></i><i style="height:30%"></i><i style="height:24%"></i><i style="height:20%"></i><i style="height:32%"></i><i style="height:28%"></i><i style="height:36%"></i><i style="height:26%"></i><i style="height:22%"></i><i style="height:34%"></i><i style="height:30%"></i><i style="height:42%"></i><i style="height:38%"></i><i style="height:28%"></i><i style="height:46%"></i><i style="height:100%"></i><i style="height:40%"></i><i style="height:34%"></i><i style="height:30%"></i><i style="height:52%"></i><i style="height:44%"></i><i style="height:38%"></i><i style="height:32%"></i><i style="height:48%"></i><i style="height:40%"></i><i style="height:36%"></i><i style="height:30%"></i><i style="height:58%"></i><i style="height:44%"></i><i style="height:38%"></i>
           </div>
         </div>
         <div class="r">
           <div class="kpi">
-            <div><div class="n">341</div><div class="k">sessions</div></div>
-            <div><div class="n">14k</div><div class="k">tool calls</div></div>
-            <div><div class="n">$1.9k</div><div class="k">spent</div></div>
-            <div><div class="n">32d</div><div class="k">streak · best 32d</div></div>
+            <div><div class="kt"><svg class="ic" viewBox="0 0 24 24"><path d="M8 12h8M8 8h8M8 16h5"/><rect x="3" y="4" width="18" height="16" rx="2"/></svg></div><div class="n">396</div><div class="k">sessions</div></div>
+            <div><div class="kt"><svg class="ic" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.6 5.6l-6.4 6.4 2 2 6.4-6.4a4 4 0 0 0 5.6-5.6L14 8l-2-2z"/></svg></div><div class="n">16k</div><div class="k">tool calls</div></div>
+            <div><div class="kt"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2v20M17 6H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><div class="n">$2.7k</div><div class="k">spent</div></div>
+            <div><div class="kt"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2c3 4 5 6 5 10a5 5 0 0 1-10 0c0-2 1-3 2-4 0 2 1 3 3 3 0-4 0-6 0-9z"/></svg></div><div class="n">35d</div><div class="k">streak · best 35d</div></div>
           </div>
           <div class="mix">
             <div class="h">Model mix · mostly Opus 4.8</div>
             <div class="mixbar"><i></i><i></i><i></i></div>
             <div class="mixleg">
               <span><span class="dotmk" style="background:var(--accent)"></span><b>Opus 4.8</b> 80%</span>
-              <span><span class="dotmk" style="background:var(--info)"></span><b>Sonnet 4.6</b> 12%</span>
-              <span><span class="dotmk" style="background:oklch(0.7 0.16 300)"></span><b>Fable 5</b> 8%</span>
+              <span><span class="dotmk" style="background:var(--info)"></span><b>Sonnet 5</b> 13%</span>
+              <span><span class="dotmk" style="background:oklch(0.7 0.16 300)"></span><b>Fable 5</b> 7%</span>
             </div>
           </div>
+          <div class="words">≈ 696k words exchanged · ~1.8k per session</div>
         </div>
       </div>
 
-      <div class="section-label">Projects <span style="margin-left:auto"><button class="btn sm">+ New</button></span></div>
+      <div class="section-label"><span class="sc"><svg width="14" height="14" class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/></svg></span> Projects <span class="ct">4</span> <span style="margin-left:auto"><button class="btn sm"><svg width="13" height="13" class="ic" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg> New</button></span></div>
       <div class="projcard active">
         <div class="pbadge">R</div>
         <div class="pmeta">
-          <div class="nm">rgb-orchestrator <span class="pill ok"><span class="dot"></span>Active</span></div>
-          <div class="path">…/projects/rgb-orchestrator</div>
-          <div class="sub2"><span class="chip" style="height:24px;font-size:var(--fs-xs)">Full folder</span><span style="color:var(--fg-subtle);font-size:var(--fs-xs);align-self:center">· Added 4d ago</span></div>
+          <div class="nm">rift-tauri <span class="pill-ok"><span class="d"></span>Active</span></div>
+          <div class="path">…/projects/rift-tauri</div>
+          <div class="sub2"><span class="tag"><svg width="11" height="11" class="ic" viewBox="0 0 24 24"><path d="M3 5h18M6 12h12M10 19h4"/></svg>Full folder</span><span style="color:var(--fg-subtle);font-size:var(--fs-xs)">· Added 2d ago</span></div>
         </div>
-        <button class="btn">Split</button>
-        <button class="btn primary">Continue →</button>
+        <div class="pact">
+          <span class="iconbtn"><svg width="14" height="14" class="ic" viewBox="0 0 24 24"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg></span>
+          <button class="btn"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M12 4v16"/></svg> Split</button>
+          <button class="btn primary">Continue <svg class="ic" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+        </div>
       </div>
-      <div class="projcard flat">
-        <div class="pbadge" style="background:var(--bg-elev-2);color:var(--fg-2)">D</div>
-        <div class="pmeta"><div class="nm">Discord-Bot <span class="path" style="margin:0">…/projects/Discord-Bot</span></div></div>
-        <span class="chip" style="height:24px;font-size:var(--fs-xs)">Full folder</span>
-      </div>
-
-      <div class="section-label">Add a project</div>
-      <div class="addgrid">
-        <div class="addcard"><svg width="18" height="18" class="ic" viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v9H3z"/></svg><div><div class="nm">rift-tauri</div><div class="ty">Recent folder</div></div></div>
-        <div class="addcard"><svg width="18" height="18" class="ic" viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v9H3z"/></svg><div><div class="nm">_stress-test</div><div class="ty">Recent folder</div></div></div>
-        <div class="addcard"><svg width="18" height="18" class="ic" viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v9H3z"/></svg><div><div class="nm">claude-sandbox</div><div class="ty">Recent folder</div></div></div>
-        <div class="addcard"><svg width="18" height="18" class="ic" viewBox="0 0 24 24"><path d="M3 7h6l2 2h10v9H3z"/></svg><div><div class="nm">remotion-playground</div><div class="ty">Recent folder</div></div></div>
+      <div class="flatgrid">
+        <div class="flatcard"><div class="pbadge">E</div><div style="min-width:0"><div class="fnm">exfil-v2</div><div class="fpath">…/projects/exfil-v2</div></div><span class="tag ftag">Full folder</span></div>
+        <div class="flatcard"><div class="pbadge">R</div><div style="min-width:0"><div class="fnm">rgb-orchestrator</div><div class="fpath">…/projects/rgb-o…</div></div><span class="tag ftag">Full folder</span></div>
+        <div class="flatcard"><div class="pbadge" style="background:var(--bg-elev-2);color:var(--fg-2);box-shadow:none">D</div><div style="min-width:0"><div class="fnm">Discord-Bot</div><div class="fpath">…/projects/Disco…</div></div><span class="tag ftag">Full folder</span></div>
       </div>
 
       <div class="news">
-        <svg width="18" height="18" class="ic" viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M8 8h8M8 12h8M8 16h5"/></svg>
+        <span class="nic"><svg width="18" height="18" class="ic" viewBox="0 0 24 24"><path d="M4 4h13a2 2 0 0 1 2 2v13a1 1 0 0 0 2 0V8"/><path d="M8 8h7M8 12h7M8 16h4"/></svg></span>
         <div><div class="nm">What's new in AI</div><div class="sub3">Claude Code releases & this week in AI</div></div>
         <svg width="16" height="16" class="ic" viewBox="0 0 24 24" style="margin-left:auto;color:var(--fg-subtle)"><path d="M6 9l6 6 6-6"/></svg>
       </div>

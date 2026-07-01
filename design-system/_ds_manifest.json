@@ -22,8 +22,13 @@
     { "path": "components/tool-chips.html", "group": "Components", "name": "Tool chips", "subtitle": "Unified-accent tool family — categories by icon, pending / done / error states" },
     { "path": "components/page-hero.html", "group": "Components", "name": "PageHero", "subtitle": "Shared workspace header — icon tile, eyebrow / title / desc, chip slot" },
     { "path": "components/forms.html", "group": "Components", "name": "Forms & Controls", "subtitle": "Inputs, field label + help, segmented control, toggle, select, accent swatches" },
+    { "path": "components/sidebar.html", "group": "Components", "name": "Sidebar (C+ rail)", "subtitle": "Switcher-led left rail — project switcher + branch pill, New chat + search, scope segment, grouped conversation list, footer icon nav, status strip" },
 
-    { "path": "pages/workspace.html", "group": "Pages", "name": "Workspace", "subtitle": "Home workspace — left sidebar IA, PageHero greeting, activity dashboard, projects list, add-a-project & news strip" }
+    { "path": "pages/home.html", "group": "Pages", "name": "Home", "subtitle": "New-chat welcome — greeting hero + context chips, 'see how it works' row, quick-action prompts, centered composer" },
+    { "path": "pages/chat.html", "group": "Pages", "name": "Chat", "subtitle": "Conversation workspace — C+ sidebar, minimal Topbar, transcript with user bubble / tool chips / assistant turn, composer + permission & model footer, StatusBar" },
+    { "path": "pages/workspace.html", "group": "Pages", "name": "Workspace", "subtitle": "Home mount — C+ switcher sidebar, greeting hero, activity bento (messages · KPIs · model mix), responsive projects grid, What's-new strip" },
+    { "path": "pages/settings.html", "group": "Pages", "name": "Settings", "subtitle": "Appearance tab — PageHero + workspace/update chips, section tabs, Theme/Layout sub-nav, 6 theme presets, accent swatches + hue + vividness sliders" },
+    { "path": "pages/ai-health.html", "group": "Pages", "name": "AI Health", "subtitle": "Experimental usage dashboard — analyze-usage hero, API-latency banner, current setup, plan-limit windows + credits, speed & efficiency KPIs" }
   ],
   "tokens": [
     { "name": "--bg", "value": "oklch(0.142 0.003 250)", "kind": "color", "definedIn": "styles.css" },

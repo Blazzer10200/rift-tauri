@@ -11,13 +11,15 @@ in `_ds_manifest.json`'s `cards` array. This folder is rebuilt to be **100% accu
 design-system/
   styles.css              canonical token + doc-primitive stylesheet (mirrors src/app.css 1:1)
   _ds_manifest.json       the ONLY thing the cloud pane reads — cards[] + tokens[] + brandFonts[]
+  assets/                 rift-logo.png (real brand mark, mirrored from src/lib/assets — used by rail mockups)
   foundations/            colors · type · spacing-shape
-  components/             buttons · pills-badges · menu · tool-chips · page-hero · environment-float · forms
-  pages/                  home · chat · settings · local-llm  (full 1280×800 workspace mockups)
+  components/             buttons · pills-badges · menu · tool-chips · page-hero · forms · sidebar
+  pages/                  home · chat · workspace · settings · ai-health  (full ~1400×880 workspace mockups)
+  _briefs/                point-in-time design briefs (history, NOT manifest cards) — see _briefs/README.md
 ```
 
-14 cards total: **3 foundations + 7 components + 4 pages.** Concepts and the old "home concept" deck were
-dropped in the 2026-06-18 rebuild — this set documents what ships, nothing speculative.
+15 cards total: **3 foundations + 7 components + 5 pages.** Every card is CDP-verified against the live app
+(2026-07-01 pass) — this set documents what ships, nothing speculative.
 
 ## Tokens — Graphite Ink, dark only
 
@@ -38,15 +40,24 @@ the manifest entry in agreement.
 Each card entry: `{ "path", "group", "name", "subtitle" }`. `group` is one of `Foundations` / `Components` /
 `Pages` (drives the pane's section grouping). Leave `tokens` / `brandFonts` / `globalCssPaths` intact.
 
-## Accuracy notes (what the rebuild corrected)
+## Accuracy notes (what the 2026-07-01 pass corrected)
 
+- **Navigation moved to the sidebar.** The app body has NO titlebar nav — the C+ switcher-led `Sidebar`
+  owns navigation via a footer icon strip (Workspace · Chat · AI Health), with Settings in the status strip.
+  A minimal `Topbar` (title + window controls) sits above the content; a `StatusBar` grounds the bottom.
+  (`Titlebar.svelte` with the old horizontal nav survives ONLY in onboarding `setupMode`.) The old page
+  mockups that drew a titlebar nav + tab strip were stale and were rebuilt on this chrome.
+- **New `components/sidebar.html`** documents that rail: switcher (+ branch pill) → New chat + search →
+  scope segment → grouped conversation list (pinned wash · active bar · working dots · hover pin/more) →
+  footer icon nav → status strip (model + connection dot).
+- **`Local LLM` became `AI Health`.** The old Ollama-endpoint cockpit was replaced by a usage dashboard
+  (analyze-usage hero, API-latency banner, plan-limit windows + credits, speed & efficiency KPIs). The
+  `pages/local-llm.html` mockup was deleted; `pages/ai-health.html` is its live-accurate replacement.
+- **Settings gained a theme system.** Appearance now has a Theme/Layout sub-nav, a 6-preset theme grid
+  (Graphite · Midnight · Ember · Orchid · Forest · Focus), and an accent hue slider + Vividness slider —
+  not just the old single accent-swatch row.
 - **Tool chips** are a *unified-accent* family — every category (read/write/shell/agent/meta) uses
   `--accent` for its icon; **status** (pending pulse / done dim / error danger-bar) drives color, not category.
-  The old multi-color-per-category version was stale.
-- **Environment float** is a *neutral* `--surface` git pill that only warms toward accent on hover — not the
-  old info-tinted treatment.
-- **Workspaces are four**: Home · Chat · Settings · Local LLM (kbd 1–4). The titlebar nav shows Home / Chat /
-  Local LLM (Settings opens via the gear); Local LLM carries a warn experimental dot.
 
 ## Pushing to cloud
 
