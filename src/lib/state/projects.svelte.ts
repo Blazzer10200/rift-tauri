@@ -27,7 +27,7 @@ class ProjectRegistry {
   loaded = $state(false);
   lastError = $state<string | null>(null);
   /** Transient one-shot: set by an "+ New project" affordance OUTSIDE the
-   *  Workspace page (e.g. the sidebar ProjectRail) to ask WorkspacePage to open
+   *  Workspace page (e.g. the sidebar ProjectSwitcher) to ask WorkspacePage to open
    *  its new-project editor on mount. WorkspacePage reads + clears it, so it
    *  fires exactly once and never re-opens on a later visit. */
   newProjectIntent = $state(false);

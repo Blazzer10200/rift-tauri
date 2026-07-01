@@ -6,6 +6,7 @@
   import { projects } from "$lib/state/projects.svelte";
   import type { ConversationMeta } from "$lib/state/assistant/types";
   import { portal } from "$lib/actions/portal";
+  import { tooltip } from "$lib/actions/tooltip";
   import { leafName, rootKey } from "$lib/utils/path";
 
   // ── grouping ─────────────────────────────────────────────────────────
@@ -187,6 +188,7 @@
     class="crow"
     class:on={isActive(c.id)}
     class:open={isOpen(c.id)}
+    class:pinned={shell.isPinned(c.id)}
     class:menu-open={menuId === c.id}
     role="button"
     tabindex="0"
@@ -223,9 +225,20 @@
         <span class="crow-proj" title={c.workspaceRoot ?? "Unfiled"}>{projLabel(c.workspaceRoot)}</span>
       {/if}
       <span class="crow-time">{relTime(c.lastActivityAt ?? c.createdAt)}</span>
-      <button class="crow-menu-btn" type="button" onclick={(e) => openMenu(e, c.id)} aria-label="Conversation actions">
-        <MoreHorizontal size={14} />
-      </button>
+      <span class="crow-acts">
+        <button
+          class="crow-act"
+          type="button"
+          onclick={(e) => { e.stopPropagation(); shell.togglePin(c.id); }}
+          use:tooltip={shell.isPinned(c.id) ? "Unpin" : "Pin"}
+          aria-label={shell.isPinned(c.id) ? "Unpin conversation" : "Pin conversation"}
+        >
+          {#if shell.isPinned(c.id)}<PinOff size={13} />{:else}<Pin size={13} />{/if}
+        </button>
+        <button class="crow-act" type="button" onclick={(e) => openMenu(e, c.id)} aria-label="Conversation actions">
+          <MoreHorizontal size={14} />
+        </button>
+      </span>
     {/if}
   </div>
 {/snippet}
@@ -272,8 +285,8 @@
 {/if}
 
 <style>
-  /* Shared "show more/less" affordance — quiet text link, matches ProjectRail's
-     so projects + history rhyme. Left-aligned with the row titles above. */
+  /* "show more/less" affordance — quiet text link, left-aligned with the row
+     titles above. */
   .showmore { display: block; width: 100%; text-align: left; padding: 8px 11px 6px 11px;
     font-size: 11.5px; font-weight: 500; color: var(--fg-subtle); transition: color var(--dur-fast); }
   .showmore:hover { color: var(--accent); }
@@ -289,8 +302,13 @@
     scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
   .conv-list::-webkit-scrollbar { width: 8px; }
   .conv-list::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
-  .conv-group-label { display: flex; align-items: center; gap: 7px; width: 100%; padding: 10px 8px 4px 11px; flex: none;
-    font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-faint); text-align: left; }
+  /* Sticky group headers — Pinned / Today / Older stay pinned to the top of the
+     scroll container so the current bucket is always identifiable deep in a long
+     list. Tinted+blurred backing so rows scrolling under them stay legible. */
+  .conv-group-label { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 7px; width: 100%; padding: 10px 8px 4px 11px; flex: none;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-faint); text-align: left;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--fg) 3%, var(--bg)) 72%, transparent);
+    -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
   .conv-group-label .cgl-txt { flex: 1; }
   .conv-group-label .cgl-ct { font-weight: 600; opacity: 0.55; font-variant-numeric: tabular-nums; }
   .conv-empty { padding: 22px 14px; text-align: center; font-size: 11.5px; line-height: 1.6; color: var(--fg-subtle); white-space: pre-line; }
@@ -301,6 +319,11 @@
   .crow.on { background: color-mix(in oklab, var(--fg) 10%, transparent); color: var(--fg); }
   .crow.on::before { content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
     width: 3px; height: 15px; border-radius: 0 3px 3px 0; background: var(--accent); animation: barPop 0.28s var(--ease-page) both; }
+  /* Pinned rows read as a different KIND of row than the time buckets: a faint
+     accent wash + the pin glyph already rendered in the lead slot. Kept below the
+     active-row treatment so an active pinned row still wins. */
+  .crow.pinned:not(.on) { background: color-mix(in oklab, var(--accent) 5%, transparent); }
+  .crow.pinned:not(.on):hover { background: color-mix(in oklab, var(--accent) 9%, transparent); }
   .crow.open:not(.on) { color: var(--fg-2); }
   .crow.open:not(.on)::before { content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
     width: 3px; height: 11px; border-radius: 0 3px 3px 0; background: color-mix(in oklab, var(--accent) 45%, transparent); }
@@ -309,10 +332,14 @@
   .crow-pin { display: inline-flex; flex: none; color: var(--accent); }
   .crow-title { flex: 1; min-width: 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
   .crow-time { font-size: 10.5px; color: var(--fg-faint); font-variant-numeric: tabular-nums; flex: none; opacity: 0.85; transition: opacity var(--dur-fast); }
-  .crow-menu-btn { display: none; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: var(--fg-faint); flex: none; }
+  /* Resting rows stay calm (title + relative time). On hover the time swaps for
+     quick actions — pin + more (rename/delete live behind more). */
+  .crow-acts { display: none; align-items: center; gap: 1px; flex: none; }
+  .crow-act { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; color: var(--fg-faint); flex: none;
+    transition: background var(--dur-fast), color var(--dur-fast); }
+  .crow-act:hover { background: var(--surface-active); color: var(--fg); }
   .crow:hover .crow-time, .crow.menu-open .crow-time { display: none; }
-  .crow:hover .crow-menu-btn, .crow.menu-open .crow-menu-btn { display: grid; }
-  .crow-menu-btn:hover { background: var(--surface-active); color: var(--fg); }
+  .crow:hover .crow-acts, .crow.menu-open .crow-acts { display: flex; }
   .crow-rename { flex: 1; min-width: 0; height: 25px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border-focus);
     background: var(--bg-inset); color: var(--fg); font-size: 12.5px; outline: 0; box-shadow: 0 0 0 3px var(--ring); }
 

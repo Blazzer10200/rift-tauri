@@ -2,17 +2,18 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased (in-tree on `main`) — Sidebar clean-up
+## Unreleased (in-tree on `main`) — Sidebar redesign
 
 ### Changed
-- **Projects list is now readable at a glance.** The cryptic monogram chips (single letters like E/R/R/D — two projects could show the same letter) are replaced with clearly-named rows that match the rest of the sidebar. When you have a lot of projects the list stays compact by default — it shows your active project and a **Show all (N)** link, expanding only when you want it.
-- **Simpler conversation history.** The sidebar opens showing just your most recent day's chats, with a single **Show earlier** link at the bottom to reveal the rest — no more wall of date-grouped history on every glance.
-- **Removed clutter:** the separate "This project / All projects" toggle (folded into the project list — click "All projects") and the sidebar search box (the global **Ctrl+K** command palette already searches chats). The whole rail reads calmer, with more breathing room.
+- **New sidebar layout — project-first and calmer.** The rail is reorganized top-to-bottom: a **project switcher** at the very top (project monogram, name, and current **git branch**), a **New chat + search** row, a **This project / All** scope toggle with a live chat count, your conversations filling the middle, and a compact **icon footer** (Workspace · Chat · AI Health) with a status strip below it (active model + connection state + Settings). Which project *and* branch you're in is now answered at a glance.
+- **Project switcher replaces the projects block.** Clicking it opens a dropdown of every project plus **All projects** and **New project**. Everything the old projects list could do still works: open a project, right-click to *open in a split pane*, or drag one onto a pane to grow the split.
+- **Simpler conversation history, now easier to manage.** The sidebar opens showing your most recent day's chats with a single **Show earlier** link for the rest. Pinned chats get a subtle accent wash so they read as distinct; date headers (Pinned / Today / Older) stay pinned to the top as you scroll; and hovering a chat reveals quick **pin** and **more** (rename / delete) actions.
+- **Search shares the top action row** — the button opens the global **Ctrl+K** command palette scoped to chats. The whole rail reads calmer, with more breathing room.
 
 ### Fixed
 - **Fable 5 is ready for the moment it reopens — and won't hard-error when it does.** Fable's reasoning is always on, and its API rejects the "turn thinking off" request that every other model accepts. Rift's thinking-off path used to send that request for *any* model, which would have made every Fable turn fail for users on an API key the instant Fable went live. Fable now correctly skips that path (there's nothing to turn off on an always-thinking model). Nothing changes for Opus, Sonnet, or Haiku. *(The Fable picker row itself stays hidden until Anthropic reopens access — a probe-gated one-command flip flips it on; see ISSUES #75.)*
 
-*(Unshipped — awaiting the ship chain. Sidebar work is frontend-only; the Fable fix is backend-only — cargo test 102/102, svelte-check 0/0, vitest 410/410.)*
+*(Unshipped — awaiting the ship chain. Sidebar redesign follows the "C+ Switcher-led" Claude Design brief; frontend-only, `ProjectRail.svelte` retired in favor of `ProjectSwitcher.svelte`. The Fable fix is backend-only — cargo test 102/102, svelte-check 0/0, vitest 410/410.)*
 
 ## v0.82.1 — Warm-CLI process leaks fixed (the "why is everything slow" memory pileup)
 
