@@ -29,6 +29,16 @@ One themeable hue (`--accent-h: 163`, emerald) drives the entire accent ramp; st
 live in `styles.css :root` and are duplicated into `_ds_manifest.json` `tokens[]` for the pane's token panel.
 **`styles.css` mirrors `src/app.css`** — when the real tokens change, change both.
 
+### Drift guard — `check-tokens.mjs`
+
+Don't rely on remembering to update the mirror. `node design-system/check-tokens.mjs` (also
+`npm run check:tokens`, and folded into `npm run check`) extracts every `--token` from both
+`src/app.css` and `styles.css`, resolves `var()` aliases so an alias and its literal compare equal,
+and **fails on any shared token whose resolved value differs** — plus a manifest cross-check
+(`_ds_manifest.json` `tokens[]` must equal the styles.css value, since the pane renders the manifest).
+`app-only` / `ds-only` tokens are advisory (never fail). This is the automated version of the manual
+diff; run it before pushing token changes to the cloud.
+
 ## The manifest-card rule (read before pushing)
 
 The Design System pane renders **only** entries in `_ds_manifest.json`'s `cards` array. `@dsCard` first-line

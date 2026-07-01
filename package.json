@@ -7,8 +7,9 @@
     "dev": "vite dev",
     "build": "vite build",
     "preview": "vite preview",
-    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && npm run check:tokens",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+    "check:tokens": "node design-system/check-tokens.mjs",
     "tauri": "tauri",
     "test": "vitest run",
     "cdp:serve": "node scripts/cdp/serve.cjs"

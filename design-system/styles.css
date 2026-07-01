@@ -91,8 +91,8 @@
   --row-h: 28px; --row-pad-y: 4px; --row-pad-x: 10px; --gap: 8px;
 
   /* ── type ── */
-  --font-ui:   "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  --font-ui:   "Inter Variable", "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", "Cascadia Code", "SFMono-Regular", Consolas, monospace;
   --titlebar-h: 34px;
   --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px;
   --fs-lg: 15px; --fs-xl: 18px; --fs-2xl: 22px;
