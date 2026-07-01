@@ -8,14 +8,16 @@ const MODEL_SELS: readonly ModelSel[] = [
   "sonnet", "opus", "claude-opus-4-7", "haiku", "claude-fable-5",
 ] as const;
 
-// Claude Fable 5 — re-enabled 2026-06-24 after the temporary US-gov pull was
-// lifted. Sunset set far out (no practical auto-hide); to retire it again, set
-// FABLE_DISABLED back to true (the kill-switch) rather than relying on the date.
+// Claude Fable 5 — re-pulled 2026-06-30: the API rejects every Fable turn with
+// "Claude Fable 5 is currently unavailable" (the Fable/Mythos access gate), so
+// leaving it selectable only lets users pick a model that hard-errors. Sunset
+// stays far out; the kill-switch below is what hides it. Flip back to false if
+// Fable access is restored for the shipping channel.
 export const FABLE_SUNSET_MS = Date.UTC(2099, 0, 1);
-// Manual kill-switch — set true to pull Fable again (hides the picker row + any
-// stored/selected Fable pref coerces to the default, and the backend swaps a
-// pinned Fable session → opus before it can hit the API). Mirror in config.rs.
-export const FABLE_DISABLED = false;
+// Manual kill-switch — true pulls Fable: hides the picker row, coerces any
+// stored/selected Fable pref to the default, and the backend swaps a pinned
+// Fable session → opus before it can hit the API. Mirror in config.rs.
+export const FABLE_DISABLED = true;
 export function fableAvailable(): boolean {
   return !FABLE_DISABLED && Date.now() < FABLE_SUNSET_MS;
 }
@@ -300,9 +302,11 @@ export function messagesHaveContextSignals(messages: ChatMessage[]): boolean {
 }
 
 
-/** Compact token count for the live turn readout (Claude-Code style: "1.2k"). */
+/** Compact token count for the live turn readout (Claude-Code style: "1.2k").
+ *  Guard against the 999_500–999_999 band rounding to "1000k": Math.round(n/1000)
+ *  there yields 1000, so those values cross into the M branch instead. */
 export function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 999_500) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 10_000) return `${Math.round(n / 1000)}k`;
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
   return String(Math.round(n));
@@ -320,7 +324,12 @@ export function modelNativeWindow(model: string | null): number {
   const id = model.toLowerCase();
   if (id.includes("haiku")) return 200_000;
   if (/^(opus|sonnet|fable)$/.test(id)) return 1_000_000;
-  if (/sonnet-(4-[56]|5)/.test(id) || /opus-4-[678]/.test(id) || /fable-5/.test(id)) return 1_000_000;
+  // Sonnet 4.6 / 5 are 1M (the backend appends `[1m]` to the CLI arg for them —
+  // caught by the `[1m]` arm above for live turns; this arm covers the bare echo).
+  // Sonnet 4.5 is deliberately NOT here: the CLI gates it at 200K and the backend
+  // never sends `[1m]` for it (config.rs SONNET_1M_GATED excludes it), so claiming
+  // 1M here would over-report the window 5× for any resumed pre-rename session.
+  if (/sonnet-(4-6|5)/.test(id) || /opus-4-[678]/.test(id) || /fable-5/.test(id)) return 1_000_000;
   return 200_000;
 }
 

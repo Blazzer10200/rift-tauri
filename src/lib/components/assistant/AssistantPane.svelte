@@ -75,7 +75,11 @@
     const lines = [
       `Ctx: ${used.toLocaleString()} / ${w.toLocaleString()} (${paneCtxPct.toFixed(1)}%)`,
     ];
-    if (paneModel) lines.push(`Model: ${paneModel}`);
+    // Strip the `[1m]` window-selector suffix the backend appends to the CLI
+    // `--model` arg for 1M-gated Sonnets (turn.rs/config.rs::cli_model_arg) — it
+    // echoes back in lastModelId but is an internal routing artifact, not a model
+    // name the user should see.
+    if (paneModel) lines.push(`Model: ${paneModel.replace(/\[1m\]/i, "")}`);
     if (paneCost != null) lines.push(`Cost: ${paneCost.toFixed(4)}`);
     return lines.join("\n");
   });

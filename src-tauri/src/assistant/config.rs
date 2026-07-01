@@ -245,11 +245,15 @@ pub(super) fn is_valid_local_base_url(s: &str) -> bool {
 /// a retired model id.
 pub(super) const FABLE_MODEL: &str = "claude-fable-5";
 pub(super) const FABLE_SUNSET_EPOCH_SECS: u64 = 4_070_908_800; // 2099-01-01T00:00:00Z
-/// Manual kill-switch — Fable re-enabled 2026-06-24 (the temporary US-gov pull
-/// was lifted). Mirrors the frontend `FABLE_DISABLED` (helpers.ts). Set true to
-/// pull Fable again: a pinned/stale Fable session falls back to opus before the
-/// model id can reach the API. Mirror any change on both sides.
-pub(super) const FABLE_DISABLED: bool = false;
+/// Manual kill-switch — Fable re-pulled 2026-06-30: the API rejects every Fable
+/// turn with "Claude Fable 5 is currently unavailable" (the Fable/Mythos access
+/// gate — see anthropic.com/news/fable-mythos-access), so showing it in the
+/// picker only lets users select a model that hard-errors. While true, a
+/// pinned/stale Fable session falls back to opus before the model id can reach
+/// the API, and the picker row is hidden. Mirrors the frontend `FABLE_DISABLED`
+/// (helpers.ts) — mirror any change on both sides. Flip back to `false` if Fable
+/// access is restored for the shipping channel.
+pub(super) const FABLE_DISABLED: bool = true;
 
 pub(super) fn fable_sunset_passed() -> bool {
     std::time::SystemTime::now()
@@ -291,6 +295,33 @@ pub(super) fn canonical_model_alias(model: &str) -> &str {
         SONNET_MODEL
     } else {
         model
+    }
+}
+
+/// Sonnet ids the CLI gates to a 200K context window unless the `[1m]` window-
+/// selector suffix is appended. The shipped CLI's model table treats bare
+/// `claude-sonnet-5` (and `claude-sonnet-4-6`) as 200K-native, so it auto-
+/// compacts at ~92% of 200K (~184K) — which read as "compacting at ~14%" against
+/// Rift's correct 1M gauge (the reported bug). Verified empirically: bare
+/// `--model claude-sonnet-5` → `modelUsage.contextWindow:200000`, while
+/// `claude-sonnet-5[1m]` → `1000000`. Opus 4.x / Fable already default to 1M, and
+/// Haiku is 200K-only — none of them need (or accept) the suffix here. Sonnet 4.5
+/// is intentionally excluded: it's not in Rift's picker or resume path and its
+/// `[1m]` support is flaky.
+const SONNET_1M_GATED: [&str; 2] = ["claude-sonnet-5", "claude-sonnet-4-6"];
+
+/// The exact string to pass to the CLI's `--model` arg for a fully-resolved model
+/// id. Appends the `[1m]` window-selector for the Sonnet ids the CLI otherwise
+/// gates at 200K, so the CLI's auto-compaction threshold matches Rift's 1M gauge.
+/// LOAD-BEARING: this must be applied ONLY when building the live CLI arg — the
+/// suffix must NEVER reach `save_session_model` (the pin), because
+/// `is_valid_model_name` rejects `[`/`]` and a bracketed pin silently fails to
+/// load on resume, un-pinning the session and breaking thinking-signature replay.
+pub(super) fn cli_model_arg(model: &str) -> String {
+    if SONNET_1M_GATED.contains(&model) {
+        format!("{model}[1m]")
+    } else {
+        model.to_string()
     }
 }
 
@@ -571,9 +602,9 @@ pub fn assistant_set_api_key(api_key: Option<String>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        canonical_model_alias, clamp_effort, effort_tier_to_flag, is_valid_effort_tier,
-        is_valid_local_base_url, model_max_effort, send_effort_flag, DEFAULT_MODEL,
-        FABLE_FALLBACK_MODEL, SONNET_MODEL,
+        canonical_model_alias, clamp_effort, cli_model_arg, effort_tier_to_flag,
+        is_valid_effort_tier, is_valid_local_base_url, is_valid_model_name, model_max_effort,
+        send_effort_flag, DEFAULT_MODEL, FABLE_FALLBACK_MODEL, SONNET_MODEL,
     };
 
     #[test]
@@ -684,5 +715,31 @@ mod tests {
         assert_eq!(canonical_model_alias("claude-sonnet-5"), "claude-sonnet-5");
         assert_eq!(canonical_model_alias("claude-sonnet-4-6"), "claude-sonnet-4-6");
         assert_eq!(canonical_model_alias("claude-opus-4-8"), "claude-opus-4-8");
+    }
+
+    // `cli_model_arg` appends the `[1m]` window-selector ONLY for the Sonnet ids
+    // the CLI gates at 200K, so its auto-compaction threshold matches Rift's 1M
+    // gauge (the "compacting at 14%" bug). Opus/Fable already default to 1M and
+    // Haiku is 200K-only — none get the suffix. The bare ids (what
+    // save_session_model pins) must round-trip is_valid_model_name; the `[1m]`
+    // arg must NOT (it's never persisted) — both asserted here so a future
+    // refactor can't collapse the arg + pin into one value.
+    #[test]
+    fn cli_model_arg_adds_1m_suffix_for_gated_sonnets_only() {
+        // 1M-gated Sonnets get the suffix.
+        assert_eq!(cli_model_arg("claude-sonnet-5"), "claude-sonnet-5[1m]");
+        assert_eq!(cli_model_arg("claude-sonnet-4-6"), "claude-sonnet-4-6[1m]");
+        // 1M-native or 200K-only models pass through unchanged.
+        assert_eq!(cli_model_arg("claude-opus-4-8"), "claude-opus-4-8");
+        assert_eq!(cli_model_arg("claude-opus-4-7"), "claude-opus-4-7");
+        assert_eq!(cli_model_arg("claude-fable-5"), "claude-fable-5");
+        assert_eq!(cli_model_arg("haiku"), "haiku");
+        // Sonnet 4.5 is excluded (flaky [1m] support, not in Rift's resume path).
+        assert_eq!(cli_model_arg("claude-sonnet-4-5"), "claude-sonnet-4-5");
+        // The suffixed arg is NOT a valid model name (so it can never be pinned),
+        // while every bare id the pin sees IS valid.
+        assert!(!is_valid_model_name(&cli_model_arg("claude-sonnet-5")));
+        assert!(is_valid_model_name("claude-sonnet-5"));
+        assert!(is_valid_model_name("claude-sonnet-4-6"));
     }
 }

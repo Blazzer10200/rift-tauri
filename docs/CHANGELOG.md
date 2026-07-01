@@ -2,21 +2,22 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.80.0 — Stuck sub-agents now get caught
+## v0.81.0 — Sonnet 5 gets its full 1M context (and no dead model options)
 
 ### Fixed
-- **A wedged sub-agent no longer hangs the turn forever.** If Claude spawned a sub-agent (a Task/recon/scout) that got stuck — showing "Starting up…" in the activity dock — the turn could run indefinitely (observed: 40 minutes, spinner never stopping, nothing detecting it). Root cause: the stall watchdog re-armed on *every* line of output, and a stuck-but-chatty sub-agent kept dribbling frames that reset the watchdog, so it never tripped. Rift now tracks how long any tool has been continuously running with a **hard 15-minute ceiling that stream activity can't extend** — so a genuinely stuck sub-agent is force-ended, its process tree is killed, and the dock settles, instead of spinning forever. A legitimately long but live sub-agent finishes well within the ceiling and is unaffected.
+- **Sonnet 5 now actually uses its full 1,000,000-token context window.** The context gauge showed "1M" but the conversation was compacting at ~14% — because the Claude CLI defaults `claude-sonnet-5` to a **200K** window unless it's asked for the large one explicitly, so it auto-compacted at ~160–184K while Rift's gauge (correctly) measured against 1M. The two never agreed, and long chats got summarized far too early. Rift now requests the 1M window for Sonnet 5 (and Sonnet 4.6), so the CLI's compaction point and the on-screen gauge finally match — a Sonnet chat runs to nearly 1M tokens before it compacts, exactly like the gauge implies. Opus was already correct and is unchanged.
+- **The model picker no longer offers a model that can't run.** Claude Fable 5 is currently unavailable at the API (a government access gate; Anthropic has said general access is being restored, but it isn't live yet). Rift was still listing Fable in the picker, so choosing it produced a hard "currently unavailable" error. Fable is hidden until access returns; any chat previously pinned to Fable falls back to Opus automatically. It flips back on the moment the API answers again.
+- **Small context-readout accuracy fixes:** a token count in the 999.5K–999.9K range now reads "1.0M" instead of "1000k", and a resumed pre-rename Sonnet 4.5 session reports its real 200K window instead of over-stating 1M.
 
 ### Internal
-- The watchdog's stall decision is now a pure, unit-tested function (`watchdog_should_stall`): the dead-silent grace net AND the new absolute in-flight ceiling, either trips. Regression tests pin both the backend decision (the chatty-wedge case the old grace path missed) and the frontend cleanup (a Stalled turn ends via the error path → the spinning dock spawn is swept closed — previously only the normal-done path was covered). Full green: cargo check 0/0 · cargo test (turn) 5/5 · svelte-check 0/0 (4138) · vitest 406/406.
-
-## v0.79.0 — Claude Sonnet 5
+- Backend appends the CLI's `[1m]` window-selector to the `--model` arg for the Sonnet ids the CLI gates at 200K (`cli_model_arg`), built *after* the session pin so the persisted, signature-preserving pin stays the bare id (a bracketed pin would fail validation and silently un-pin on resume). Fable kill-switch flipped in lockstep across `config.rs` + `helpers.ts`; a clean-flip trace confirmed re-enabling is a two-const change with zero test breakage. Added `scripts/fable-watch.ps1` to detect the moment Fable access returns. Full green: cargo test 131/131 · svelte-check 0/0 (4138) · vitest 406/406; verified end-to-end live (Sonnet turn → 1M gauge at true %; Fable absent from the live picker).
 
 ### Known issues
 - **Voice profanity on Web Speech:** fully-masked words (`******`, no leading letter) can't be recovered from Azure's servers — the real fix is the on-device **Whisper** engine (built but not yet in the shipped binary). Planned.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
 
+- **v0.80.0** — Stuck sub-agents now get caught: a wedged (but still-chatty) sub-agent could spin the turn forever because the stall watchdog re-armed on every output line; a hard 15-minute in-flight ceiling that stream activity can't extend now force-ends it.
 - **v0.79.0** — Claude Sonnet 5: "Sonnet" now actually runs Sonnet 5 (the shipped CLI's bare `sonnet` alias still resolved to 4.6, so Rift now pins the explicit id), reaches the X-High effort tier, and shows clean dateless model labels.
 - **v0.78.0** — Queued messages keep their image attachments, short bleeped swear phrases get de-censored in voice dictation, and first-run onboarding fixes (no phantom Haiku option, corrected hints).
 

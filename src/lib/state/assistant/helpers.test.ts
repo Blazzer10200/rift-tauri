@@ -33,6 +33,12 @@ describe("context window (model × plan)", () => {
     expect(modelNativeWindow("claude-opus-4-8")).toBe(1_000_000);
     expect(modelNativeWindow("claude-sonnet-4-6")).toBe(1_000_000);
     expect(modelNativeWindow("claude-opus-4-8[1m]")).toBe(1_000_000);
+    // The backend appends `[1m]` to the CLI --model arg for 1M-gated Sonnets
+    // (config.rs::cli_model_arg) and the CLI echoes it back in lastModelId — the
+    // gauge must read these as 1M so it agrees with the CLI's auto-compaction
+    // threshold (the "compacting at 14%" bug this fixes).
+    expect(modelNativeWindow("claude-sonnet-5[1m]")).toBe(1_000_000);
+    expect(modelNativeWindow("claude-sonnet-4-6[1m]")).toBe(1_000_000);
     expect(modelNativeWindow("some-future-model")).toBe(200_000);
     expect(modelNativeWindow(null)).toBe(200_000);
   });

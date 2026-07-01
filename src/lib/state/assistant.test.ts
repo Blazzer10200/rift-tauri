@@ -99,8 +99,11 @@ describe("assistant.ctxWindowFor()", () => {
     expect(assistant.ctxWindowFor(tab)).toBe(200_000);
   });
 
-  it("returns 1M for sonnet 4.5/4.6/5 + opus 4.6/4.7", () => {
-    expect(assistant.ctxWindowFor({ lastModelId: "claude-sonnet-4-5", lastTurnUsage: null } as any)).toBe(1_000_000);
+  it("returns 1M for sonnet 4.6/5 + opus 4.6/4.7, 200K for sonnet 4.5", () => {
+    // Sonnet 4.5 is CLI-gated at 200K and the backend never sends it `[1m]`
+    // (config.rs SONNET_1M_GATED excludes it) — the gauge must report 200K to
+    // match, else a resumed pre-rename 4.5 session over-reports the window 5×.
+    expect(assistant.ctxWindowFor({ lastModelId: "claude-sonnet-4-5", lastTurnUsage: null } as any)).toBe(200_000);
     expect(assistant.ctxWindowFor({ lastModelId: "claude-sonnet-4-6", lastTurnUsage: null } as any)).toBe(1_000_000);
     expect(assistant.ctxWindowFor({ lastModelId: "claude-sonnet-5", lastTurnUsage: null } as any)).toBe(1_000_000);
     expect(assistant.ctxWindowFor({ lastModelId: "claude-opus-4-6", lastTurnUsage: null } as any)).toBe(1_000_000);

@@ -21,7 +21,7 @@ use super::warm_pool::kill_child_tree;
 use super::auth_update::assistant_auth_probe;
 use super::cli_install::{claude_command, resolve_claude_exe};
 use super::config::{
-    canonical_model_alias, clamp_effort, current_api_key, current_api_key_with,
+    canonical_model_alias, clamp_effort, cli_model_arg, current_api_key, current_api_key_with,
     effective_trust_level, effort_tier_to_flag,
     fable_unavailable, haiku_unavailable, HAIKU_FALLBACK_MODEL, HAIKU_MODEL,
     is_valid_effort_tier,
@@ -952,7 +952,11 @@ async fn resolve_spawn(
         // path), and the `initialize` handshake below requires it.
         .arg("--input-format").arg("stream-json")
         .arg("--verbose")
-        .arg("--model").arg(&model)
+        // `cli_model_arg` appends the `[1m]` window-selector for the Sonnet ids the
+        // CLI otherwise gates at 200K (see config.rs). Built off the fully-resolved
+        // `model` AFTER save_session_model (line ~834) already pinned the BARE id —
+        // the suffix must never reach the pin (is_valid_model_name rejects `[`/`]`).
+        .arg("--model").arg(cli_model_arg(&model))
         .arg("--permission-mode").arg(&permission_mode);
     // The `user` setting source carries the global ~/.claude CLAUDE.md +
     // settings.json + hooks. `use_full_config` on = inherit them (full reskin);
