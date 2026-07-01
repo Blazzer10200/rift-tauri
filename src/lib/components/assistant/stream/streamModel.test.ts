@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { messageToTurn, parseAskUserResult, groupNames, isFillerSay, classifySay, outputPeek, groupBlocks } from "./streamModel";
+import { messageToTurn, parseAskUserResult, groupNames, workLineMode, isFillerSay, classifySay, outputPeek, groupBlocks } from "./streamModel";
 import type { StreamTool } from "./streamModel";
 import type { ChatMessage } from "$lib/state/assistant.svelte";
 
@@ -255,20 +255,28 @@ describe("groupNames — names on the collapsed work row", () => {
     expect(groupNames(ts)).toBe("Ran 1 command");
   });
 
-  it("mixed kinds get a dominant-first per-kind breakdown", () => {
+  it("mixed kinds name their targets per-kind, dominant-first", () => {
     const ts = toolsOf([
       tool("Read", "done", { file_path: "/a/a.ts" }),
       tool("Read", "done", { file_path: "/a/b.ts" }),
       tool("Grep", "done", { pattern: "foo" }),
       tool("Bash", "done", { command: "ls" }),
     ]);
-    expect(groupNames(ts)).toBe("Read 2 · searched 1 · ran 1");
+    // Lead kind (read) names up to 2 targets; namable trailing kinds (grep)
+    // name 1; non-namable (shell) just count.
+    expect(groupNames(ts)).toBe('Read a.ts, b.ts · Searched "foo" · ran 1');
   });
 
   it("grep names its pattern target", () => {
     const ts = toolsOf([tool("Grep", "done", { pattern: "foo" })]);
     expect(groupNames(ts)).toBe('Searched "foo"');
   });
+});
+
+describe("workLineMode — tool-detail tier → WorkLine render mode", () => {
+  it("minimal → collapsed", () => expect(workLineMode("minimal")).toBe("collapsed"));
+  it("balanced → rows", () => expect(workLineMode("balanced")).toBe("rows"));
+  it("detailed → expanded", () => expect(workLineMode("detailed")).toBe("expanded"));
 });
 
 describe("isFillerSay — trim throwaway transitional prose", () => {

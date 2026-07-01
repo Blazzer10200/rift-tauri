@@ -18,7 +18,7 @@
   import { stt } from "../../state/stt.svelte";
   import { accessibility } from "../../state/accessibility.svelte";
   import { commandPalette } from "../../state/command-palette.svelte";
-  import { uiPrefs, ACCENTS, DOT_FIELDS, VIVIDNESS_MIN, VIVIDNESS_MAX } from "../../state/ui-prefs.svelte";
+  import { uiPrefs, ACCENTS, DOT_FIELDS, TOOL_DETAILS, DENSITY_PRESETS, VIVIDNESS_MIN, VIVIDNESS_MAX } from "../../state/ui-prefs.svelte";
   import { activityDock } from "../../state/activityDock.svelte";
   import { onboarding } from "../../state/onboarding.svelte";
   import { betaNotice } from "../../state/betaNotice.svelte";
@@ -590,6 +590,22 @@
             </div>
             {#if uiPrefs.streamMode}
               <div class="ctl-row tight">
+                <div><div class="ctl-t">Density preset</div><div class="ctl-s">Sets tool detail, narration, and command output together. <b>Calm</b> keeps the stream clean; <b>Standard</b> is the balanced default; <b>Verbose</b> shows everything. Pick one, then fine-tune any axis below.</div></div>
+                <div class="seg" role="radiogroup" aria-label="Density preset">
+                  {#each DENSITY_PRESETS as p (p.id)}
+                    <button class:on={uiPrefs.activePreset === p.id} role="radio" aria-checked={uiPrefs.activePreset === p.id} type="button" onclick={() => uiPrefs.applyPreset(p.id)}>{p.label}</button>
+                  {/each}
+                </div>
+              </div>
+              <div class="ctl-row tight">
+                <div><div class="ctl-t">Tool detail</div><div class="ctl-s">How much of each tool/file action shows. <b>Balanced</b> names targets on the collapsed row; <b>Minimal</b> collapses to a one-line outcome (still expandable); <b>Detailed</b> auto-expands rows with full paths and forces full command output.</div></div>
+                <div class="seg" role="radiogroup" aria-label="Tool detail density">
+                  {#each TOOL_DETAILS as d (d.id)}
+                    <button class:on={uiPrefs.toolDetail === d.id} role="radio" aria-checked={uiPrefs.toolDetail === d.id} type="button" onclick={() => uiPrefs.setToolDetail(d.id)}>{d.label}</button>
+                  {/each}
+                </div>
+              </div>
+              <div class="ctl-row tight">
                 <div><div class="ctl-t">Narration</div><div class="ctl-s">How much of Claude's between-step commentary shows. <b>Balanced</b> keeps it but demotes connective beats to quiet inline notes so the turn reads as work-with-commentary; <b>Focused</b> hides filler; <b>Chatty</b> shows every line as prose.</div></div>
                 <div class="seg" role="radiogroup" aria-label="Narration density">
                   {#each NARRATIONS as n (n.id)}
@@ -597,11 +613,11 @@
                   {/each}
                 </div>
               </div>
-              <div class="ctl-row tight">
-                <div><div class="ctl-t">Command output</div><div class="ctl-s">How much of a shell command's output (the in-and-out) shows in the stream. <b>Peek</b> shows the exit status and a few trailing lines, click to expand the rest; <b>Full</b> streams the whole terminal output live as it runs; <b>Minimal</b> shows just the command line.</div></div>
-                <div class="seg" role="radiogroup" aria-label="Command output detail">
+              <div class="ctl-row tight" class:overridden={uiPrefs.toolDetail === "detailed"}>
+                <div><div class="ctl-t">Command output {#if uiPrefs.toolDetail === "detailed"}<span class="ctl-note">· set by Detailed</span>{/if}</div><div class="ctl-s">How much of a shell command's output (the in-and-out) shows in the stream. <b>Peek</b> shows the exit status and a few trailing lines, click to expand the rest; <b>Full</b> streams the whole terminal output live as it runs; <b>Minimal</b> shows just the command line.</div></div>
+                <div class="seg" role="radiogroup" aria-label="Command output detail" aria-disabled={uiPrefs.toolDetail === "detailed"}>
                   {#each COMMAND_OUTPUTS as c (c.id)}
-                    <button class:on={uiPrefs.commandOutput === c.id} role="radio" aria-checked={uiPrefs.commandOutput === c.id} type="button" onclick={() => uiPrefs.setCommandOutput(c.id)}>{c.label}</button>
+                    <button class:on={uiPrefs.commandOutput === c.id} role="radio" aria-checked={uiPrefs.commandOutput === c.id} type="button" disabled={uiPrefs.toolDetail === "detailed"} onclick={() => uiPrefs.setCommandOutput(c.id)}>{c.label}</button>
                   {/each}
                 </div>
               </div>
@@ -1000,6 +1016,10 @@
   .ctl-row.tight { padding: 9px 0; }
   .ctl-row.stack { flex-direction: column; align-items: stretch; gap: 10px; }
   .ctl-row[data-disabled="true"] { opacity: 0.5; }
+  /* dim only the label side when a control is overridden by another pref (the
+     seg buttons dim themselves via :disabled) */
+  .ctl-row.overridden .ctl-t, .ctl-row.overridden .ctl-s { opacity: 0.5; }
+  .ctl-note { font-weight: 400; font-size: 11px; color: var(--accent); opacity: 0.9; }
   .ctl-t { font-size: 13px; font-weight: 500; }
   .ctl-s { font-size: 11.5px; color: var(--fg-subtle); margin-top: 2px; }
   .ctl-actions { display: flex; align-items: center; gap: 8px; flex: none; }

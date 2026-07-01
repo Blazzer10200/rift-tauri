@@ -9,6 +9,7 @@ const CODE_KEY = "rift.ui.code.v1";
 const STREAM_MODE_KEY = "rift.ui.stream-mode.v1";
 const NARRATION_KEY = "rift.ui.narration.v1";
 const COMMAND_OUTPUT_KEY = "rift.ui.command-output.v1";
+const TOOL_DETAIL_KEY = "rift.ui.tool-detail.v1";
 const DOTFIELD_KEY = "rift.ui.dotfield.v1";
 const VIVIDNESS_KEY = "rift.ui.vividness.v1";
 
@@ -31,6 +32,39 @@ const NARRATION_IDS = new Set<string>(["focused", "balanced", "chatty"]);
 //    (VS Code-style in-and-out), exit code on finish.
 export type CommandOutput = "minimal" | "peek" | "full";
 const COMMAND_OUTPUT_IDS = new Set<string>(["minimal", "peek", "full"]);
+
+// How much of each tool/file ACTION (Read/Grep/Edit/…) shows in the work stream.
+// Orthogonal to `narration` (the model's prose) and `commandOutput` (shell body):
+// this governs the WorkLine rows themselves.
+//  - "minimal": rows collapse to a single named outcome line; a chevron still
+//    lets you expand on demand (clean, but never trapped).
+//  - "balanced" (default): named rows on the collapsed header ("Read a.ts ·
+//    Searched \"foo\""), click to expand the per-tool list.
+//  - "detailed": rows auto-expand with full file paths, and force full shell
+//    output regardless of the separate commandOutput pref (the VS Code-ish look).
+export type ToolDetail = "minimal" | "balanced" | "detailed";
+const TOOL_DETAIL_IDS = new Set<string>(["minimal", "balanced", "detailed"]);
+export const TOOL_DETAILS: { id: ToolDetail; label: string }[] = [
+  { id: "minimal", label: "Minimal" },
+  { id: "balanced", label: "Balanced" },
+  { id: "detailed", label: "Detailed" },
+];
+
+// Named density presets set all three stream knobs at once (a starting point;
+// each axis stays independently tweakable afterward). Preset is apply-only — we
+// don't persist "which preset" because any later single-axis tweak would make a
+// stored label lie; the settings UI DERIVES the active preset from the live triple.
+export type DensityPreset = "calm" | "standard" | "verbose";
+export const DENSITY_PRESETS: { id: DensityPreset; label: string }[] = [
+  { id: "calm", label: "Calm" },
+  { id: "standard", label: "Standard" },
+  { id: "verbose", label: "Verbose" },
+];
+const PRESET_MAP: Record<DensityPreset, { toolDetail: ToolDetail; narration: Narration; commandOutput: CommandOutput }> = {
+  calm:     { toolDetail: "minimal",  narration: "focused",  commandOutput: "minimal" },
+  standard: { toolDetail: "balanced", narration: "balanced", commandOutput: "peek" },
+  verbose:  { toolDetail: "detailed", narration: "chatty",   commandOutput: "full" },
+};
 
 // Background texture driving `.app[data-dots]` (variant CSS lives in AppShell).
 // "dots" = the default base field (no override); "off" hides it entirely.
@@ -86,6 +120,8 @@ class UiPrefs {
   // How much shell command output to render in the live stream (see
   // CommandOutput type). Default "peek".
   commandOutput = $state<CommandOutput>("peek");
+  // How much per-tool action detail to render (see ToolDetail). Default "balanced".
+  toolDetail = $state<ToolDetail>("balanced");
 
   init() {
     if (typeof window === "undefined") return;
@@ -132,6 +168,9 @@ class UiPrefs {
 
     const cmdOutRaw = localStorage.getItem(COMMAND_OUTPUT_KEY);
     if (cmdOutRaw !== null && COMMAND_OUTPUT_IDS.has(cmdOutRaw)) this.commandOutput = cmdOutRaw as CommandOutput;
+
+    const toolDetailRaw = localStorage.getItem(TOOL_DETAIL_KEY);
+    if (toolDetailRaw !== null && TOOL_DETAIL_IDS.has(toolDetailRaw)) this.toolDetail = toolDetailRaw as ToolDetail;
 
     this.apply();
   }
@@ -186,6 +225,33 @@ class UiPrefs {
   setCommandOutput(c: CommandOutput) {
     this.commandOutput = c;
     localStorage.setItem(COMMAND_OUTPUT_KEY, c);
+  }
+
+  setToolDetail(t: ToolDetail) {
+    this.toolDetail = t;
+    localStorage.setItem(TOOL_DETAIL_KEY, t);
+  }
+
+  // Apply a named preset = set all three stream knobs together. One-shot: we
+  // don't remember "which preset" — `activePreset` re-derives it from the live
+  // triple, so a later single-axis tweak simply un-highlights the preset.
+  applyPreset(p: DensityPreset) {
+    const { toolDetail, narration, commandOutput } = PRESET_MAP[p];
+    this.setToolDetail(toolDetail);
+    this.setNarration(narration);
+    this.setCommandOutput(commandOutput);
+  }
+
+  // Which preset (if any) the current axis triple exactly matches — for the
+  // settings UI to highlight. null once the user drifts off a preset.
+  get activePreset(): DensityPreset | null {
+    for (const { id } of DENSITY_PRESETS) {
+      const m = PRESET_MAP[id];
+      if (m.toolDetail === this.toolDetail && m.narration === this.narration && m.commandOutput === this.commandOutput) {
+        return id;
+      }
+    }
+    return null;
   }
 
 

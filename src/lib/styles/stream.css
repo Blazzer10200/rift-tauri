@@ -107,6 +107,10 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wline-row .wr-verb { color: var(--fg-subtle); }
 .wline-row .wr-dir { color: var(--fg-faint); opacity: 0.7; }
+/* Detailed tier: full path shown in place of dir+basename. Let the row wrap so
+   the whole path is legible rather than ellipsised away. */
+.wline-row .wr-path { color: var(--fg-2); }
+.wline-row:has(.wr-path) { white-space: normal; overflow: visible; word-break: break-all; }
 .wline-row b { color: var(--fg-2); font-weight: 600; }
 /* in-flight tool — single active line, no box */
 .wline-active { display: inline-flex; align-items: center; gap: 8px; margin: 12px 0; font-size: 12.5px; color: var(--fg-muted);

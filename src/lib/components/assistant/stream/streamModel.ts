@@ -424,26 +424,74 @@ function groupSummary(tools: StreamTool[]): string {
 }
 
 // Names-on-rows summary: instead of "Read 2 files", show "Read layout.ts,
-// rest.ts" so the collapsed work line names its targets. Verb comes from the
-// lead tool's kind; targets are each tool's basename caption, de-duped, capped
-// at 3 with a "+N more" tail. Falls back to groupSummary when the group is
-// mixed-kind or its targets aren't file-ish names (shell commands, mcp calls).
-export function groupNames(tools: StreamTool[]): string {
-  const kinds = new Set(tools.map((t) => t.kind));
-  // Only name-list the kinds whose caption IS a target name (file/dir/pattern).
-  const namable = (k: TKind) => k === "read" || k === "grep" || k === "edit" || k === "create";
-  if (kinds.size !== 1 || !namable([...kinds][0] as TKind)) return groupSummary(tools);
-  const k = [...kinds][0] as TKind;
-  const verb = VERB_PAST[k];
+// rest.ts" so the collapsed work line names its targets. Targets are each
+// tool's basename caption, de-duped, capped so the row stays one line.
+//
+// Kinds whose caption IS a target name (file/dir/pattern) get name-listed; the
+// rest (shell commands, mcp calls) only count. A MIXED group is now segmented
+// per-kind, dominant-first, so "Read 2 files · searched 1" becomes the far more
+// useful "Read layout.ts, rest.ts · searched \"apply_slot\"" — the filenames
+// were always in the data, the old flat-count summary just threw them away.
+const NAMABLE = (k: TKind) => k === "read" || k === "grep" || k === "edit" || k === "create";
+
+// One verb-led segment for a single kind's tools: names the targets if namable,
+// else defers to a bare count via KIND_VERB ("ran 2").
+function nameSeg(k: TKind, tools: StreamTool[], nameBudget: number): string {
+  const c = tools.length;
+  if (!NAMABLE(k)) return `${KIND_VERB[k]} ${c}`;
   const names: string[] = [];
   for (const t of tools) {
     const nm = (t.cap ?? "").trim();
     if (nm && !names.includes(nm)) names.push(nm);
   }
-  if (names.length === 0) return groupSummary(tools);
-  const shown = names.slice(0, 3).join(", ");
-  const more = names.length > 3 ? ` +${names.length - 3} more` : "";
-  return `${verb} ${shown}${more}`;
+  if (names.length === 0) return `${KIND_VERB[k]} ${c}`;
+  const shown = names.slice(0, nameBudget).join(", ");
+  const more = names.length > nameBudget ? ` +${names.length - nameBudget} more` : "";
+  return `${VERB_PAST[k]} ${shown}${more}`;
+}
+
+export function groupNames(tools: StreamTool[]): string {
+  const kinds = new Set(tools.map((t) => t.kind));
+
+  // Single kind: name up to 3 targets (the common, readable case).
+  if (kinds.size === 1) {
+    const k = [...kinds][0] as TKind;
+    if (!NAMABLE(k)) return groupSummary(tools);
+    return nameSeg(k, tools, 3);
+  }
+
+  // Mixed kinds: one segment per kind, dominant-first, joined by " · ". Give
+  // the lead kind a wider name budget so the primary target list stays useful;
+  // trailing kinds get 1 name so the whole row stays a single line. Cap at 3
+  // segments + a "+N more" tail (mirrors groupSummary's shape).
+  const byKind = new Map<TKind, StreamTool[]>();
+  for (const t of tools) {
+    const arr = byKind.get(t.kind) ?? [];
+    arr.push(t);
+    byKind.set(t.kind, arr);
+  }
+  const ordered = [...byKind].sort((a, b) => b[1].length - a[1].length);
+  const segs = ordered
+    .slice(0, 3)
+    .map(([k, ts], i) => nameSeg(k, ts, i === 0 ? 2 : 1));
+  const restCount = ordered.slice(3).reduce((s, [, ts]) => s + ts.length, 0);
+  const tail = restCount > 0 ? ` · +${restCount} more` : "";
+  const body = segs.join(" · ");
+  return body.charAt(0).toUpperCase() + body.slice(1) + tail;
+}
+
+// ── Tool-detail density ─────────────────────────────────────────────────────
+// Map the `toolDetail` pref tier onto a WorkLine render mode. Pure so it's unit-
+// testable + shared, mirroring classifySay/groupNames.
+//  - "collapsed": minimal — one named outcome line, chevron still expands.
+//  - "rows":      balanced — named header, click to expand the per-tool list.
+//  - "expanded":  detailed — rows auto-open with full paths (+full shell output,
+//                 handled in StreamShell).
+export type ToolDetailTier = "minimal" | "balanced" | "detailed";
+export function workLineMode(tier: ToolDetailTier): "collapsed" | "rows" | "expanded" {
+  if (tier === "minimal") return "collapsed";
+  if (tier === "detailed") return "expanded";
+  return "rows";
 }
 
 // ── Narration classification ────────────────────────────────────────────────

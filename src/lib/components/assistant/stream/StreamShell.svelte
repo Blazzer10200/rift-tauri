@@ -8,7 +8,9 @@
 
   const running = $derived(tool.status === "pending");
   const failed = $derived(tool.status === "error");
-  const mode = $derived(uiPrefs.commandOutput);
+  // Detailed tool-detail forces full shell output regardless of the separate
+  // commandOutput pref (the Settings UI dims that control while Detailed is on).
+  const mode = $derived(uiPrefs.toolDetail === "detailed" ? "full" : uiPrefs.commandOutput);
   const hasOut = $derived(typeof tool.result === "string" && tool.result.trim().length > 0);
 
   // "full" auto-expands (live in-and-out); "peek"/"minimal" start collapsed.

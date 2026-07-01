@@ -2,20 +2,26 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.81.0 — Sonnet 5 gets its full 1M context (and no dead model options)
+## v0.82.0 — Dial in how much the activity stream shows (two axes + one-tap presets)
+
+### Added
+- **Tool detail — a new density control for the work stream itself.** Until now you could tune the model's *narration* and a shell command's *output*, but not how much the tool/file rows themselves showed. The new three-way **Tool detail** control (Settings → Chat → Reading → Chat rendering) fixes that: **Balanced** (default) names each row's targets on the collapsed line (`Read a.ts · Searched "foo"`); **Minimal** collapses a work run to a single one-line outcome, still one click from the full list; **Detailed** auto-expands every row with full file paths and streams full command output. Clean readers get calm; power users get the play-by-play — same data, your zoom level.
+- **Density presets.** A **Calm / Standard / Verbose** picker sets all three stream knobs (tool detail, narration, command output) together, so you don't have to tune three sliders to get a coherent feel. Pick one, then fine-tune any single axis afterward — the preset highlight simply clears once you drift off it (nothing is silently remembered to go stale).
 
 ### Fixed
-- **Sonnet 5 now actually uses its full 1,000,000-token context window.** The context gauge showed "1M" but the conversation was compacting at ~14% — because the Claude CLI defaults `claude-sonnet-5` to a **200K** window unless it's asked for the large one explicitly, so it auto-compacted at ~160–184K while Rift's gauge (correctly) measured against 1M. The two never agreed, and long chats got summarized far too early. Rift now requests the 1M window for Sonnet 5 (and Sonnet 4.6), so the CLI's compaction point and the on-screen gauge finally match — a Sonnet chat runs to nearly 1M tokens before it compacts, exactly like the gauge implies. Opus was already correct and is unchanged.
-- **The model picker no longer offers a model that can't run.** Claude Fable 5 is currently unavailable at the API (a government access gate; Anthropic has said general access is being restored, but it isn't live yet). Rift was still listing Fable in the picker, so choosing it produced a hard "currently unavailable" error. Fable is hidden until access returns; any chat previously pinned to Fable falls back to Opus automatically. It flips back on the moment the API answers again.
-- **Small context-readout accuracy fixes:** a token count in the 999.5K–999.9K range now reads "1.0M" instead of "1000k", and a resumed pre-rename Sonnet 4.5 session reports its real 200K window instead of over-stating 1M.
+- **Collapsed work rows no longer hide what they did.** A mixed turn used to summarize as a bare count — `Read 2 · searched 1` — throwing away the filenames it already knew. Rows now name their targets even across mixed tool kinds (`Read HANDOFF.md, README.md · Searched *.md`), so you can read a turn's work without expanding a thing.
+- **No more silent setting override.** When Tool detail is set to Detailed (which forces full command output), the separate **Command output** control now visibly dims and shows a "· set by Detailed" note instead of just ignoring your choice — and restores it the moment you leave Detailed.
 
 ### Internal
-- Backend appends the CLI's `[1m]` window-selector to the `--model` arg for the Sonnet ids the CLI gates at 200K (`cli_model_arg`), built *after* the session pin so the persisted, signature-preserving pin stays the bare id (a bracketed pin would fail validation and silently un-pin on resume). Fable kill-switch flipped in lockstep across `config.rs` + `helpers.ts`; a clean-flip trace confirmed re-enabling is a two-const change with zero test breakage. Added `scripts/fable-watch.ps1` to detect the moment Fable access returns. Full green: cargo test 131/131 · svelte-check 0/0 (4138) · vitest 406/406; verified end-to-end live (Sonnet turn → 1M gauge at true %; Fable absent from the live picker).
+- New `toolDetail` pref + `DensityPreset` map + apply-only `applyPreset()` with a *derived* `activePreset` getter (no 4th persisted key that could desync from the three it sets) in `ui-prefs.svelte.ts`; pure `workLineMode()` tier→render-mode helper in `streamModel.ts` (unit-tested); `groupNames()` rewritten to segment mixed groups per-kind, dominant-first. Wired through `WorkLine.svelte` (minimal keeps a chevron escape hatch; detailed auto-opens + full paths, wrap-not-ellipsis) and a one-line `StreamShell.svelte` override. Verified live via CDP across real sessions (mixed-row naming, Detailed→dimmed Command-output). Green: svelte-check 0/0 (4138) · vitest 54/54 (stream).
 
 ### Known issues
 - **Voice profanity on Web Speech:** fully-masked words (`******`, no leading letter) can't be recovered from Azure's servers — the real fix is the on-device **Whisper** engine (built but not yet in the shipped binary). Planned.
+- **Dismissed ask-cards** render "(no answer recorded)" rather than a proper "Dismissed" state — cosmetic, fix planned.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.81.0** — Sonnet 5 gets its full 1M context window (the CLI defaulted it to 200K, so long chats compacted at ~14% while the gauge said 1M); the picker no longer offers unavailable Fable; small context-readout accuracy fixes.
 
 - **v0.80.0** — Stuck sub-agents now get caught: a wedged (but still-chatty) sub-agent could spin the turn forever because the stall watchdog re-armed on every output line; a hard 15-minute in-flight ceiling that stream activity can't extend now force-ends it.
 - **v0.79.0** — Claude Sonnet 5: "Sonnet" now actually runs Sonnet 5 (the shipped CLI's bare `sonnet` alias still resolved to 4.6, so Rift now pins the explicit id), reaches the X-High effort tier, and shows clean dateless model labels.

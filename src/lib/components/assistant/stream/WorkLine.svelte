@@ -1,9 +1,14 @@
 <script lang="ts">
   import { ChevronDown, FileText, FolderSearch, FolderTree, Search, Terminal, Wrench } from "lucide-svelte";
-  import { groupNames, VERB_PAST, VERB_ING, type StreamTool, type TKind } from "./streamModel";
+  import { groupNames, workLineMode, VERB_PAST, VERB_ING, type StreamTool, type TKind } from "./streamModel";
+  import { uiPrefs } from "$lib/state/ui-prefs.svelte";
 
   let { tools }: { tools: StreamTool[] } = $props();
-  let open = $state(false);
+  // Detailed tier auto-opens the per-tool list; minimal/balanced start collapsed
+  // (both still expandable via the chevron). Derived so a live pref change re-runs.
+  const mode = $derived(workLineMode(uiPrefs.toolDetail));
+  let userOpen = $state(false);
+  const open = $derived(mode === "expanded" || userOpen);
 
   const ICONS: Partial<Record<TKind, typeof FileText>> = {
     read: FileText, grep: Search, shell: Terminal, mcp: Wrench,
@@ -30,7 +35,7 @@
   </div>
 {:else}
   <div class="wline">
-    <button class="wline-head" onclick={() => (open = !open)} type="button">
+    <button class="wline-head" onclick={() => (userOpen = !userOpen)} type="button">
       <span class="wline-ic"><Icon size={12} strokeWidth={2} /></span>
       <span class="wline-label">{summary}</span>
       <ChevronDown class="wline-chev {open ? 'open' : ''}" size={13} strokeWidth={2} />
@@ -40,7 +45,7 @@
         {#each tools as t (t.id)}
           <div class="wline-row" title={t.path ?? t.cap}>
             <span class="wr-verb">{t.status === "pending" ? VERB_ING[t.kind] : VERB_PAST[t.kind]}</span>
-            {#if t.dir}<span class="wr-dir">{t.dir}</span>{/if}<b>{t.cap}</b>
+            {#if mode === "expanded" && t.path}<span class="wr-path">{t.path}</span>{:else}{#if t.dir}<span class="wr-dir">{t.dir}</span>{/if}<b>{t.cap}</b>{/if}
           </div>
         {/each}
       </div>
