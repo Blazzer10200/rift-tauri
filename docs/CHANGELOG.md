@@ -10,6 +10,7 @@
 
 ### Internal
 - `warm_pool::insert_if_absent` (check-and-insert under one registry-lock hold) replaces the racy `get()`-then-`insert()` in `prewarm_spawn`; the loser calls `kill_child_tree(pid)`. `loop_cleanup` now `kill_child_tree(turn_pid)` before `start_kill()` (mirrors the Stalled branch + `kill_all_session_children`). Both adversarially verified (parallel-agent audit) and compiler-verified: `cargo check` clean, 0 errors / 0 warnings. Warm-pool dev-tuning (`#[cfg(debug_assertions)]` shorter idle windows) was evaluated and **deferred** — pure dev-ergonomics, would add prod/dev divergence for no release benefit.
+- Also unblocked the release: `assistant.playback.test.ts` still asserted the pre-`3b3740c` dock-only behavior (zero sub-agent leakage into the main bubble) after the inline-sub-agent-card redesign made a `Task` tool_use append its own bubble card. Updated to assert the bubble holds exactly the Task card (nested frames still route to `agentSpawns`). Full vitest suite green: 410/410.
 
 ### Known issues
 - **Voice profanity on Web Speech:** fully-masked words (`******`, no leading letter) can't be recovered from Azure's servers — the real fix is the on-device **Whisper** engine (built but not yet in the shipped binary). Planned.
