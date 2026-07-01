@@ -55,9 +55,9 @@ export type ModelOpt = {
 // legacy generations grouped below. `opus` is the alias → newest Opus (4.8,
 // 1M-ctx beta); `claude-opus-4-7` pins the prior generation. The CLI takes
 // the alias / pinned id; name + suffix are display-only.
-// Fable 5 is a limited run — row exists only while fableAvailable() (gated by
-// FABLE_DISABLED + the sunset date in helpers.ts); when pulled the list
-// collapses back to the standard four.
+// Fable 5 row exists while fableAvailable() (gated by FABLE_DISABLED + the
+// sunset date in helpers.ts). Owner call 2026-07-01: kept always-visible even
+// while the upstream access gate holds — hard-pull only (set FABLE_DISABLED).
 export const MODEL_OPTIONS: ModelOpt[] = [
   ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", tagline: "Anthropic's most capable model — limited run", blurb: "Most capable — limited run", ctx: "1M ctx", suffix: "1M context", legacy: false, limited: true, effort: true, maxEffort: MODEL_MAX_EFFORT["claude-fable-5"], icon: Sparkles }] : []),
   { id: "opus",            label: "Opus",   version: "4.8", tagline: "Newest + most capable — complex reasoning & agentic coding", blurb: "Deep reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.opus, icon: Gem },

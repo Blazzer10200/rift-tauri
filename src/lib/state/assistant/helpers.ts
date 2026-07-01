@@ -8,16 +8,17 @@ const MODEL_SELS: readonly ModelSel[] = [
   "sonnet", "opus", "claude-opus-4-7", "haiku", "claude-fable-5",
 ] as const;
 
-// Claude Fable 5 — re-pulled 2026-06-30: the API rejects every Fable turn with
-// "Claude Fable 5 is currently unavailable" (the Fable/Mythos access gate), so
-// leaving it selectable only lets users pick a model that hard-errors. Sunset
-// stays far out; the kill-switch below is what hides it. Flip back to false if
-// Fable access is restored for the shipping channel.
+// Claude Fable 5 — owner call 2026-07-01: keep it ALWAYS VISIBLE (flag `false`)
+// even while the upstream Fable/Mythos access gate is up, so the picker row is
+// live and rolls the instant access returns. Tradeoff accepted: while the gate
+// holds, a Fable turn returns "Claude Fable 5 is currently unavailable" (the
+// Fable/Mythos access gate), which Rift renders gracefully — EXPECTED, not a bug
+// to re-gate. Sunset stays far out; only the kill-switch below hides the row.
 export const FABLE_SUNSET_MS = Date.UTC(2099, 0, 1);
 // Manual kill-switch — true pulls Fable: hides the picker row, coerces any
 // stored/selected Fable pref to the default, and the backend swaps a pinned
 // Fable session → opus before it can hit the API. Mirror in config.rs.
-export const FABLE_DISABLED = true;
+export const FABLE_DISABLED = false;
 export function fableAvailable(): boolean {
   return !FABLE_DISABLED && Date.now() < FABLE_SUNSET_MS;
 }

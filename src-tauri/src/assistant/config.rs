@@ -245,15 +245,15 @@ pub(super) fn is_valid_local_base_url(s: &str) -> bool {
 /// a retired model id.
 pub(super) const FABLE_MODEL: &str = "claude-fable-5";
 pub(super) const FABLE_SUNSET_EPOCH_SECS: u64 = 4_070_908_800; // 2099-01-01T00:00:00Z
-/// Manual kill-switch — Fable re-pulled 2026-06-30: the API rejects every Fable
-/// turn with "Claude Fable 5 is currently unavailable" (the Fable/Mythos access
-/// gate — see anthropic.com/news/fable-mythos-access), so showing it in the
-/// picker only lets users select a model that hard-errors. While true, a
-/// pinned/stale Fable session falls back to opus before the model id can reach
-/// the API, and the picker row is hidden. Mirrors the frontend `FABLE_DISABLED`
-/// (helpers.ts) — mirror any change on both sides. Flip back to `false` if Fable
-/// access is restored for the shipping channel.
-pub(super) const FABLE_DISABLED: bool = true;
+/// Manual kill-switch. Owner call 2026-07-01: keep Fable ALWAYS VISIBLE (flag
+/// `false`) even while the upstream Fable/Mythos access gate is up — so the row
+/// is live and rolls the instant access returns, no code change needed. The
+/// tradeoff is accepted: while the gate holds, a Fable turn returns "Claude
+/// Fable 5 is currently unavailable" (anthropic.com/news/fable-mythos-access),
+/// which Rift renders gracefully as a normal reply — this is EXPECTED, not a bug
+/// to "fix" by re-gating. Mirrors the frontend `FABLE_DISABLED` (helpers.ts) —
+/// mirror any change on both sides. Set `true` only to hard-pull Fable entirely.
+pub(super) const FABLE_DISABLED: bool = false;
 
 pub(super) fn fable_sunset_passed() -> bool {
     std::time::SystemTime::now()
