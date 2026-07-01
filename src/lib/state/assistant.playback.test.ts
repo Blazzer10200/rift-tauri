@@ -287,9 +287,14 @@ describe("playback — sub-agent live routing", () => {
       nestedTextEnv("task-1", "found 3"),
     ]);
 
-    // Zero sub-agent leakage into the main bubble (the Task chip lives in
-    // agentSpawns, not the message blocks).
-    expect(textBlocks(tab, id).filter((b) => b.type === "tool" || b.type === "text")).toEqual([]);
+    // Post-inline-card redesign (3b3740c): the Task tool_use itself renders as a
+    // first-class INLINE card in the main bubble (one "tool" block named "Task"),
+    // while the NESTED sub-agent frames (scanning / Grep / found 3) still divert to
+    // agentSpawns[i].blocks and must NOT leak into the main bubble. So the bubble
+    // holds exactly the Task card — nothing from the sub-transcript.
+    const bubbleBlocks = textBlocks(tab, id).filter((b) => b.type === "tool" || b.type === "text");
+    expect(bubbleBlocks).toHaveLength(1);
+    expect(bubbleBlocks[0]).toMatchObject({ type: "tool", name: "Task" });
 
     const agent = tab.agentSpawns.find((a) => a.id === "task-1")!;
     expect(agent).toMatchObject({ subagentType: "recon", description: "map the files", completedAt: null });
