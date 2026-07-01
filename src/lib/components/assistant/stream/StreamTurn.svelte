@@ -218,7 +218,12 @@
       {:else if sm === "muted"}
         <div class="snarr-beat">{g.text.trim()}</div>
       {:else}
-        <div class="snarr"><Markdown text={g.text} {streaming} /></div>
+        <!-- Trailing caret on the actively-streaming final text block only (CC-UI
+             ref §2): a thin bar, step-end ~1s blink, scoped to the one block
+             receiving tokens. Every settled block has none. -->
+        <div class="snarr">
+          <Markdown text={g.text} {streaming} />{#if streaming && gi === groups.length - 1}<span class="stream-caret" aria-hidden="true"></span>{/if}
+        </div>
       {/if}
     {:else}
       {#each g.segs as seg, si (si)}

@@ -29,6 +29,20 @@
 .snarr { color: var(--fg-2); margin: 13px 0; animation: blockIn var(--dur-base) var(--ease-page) both; }
 .snarr :global(.md-p), .snarr :global(.md-li) { color: var(--fg-2); }
 
+/* Streaming caret (CC-UI ref §2): a thin bar at the tail of the block currently
+   receiving tokens — the one universal "still streaming" signal. step-end ~1.05s
+   blink (a caret snaps on/off, it doesn't fade), scoped to the active block only.
+   Inline so it sits right after the last revealed word. Reduced-motion → solid. */
+.stream-caret {
+  display: inline-block; width: 2px; height: 1.05em;
+  margin-left: 1px; vertical-align: text-bottom;
+  background: var(--status-busy);
+  border-radius: 1px;
+  animation: stream-caret-blink 1.05s step-end infinite;
+}
+@keyframes stream-caret-blink { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .stream-caret { animation: none; opacity: 1; } }
+
 /* demoted connective beat (balanced narration) — a between-tools line ("now the
    release build:", "exe still locked, kill harder:") rendered as quiet inline
    tissue that hugs the work rows instead of a full prose block. Muted, smaller,
