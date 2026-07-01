@@ -1178,12 +1178,16 @@ async fn resolve_spawn(
         // output length limit / Continue". 8192 lets a real turn finish while
         // staying well inside the model's 16384 num_ctx (input + output).
         cmd.env("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "8192");
-    } else if !thinking_on && model != "haiku" {
+    } else if routes_through_nothink_shim(thinking_on, &model) {
         // Cloud "thinking off": point the CLI at the in-process shim, which
         // injects `thinking:{type:"disabled"}` into /v1/messages and forwards to
-        // Anthropic. Haiku has no extended thinking, so there's nothing to
-        // disable (and it would only add a needless hop). If the shim failed to
-        // bind, leave ANTHROPIC_BASE_URL unset → falls back to normal thinking.
+        // Anthropic. Haiku + Fable are excluded (see routes_through_nothink_shim):
+        // Haiku has no extended thinking to disable, and Fable's thinking is
+        // always-on with the API 400ing on an explicit disabled block — a Fable
+        // turn through the shim would hard-error every send. If the shim failed
+        // to bind, leave ANTHROPIC_BASE_URL unset → falls back to normal thinking.
+        // (By this point a Fable pref only survives when Fable is actually live —
+        // an unavailable Fable session was already swapped to opus above.)
         if let Some(shim) = super::nothink::shim_base_url() {
             cmd.env("ANTHROPIC_BASE_URL", shim);
         }
@@ -2183,6 +2187,22 @@ const STREAM_TOOL_GRACE_WINDOWS: u32 = 2;
 /// first when there's no chatter; this only governs the chatty-wedge case).
 const STREAM_TOOL_CEILING_SECS: u64 = 900;
 
+/// Pure decision: does a cloud turn route through the in-process no-think shim?
+/// Extracted as a seam so the Fable-must-skip-the-shim guard is unit-testable
+/// without the whole spawn path. The shim rewrites every `/v1/messages` body to
+/// `thinking:{type:"disabled"}` (nothink.rs), so it only applies to models that
+/// (a) have extended thinking to disable and (b) accept an explicit disabled
+/// block. Excluded:
+///   • Haiku — no extended thinking, so nothing to disable (needless hop).
+///   • Fable — thinking is ALWAYS ON and the API 400s on an explicit
+///     `thinking:{type:"disabled"}`; routing a Fable turn through the shim would
+///     hard-error every send for any user whose CLI honors ANTHROPIC_BASE_URL.
+/// A thinking-ON turn never uses the shim (there's nothing to turn off).
+/// (Local-LLM mode has its own always-on shim branch and is handled separately.)
+fn routes_through_nothink_shim(thinking_on: bool, model: &str) -> bool {
+    !thinking_on && model != HAIKU_MODEL && model != FABLE_MODEL
+}
+
 /// Pure watchdog decision: on a no-progress fire with a tool in flight, do we
 /// re-arm (grace) or force-stall? Extracted as a seam so the wedged-sub-agent
 /// regression is unit-testable without the async IO loop.
@@ -2895,10 +2915,30 @@ pub async fn assistant_stop(
 #[cfg(test)]
 mod tests {
     use super::{
-        drain_stale_buffered_lines, plan_usage_is_hot, watchdog_should_stall,
-        STREAM_TOOL_CEILING_SECS, STREAM_TOOL_GRACE_WINDOWS,
+        drain_stale_buffered_lines, plan_usage_is_hot, routes_through_nothink_shim,
+        watchdog_should_stall, FABLE_MODEL, HAIKU_MODEL, STREAM_TOOL_CEILING_SECS,
+        STREAM_TOOL_GRACE_WINDOWS,
     };
     use tokio::io::{AsyncBufReadExt, BufReader};
+
+    #[test]
+    fn fable_never_routes_through_the_nothink_shim() {
+        // Regression guard for the Fable go-live: the no-think shim rewrites
+        // every /v1/messages body to `thinking:{type:"disabled"}`, which the
+        // Fable API rejects with a 400 (its thinking is always-on — must omit the
+        // field). A thinking-OFF Fable turn (the DEFAULT, since thinking_on
+        // defaults to false) must therefore SKIP the shim, or every Fable send
+        // hard-errors for any user whose CLI honors ANTHROPIC_BASE_URL. Opus and
+        // Sonnet accept the disabled block, so they still use it.
+        assert!(!routes_through_nothink_shim(false, FABLE_MODEL), "Fable thinking-off must skip the shim (API 400s on disabled)");
+        assert!(!routes_through_nothink_shim(true, FABLE_MODEL), "Fable thinking-on never uses the shim either");
+        assert!(!routes_through_nothink_shim(false, HAIKU_MODEL), "Haiku has no thinking to disable");
+        // Opus / Sonnet thinking-off DO route through the shim (they accept the
+        // explicit disabled block); thinking-on never does.
+        assert!(routes_through_nothink_shim(false, "opus"));
+        assert!(routes_through_nothink_shim(false, "sonnet"));
+        assert!(!routes_through_nothink_shim(true, "opus"), "thinking-on never uses the shim");
+    }
 
     #[tokio::test]
     async fn drain_drops_stale_buffered_lines_then_stops() {

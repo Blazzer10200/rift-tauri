@@ -9,7 +9,10 @@
 - **Simpler conversation history.** The sidebar opens showing just your most recent day's chats, with a single **Show earlier** link at the bottom to reveal the rest — no more wall of date-grouped history on every glance.
 - **Removed clutter:** the separate "This project / All projects" toggle (folded into the project list — click "All projects") and the sidebar search box (the global **Ctrl+K** command palette already searches chats). The whole rail reads calmer, with more breathing room.
 
-*(Unshipped — awaiting the ship chain. Frontend-only; svelte-check clean.)*
+### Fixed
+- **Fable 5 is ready for the moment it reopens — and won't hard-error when it does.** Fable's reasoning is always on, and its API rejects the "turn thinking off" request that every other model accepts. Rift's thinking-off path used to send that request for *any* model, which would have made every Fable turn fail for users on an API key the instant Fable went live. Fable now correctly skips that path (there's nothing to turn off on an always-thinking model). Nothing changes for Opus, Sonnet, or Haiku. *(The Fable picker row itself stays hidden until Anthropic reopens access — a probe-gated one-command flip flips it on; see ISSUES #75.)*
+
+*(Unshipped — awaiting the ship chain. Sidebar work is frontend-only; the Fable fix is backend-only — cargo test 102/102, svelte-check 0/0, vitest 410/410.)*
 
 ## v0.82.1 — Warm-CLI process leaks fixed (the "why is everything slow" memory pileup)
 
