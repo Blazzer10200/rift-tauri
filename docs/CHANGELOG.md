@@ -2,18 +2,14 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.82.0 — Dial in how much the activity stream shows (two axes + one-tap presets)
-
-### Added
-- **Tool detail — a new density control for the work stream itself.** Until now you could tune the model's *narration* and a shell command's *output*, but not how much the tool/file rows themselves showed. The new three-way **Tool detail** control (Settings → Chat → Reading → Chat rendering) fixes that: **Balanced** (default) names each row's targets on the collapsed line (`Read a.ts · Searched "foo"`); **Minimal** collapses a work run to a single one-line outcome, still one click from the full list; **Detailed** auto-expands every row with full file paths and streams full command output. Clean readers get calm; power users get the play-by-play — same data, your zoom level.
-- **Density presets.** A **Calm / Standard / Verbose** picker sets all three stream knobs (tool detail, narration, command output) together, so you don't have to tune three sliders to get a coherent feel. Pick one, then fine-tune any single axis afterward — the preset highlight simply clears once you drift off it (nothing is silently remembered to go stale).
+## v0.82.1 — Warm-CLI process leaks fixed (the "why is everything slow" memory pileup)
 
 ### Fixed
-- **Collapsed work rows no longer hide what they did.** A mixed turn used to summarize as a bare count — `Read 2 · searched 1` — throwing away the filenames it already knew. Rows now name their targets even across mixed tool kinds (`Read HANDOFF.md, README.md · Searched *.md`), so you can read a turn's work without expanding a thing.
-- **No more silent setting override.** When Tool detail is set to Detailed (which forces full command output), the separate **Command output** control now visibly dims and shows a "· set by Detailed" note instead of just ignoring your choice — and restores it the moment you leave Detailed.
+- **Duplicate pre-warm no longer leaks a `claude` process.** Opening a chat tab pre-spawns a warm `claude` helper so your first message is instant. But switching away from a tab and back fast enough (before its spawn finished resolving) could fire a *second* pre-warm for the same session — and the second silently displaced the first in the registry **without killing it**. The orphaned helper (~450 MB, plus its MCP sub-process) then sat invisible to every cleanup path until you quit the app. On a machine churning many sessions this piled up to gigabytes of idle processes and dragged the whole system — including other apps — into slow motion. Pre-warm now picks a single winner atomically and the loser reaps the helper it spawned. *(ISSUES #76)*
+- **Every warm-helper teardown now reaps its MCP sub-process.** When a warm `claude` helper's reader loop exited (the child crashed, its pipe broke, or it was evicted), teardown killed only the direct `claude` process — not the `RIFT_MCP_SERVER` grandchild it spawned, which then orphaned until app exit. Only one exit path (a wedged CLI) had been special-cased to tree-kill; the common ones hadn't. Teardown now tree-kills by PID on every path. *(ISSUES #77)*
 
 ### Internal
-- New `toolDetail` pref + `DensityPreset` map + apply-only `applyPreset()` with a *derived* `activePreset` getter (no 4th persisted key that could desync from the three it sets) in `ui-prefs.svelte.ts`; pure `workLineMode()` tier→render-mode helper in `streamModel.ts` (unit-tested); `groupNames()` rewritten to segment mixed groups per-kind, dominant-first. Wired through `WorkLine.svelte` (minimal keeps a chevron escape hatch; detailed auto-opens + full paths, wrap-not-ellipsis) and a one-line `StreamShell.svelte` override. Verified live via CDP across real sessions (mixed-row naming, Detailed→dimmed Command-output). Green: svelte-check 0/0 (4138) · vitest 54/54 (stream).
+- `warm_pool::insert_if_absent` (check-and-insert under one registry-lock hold) replaces the racy `get()`-then-`insert()` in `prewarm_spawn`; the loser calls `kill_child_tree(pid)`. `loop_cleanup` now `kill_child_tree(turn_pid)` before `start_kill()` (mirrors the Stalled branch + `kill_all_session_children`). Both adversarially verified (parallel-agent audit) and compiler-verified: `cargo check` clean, 0 errors / 0 warnings. Warm-pool dev-tuning (`#[cfg(debug_assertions)]` shorter idle windows) was evaluated and **deferred** — pure dev-ergonomics, would add prod/dev divergence for no release benefit.
 
 ### Known issues
 - **Voice profanity on Web Speech:** fully-masked words (`******`, no leading letter) can't be recovered from Azure's servers — the real fix is the on-device **Whisper** engine (built but not yet in the shipped binary). Planned.
@@ -21,6 +17,7 @@
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
 
+- **v0.82.0** — Dial in how much the activity stream shows: a new three-way **Tool detail** control (Balanced/Minimal/Detailed) plus **Calm/Standard/Verbose** density presets that set all three stream knobs at once; collapsed work rows now name their targets across mixed tool kinds; no more silent Command-output override under Detailed.
 - **v0.81.0** — Sonnet 5 gets its full 1M context window (the CLI defaulted it to 200K, so long chats compacted at ~14% while the gauge said 1M); the picker no longer offers unavailable Fable; small context-readout accuracy fixes.
 
 - **v0.80.0** — Stuck sub-agents now get caught: a wedged (but still-chatty) sub-agent could spin the turn forever because the stall watchdog re-armed on every output line; a hard 15-minute in-flight ceiling that stream activity can't extend now force-ends it.

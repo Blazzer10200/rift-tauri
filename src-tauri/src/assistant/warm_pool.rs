@@ -193,6 +193,28 @@ pub(super) fn insert(session_id: &str, child: Arc<Mutex<WarmChild>>) {
     });
 }
 
+/// Atomic "insert only if the session has no warm child yet" (#76 dup-prewarm
+/// race). `insert` unconditionally REPLACES, which is correct for the cold-spawn
+/// path (the caller already drained the old child) but WRONG for two overlapping
+/// `assistant_prewarm` calls: the non-atomic `get().is_some()` guard at the top of
+/// `assistant_prewarm` runs before an async gap (`resolve_spawn().await`), so both
+/// invocations can pass it, both spawn, and the second `insert` silently displaces
+/// the first Arc with no kill — leaking a ~450MB `claude` child + its MCP grandchild
+/// (invisible to idle-evict AND the shutdown kill-sweep). This does the presence
+/// check and the insert under ONE registry-lock hold, so a loser can detect it lost
+/// and reap its own just-spawned child. Returns true if inserted (winner), false if
+/// a child already existed (caller must kill the child it spawned).
+pub(super) fn insert_if_absent(session_id: &str, child: Arc<Mutex<WarmChild>>) -> bool {
+    with_warm(|m| {
+        if m.contains_key(session_id) {
+            false
+        } else {
+            m.insert(session_id.to_string(), child);
+            true
+        }
+    })
+}
+
 /// Remove the warm child for a session, but only if it's still the SAME Arc the
 /// caller observed (overlapping-turn / respawn guard, mirrors
 /// `clear_session_pid_if`). A respawn may have already inserted a new child

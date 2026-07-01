@@ -1751,7 +1751,22 @@ fn prewarm_spawn(
         last_used: std::time::Instant::now(),
         pid: turn_pid,
     }));
-    warm_pool::insert(&session_id, warm.clone());
+    // #76 dup-prewarm race: register ONLY if this session has no warm child yet.
+    // The top-of-`assistant_prewarm` `get().is_some()` guard is non-atomic across the
+    // `resolve_spawn().await` gap, so two overlapping prewarms for one session can both
+    // reach here. `insert_if_absent` decides the winner under a single registry lock;
+    // the loser tree-kills the child it just spawned (the parked `claude` + its MCP
+    // grandchild) instead of leaking it — a bare `insert` would silently displace the
+    // winner's Arc with no kill. We haven't spawned the reader loop yet, so `turn_pid`
+    // is the only handle we need to reap.
+    if !warm_pool::insert_if_absent(&session_id, warm.clone()) {
+        log::info!("prewarm_spawn: lost dup-prewarm race for {session_id} — reaping surplus spare");
+        if let Some(p) = turn_pid {
+            kill_child_tree(p);
+            clear_session_pid_if(&session_id, p);
+        }
+        return Ok(());
+    }
 
     // Reader loop with first_turn: None → handshake then park.
     tokio::spawn(run_turn_loop(RunCtx {
@@ -2053,6 +2068,16 @@ async fn run_turn_loop(mut ctx: RunCtx) {
 
 /// Common loop-exit teardown: drop the warm registry entry if it's still ours,
 /// clear the PID, and best-effort reap the child.
+///
+/// #77: every `claude` child parents a `RIFT_MCP_SERVER=1` MCP grandchild (holds the
+/// Velopack `current/` lock). `child.start_kill()` is a single-PID TerminateProcess —
+/// it does NOT reap that grandchild, which then orphans until app exit. This fires on
+/// EVERY non-Stalled loop exit (Fatal, Eof, bg_evict, handshake-fail), so the leak is
+/// the common case, not an edge one (the Stalled branch already tree-kills for exactly
+/// this reason). Tree-kill by PID FIRST (matches the Stalled branch + `kill_all_session_children`),
+/// then still `start_kill` + `wait` the tokio handle so the `Child` is reaped cleanly and
+/// no zombie/handle leaks. `kill_child_tree` is best-effort + idempotent (safe if the
+/// process already exited, e.g. an Eof where `claude` died on its own).
 async fn loop_cleanup(
     session_id: &str,
     turn_pid: Option<u32>,
@@ -2062,6 +2087,7 @@ async fn loop_cleanup(
     warm_pool::remove_if(session_id, warm);
     if let Some(p) = turn_pid { clear_session_pid_if(session_id, p); }
     forget_cumulative_cli_api(session_id);
+    if let Some(p) = turn_pid { kill_child_tree(p); }
     let _ = child.start_kill();
     let _ = child.wait().await;
 }
