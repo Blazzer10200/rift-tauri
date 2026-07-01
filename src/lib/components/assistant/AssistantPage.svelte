@@ -36,11 +36,6 @@
     }
   });
 
-  // Sub-agent visibility is now PER-PANE: each AssistantPane mounts its own
-  // SubAgentDock scoped to its tab, and that dock runs its own auto-reveal
-  // controller off its pane's agentSpawns. The page no longer drives a single
-  // global dock (it showed the focused pane's agents in every pane).
-
   // ── Resizable dividers ────────────────────────────────────────────────────
   // Per pane-count storage. fracs[i] is pane i's share; sum ≈ 1. Drag on the
   // divider btw pane i and i+1 redistributes between those two only.
@@ -173,9 +168,6 @@
     try { (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId); } catch { /* noop */ }
   }
 
-  // The sub-agent activity float is a top-right overlay (no column, no resize) —
-  // see the .subagent-float block below + SubAgentDock's card/pill render.
-
 </script>
 
 <div class="assistant">
@@ -258,10 +250,6 @@
       </div>
     </div>
   {/if}
-
-  <!-- Sub-agent activity now floats PER-PANE inside each AssistantPane (scoped to
-       that pane's tab) — see AssistantPane's .pane-subagent-float. The page-level
-       global dock was removed: it showed the focused pane's agents in every pane. -->
 
   </div>
 </div>

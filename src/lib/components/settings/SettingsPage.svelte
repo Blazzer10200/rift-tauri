@@ -19,7 +19,6 @@
   import { accessibility } from "../../state/accessibility.svelte";
   import { commandPalette } from "../../state/command-palette.svelte";
   import { uiPrefs, ACCENTS, DOT_FIELDS, TOOL_DETAILS, DENSITY_PRESETS, VIVIDNESS_MIN, VIVIDNESS_MAX } from "../../state/ui-prefs.svelte";
-  import { activityDock } from "../../state/activityDock.svelte";
   import { onboarding } from "../../state/onboarding.svelte";
   import { betaNotice } from "../../state/betaNotice.svelte";
   import { environment } from "../../state/environment.svelte";
@@ -622,10 +621,6 @@
                 </div>
               </div>
             {/if}
-            <div class="ctl-row tight">
-              <div><div class="ctl-t">Activity dock</div><div class="ctl-s">A slide-in side panel showing live sub-agent activity. Reveals itself while sub-agents run and tidies away when they finish.</div></div>
-              <button class="toggle" class:on={activityDock.enabled} role="switch" aria-checked={activityDock.enabled} aria-label="Activity dock" type="button" onclick={() => activityDock.setEnabled(!activityDock.enabled)}><span class="toggle-knob"></span></button>
-            </div>
           </div>
         {:else}
           <!-- Per-turn dollar cap only does anything in API-key mode (pay-per-token,

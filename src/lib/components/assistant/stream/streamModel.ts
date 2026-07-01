@@ -50,7 +50,7 @@ export type StreamTool = {
   items?: PlanItem[]; // plan
   query?: string; sources?: string[]; count?: number | null; // web/fetch
   fail?: number | null; pass?: number | null; // test/lint
-  steps?: string[]; task?: string; result?: string | null; // agent
+  task?: string; result?: string | null; // agent
 };
 
 type StreamBlock =
@@ -255,7 +255,7 @@ function adaptTool(tb: ToolBlock): StreamTool {
     t.query = t.cap; t.sources = []; t.count = null;
   }
   if (kind === "agent") {
-    t.task = t.cap; t.steps = [];
+    t.task = t.cap;
     t.result = tb.result && !tb.isError ? trim(tb.result.trim().split("\n")[0] ?? "", 90) : null;
   }
   if (kind === "ask") {

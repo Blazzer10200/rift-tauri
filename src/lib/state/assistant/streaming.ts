@@ -467,7 +467,11 @@ function appendToolUse(tab: TabState, block: { id: string; name: string; input?:
       ...tab.agentSpawns,
       { id: block.id, subagentType, description, startedAt: Date.now(), completedAt: null, isError: false, blocks: [] },
     ]);
-    return;
+    // NO early return: fall through so the Task ALSO appends a normal bubble tool
+    // block. That makes the delegation a first-class INLINE card in the transcript
+    // — StreamAgent live (streamModel maps "Task"/"Agent" → kind "agent"), AgentCard
+    // once persisted — matched to its spawn by id. The nested sub-agent frames still
+    // route to agentSpawns[i].blocks (applySubAgentFrame), never the main bubble.
   }
   // Suppress: ToolSearch (internal schema fetch) + the read/control Task tools
   // (TaskList/TaskGet/TaskStop/TaskOutput — newer CLI). TaskCreate/TaskUpdate

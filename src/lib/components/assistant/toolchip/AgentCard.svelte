@@ -23,7 +23,7 @@
 </script>
 
 <!-- Agent card head -->
-<div class="agent-head">
+<div class="agent-head" data-status={status}>
   <span class="agent-icon"><Bot size={14} /></span>
   <span class="agent-pill">{agentSubtype}</span>
   {#if agentDescription}
@@ -163,6 +163,11 @@
     display: inline-flex;
     flex-shrink: 0;
   }
+  /* Status lives in the glyph (CC-UI ref §9): activity green while running,
+     outcome tokens once settled. */
+  .agent-head[data-status="pending"] .chip-status { color: var(--status-busy); }
+  .agent-head[data-status="done"] .chip-status { color: var(--ok); }
+  .agent-head[data-status="error"] .chip-status { color: var(--danger); }
   .chip-status :global(.chip-spin) { animation: chip-spin 1s linear infinite; }
   @keyframes chip-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
 

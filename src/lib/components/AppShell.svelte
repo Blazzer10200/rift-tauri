@@ -15,7 +15,6 @@
   import { WORKSPACES } from "./workspaces";
   import { workspace, type WorkspaceId } from "../state/workspace.svelte";
   import { browserDock } from "../state/browserDock.svelte";
-  import { activityDock } from "../state/activityDock.svelte";
   import { updates } from "../state/updates.svelte";
   import { cliUpdate } from "../state/cliUpdate.svelte";
   import { news } from "../state/news.svelte";
@@ -62,7 +61,6 @@
     void assistant.init();
     shell.init();
     browserDock.init();
-    activityDock.init();
     toast.init();
     void updates.checkOnLaunch();
     // CLI update: check npm for the latest claude version once on launch so the

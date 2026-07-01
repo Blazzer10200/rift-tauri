@@ -236,7 +236,8 @@
           {:else if seg.tool.kind === "test" || seg.tool.kind === "lint"}
             <StreamResult tool={seg.tool} />
           {:else if seg.tool.kind === "agent"}
-            <StreamAgent tool={seg.tool} />
+            {@const spawn = liveTab?.agentSpawns.find((a) => a.id === seg.tool.id)}
+            <StreamAgent tool={seg.tool} {spawn} />
           {:else if seg.tool.kind === "ask"}
             <StreamAskUser tool={seg.tool} />
           {:else if seg.tool.kind === "shell"}

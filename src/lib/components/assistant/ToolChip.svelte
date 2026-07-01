@@ -29,7 +29,7 @@
   let { tool, variant = "card", caption = null }: { tool: ToolBlock; variant?: "card" | "timeline"; caption?: string | null } = $props();
   // Agent + TodoWrite + AskUser are first-class card variants — default-expanded
   // since their body IS the message, not a debug detail. All other tools collapse.
-  const isAgent = $derived(/^(mcp__rift__)?Agent$/.test(tool.name));
+  const isAgent = $derived(/^(mcp__rift__)?(Agent|Task)$/.test(tool.name));
   const isTodoWrite = $derived(/^(mcp__rift__)?TodoWrite$/.test(tool.name));
   const isAskUser = $derived(/^mcp__rift__ask_user$/.test(tool.name));
   const isCard = $derived(isAgent || isTodoWrite || isAskUser);
@@ -439,7 +439,7 @@
     </button>
   {/if}
 
-  {#if expanded}
+  {#if expanded && !isCard}
     <div class="chip-body" transition:slide={{ duration: reducedMotion ? 0 : 180 }}>
       {#if inputRows}
         {#if inputRows.length > 0}
