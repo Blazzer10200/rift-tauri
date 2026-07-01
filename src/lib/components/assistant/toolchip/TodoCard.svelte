@@ -106,15 +106,19 @@
     word-wrap: break-word;
     transition: color 200ms ease-out, text-decoration-color 200ms ease-out;
   }
+  /* Semantic dim ladder (CC-UI ref §5/§10): done recedes furthest (--fg-faint,
+     it's finished), pending sits mid (--fg-muted), in-progress is full --fg so
+     the one live task pops. Previously done was --fg-muted + pending --fg-2,
+     which read too bright and flattened the scan. */
   .todo-item[data-status="completed"] .todo-box { color: var(--accent-hover); }
   .todo-item[data-status="completed"] .todo-content {
-    color: var(--fg-muted);
+    color: var(--fg-faint);
     text-decoration: line-through;
-    text-decoration-color: color-mix(in oklch, var(--fg-muted) 60%, transparent);
+    text-decoration-color: color-mix(in oklch, var(--fg-faint) 60%, transparent);
   }
   .todo-item[data-status="in_progress"] .todo-box { color: var(--accent); }
   .todo-item[data-status="in_progress"] .todo-content { color: var(--fg); font-weight: 500; }
-  .todo-item[data-status="pending"] .todo-content { color: var(--fg-2); }
+  .todo-item[data-status="pending"] .todo-content { color: var(--fg-muted); }
   .todo-box :global(.todo-spin) {
     animation: chip-spin 1.1s linear infinite;
     color: var(--accent);

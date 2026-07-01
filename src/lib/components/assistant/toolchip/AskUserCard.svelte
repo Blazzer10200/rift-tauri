@@ -498,12 +498,15 @@
     flex-wrap: wrap;
     gap: 5px;
   }
+  /* Answered chip: greyed/neutral, not accent (CC-UI ref §5 — a resolved question
+     must not keep reading as live in scrollback). Matches StreamAskUser's answered
+     collapse so both AskUser paths settle the same way. */
   .ask-answered-chip {
     padding: 2px 9px;
     border-radius: 5px;
-    background: color-mix(in oklch, var(--ask) 14%, transparent);
-    border: 1px solid color-mix(in oklch, var(--ask) 30%, var(--border));
-    color: color-mix(in oklch, var(--ask) 55%, var(--fg));
+    background: color-mix(in oklch, var(--fg) 6%, transparent);
+    border: 1px solid var(--border);
+    color: var(--fg-muted);
     font-size: 11.5px;
     font-weight: 600;
   }

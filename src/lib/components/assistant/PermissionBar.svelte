@@ -29,7 +29,10 @@
 </script>
 
 {#if prompt}
-  <div class="perm-bar" role="alertdialog" aria-label="Tool permission request">
+  <!-- role="group" (not alertdialog): this prompt is intentionally NON-modal —
+       it never traps focus or steals it from scrollback (CC-UI ref §8). An
+       alertdialog role would promise focus containment we deliberately don't do. -->
+  <div class="perm-bar" role="group" aria-label="Tool permission request">
     <span class="perm-icon"><ShieldQuestion size={14} /></span>
     <span class="perm-text">
       Allow <span class="perm-tool">{label(toolName || prompt.toolName)}</span>?
@@ -128,5 +131,11 @@
   @keyframes perm-enter {
     from { opacity: 0; transform: translateY(-3px); }
     to { opacity: 1; transform: translateY(0); }
+  }
+  /* Honour reduced-motion: drop the entrance slide (decorative) but keep the
+     spinner (it's a state indicator, not decoration — CC-UI ref §2/§11). */
+  @media (prefers-reduced-motion: reduce) {
+    .perm-bar { animation: none; }
+    .perm-btn { transition: none; }
   }
 </style>

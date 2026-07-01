@@ -312,7 +312,7 @@
     {/if}
 
     {#if !isUser && streaming && grouped.length === 0}
-      <div class="stage-strip" out:fade={{ duration: 220 }}>
+      <div class="stage-strip" out:fade={{ duration: reducedMotion ? 0 : 220 }}>
         <span class="stage-dots" aria-hidden="true">
           <span class="stage-dot"></span>
           <span class="stage-dot"></span>

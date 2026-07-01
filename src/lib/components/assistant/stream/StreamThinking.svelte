@@ -6,7 +6,9 @@
 </script>
 
 <div class="sthink">
-  <button class="sthink-row" onclick={() => (open = !open)} type="button">
+  <!-- Disabled when there's no reasoning text: an empty thinking block (encrypted
+       signature only, no plaintext) shouldn't look or act clickable (CC-UI ref §3). -->
+  <button class="sthink-row" class:bare={!text} onclick={() => text && (open = !open)} type="button" disabled={!text} aria-expanded={text ? open : undefined}>
     <Brain size={13} strokeWidth={2} />
     <span>{label}</span>
     {#if text}<ChevronDown class="sthink-chev {open ? 'open' : ''}" size={13} strokeWidth={2} />{/if}
