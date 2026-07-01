@@ -657,11 +657,11 @@
      card/pill re-enable them. In split mode, drop below the pane header row so
      the card never covers the title. */
   .pane-subagent-float {
-    position: absolute; top: 12px; right: 12px; z-index: 20;
+    position: absolute; top: 16px; right: 16px; z-index: 20;
     display: flex; justify-content: flex-end;
     pointer-events: none;
   }
-  .pane-subagent-float.split { top: 42px; }
+  .pane-subagent-float.split { top: 44px; }
   .pane-subagent-float > :global(*) { pointer-events: auto; }
   .pane.split.focused { box-shadow: inset 0 0 0 1px var(--ghost-border); }
   .pane-shell:last-child .pane.split { margin-right: 6px; }

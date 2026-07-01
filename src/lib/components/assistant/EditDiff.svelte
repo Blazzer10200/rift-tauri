@@ -1,5 +1,6 @@
 <script lang="ts">
-  // Side-by-side line-diff of an Edit tool block's old_string / new_string.
+  // Unified line-diff of an Edit tool block's old_string / new_string (del lines
+  // then add lines in one column — NOT side-by-side; see the render at ~L219).
   // Used both inline in chat bubbles (default) and inside the dock op-card
   // (`compact`). When `input` lacks old_string / new_string, renders nothing
   // and the parent can fall back to raw JSON.

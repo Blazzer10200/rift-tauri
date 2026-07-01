@@ -330,6 +330,23 @@ describe("playback — sub-agent live routing", () => {
     expect(agent.blocks.map((b) => b.type)).toEqual(["text"]); // sub-transcript intact
   });
 
+  it("a late top-level tool_result does NOT flip an already-settled spawn (no done→error flicker)", () => {
+    // Ordering edge: the per-agent result envelope settles the spawn as success
+    // FIRST; a late top-level Task tool_result carrying is_error:true must not
+    // re-close it and flip the clean ✓ to error. fillToolResult is idempotent on
+    // an already-closed spawn (mirrors markSpawnDone).
+    const tab = freshTab();
+    beginTurn(tab);
+    feed(tab, [
+      agentSpawnEnv("task-o", "recon", "ordering"),
+      nestedResultEnv("task-o"), // per-agent result FIRST → done, isError=false
+    ]);
+    expect(tab.agentSpawns.find((a) => a.id === "task-o")!.isError).toBe(false);
+    feed(tab, [toolResultEnv("task-o", "late error", true)]); // late top-level error
+    // Still success — the first terminal signal wins; no post-hoc flip.
+    expect(tab.agentSpawns.find((a) => a.id === "task-o")!.isError).toBe(false);
+  });
+
   it("an error result envelope marks the spawn done + errored", () => {
     const tab = freshTab();
     beginTurn(tab);
@@ -354,7 +371,12 @@ describe("playback — sub-agent live routing", () => {
     ]);
     expect(tab.agentSpawns.find((a) => a.id === "task-x")!.completedAt).toBeNull(); // still running mid-turn
     tab.onDone();
-    expect(tab.agentSpawns.find((a) => a.id === "task-x")!.completedAt).not.toBeNull(); // swept closed
+    const swept = tab.agentSpawns.find((a) => a.id === "task-x")!;
+    expect(swept.completedAt).not.toBeNull(); // swept closed
+    // A spawn reaching the sweep still-open is abnormal (its result envelope was
+    // lost / it was interrupted) — mark it errored, not a clean ✓, so an aborted
+    // turn doesn't show green-check sub-agents. Mirrors main-turn tool→error.
+    expect(swept.isError).toBe(true);
   });
 
   it("the error-terminal path (backend Stalled) also sweeps a spinning spawn closed", () => {

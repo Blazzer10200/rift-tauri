@@ -595,9 +595,13 @@ function fillToolResult(tab: TabState, toolUseId: string, content: string, isErr
       rec.isError = isError;
     }
   }
-  // S124: mark matching agent spawn done.
+  // S124: mark matching agent spawn done — but only if it isn't already closed.
+  // The per-agent `result` envelope (markSpawnDone) usually settles a spawn first;
+  // a late top-level Task tool_result must NOT re-close it, or a spawn already
+  // shown as a clean ✓ could flip to error post-hoc (done→error flicker) when the
+  // two terminal signals disagree. Idempotent, matching markSpawnDone.
   const agentIdx = tab.agentSpawns.findIndex((a) => a.id === toolUseId);
-  if (agentIdx !== -1) {
+  if (agentIdx !== -1 && tab.agentSpawns[agentIdx].completedAt == null) {
     const next = tab.agentSpawns.slice();
     next[agentIdx] = { ...next[agentIdx], completedAt: Date.now(), isError };
     tab.agentSpawns = next;
@@ -1004,10 +1008,17 @@ export function finalizeInflightBlocks(tab: TabState) {
   // was missed or absent. Without this a dock section spins forever and the
   // model reads the spawn as live (the reported bug). Shared by every terminal
   // path via onStreamError/stop, not just onStreamDone.
+  //
+  // A spawn reaching this sweep still-open is already abnormal — a healthy
+  // sub-agent emits its own `result` envelope and is closed via markSpawnDone
+  // well before turn-end. So mark it errored, not a clean ✓: it was interrupted
+  // (user Stop / turn error) or its terminal signal was lost. This mirrors the
+  // pending→error flip applied to main-turn tool blocks just below, so an
+  // aborted turn reads consistently (no green-check sub-agents under a red turn).
   if (tab.agentSpawns.some((a) => a.completedAt == null)) {
     const now = Date.now();
     tab.agentSpawns = tab.agentSpawns.map((a) =>
-      a.completedAt == null ? { ...a, completedAt: now } : a,
+      a.completedAt == null ? { ...a, completedAt: now, isError: true } : a,
     );
   }
   if (tab.streamingMsgId) {

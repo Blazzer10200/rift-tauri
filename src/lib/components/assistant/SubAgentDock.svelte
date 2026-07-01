@@ -11,7 +11,8 @@
   import Markdown from "./Markdown.svelte";
   import { scale } from "svelte/transition";
   import { Loader2, Check, AlertTriangle, ChevronDown, ChevronRight, Bot, Sparkles, Minus, Brain, Terminal, FileText,
-    FileSearch, FilePen, FilePlus, Search, FolderTree, Globe, GitBranch, ListChecks, Wrench } from "lucide-svelte";
+    FileSearch, FilePen, FilePlus, Search, FolderTree, Globe, GitBranch, ListChecks, Wrench,
+    Copy, CheckCheck, UnfoldVertical, FoldVertical } from "lucide-svelte";
 
   // Tool-kind → icon. Gives each step a type-specific glyph (read / edit / search
   // / shell / web / git) instead of a flat check, so a transcript reads as
@@ -101,7 +102,7 @@
   // A block stream (thinking / text / tool) arrives per agent; we project it to
   // a single human "now-doing" line + the recent-steps trail so the user reads
   // momentum at a glance without expanding anything.
-  type Block = { type: string; status?: string; name?: string; input?: Record<string, unknown>; text?: string };
+  type Block = { type: string; status?: string; name?: string; input?: Record<string, unknown>; text?: string; result?: string | null };
   type ActKind = "thinking" | "tool" | "text" | "idle";
   type Activity = { kind: ActKind; label: string; live: boolean };
 
@@ -172,6 +173,25 @@
     openTools = next;
   }
 
+  // Claude-Code-style result-panel header: a dim label above the output that
+  // names WHAT produced it — the file path for a read/edit, "Bash"/"PowerShell"
+  // for a shell run, the query for a search — mirroring the desktop tool card.
+  // Falls back to the bare tool name. Kept short; the full input lives in the
+  // main transcript.
+  function resultHeader(name: string, input: Record<string, unknown>): string {
+    const n = name.replace(/^mcp__rift__/, "");
+    const s = (k: string) => (typeof input[k] === "string" ? (input[k] as string) : null);
+    if (n === "Bash" || n === "remote_bash" || n === "BashOutput") return "Bash";
+    if (n === "Read" || n === "read_file" || n === "Edit" || n === "MultiEdit" || n === "Write" || n === "NotebookEdit") {
+      const p = s("file_path") ?? s("path") ?? s("notebook_path");
+      return p ?? n;
+    }
+    if (n === "Grep" || n === "grep") { const q = s("pattern"); return q ? `Grep ${q}` : "Grep"; }
+    if (n === "Glob") { const q = s("pattern"); return q ? `Glob ${q}` : "Glob"; }
+    if (n === "WebFetch" || n === "open_browser") return s("url") ?? n;
+    return n;
+  }
+
   // Live ticker — only ticks while something is in flight.
   let now = $state(Date.now());
   $effect(() => {
@@ -204,6 +224,64 @@
   // the "+N earlier steps" trail-more count isn't inflated by an in-flight call.
   const settledToolCount = (blocks: { type: string; status?: string }[]) =>
     blocks.filter((b) => b.type === "tool" && b.status !== "pending").length;
+
+  // ── Aggregate header stats ──────────────────────────────────────────────────
+  // A single glanceable summary for the whole batch: total tool steps across all
+  // agents, wall-clock span (earliest start → latest finish, or now if running),
+  // and an error count. Lets the header tell the story without expanding anything.
+  const stats = $derived.by(() => {
+    let tools = 0;
+    let errors = 0;
+    let minStart = Infinity;
+    let maxEnd = 0;
+    for (const a of spawns) {
+      tools += toolCount(a.blocks);
+      if (a.isError) errors++;
+      if (a.startedAt < minStart) minStart = a.startedAt;
+      const end = a.completedAt ?? now;
+      if (end > maxEnd) maxEnd = end;
+    }
+    const span = minStart === Infinity ? 0 : maxEnd - minStart;
+    return { tools, errors, span };
+  });
+
+  // Expand / collapse EVERY agent section at once. Writes an explicit override
+  // for each spawn so the batch action wins over the per-agent defaults. "All
+  // expanded" is true only when no agent is currently collapsed.
+  const allOpen = $derived(spawns.length > 0 && spawns.every((a) => isOpen(a)));
+  function toggleAll() {
+    const next = new Map(overrides);
+    const target = !allOpen;
+    for (const a of spawns) next.set(a.id, target);
+    overrides = next;
+  }
+
+  // Copy one agent's transcript to the clipboard as plain text — the header line
+  // plus each block (reasoning / response / tool + result). Gives the user a
+  // one-click way to lift an agent's work into a bug report or notes.
+  let copiedId = $state<string | null>(null);
+  let copiedTimer: ReturnType<typeof setTimeout> | null = null;
+  function transcriptText(a: { subagentType: string; description: string; blocks: Block[] }): string {
+    const lines: string[] = [`# ${a.subagentType} — ${a.description}`, ""];
+    for (const b of a.blocks) {
+      if (b.type === "thinking") { if (b.text) lines.push(`[reasoning] ${b.text}`); }
+      else if (b.type === "text") { if (b.text) lines.push(b.text); }
+      else if (b.type === "tool") {
+        lines.push(`• ${captionForTool(b.name ?? "", b.input ?? {})}`);
+        if (b.result) lines.push(`  ${b.result.replace(/\n/g, "\n  ")}`);
+      }
+    }
+    return lines.join("\n");
+  }
+  async function copyAgent(a: { id: string; subagentType: string; description: string; blocks: Block[] }) {
+    try {
+      await navigator.clipboard.writeText(transcriptText(a));
+      copiedId = a.id;
+      if (copiedTimer !== null) clearTimeout(copiedTimer);
+      copiedTimer = setTimeout(() => { copiedId = null; copiedTimer = null; }, 1600);
+    } catch { /* clipboard denied — no-op, the button just doesn't confirm */ }
+  }
+  $effect(() => () => { if (copiedTimer !== null) clearTimeout(copiedTimer); });
 </script>
 
 {#if !open}
@@ -214,6 +292,7 @@
     <button
       class="subagent-pill"
       class:live={runningCount > 0}
+      class:err={runningCount === 0 && stats.errors > 0}
       transition:scale={{ duration: reducedMotion ? 0 : 160, start: 0.85 }}
       onclick={toggleOpen}
       onpointerenter={onPointerEnter}
@@ -225,6 +304,8 @@
       </span>
       {#if runningCount > 0}
         <span class="pill-live"><span class="live-dot"></span>{runningCount} working</span>
+      {:else if stats.errors > 0}
+        <span class="pill-err">{stats.errors} failed</span>
       {:else}
         <span class="pill-count">{spawns.length}</span>
       {/if}
@@ -243,10 +324,25 @@
       {#if runningCount > 0}
         <span class="head-live"><span class="live-dot"></span>{runningCount} agent{runningCount === 1 ? "" : "s"} active</span>
       {:else if spawns.length > 0}
-        <span class="head-rest">{spawns.length} finished</span>
+        <!-- Finished: aggregate story — how many agents, total tool steps, span,
+             and any errors — so the collapsed batch reads at a glance. -->
+        <!-- Priority order: agent count, then the error flag (never let it clip),
+             then steps + duration (safe to clip first at narrow widths). -->
+        <span class="head-stats">
+          <span>{spawns.length} agent{spawns.length === 1 ? "" : "s"}</span>
+          {#if stats.errors > 0}<span class="dot-sep">·</span><span class="stat-err">{stats.errors} failed</span>{/if}
+          {#if stats.tools > 0}<span class="dot-sep">·</span><span>{stats.tools} step{stats.tools === 1 ? "" : "s"}</span>{/if}
+          {#if stats.span > 0}<span class="dot-sep">·</span><span class="mono">{fmtDur(stats.span)}</span>{/if}
+        </span>
       {/if}
     </span>
-    {#if spawns.length > 0}<span class="count" class:live={runningCount > 0}>{spawns.length}</span>{/if}
+    {#if spawns.length > 1}
+      <button class="head-act" onclick={toggleAll}
+        use:tooltip={allOpen ? "Collapse all" : "Expand all"}
+        aria-label={allOpen ? "Collapse all agents" : "Expand all agents"}>
+        {#if allOpen}<FoldVertical size={14} />{:else}<UnfoldVertical size={14} />{/if}
+      </button>
+    {/if}
     <button class="close" onclick={toggleOpen} use:tooltip={"Minimize to pill"} aria-label="Minimize sub-agent panel">
       <Minus size={15} />
     </button>
@@ -289,6 +385,18 @@
               <span class="desc">{a.description}</span>
             </span>
           </button>
+
+          <!-- Copy-transcript affordance — a quiet button that appears on hover
+               (or when a copy just landed), lifting this agent's full transcript
+               to the clipboard. Sibling of the head button (can't nest buttons). -->
+          {#if a.blocks.length > 0}
+            <button class="copy-btn" class:done={copiedId === a.id}
+              onclick={() => copyAgent(a)}
+              use:tooltip={copiedId === a.id ? "Copied" : "Copy transcript"}
+              aria-label="Copy agent transcript">
+              {#if copiedId === a.id}<CheckCheck size={13} />{:else}<Copy size={13} />{/if}
+            </button>
+          {/if}
 
           <!-- ── Live action line ── the headline of the whole panel: what this
                agent is doing RIGHT NOW, in plain language. Only while in flight
@@ -339,7 +447,10 @@
                         {#if b.result}<span class="tool-chev">{#if openTools.has(b.id)}<ChevronDown size={13} />{:else}<ChevronRight size={13} />{/if}</span>{/if}
                       </button>
                       {#if b.result && openTools.has(b.id)}
-                        <pre class="tool-result mono" transition:slide={{ duration: reducedMotion ? 0 : 160 }}>{b.result.length > 4096 ? b.result.slice(0, 4096) + "\n… (truncated)" : b.result}</pre>
+                        <div class="tool-out" transition:slide={{ duration: reducedMotion ? 0 : 160 }}>
+                          <div class="tool-out-head mono">{resultHeader(b.name, b.input)}</div>
+                          <pre class="tool-result mono">{b.result.length > 4096 ? b.result.slice(0, 4096) + "\n… (truncated)" : b.result}</pre>
+                        </div>
                       {/if}
                     </div>
                   {/if}
@@ -369,32 +480,39 @@
 {/if}
 
 <style>
-  /* ── Floating card ── a fixed-width top-right overlay (anchored by .subagent-float
-     in AssistantPage), not a full-height column. Rounded, raised, self-scrolling;
-     it floats above the chat instead of reserving a side column. */
+  /* ── Floating card ── an adaptive-width top-right overlay (anchored by
+     .pane-subagent-float in AssistantPane), not a full-height column. Rounded to
+     the app's card token, raised, self-scrolling; it floats above the chat
+     instead of reserving a side column. */
   .subagent-dock {
-    width: 348px; max-width: calc(100vw - 32px);
+    /* Adaptive width: tracks the pane instead of a hard 348px — comfortable on a
+       wide single pane, never crowding a narrow split pane. Clamped to a sane
+       band; the parent float caps it to the viewport. */
+    width: clamp(300px, 31vw, 404px); max-width: calc(100vw - 32px);
     /* Capped so the card clears the composer at the bottom of the pane even on
        shorter windows (it starts ~38px down + leaves room for the composer);
        overflow scrolls internally past this. */
-    max-height: min(56vh, 480px);
+    max-height: min(58vh, 520px);
     display: flex; flex-direction: column;
     /* Blended glass: a translucent surface tinted toward the chat backdrop +
        real blur, so the card reads as part of the conversation surface rather
-       than a hard opaque panel pasted on top. A faint accent-warmed hairline
-       border + a soft (not heavy) shadow keep it legible without shouting. */
+       than a hard opaque panel pasted on top. Radius matches the app's card
+       token (--r-card, 12px) so it stops reading as a harder rectangle than
+       every other floating surface. A faint accent-warmed hairline border + a
+       soft (not heavy) shadow keep it legible without shouting. */
     background: color-mix(in oklch, var(--bg-elev-1) 82%, transparent);
     border: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
-    border-radius: var(--radius-lg);
-    box-shadow: 0 10px 34px -16px color-mix(in oklch, var(--shadow, #000) 50%, transparent),
+    border-radius: var(--r-card);
+    box-shadow: 0 12px 38px -18px color-mix(in oklch, var(--shadow, #000) 55%, transparent),
                 0 1px 0 0 color-mix(in oklch, var(--fg, #fff) 5%, transparent) inset;
     overflow: hidden;
     backdrop-filter: blur(14px) saturate(1.1);
   }
+  /* Live card: NO ambient accent glow (per §11 — glow on a static container reads
+     as gimmick). Just a slightly firmer neutral border so the card feels present
+     while work runs; the "live" signal lives in the header badge + row glyphs. */
   .subagent-dock:has(.head.live) {
-    border-color: color-mix(in oklch, var(--accent) 30%, transparent);
-    box-shadow: 0 10px 34px -16px color-mix(in oklch, var(--accent) 40%, transparent),
-                0 0 0 1px color-mix(in oklch, var(--accent) 12%, transparent);
+    border-color: color-mix(in oklch, var(--border-strong) 70%, transparent);
   }
 
   /* ── Collapsed pill ── the idle/minimized affordance. A small capsule with the
@@ -413,70 +531,96 @@
   }
   .subagent-pill:hover { background: var(--bg-elev-1); transform: translateY(-1px); }
   .subagent-pill.live {
-    border-color: color-mix(in oklch, var(--accent) 42%, transparent);
-    box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 16%, transparent),
-                0 6px 22px -8px color-mix(in oklch, var(--accent) 45%, transparent);
+    border-color: color-mix(in oklch, var(--status-busy) 42%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--status-busy) 16%, transparent);
   }
   .pill-badge { display: grid; place-items: center; color: var(--fg-muted); }
-  .subagent-pill.live .pill-badge { color: var(--accent); }
+  .subagent-pill.live .pill-badge { color: var(--status-busy); }
   .pill-live {
     display: inline-flex; align-items: center; gap: 5px;
-    font-size: var(--fs-xs); font-weight: 650; color: var(--accent);
+    font-size: var(--fs-xs); font-weight: 650; color: var(--status-busy);
     font-variant-numeric: tabular-nums;
   }
   .pill-count {
     font-size: var(--fs-xs); font-weight: 650; color: var(--fg-muted);
     font-variant-numeric: tabular-nums;
   }
+  .pill-err {
+    font-size: var(--fs-xs); font-weight: 650; color: var(--danger);
+    font-variant-numeric: tabular-nums;
+  }
+  .subagent-pill.err {
+    border-color: color-mix(in oklch, var(--danger) 42%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--danger) 14%, transparent),
+                0 6px 22px -8px color-mix(in oklch, var(--danger) 40%, transparent);
+  }
+  .subagent-pill.err .pill-badge { color: var(--danger); }
 
   /* ── Header ── lighter than a bordered toolbar: a soft gradient wash + an
      accent-badged title, no hard bottom rule (a faint shadow separates it). */
   .head {
     flex: 0 0 auto;
-    display: flex; align-items: center; gap: 9px;
-    padding: 0 8px 0 12px;
-    height: var(--titlebar-h);
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 6px 0 10px;
+    height: 32px;
     background: linear-gradient(180deg, color-mix(in oklch, var(--bg-elev-1) 60%, var(--bg)), var(--bg));
     box-shadow: 0 1px 0 color-mix(in oklch, var(--border) 60%, transparent);
     color: var(--fg);
   }
   .head-badge {
     flex: 0 0 auto; display: grid; place-items: center;
-    width: 26px; height: 26px; border-radius: var(--radius-sm);
+    width: 22px; height: 22px; border-radius: var(--radius-sm);
     background: var(--bg-elev-2); color: var(--fg-muted);
     transition: color var(--dur-base) var(--ease-soft), background var(--dur-base) var(--ease-soft);
   }
+  /* Live header: a restrained status-busy wash (activity color, §9), not the loud
+     accent gradient. Enough to say "working" without the whole card lighting up. */
   .head.live {
-    background: linear-gradient(180deg, color-mix(in oklch, var(--accent-soft) 38%, var(--bg)), var(--bg));
-    box-shadow: 0 1px 0 color-mix(in oklch, var(--accent) 28%, transparent);
+    background: linear-gradient(180deg, color-mix(in oklch, var(--status-busy) 12%, var(--bg-elev-1)), var(--bg));
+    box-shadow: 0 1px 0 color-mix(in oklch, var(--status-busy) 22%, transparent);
   }
   .head-badge.live {
-    color: var(--accent);
-    background: var(--accent-soft);
-    box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 30%, transparent);
+    color: var(--status-busy);
+    background: color-mix(in oklch, var(--status-busy) 16%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in oklch, var(--status-busy) 28%, transparent);
   }
-  .head .count.live { background: var(--accent-soft); color: var(--accent); }
-  .head-text { display: flex; flex-direction: column; gap: 1px; line-height: 1.1; min-width: 0; }
+  .head-text { display: flex; flex-direction: column; gap: 1px; line-height: 1.1; min-width: 0; margin-right: auto; }
   .head .title { font-size: var(--fs-sm); font-weight: 650; letter-spacing: -0.01em; }
-  .head-rest { font-size: 10px; color: var(--fg-subtle); }
-  .head .count {
-    margin-left: auto;
-    font-size: var(--fs-xs); font-weight: 650; line-height: 1;
-    padding: 3px 7px; border-radius: 999px;
-    background: var(--field); color: var(--fg-muted);
+  /* Aggregate stats strip — "3 agents · 14 steps · 2m 40s". Dot-separated, quiet;
+     the failed-count segment tints danger so a batch with errors flags itself. */
+  .head-stats {
+    display: flex; align-items: center; gap: 5px;
+    /* Never wrap — a wrapped strip forced the fixed-height header taller and
+       clipped the title at narrow (split-pane) widths. Single line, clips the
+       tail with an ellipsis instead. */
+    flex-wrap: nowrap; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    font-size: 10.5px; color: var(--fg-subtle); font-variant-numeric: tabular-nums;
   }
+  .head-stats > span { flex: 0 0 auto; }
+  .head-stats .dot-sep { color: var(--fg-faint); }
+  .head-stats .stat-err { color: color-mix(in oklch, var(--danger) 85%, var(--fg)); font-weight: 600; }
+  /* Header action button (expand/collapse all) — matches the close button's quiet
+     ghost treatment so the header controls read as one set. */
+  .head-act {
+    flex: 0 0 auto; display: grid; place-items: center;
+    width: 22px; height: 22px; border-radius: var(--radius-sm);
+    color: var(--fg-subtle); background: transparent; border: 0; cursor: pointer;
+    transition: background var(--dur-fast) ease-out, color var(--dur-fast) ease-out;
+  }
+  .head-act:hover { background: var(--surface-hover); color: var(--fg); }
   .head-live {
     display: inline-flex; align-items: center; gap: 5px;
     font-size: 10px; font-weight: 600; letter-spacing: 0.02em; text-transform: uppercase;
-    color: var(--accent);
+    color: var(--status-busy);
   }
   .live-dot {
-    width: 6px; height: 6px; border-radius: 999px; background: var(--accent);
-    box-shadow: 0 0 0 0 var(--accent-soft); animation: live-pulse 1.8s var(--ease-soft) infinite;
+    width: 6px; height: 6px; border-radius: 999px; background: var(--status-busy);
+    box-shadow: 0 0 0 0 color-mix(in oklch, var(--status-busy) 40%, transparent);
+    animation: live-pulse 1.8s var(--ease-soft) infinite;
   }
   .close {
     flex: 0 0 auto; display: grid; place-items: center;
-    width: 26px; height: 26px; border-radius: var(--radius-sm);
+    width: 22px; height: 22px; border-radius: var(--radius-sm);
     color: var(--fg-subtle); background: transparent; border: 0; cursor: pointer;
     transition: background var(--dur-fast) ease-out, color var(--dur-fast) ease-out;
   }
@@ -496,46 +640,58 @@
   .empty p { margin: 0; font-size: var(--fs-md); font-weight: 600; color: var(--fg-2); }
   .empty-sub { font-size: var(--fs-xs); line-height: 1.55; max-width: 230px; color: var(--fg-subtle); }
 
-  /* ── Agent cards ── each spawn is a distinct raised surface w/ breathing room,
-     not a hard-bordered list row. Running cards get an accent ring + soft glow. */
+  /* ── Agent rows ── flat, glyph-driven, terse (per the CC-UI reference §9/§11:
+     status lives in the GLYPH, not row-background tint; no ambient glow). Each
+     spawn is a borderless row on a hairline divider. Running = a status-busy left
+     bar + spinner glyph (NO wash, NO accent ring). Error = a faint danger tint
+     (outcome color, allowed) + danger bar. Calm at rest, dense. */
   .agents {
     flex: 1 1 auto; min-height: 0; overflow-y: auto;
-    display: flex; flex-direction: column; gap: 8px;
-    padding: 9px;
+    display: flex; flex-direction: column;
+    padding: 2px;
   }
   .agent {
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    background: var(--bg-elev-1);
+    position: relative;
+    border-radius: var(--radius-sm);
+    background: transparent;
     overflow: hidden;
-    transition: border-color var(--dur-base) var(--ease-soft), box-shadow var(--dur-base) var(--ease-soft);
+    transition: background var(--dur-fast) var(--ease-soft);
     animation: enter var(--dur-base) var(--ease-page);
   }
-  .agent[data-status="running"] {
-    border-color: color-mix(in oklch, var(--accent) 38%, transparent);
-    box-shadow: 0 0 0 1px color-mix(in oklch, var(--accent) 14%, transparent),
-                0 4px 18px -10px color-mix(in oklch, var(--accent) 50%, transparent);
+  /* Hairline separator between rows — a divider, not a border box. Suppressed on
+     an open row + the row after it (the open body already reads as a break). */
+  .agent + .agent { box-shadow: inset 0 1px 0 color-mix(in oklch, var(--border) 38%, transparent); }
+  .agent.open, .agent.open + .agent { box-shadow: none; }
+  /* Error rows: a whisper of danger tint (this is OUTCOME color, which §9 permits
+     on the row) so a failed agent is unmissable without shouting. Running rows
+     get NO wash — their signal is the bar + spinner only. */
+  .agent[data-status="error"] {
+    background: color-mix(in oklch, var(--danger) 6%, transparent);
   }
-  .agent[data-status="error"] { border-color: color-mix(in oklch, var(--danger) 40%, transparent); }
   .agent-head {
     width: 100%; position: relative;
-    display: flex; align-items: flex-start; gap: 8px;
-    padding: 10px 11px 10px 12px; text-align: left;
+    display: flex; align-items: flex-start; gap: 7px;
+    padding: 7px 10px 4px 11px; text-align: left;
     background: transparent; border: 0; cursor: pointer; color: var(--fg);
+    border-radius: inherit;
     transition: background var(--dur-fast) ease-out;
   }
+  /* A head with no sub-content below (running w/o now, done w/o trail) keeps
+     symmetric padding so a lone row isn't bottom-heavy. */
+  .agent:not(:has(.now)):not(:has(.trail)):not(.open) > .agent-head { padding-bottom: 7px; }
   .agent-head::before {
-    content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
+    content: ""; position: absolute; left: 0; top: 4px; bottom: 4px; width: 2px;
+    border-radius: 999px;
     background: transparent; transition: background var(--dur-fast) ease-out;
   }
-  .agent-head:hover { background: var(--surface-hover); }
-  .agent[data-status="running"] > .agent-head::before { background: var(--accent); }
-  .agent[data-status="running"].open > .agent-head {
-    background: color-mix(in oklch, var(--accent-soft) 50%, transparent);
-  }
+  .agent-head:hover { background: color-mix(in oklch, var(--surface-hover) 50%, transparent); }
+  /* Left bar: ACTIVITY color (--status-busy, fixed green) for running — the "is
+     it working now" signal, per §9. Error uses OUTCOME danger. Done has no bar. */
+  .agent[data-status="running"] > .agent-head::before { background: var(--status-busy); }
+  .agent[data-status="error"] > .agent-head::before { background: var(--danger); }
   .chev { flex: 0 0 auto; margin-top: 1px; display: grid; place-items: center; color: var(--fg-subtle); }
   .stat { flex: 0 0 auto; margin-top: 1px; display: grid; place-items: center; }
-  .stat[data-status="running"] { color: var(--accent); }
+  .stat[data-status="running"] { color: var(--status-busy); }
   .stat[data-status="done"] { color: var(--ok); }
   .stat[data-status="error"] { color: var(--danger); }
   .meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
@@ -569,16 +725,36 @@
     overflow: hidden; text-overflow: ellipsis;
   }
 
+  /* ── Copy-transcript button ── an unobtrusive top-right affordance on each agent
+     row. Hidden at rest (opacity 0), fades in on row hover / keyboard focus, and
+     stays visible for the confirm flash after a copy. Positioned over the head's
+     right edge; the head reserves no space for it (it overlays the timing chip
+     only on hover, when the user's intent is clearly this row). */
+  .copy-btn {
+    position: absolute; top: 7px; right: 8px; z-index: 2;
+    display: grid; place-items: center;
+    width: 24px; height: 24px; border-radius: var(--radius-sm);
+    color: var(--fg-subtle);
+    background: color-mix(in oklch, var(--bg-elev-2) 85%, transparent);
+    border: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
+    cursor: pointer; opacity: 0;
+    backdrop-filter: blur(3px);
+    transition: opacity var(--dur-fast) ease-out, background var(--dur-fast) ease-out, color var(--dur-fast) ease-out;
+  }
+  .agent:hover .copy-btn, .copy-btn:focus-visible, .copy-btn.done { opacity: 1; }
+  .copy-btn:hover { background: var(--bg-elev-2); color: var(--fg); }
+  .copy-btn.done { color: var(--ok); border-color: color-mix(in oklch, var(--ok) 40%, transparent); }
+
   /* ── Live action line ── the panel's headline. A captioned "now-doing" row
      under each agent head: kind icon + plain-language label. Running agents get
      an accent label + a soft animated wash so the eye lands on live work. */
   .now {
-    display: flex; align-items: center; gap: 7px;
-    padding: 7px 12px 9px 33px;
+    display: flex; align-items: center; gap: 6px;
+    padding: 0 10px 7px 25px;
     min-width: 0;
   }
   .now-icon { flex: 0 0 auto; display: grid; place-items: center; color: var(--fg-subtle); }
-  .now.running .now-icon { color: var(--accent); }
+  .now.running .now-icon { color: var(--status-busy); }
   .now[data-status="error"] .now-icon { color: var(--danger); }
   .now-label {
     flex: 1 1 auto; min-width: 0;
@@ -586,7 +762,7 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     display: inline-flex; align-items: center;
   }
-  .now-label.live { color: var(--accent); font-weight: 550; }
+  .now-label.live { color: var(--status-busy); font-weight: 550; }
   /* Animated ellipsis for active thinking — three breathing dots. */
   .dots { display: inline-flex; gap: 2px; margin-left: 4px; }
   .dots span {
@@ -600,12 +776,12 @@
      collapsed agent. The last few captioned tool steps, newest first, so the
      user reads actual work ("Read X · Searched Y") not a meaningless fill %. */
   .trail {
-    list-style: none; margin: 0; padding: 0 12px 9px 33px;
-    display: flex; flex-direction: column; gap: 3px;
+    list-style: none; margin: 0; padding: 0 10px 7px 25px;
+    display: flex; flex-direction: column; gap: 1px;
   }
   .trail-step {
     display: flex; align-items: center; gap: 7px;
-    font-size: var(--fs-xs); color: var(--fg-subtle); line-height: 1.4;
+    font-size: var(--fs-xs); color: var(--fg-subtle); line-height: 1.5;
     min-width: 0;
   }
   .trail-step:first-child { color: var(--fg-muted); }
@@ -616,13 +792,13 @@
 
   /* ── Transcript body ── */
   .agent-body {
-    display: flex; flex-direction: column; gap: 5px;
-    padding: 4px 12px 13px 13px;
-    margin-left: 18px;
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 2px 10px 9px 11px;
+    margin-left: 16px;
     border-left: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
     transition: border-color var(--dur-base) var(--ease-soft);
   }
-  .agent[data-status="running"] .agent-body { border-left-color: color-mix(in oklch, var(--accent) 35%, transparent); }
+  .agent[data-status="running"] .agent-body { border-left-color: color-mix(in oklch, var(--status-busy) 32%, transparent); }
   .block { animation: enter var(--dur-base) var(--ease-page); }
 
   .thinking-line { display: flex; align-items: center; gap: 7px; font-size: var(--fs-xs); color: var(--fg-muted); }
@@ -644,10 +820,9 @@
     overflow: hidden;
     transition: background var(--dur-fast) ease-out;
   }
-  .tool[data-status="pending"] {
-    background: color-mix(in oklch, var(--accent-soft) 16%, transparent);
-    animation: tool-pulse 1.9s var(--ease-soft) infinite;
-  }
+  /* Pending tool: the spinner glyph carries the "running" signal (§9/§11 — no
+     ambient row pulse). A whisper of neutral raise, nothing that breathes. */
+  .tool[data-status="pending"] { background: color-mix(in oklch, var(--bg-elev-2) 30%, transparent); }
   .tool[data-status="error"] { background: color-mix(in oklch, var(--danger) 9%, transparent); }
   .tool-head {
     width: 100%; display: flex; align-items: center; gap: 7px;
@@ -658,21 +833,36 @@
   .tool-head:hover { background: color-mix(in oklch, var(--surface-hover) 60%, transparent); }
   .tool-stat { flex: 0 0 auto; display: grid; place-items: center; color: var(--fg-muted); }
   .tool-ic { flex: 0 0 auto; display: grid; place-items: center; color: var(--fg-subtle); }
-  .tool[data-status="pending"] .tool-ic { color: var(--accent); }
-  .tool[data-status="pending"] .tool-stat { color: var(--accent); }
+  .tool[data-status="pending"] .tool-ic { color: var(--status-busy); }
+  .tool[data-status="pending"] .tool-stat { color: var(--status-busy); }
   .tool[data-status="done"] .tool-stat { color: var(--ok); }
   .tool[data-status="error"] .tool-stat { color: var(--danger); }
   .tool-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .tool-dur { flex: 0 0 auto; font-size: 10px; color: var(--fg-subtle); }
   .tool-chev { flex: 0 0 auto; display: grid; place-items: center; color: var(--fg-subtle); }
-  .tool-result {
-    margin: 4px 0 2px; padding: 8px 10px;
-    border-left: 2px solid color-mix(in oklch, var(--border) 70%, transparent);
-    border-radius: var(--radius-xs);
+  /* ── Output panel ── Claude-Code-style: a rounded, bordered container with a
+     dim header line (file path / "Bash" / query) above the monospace output.
+     Reads as a distinct "here's what it produced" block, not a raw text dump. */
+  .tool-out {
+    margin: 3px 0 4px 19px;
+    border: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
+    border-radius: var(--radius-sm);
     background: var(--bg-inset);
+    overflow: hidden;
+  }
+  .tool-out-head {
+    padding: 5px 9px;
+    font-size: 10.5px; color: var(--fg-subtle);
+    background: color-mix(in oklch, var(--bg-elev-2) 40%, transparent);
+    box-shadow: 0 1px 0 color-mix(in oklch, var(--border) 45%, transparent);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .tool-result {
+    margin: 0; padding: 7px 9px;
+    background: transparent;
     font-size: var(--fs-xs); line-height: 1.5;
     white-space: pre-wrap; word-break: break-word;
-    max-height: 240px; overflow: auto; color: var(--fg-muted);
+    max-height: 220px; overflow: auto; color: var(--fg-muted);
   }
 
   /* Slimmer, quieter scrollbars scoped to the dock — the app-wide 10px bar reads
@@ -694,15 +884,15 @@
   @keyframes now-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
   @keyframes dot-bounce { 0%, 60%, 100% { opacity: 0.3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-2px); } }
   @keyframes enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-  @keyframes live-pulse { 0% { box-shadow: 0 0 0 0 var(--accent-soft); } 70% { box-shadow: 0 0 0 5px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
-  @keyframes tool-pulse {
-    0%, 100% { background: color-mix(in oklch, var(--bg-elev-1) 70%, transparent); }
-    50%      { background: color-mix(in oklch, var(--accent-soft) 22%, var(--bg-elev-1)); }
+  @keyframes live-pulse {
+    0%   { box-shadow: 0 0 0 0 color-mix(in oklch, var(--status-busy) 40%, transparent); }
+    70%  { box-shadow: 0 0 0 5px transparent; }
+    100% { box-shadow: 0 0 0 0 transparent; }
   }
 
   @media (prefers-reduced-motion: reduce) {
     .empty, .block, .agent { animation: none; }
-    .live-dot, .tool[data-status="pending"] { animation: none; }
+    .live-dot { animation: none; }
     .dots span, :global(.subagent-dock .pulse) { animation: none; }
     .subagent-pill:hover { transform: none; }
   }
