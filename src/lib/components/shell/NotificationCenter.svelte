@@ -84,6 +84,24 @@
 </script>
 
 <div class="nc" bind:this={rootEl}>
+  <button
+    class="nc-bell"
+    class:active={toast.centerOpen}
+    type="button"
+    onclick={() => (toast.centerOpen ? toast.closeCenter() : toast.openCenter())}
+    use:tooltip={"Notifications"}
+    aria-label="Notifications"
+    aria-haspopup="dialog"
+    aria-expanded={toast.centerOpen}
+  >
+    <Bell size={15} />
+    {#if toast.unreadCount > 0}
+      <span class="nc-badge" transition:fade={{ duration: reducedMotion ? 0 : 120 }}>
+        {toast.unreadCount > 9 ? "9+" : toast.unreadCount}
+      </span>
+    {/if}
+  </button>
+
   {#if toast.centerOpen}
     <div
       class="panel"
@@ -170,17 +188,47 @@
 </div>
 
 <style>
-  /* The bell trigger now lives in TopbarMenu; this component owns only the
-     history panel, anchored to the top-right under the topbar utility menu. */
-  .nc { display: contents; }
+  /* Self-contained: bell trigger + history panel. (The TopbarMenu dropdown that
+     used to proxy this was dissolved — search was a sidebar/Ctrl+K duplicate and
+     notifications deserve one-click access with a visible badge.) */
+  .nc { position: relative; display: flex; }
+
+  .nc-bell {
+    position: relative;
+    width: 30px; height: 30px;
+    display: grid; place-items: center;
+    border-radius: 8px;
+    color: var(--fg-subtle);
+    transition: background var(--dur-fast), color var(--dur-fast);
+  }
+  .nc-bell:hover, .nc-bell.active { background: var(--surface-hover); color: var(--fg-2); }
+
+  .nc-badge {
+    position: absolute;
+    top: 2px; right: 2px;
+    min-width: 14px; height: 14px;
+    padding: 0 3px;
+    border-radius: 999px;
+    background: var(--accent);
+    color: var(--bg);
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 14px;
+    text-align: center;
+    box-shadow: 0 0 0 2px var(--bg);
+    pointer-events: none;
+  }
 
   .panel {
-    position: fixed;
-    top: 46px;
-    right: 8px;
+    /* Anchored below the bell (was fixed top:46px — that overlapped the bell
+       itself once the update banner pushed the topbar down, so clicking the
+       bell to close actually hit the panel header). */
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
     width: 360px;
     max-width: calc(100vw - 24px);
-    max-height: min(560px, calc(100vh - 84px));
+    max-height: min(560px, calc(100vh - 140px));
     display: flex;
     flex-direction: column;
     background: var(--bg-elev-1);

@@ -2,18 +2,23 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — Collapsed mini-rail, Workspace dashboard signals, full-app polish
+## Unreleased — Workspace hub revamp, mini-rail, cleaner chrome, full-app polish
 
 ### Added
-- **Collapsed sidebar is now a mini-rail, not a disappearance.** Collapsing the sidebar leaves a slim 52px icon column: the Rift mark (which becomes an expand button on hover), a **New chat** button, chat **search**, and your **Workspace / Chat / AI Health / Settings** nav — all still one click away. Collapse to reclaim width without losing the essentials.
-- **Workspace dashboard now shows momentum, not just totals.** In the 7-day and 30-day views, each stat tile carries a small trend chip comparing it to the previous window (e.g. sessions ▲ 142%). Rising spend reads as neutral, never as a win. The **spent** tile is now clickable — it jumps straight to the AI Health cost breakdown.
-- **The Workspace greeting resolves to an action.** "What's next for *project*?" now sits beside a one-click **Resume** chip that reopens your most recent chat in that folder.
+- **The Workspace page is now a real hub.** Projects lead the page as one uniform grid — every card carries live signal (**chat count · last active · total spend**) instead of repeated paths and default scope chips, and the grid orders itself by where you actually work. The active project wears the accent frame with an in-place **Continue** — the old duplicate hero card is gone. Retrospective **Activity** analytics now sit *below* the launch targets, and the whole page fits the default window with **no scrollbar** (scroll only appears when content genuinely needs it).
+- **Collapsed sidebar is now a mini-rail, not a disappearance.** Collapsing the sidebar leaves a slim 52px icon column: the Rift mark (which becomes an expand button on hover), a **New chat** button, chat **search**, and your **Workspace / Chat / AI Health / Settings** nav — all still one click away.
+- **Workspace dashboard now shows momentum, not just totals.** In the 7-day and 30-day views, each stat tile carries a small trend chip comparing it to the previous window. Rising spend reads as neutral, never as a win. The **spent** tile jumps straight to the AI Health cost breakdown.
+
+### Changed
+- **The topbar ⋮ menu is gone — its actions are now one click.** Split editor (in chat), New window, and a **notifications bell** with a visible unread badge sit directly in the topbar. The menu's Search row was a duplicate of the sidebar search / Ctrl+K and was dropped.
+- **The Ctrl+K search was redesigned.** Single-line rows with key chips, recent chats tagged with their **project and last activity** ("exfil-v2 · 2h ago"), Split editor / New window reachable from the keyboard, and noticeably less matching noise.
+- **Your background texture now covers the whole app.** Workspace, Settings, and the in-app browser were painting solid panels over the texture picked in Appearance; every surface now blends like the chat page always did.
 
 ### Fixed
+- **The notifications panel no longer covers its own bell** — it opens anchored below it, so clicking the bell again closes it.
 - **Deleting a chat right after a reply no longer resurrects it.** A background auto-save or title-generation could re-create a conversation moments after you deleted it, leaving a ghost row that wouldn't delete. Deletions now hold, even mid-save.
-- **Notifications stop piling up duplicates.** Repeated identical notifications (e.g. switching folders) now collapse into a single entry with a count, instead of stacking and pinning the unread badge. The "Past hour" group is also labeled correctly.
-- **AI Health reads honestly.** Dropped a misleading "typical reply" figure that mixed averages, and the status banner no longer truncates mid-word.
-- **Dev builds don't cry wolf.** A development build no longer shows a red "reinstall needed" chip; packaged installs still surface real install problems.
+- **Notifications stop piling up duplicates.** Repeated identical notifications now collapse into a single entry with a count, instead of stacking and pinning the unread badge.
+- **AI Health reads honestly** (dropped a misleading "typical reply" figure; no mid-word truncation), and **dev builds don't cry wolf** with a red "reinstall needed" chip.
 
 ## v0.83.0 — Sidebar redesign + Fable 5 always in the picker
 
@@ -29,21 +34,13 @@
 
 *(Sidebar redesign follows the "C+ Switcher-led" Claude Design brief; frontend-only, `ProjectRail.svelte` retired in favor of `ProjectSwitcher.svelte`. Fable now visible via the `FABLE_DISABLED = false` lockstep — config.rs + helpers.ts. Verified: cargo test 132/132, svelte-check 0/0, vitest 410/410, live picker CDP-checked.)*
 
-## v0.82.1 — Warm-CLI process leaks fixed (the "why is everything slow" memory pileup)
-
-### Fixed
-- **Duplicate pre-warm no longer leaks a `claude` process.** Opening a chat tab pre-spawns a warm `claude` helper so your first message is instant. But switching away from a tab and back fast enough (before its spawn finished resolving) could fire a *second* pre-warm for the same session — and the second silently displaced the first in the registry **without killing it**. The orphaned helper (~450 MB, plus its MCP sub-process) then sat invisible to every cleanup path until you quit the app. On a machine churning many sessions this piled up to gigabytes of idle processes and dragged the whole system — including other apps — into slow motion. Pre-warm now picks a single winner atomically and the loser reaps the helper it spawned. *(ISSUES #76)*
-- **Every warm-helper teardown now reaps its MCP sub-process.** When a warm `claude` helper's reader loop exited (the child crashed, its pipe broke, or it was evicted), teardown killed only the direct `claude` process — not the `RIFT_MCP_SERVER` grandchild it spawned, which then orphaned until app exit. Only one exit path (a wedged CLI) had been special-cased to tree-kill; the common ones hadn't. Teardown now tree-kills by PID on every path. *(ISSUES #77)*
-
-### Internal
-- `warm_pool::insert_if_absent` (check-and-insert under one registry-lock hold) replaces the racy `get()`-then-`insert()` in `prewarm_spawn`; the loser calls `kill_child_tree(pid)`. `loop_cleanup` now `kill_child_tree(turn_pid)` before `start_kill()` (mirrors the Stalled branch + `kill_all_session_children`). Both adversarially verified (parallel-agent audit) and compiler-verified: `cargo check` clean, 0 errors / 0 warnings. Warm-pool dev-tuning (`#[cfg(debug_assertions)]` shorter idle windows) was evaluated and **deferred** — pure dev-ergonomics, would add prod/dev divergence for no release benefit.
-- Also unblocked the release: `assistant.playback.test.ts` still asserted the pre-`3b3740c` dock-only behavior (zero sub-agent leakage into the main bubble) after the inline-sub-agent-card redesign made a `Task` tool_use append its own bubble card. Updated to assert the bubble holds exactly the Task card (nested frames still route to `agentSpawns`). Full vitest suite green: 410/410.
-
-### Known issues
+## Known issues
 - **Voice profanity on Web Speech:** fully-masked words (`******`, no leading letter) can't be recovered from Azure's servers — the real fix is the on-device **Whisper** engine (built but not yet in the shipped binary). Planned.
 - **Dismissed ask-cards** render "(no answer recorded)" rather than a proper "Dismissed" state — cosmetic, fix planned.
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
+
+- **v0.82.1** — Warm-CLI process leaks fixed: a duplicate pre-warm race orphaned ~450 MB `claude` helpers invisibly until app exit (gigabytes on busy machines), and helper teardown didn't reap the MCP grandchild. Atomic pre-warm winner + tree-kill on every teardown path. *(ISSUES #76/#77)*
 
 - **v0.82.0** — Dial in how much the activity stream shows: a new three-way **Tool detail** control (Balanced/Minimal/Detailed) plus **Calm/Standard/Verbose** density presets that set all three stream knobs at once; collapsed work rows now name their targets across mixed tool kinds; no more silent Command-output override under Detailed.
 - **v0.81.0** — Sonnet 5 gets its full 1M context window (the CLI defaulted it to 200K, so long chats compacted at ~14% while the gauge said 1M); the picker no longer offers unavailable Fable; small context-readout accuracy fixes.

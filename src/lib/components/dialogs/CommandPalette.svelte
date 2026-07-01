@@ -1,15 +1,20 @@
 <script lang="ts">
   import { tick, untrack } from "svelte";
-  import { fly, fade } from "svelte/transition";
+  import { fade, scale } from "svelte/transition";
   import { quintOut } from "svelte/easing";
   import {
     Search, Home, MessageSquare,
     Settings as SettingsIcon, Plus, Palette,
     Sparkles, Mic, Info, History,
+    SplitSquareHorizontal, AppWindow,
   } from "lucide-svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import { commandPalette, type SettingsSection } from "../../state/command-palette.svelte";
   import { workspace, type WorkspaceId } from "../../state/workspace.svelte";
   import { assistant } from "../../state/assistant.svelte";
+  import { projects } from "../../state/projects.svelte";
+  import { relTime } from "../workspace/hubHelpers";
+  import { leafName } from "$lib/utils/path";
 
   // lucide-svelte 1.x ships icons as legacy components — `typeof Search`
   // matches what the workspaces registry uses (see workspaces/index.ts).
@@ -18,7 +23,10 @@
   type Item = {
     id: string;
     label: string;
+    /** Muted metadata rendered right-aligned (e.g. "exfil-v2 · 2h ago"). */
     sub?: string;
+    /** Keyboard shortcut rendered as a key chip (e.g. "Ctrl+1"). */
+    kbd?: string;
     group: "Go to" | "Recent chats" | "Actions";
     icon: Icon;
     tone?: "accent" | "info" | "warn" | "danger" | "ok" | "neutral";
@@ -31,6 +39,8 @@
   let query = $state("");
   let activeIdx = $state(0);
   let listEl: HTMLDivElement | undefined = $state();
+  // Stamped on each open — relTime anchor for the recent-chat rows.
+  let nowTs = $state(Date.now());
 
   // ── Items, computed reactively so palette stays fresh while open ────
   const items = $derived.by<Item[]>(() => {
@@ -40,16 +50,16 @@
     // Labels match the sidebar nav + workspaces registry — "Workspace" is the
     // home/dashboard surface (NOT "Home", which collided with the empty-chat
     // label). Keeps "Go to …" consistent across palette, sidebar, and titlebar.
-    const navs: { id: WorkspaceId; label: string; icon: Icon; sub: string }[] = [
-      { id: "home",     label: "Workspace", icon: Home,          sub: "Ctrl+1" },
-      { id: "chat",     label: "Chat",      icon: MessageSquare, sub: "Ctrl+2" },
-      { id: "settings", label: "Settings",  icon: SettingsIcon,  sub: "Ctrl+3" },
+    const navs: { id: WorkspaceId; label: string; icon: Icon; kbd: string }[] = [
+      { id: "home",     label: "Workspace", icon: Home,          kbd: "Ctrl+1" },
+      { id: "chat",     label: "Chat",      icon: MessageSquare, kbd: "Ctrl+2" },
+      { id: "settings", label: "Settings",  icon: SettingsIcon,  kbd: "Ctrl+3" },
     ];
     for (const n of navs) {
       out.push({
         id: `nav:${n.id}`,
         label: `Go to ${n.label}`,
-        sub: n.sub,
+        kbd: n.kbd,
         group: "Go to",
         icon: n.icon,
         keywords: `workspace pane home ${n.id}`,
@@ -68,7 +78,6 @@
       out.push({
         id: `settings:${s.id}`,
         label: `Settings — ${s.label}`,
-        sub: `Jump to ${s.label.toLowerCase()} settings`,
         group: "Go to",
         icon: s.icon,
         keywords: `preferences ${s.id} options ${s.kw ?? ""}`,
@@ -79,18 +88,21 @@
       });
     }
 
-    // Recent chats — last 8 by updatedAt
+    // Recent chats — last 8 by real activity, tagged with their project so a
+    // row reads like the hub cards ("exfil-v2 · 2h ago"), not a model id dump.
     const recents = [...assistant.conversations]
-      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .sort((a, b) => (b.lastActivityAt ?? b.createdAt) - (a.lastActivityAt ?? a.createdAt))
       .slice(0, 8);
     for (const c of recents) {
+      const proj = projects.byRoot(c.workspaceRoot)?.name
+        ?? (c.workspaceRoot ? leafName(c.workspaceRoot) : null);
       out.push({
         id: `chat:${c.id}`,
         label: c.title || "Untitled chat",
-        sub: `${c.model} · ${c.messageCount} msg`,
+        sub: `${proj ? `${proj} · ` : ""}${relTime(c.lastActivityAt ?? c.createdAt, nowTs)}`,
         group: "Recent chats",
         icon: History,
-        keywords: c.model,
+        keywords: `${c.model} ${proj ?? ""}`,
         run: () => {
           workspace.setActive("chat");
           void assistant.openTab(c.id);
@@ -98,11 +110,12 @@
       });
     }
 
-    // Actions
+    // Actions — includes the window utilities (split / new window) so they stay
+    // keyboard-reachable after the old topbar dropdown was dissolved.
     out.push({
       id: "act:new-chat",
       label: "New chat tab",
-      sub: "Ctrl+T",
+      kbd: "Ctrl+T",
       group: "Actions",
       icon: Plus,
       tone: "accent",
@@ -112,24 +125,46 @@
         void assistant.newTab();
       },
     });
+    if (workspace.activeId === "chat" && assistant.canAddPane) {
+      out.push({
+        id: "act:split",
+        label: "Split editor",
+        kbd: "Ctrl+\\",
+        group: "Actions",
+        icon: SplitSquareHorizontal,
+        keywords: "pane second side by side",
+        run: () => assistant.addPane(),
+      });
+    }
+    out.push({
+      id: "act:new-window",
+      label: "New window",
+      sub: "Separate Rift window",
+      group: "Actions",
+      icon: AppWindow,
+      keywords: "open separate",
+      run: () => { void invoke("open_new_window").catch(console.error); },
+    });
     return out;
   });
 
   // ── Fuzzy filter ────────────────────────────────────────────────────
-  // Simple subsequence match — every query char must appear in order,
-  // case-insensitive. Hits early matches over scattered ones.
+  // Substring matches rank across every field; the subsequence fallback only
+  // runs against the LABEL — letter-scatter across keywords/group text matched
+  // practically everything ("speech" hit "Go to Chat" via its keyword soup).
   function score(item: Item, q: string): number {
     if (!q) return 1;
     const hay = `${item.label} ${item.sub ?? ""} ${item.keywords ?? ""} ${item.group}`.toLowerCase();
     const needle = q.toLowerCase();
     if (hay.includes(needle)) return 1000 - hay.indexOf(needle);
-    // Subsequence
+    // Subsequence over the label only
+    const label = item.label.toLowerCase();
     let hi = 0;
     let prevMatch = -1;
     let runScore = 0;
     for (let ni = 0; ni < needle.length; ni++) {
       const c = needle[ni];
-      const found = hay.indexOf(c, hi);
+      const found = label.indexOf(c, hi);
       if (found < 0) return 0;
       // contiguous-run bonus
       if (found === prevMatch + 1) runScore += 5;
@@ -170,6 +205,7 @@
     if (commandPalette.open) {
       query = "";
       activeIdx = 0;
+      nowTs = Date.now();
       void (async () => {
         await tick();
         input?.focus();
@@ -261,22 +297,22 @@
 
 {#if commandPalette.open}
   <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <div class="cp-scrim" role="presentation" onclick={backdropClick} transition:fade={{ duration: 120 }}>
+  <div class="cp-scrim" role="presentation" onclick={backdropClick} transition:fade={{ duration: 130 }}>
     <div
       class="cp-panel"
       role="dialog"
       aria-modal="true"
       aria-label="Command palette"
       bind:this={panelEl}
-      transition:fly={{ y: -8, duration: 160, easing: quintOut }}
+      transition:scale={{ start: 0.97, duration: 170, easing: quintOut }}
     >
       <div class="cp-search">
-        <Search size={14} />
+        <Search size={15} />
         <input
           bind:this={input}
           bind:value={query}
           type="text"
-          placeholder="Search or run a command…"
+          placeholder="Search chats, pages, and commands…"
           aria-label="Search commands and chats"
           autocomplete="off"
           spellcheck="false"
@@ -286,7 +322,10 @@
 
       <div class="cp-list" role="list" aria-label="Results" bind:this={listEl}>
         {#if flat.length === 0}
-          <div class="cp-empty">No matches</div>
+          <div class="cp-empty">
+            <span class="cp-empty-t">No matches</span>
+            <span class="cp-empty-s">Nothing found for “{query.trim()}”</span>
+          </div>
         {:else}
           {#each grouped as g (g.group)}
             <div class="cp-group-label">{g.group}</div>
@@ -303,14 +342,13 @@
                 onmouseenter={() => (activeIdx = idx)}
                 onclick={() => pick(it)}
               >
-                <span class="cp-item-icon"><Icon size={13} /></span>
-                <span class="cp-item-l">
-                  <span class="cp-item-label">{it.label}</span>
-                  {#if it.sub}<span class="cp-item-sub">{it.sub}</span>{/if}
+                <span class="cp-item-icon"><Icon size={14} /></span>
+                <span class="cp-item-label">{it.label}</span>
+                {#if it.sub}<span class="cp-item-sub">{it.sub}</span>{/if}
+                {#if it.kbd}<kbd class="cp-hint cp-item-kbd">{it.kbd}</kbd>{/if}
+                <span class="cp-item-go" class:show={idx === activeIdx} aria-hidden="true">
+                  <kbd class="cp-hint">↵</kbd>
                 </span>
-                {#if idx === activeIdx}
-                  <span class="cp-item-r"><kbd class="cp-hint">↵</kbd></span>
-                {/if}
               </button>
             {/each}
           {/each}
@@ -319,8 +357,8 @@
 
       <footer class="cp-foot">
         <span><kbd class="cp-hint">↑↓</kbd> navigate</span>
-        <span><kbd class="cp-hint">↵</kbd> run</span>
-        <span><kbd class="cp-hint">Esc</kbd> close</span>
+        <span><kbd class="cp-hint">↵</kbd> open</span>
+        <span class="cp-foot-r"><kbd class="cp-hint">Esc</kbd> close</span>
       </footer>
     </div>
   </div>
@@ -330,40 +368,40 @@
   .cp-scrim {
     position: fixed; inset: 0;
     z-index: 200;
-    background: color-mix(in oklch, var(--bg) 60%, transparent);
-    backdrop-filter: blur(6px) saturate(140%);
-    -webkit-backdrop-filter: blur(6px) saturate(140%);
+    background: color-mix(in oklch, var(--bg) 55%, transparent);
+    backdrop-filter: blur(8px) saturate(135%);
+    -webkit-backdrop-filter: blur(8px) saturate(135%);
     display: flex; justify-content: center; align-items: flex-start;
-    padding-top: 14vh;
+    padding-top: 13vh;
   }
   .cp-panel {
-    width: min(640px, calc(100vw - 32px));
-    max-height: 70vh;
+    width: min(620px, calc(100vw - 32px));
+    max-height: 68vh;
     display: flex; flex-direction: column;
     background: var(--bg-elev-2);
     border: 1px solid var(--border-strong);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-2xl);
     box-shadow:
-      0 16px 48px -12px rgba(0, 0, 0, 0.55),
-      0 2px 8px -4px rgba(0, 0, 0, 0.4),
-      inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
+      0 24px 64px -16px rgba(0, 0, 0, 0.6),
+      0 4px 16px -8px rgba(0, 0, 0, 0.45),
+      0 0 80px -32px color-mix(in oklab, var(--accent) 30%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 6%, transparent);
     overflow: hidden;
   }
 
   .cp-search {
-    display: flex; align-items: center; gap: 10px;
-    padding: 12px 14px;
+    display: flex; align-items: center; gap: 11px;
+    height: 48px; flex: none;
+    padding: 0 16px;
     border-bottom: 1px solid var(--border);
-    background: linear-gradient(to bottom,
-      color-mix(in oklab, var(--accent) 4%, transparent),
-      transparent);
   }
-  .cp-search :global(svg) { color: var(--fg-muted); flex-shrink: 0; }
+  .cp-search :global(svg) { color: var(--accent); opacity: 0.85; flex-shrink: 0; }
   .cp-search input {
-    flex: 1;
+    flex: 1; min-width: 0;
     background: transparent; border: 0; outline: 0;
     color: var(--fg);
-    font: inherit; font-size: var(--fs-md);
+    caret-color: var(--accent);
+    font: inherit; font-size: 14px;
     letter-spacing: -0.01em;
   }
   .cp-search input::placeholder { color: var(--fg-faint); }
@@ -384,7 +422,7 @@
   .cp-list {
     flex: 1;
     overflow-y: auto;
-    padding: 4px;
+    padding: 6px;
     scrollbar-width: thin;
     scrollbar-color: var(--border-strong) transparent;
   }
@@ -393,21 +431,24 @@
     font-size: 10px;
     font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--fg-subtle);
-    padding: 12px 12px 5px;
+    letter-spacing: 0.07em;
+    color: var(--fg-faint);
+    padding: 13px 12px 5px;
   }
-  .cp-group-label:first-child { padding-top: 6px; }
+  .cp-group-label:first-child { padding-top: 7px; }
 
+  /* Single-line rows: icon chip · label · (metadata | kbd) · ↵-on-active.
+     One height, one baseline — the old stacked two-line rows read as clutter. */
   .cp-item {
     display: flex; align-items: center; gap: 10px;
     width: 100%;
-    padding: 7px 10px;
+    height: 36px;
+    padding: 0 10px;
     background: transparent; border: 0;
     color: var(--fg);
     font: inherit; font-size: var(--fs-sm);
     text-align: left;
-    border-radius: var(--radius-sm);
+    border-radius: 10px;
     cursor: pointer;
     transition: background 80ms;
   }
@@ -420,10 +461,10 @@
 
   .cp-item-icon {
     display: inline-flex; align-items: center; justify-content: center;
-    width: 22px; height: 22px;
+    width: 25px; height: 25px;
     color: var(--fg-muted);
     background: var(--bg-elev-3);
-    border-radius: 6px;
+    border-radius: 7px;
     flex-shrink: 0;
     transition: color 100ms, background 100ms;
   }
@@ -437,37 +478,40 @@
   .cp-item[data-tone="info"]   .cp-item-icon { color: var(--info); }
   .cp-item[data-tone="accent"] .cp-item-icon { color: var(--accent); }
 
-  .cp-item-l {
-    flex: 1; min-width: 0;
-    display: flex; flex-direction: column; gap: 1px;
-  }
   .cp-item-label {
+    flex: 1; min-width: 0;
     color: var(--fg);
-    font-weight: 500;
+    font-weight: 520;
     letter-spacing: -0.005em;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .cp-item-sub {
+    flex: none; max-width: 40%;
     color: var(--fg-subtle);
     font-size: var(--fs-xs);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .cp-item-r { flex-shrink: 0; }
+  .cp-item-kbd { flex: none; }
+  /* Reserved slot so rows don't shift width when the cursor moves. */
+  .cp-item-go { flex: none; width: 20px; display: inline-flex; justify-content: flex-end; visibility: hidden; }
+  .cp-item-go.show { visibility: visible; }
 
   .cp-empty {
-    padding: 22px;
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    padding: 28px 22px;
     text-align: center;
-    color: var(--fg-faint);
-    font-size: var(--fs-sm);
   }
+  .cp-empty-t { color: var(--fg-2); font-size: var(--fs-md); font-weight: 600; }
+  .cp-empty-s { color: var(--fg-faint); font-size: var(--fs-xs); overflow-wrap: anywhere; }
 
   .cp-foot {
     display: flex; align-items: center; gap: 14px;
-    padding: 7px 14px;
+    padding: 8px 14px; flex: none;
     border-top: 1px solid var(--border);
-    background: var(--bg);
+    background: color-mix(in oklab, var(--fg) 2%, transparent);
     font-size: var(--fs-xs);
     color: var(--fg-faint);
   }
   .cp-foot span { display: inline-flex; align-items: center; gap: 6px; }
+  .cp-foot-r { margin-left: auto; }
 </style>

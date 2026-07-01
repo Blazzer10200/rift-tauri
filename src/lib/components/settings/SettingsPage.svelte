@@ -953,7 +953,9 @@
 {/if}
 
 <style>
-  .sb-main { position: relative; overflow: hidden; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; background: var(--bg); color: var(--fg); }
+  /* Transparent — keeps the app dot-field continuous across surfaces
+     (AssistantPage doctrine); opaque var(--bg) hid the user's texture here. */
+  .sb-main { position: relative; overflow: hidden; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; background: transparent; color: var(--fg); }
 
   /* ════════ Redesign RailShell (spec: rift-redesign.html) ════════ */
   @keyframes blockIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }

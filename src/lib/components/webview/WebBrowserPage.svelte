@@ -357,10 +357,12 @@
 </div>
 
 <style>
+  /* Transparent chrome — the app dot-field stays continuous (the native child
+     webview paints its own surface over .wb-stage when a page is open). */
   .wb-root {
     display: flex; flex-direction: column;
     height: 100%; min-height: 0;
-    background: var(--bg);
+    background: transparent;
   }
   .wb-bar {
     display: flex; align-items: center; gap: 6px;
@@ -439,7 +441,7 @@
     flex: 1; min-height: 0;
     display: flex; align-items: center; justify-content: center;
     overflow: hidden;
-    background: var(--bg);
+    background: transparent;
   }
   .wb-empty {
     display: flex; flex-direction: column; align-items: center; gap: 12px;

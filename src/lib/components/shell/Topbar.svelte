@@ -1,14 +1,15 @@
 <script lang="ts">
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { X } from "lucide-svelte";
+  import { invoke } from "@tauri-apps/api/core";
+  import { X, SplitSquareHorizontal, AppWindow } from "lucide-svelte";
   import { workspace } from "$lib/state/workspace.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { WORKSPACES } from "../workspaces";
   import { tooltip } from "$lib/actions/tooltip";
   import NotificationCenter from "./NotificationCenter.svelte";
-  import TopbarMenu from "./TopbarMenu.svelte";
 
   const win = getCurrentWindow();
+  const isChat = $derived(workspace.activeId === "chat");
 
   // Chat surface titles consistently as "Chat" (empty or not) — a real
   // conversation shows its own title once it has one. (Previously an empty chat
@@ -28,10 +29,21 @@
   <span class="topbar-title" data-tauri-drag-region>{title}</span>
 
   <div class="topbar-r">
-    <!-- Split / Search / Notifications / New-window folded into one dropdown so
-         the topbar-right reads as a single affordance beside the window ctls. -->
-    <TopbarMenu />
-    <!-- Panel only — its trigger lives in TopbarMenu's Notifications row. -->
+    <!-- Window utilities as direct one-click icons (the old ⋮ dropdown buried
+         notifications behind two clicks and duplicated the sidebar's search). -->
+    {#if isChat}
+      <button class="tb-ic" type="button" disabled={!assistant.canAddPane}
+        onclick={() => assistant.addPane()}
+        use:tooltip={assistant.canAddPane ? "Split editor · Ctrl+\\" : "Maximum panes open"}
+        aria-label="Split editor">
+        <SplitSquareHorizontal size={15} />
+      </button>
+    {/if}
+    <button class="tb-ic" type="button"
+      onclick={() => invoke("open_new_window").catch(console.error)}
+      use:tooltip={"New window"} aria-label="New window">
+      <AppWindow size={15} />
+    </button>
     <NotificationCenter />
 
     <div class="winctl">
@@ -45,7 +57,12 @@
 <style>
   .topbar { display: flex; align-items: center; gap: 10px; height: 40px; flex: none; padding: 0 6px 0 20px; }
   .topbar-title { font-size: 13px; font-weight: 600; color: var(--fg-2); letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .topbar-r { margin-left: auto; display: flex; align-items: center; gap: 8px; flex: none; }
+  .topbar-r { margin-left: auto; display: flex; align-items: center; gap: 2px; flex: none; }
+  .topbar-r .winctl { margin-left: 6px; }
+  .tb-ic { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px;
+    color: var(--fg-subtle); transition: background var(--dur-fast), color var(--dur-fast); }
+  .tb-ic:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg-2); }
+  .tb-ic:disabled { opacity: 0.4; }
   .winctl { display: flex; gap: 2px; }
   .wc { width: 36px; height: 30px; display: grid; place-items: center; color: var(--fg-muted); border-radius: 7px; transition: background var(--dur-fast); }
   .wc:hover { background: var(--surface-hover); }

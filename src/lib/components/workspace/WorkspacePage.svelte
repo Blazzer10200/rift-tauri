@@ -6,7 +6,7 @@
     ArrowRight, Filter, FolderGit2, GitBranch, Folder, MessageSquare,
     Sparkles, History, Activity as ActivityIcon, Loader2, Flame, Cpu, Wrench, DollarSign,
     Newspaper, ChevronDown, SplitSquareHorizontal, AlertTriangle, RotateCw,
-    TrendingUp, TrendingDown,
+    TrendingUp, TrendingDown, Clock,
   } from "lucide-svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import NewsFeed from "./NewsFeed.svelte";
@@ -25,6 +25,7 @@
   import { tooltip } from "$lib/actions/tooltip";
   import { globSummary } from "./globPreview";
   import { greeting } from "./welcomeShared";
+  import { EMPTY_PULSE, pulseByRoot, relTime } from "./hubHelpers";
   import type { Project } from "../../state/assistant/types";
 
   // ── Active-folder band ──────────────────────────────────────────────────────
@@ -136,25 +137,10 @@
   const knownKeys = $derived(new Set(projects.items.map((p) => projectRootKey(p.root))));
   const activeIsProject = $derived(hasRoot && knownKeys.has(projectRootKey(paneRoot)));
 
-  // The greeting asks "What's next for X?" — so give it an answer: the most
-  // recent chat in this folder, one click to resume. Ranks by real activity
-  // (never open/switch bumps), matching the sidebar list's own comparator.
-  const resumeChat = $derived.by(() => {
-    if (!paneRoot) return null;
-    const key = projectRootKey(paneRoot);
-    let best: (typeof assistant.conversations)[number] | null = null;
-    let bestAt = -Infinity;
-    for (const c of assistant.conversations) {
-      if (projectRootKey(c.workspaceRoot ?? "") !== key) continue;
-      const at = c.lastActivityAt ?? c.createdAt;
-      if (at > bestAt) { bestAt = at; best = c; }
-    }
-    return best;
-  });
-  function resume(id: string) {
-    workspace.setActive("chat");
-    void assistant.openTab(id).catch(console.error);
-  }
+  // Per-project activity rollup (chats · last-active · cost) for the cards —
+  // the greeting's "What's next for X?" resolves via the active card's Continue.
+  const pulses = $derived(pulseByRoot(assistant.conversations));
+  const pulseOf = (p: Project) => pulses.get(projectRootKey(p.root)) ?? EMPTY_PULSE;
 
   // ── Project editor state ────────────────────────────────────────────────────
   let editing = $state<Project | null>(null);
@@ -282,7 +268,11 @@
     if (projects.newProjectIntent && projects.consumeNewProjectIntent()) startNew();
   });
 
-  const activeKey = $derived(projectRootKey(assistant.activeRoot));
+  // Keyed off paneRoot (the GLOBAL workspace root) — same source as the
+  // greeting/band/save-prompt. assistant.activeRoot follows the focused TAB's
+  // per-tab root, which can lag the page after a project switch (stale
+  // "Active" highlight when the old chat tab keeps focus).
+  const activeKey = $derived(projectRootKey(paneRoot));
   function isActive(p: Project): boolean {
     return !!activeKey && projectRootKey(p.root) === activeKey;
   }
@@ -303,33 +293,29 @@
   }
 
   // ── Project card helpers ─────────────────────────────────────────────────────
-  // Hierarchy: the active project renders as a hero card; the rest fill a grid.
-  const activeProject = $derived(projects.sorted.find(isActive) ?? null);
-  const otherProjects = $derived(projects.sorted.filter((p) => !isActive(p)));
+  // ONE uniform grid — the active project leads (accent-framed in place, no
+  // separate hero card), the rest rank by real chat activity so the grid
+  // mirrors where work actually happens.
+  const sortedProjects = $derived.by(() =>
+    [...projects.items].sort((a, b) => {
+      const act = Number(isActive(b)) - Number(isActive(a));
+      if (act !== 0) return act;
+      const la = pulseOf(a).lastAt ?? a.createdAt;
+      const lb = pulseOf(b).lastAt ?? b.createdAt;
+      return lb - la || a.name.localeCompare(b.name);
+    }),
+  );
 
   // Monogram: first alnum char of the name, for the card avatar.
   const monogram = (name: string) => (name.trim().match(/[a-z0-9]/i)?.[0] ?? "·").toUpperCase();
 
-  // Compact scope label for a project's include/exclude globs.
+  // Compact scope label — empty when unscoped (the default), so "Full folder"
+  // chips stop repeating on every card as noise.
   function scopeLabel(p: Project): string {
-    if (!p.include.length && !p.exclude.length) return "Full folder";
     const parts: string[] = [];
     if (p.include.length) parts.push(`${p.include.length} include`);
     if (p.exclude.length) parts.push(`${p.exclude.length} exclude`);
     return parts.join(" · ");
-  }
-
-  // "Added 3d ago" — relative time from createdAt, omitted when unknown.
-  function addedLabel(ts: number): string {
-    if (!ts) return "";
-    const d = Math.max(0, statsNow - ts);
-    const day = 86_400_000;
-    if (d < day) return "Added today";
-    const days = Math.round(d / day);
-    if (days < 7) return `Added ${days}d ago`;
-    if (days < 30) return `Added ${Math.round(days / 7)}w ago`;
-    if (days < 365) return `Added ${Math.round(days / 30)}mo ago`;
-    return `Added ${Math.round(days / 365)}y ago`;
   }
 </script>
 
@@ -371,13 +357,6 @@
               <button class="chip-btn" type="button" onclick={() => void assistant.pickTabFolder(null)}>
                 <Folder size={13} /> Switch folder
               </button>
-              {#if resumeChat}
-                <button class="chip-btn resume" type="button" onclick={() => resume(resumeChat.id)}
-                  use:tooltip={"Pick up your most recent chat here"}>
-                  <History size={13} /> Resume <b>{resumeChat.title || "Untitled"}</b>
-                  <ArrowRight size={12} />
-                </button>
-              {/if}
             </div>
           {/if}
         </div>
@@ -473,13 +452,113 @@
         </section>
       {/if}
 
-      <!-- ── Bento dashboard (2026-06-25 v2) ───────────────────────────────────
-           Row 1: a FULL-WIDTH Activity band (stats are wide-but-short — hero+chart
-           left, tiles+model-mix right) so it doesn't pile vertically.
-           Row 2: Projects (left) · What's new in AI (right) — two balanced columns.
-           Replaces the v1 single tall right-rail that scrolled 2.7 screens. -->
+      <!-- ── Hub layout (2026-07-01 v3) — action-first ─────────────────────────
+           Projects (uniform grid) → Activity band → What's new. Launch targets
+           lead; retrospective analytics follow. (A "Jump back in" recent-chats
+           strip lived here for one session — owner cut it: nobody resumes old
+           sessions from the hub; the sidebar owns history.) -->
 
-      <!-- ── Activity band (full width) ───────────────────────────────────────── -->
+      <!-- ── Projects (uniform grid) ──────────────────────────────────────────── -->
+      <div class="dash">
+
+        <!-- ── Workspace (projects) ─────────────────────────────────────────── -->
+        <section class="col projects-col">
+          <div class="section-h-row">
+            <div class="section-h"><FolderGit2 size={13} /> Projects
+              {#if projects.items.length > 0}<span class="count">{projects.items.length}</span>{/if}
+            </div>
+            <button class="mini-new" type="button" onclick={() => startNew()} use:tooltip={"New project"}>
+              <Plus size={14} strokeWidth={2.4} /> New
+            </button>
+          </div>
+
+          {#if !projects.loaded && projects.lastError}
+            <div class="empty">
+              <div class="empty-tt">Couldn't load projects</div>
+              <div class="empty-sub">{projects.lastError}</div>
+              <button class="save-btn" type="button" onclick={() => projects.refresh()}>Retry</button>
+            </div>
+          {:else if projects.items.length === 0 && !(hasRoot && !activeIsProject)}
+            <!-- True empty-state only when there's no active folder to save. When
+                 a folder IS open, the "Save … as a project" prompt below guides
+                 the user, so we don't repeat the instruction here. -->
+            <div class="empty lean">
+              <div class="empty-tt">No projects yet</div>
+              <div class="empty-sub">Name a workspace folder and scope which files Rift can read.</div>
+              <button class="save-btn" type="button" onclick={() => startNew()}>
+                <Plus size={15} strokeWidth={2.4} /> New project
+              </button>
+            </div>
+          {:else if projects.items.length > 0}
+            <!-- ONE uniform grid — active project leads with an accent frame +
+                 in-place Continue; every card carries live signal (chats ·
+                 last-active · cost) instead of static registry metadata. -->
+            <div class="proj-grid" class:solo={sortedProjects.length === 1}>
+              {#each sortedProjects as p (p.id)}
+                {@const pulse = pulseOf(p)}
+                {@const active = isActive(p)}
+                {@const scope = scopeLabel(p)}
+                <div class="pcard" class:active role="button" tabindex="0"
+                  onclick={() => (active ? goHome() : void openProject(p))}
+                  onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); active ? goHome() : void openProject(p); } }}>
+                  <div class="pcard-top">
+                    <span class="pcard-mono">{monogram(p.name)}</span>
+                    <div class="pcard-id">
+                      <div class="pcard-name-row">
+                        <span class="pcard-name">{p.name}</span>
+                        {#if active}<span class="active-pill"><span class="live-dot"></span>Active</span>{/if}
+                      </div>
+                      <div class="pcard-path mono" use:tooltip={prettyPath(p.root)}>{shortPath(p.root)}</div>
+                    </div>
+                    {#if assistant.canAddPane}
+                      <button class="pcard-act" type="button"
+                        onclick={(e) => { e.stopPropagation(); void openInSplit(p); }} use:tooltip={"Open in split"} aria-label="Open in split pane">
+                        <SplitSquareHorizontal size={13} />
+                      </button>
+                    {/if}
+                    <button class="pcard-act" type="button"
+                      onclick={(e) => { e.stopPropagation(); startEdit(p); }} use:tooltip={"Edit project"} aria-label="Edit project">
+                      <Pencil size={12} />
+                    </button>
+                  </div>
+                  <div class="pcard-foot">
+                    {#if pulse.chats > 0}
+                      <span class="pmeta"><MessageSquare size={11} /> {pulse.chats} chat{pulse.chats === 1 ? "" : "s"}</span>
+                      {#if pulse.lastAt != null}<span class="pmeta"><Clock size={11} /> {relTime(pulse.lastAt, statsNow)}</span>{/if}
+                      {#if pulse.cost > 0}<span class="pmeta"><DollarSign size={11} /> {fmtCost(pulse.cost)}</span>{/if}
+                    {:else}
+                      <span class="pmeta muted">No chats yet</span>
+                    {/if}
+                    {#if scope}<span class="scope-chip sm"><Filter size={10} /> {scope}</span>{/if}
+                    <span class="pcard-go" aria-hidden="true">{#if active}Continue{/if}<ArrowRight size={14} /></span>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {/if}
+
+          <!-- ── Save the current folder as a project — a SINGLE, quiet prompt.
+               Only the active, not-yet-projectified folder gets a one-click
+               "save it" affordance. Recent folders are NOT surfaced here as
+               competing tiles (that read as noise + resurrected ghosts of
+               folders the user opened once); they live inside the editor's
+               folder picker, where they're a convenience, not a to-do list. ── -->
+          {#if hasRoot && !activeIsProject && !editing}
+            <button class="save-current" type="button" onclick={adoptActive}>
+              <span class="sc-ic"><Sparkles size={14} /></span>
+              <span class="sc-tx">
+                Save <b>{ctxName}</b> as a project
+                <small>Scope which files Rift reads and pin it to the sidebar</small>
+              </span>
+              <ArrowRight size={15} class="sc-go" />
+            </button>
+          {/if}
+        </section>
+
+      </div>
+
+      <!-- ── Activity band (full width) — retrospective, so it rides BELOW the
+           launch targets (Jump back in · Projects). ───────────────────────────── -->
       <section class="act-band">
         <div class="section-h-row">
           <div class="section-h"><ActivityIcon size={13} /> Activity</div>
@@ -578,123 +657,6 @@
         {/if}
       </section>
 
-      <!-- ── Row 2: Projects (full-width hero) · What's new strip ─────────────── -->
-      <div class="dash">
-
-        <!-- ── Workspace (projects) ─────────────────────────────────────────── -->
-        <section class="col projects-col">
-          <div class="section-h-row">
-            <div class="section-h"><FolderGit2 size={13} /> Projects
-              {#if projects.items.length > 0}<span class="count">{projects.items.length}</span>{/if}
-            </div>
-            <button class="mini-new" type="button" onclick={() => startNew()} use:tooltip={"New project"}>
-              <Plus size={14} strokeWidth={2.4} /> New
-            </button>
-          </div>
-
-          {#if !projects.loaded && projects.lastError}
-            <div class="empty">
-              <div class="empty-tt">Couldn't load projects</div>
-              <div class="empty-sub">{projects.lastError}</div>
-              <button class="save-btn" type="button" onclick={() => projects.refresh()}>Retry</button>
-            </div>
-          {:else if projects.items.length === 0 && !(hasRoot && !activeIsProject)}
-            <!-- True empty-state only when there's no active folder to save. When
-                 a folder IS open, the "Save … as a project" prompt below guides
-                 the user, so we don't repeat the instruction here. -->
-            <div class="empty lean">
-              <div class="empty-tt">No projects yet</div>
-              <div class="empty-sub">Name a workspace folder and scope which files Rift can read.</div>
-              <button class="save-btn" type="button" onclick={() => startNew()}>
-                <Plus size={15} strokeWidth={2.4} /> New project
-              </button>
-            </div>
-          {:else if projects.items.length > 0}
-            <!-- Hero: the active project, framed + primary. -->
-            {#if activeProject}
-              {@const p = activeProject}
-              <div class="hero-card">
-                <span class="hero-glow" aria-hidden="true"></span>
-                <div class="hero-row">
-                  <span class="hero-mono">{monogram(p.name)}</span>
-                  <div class="hero-id">
-                    <div class="hero-name-row">
-                      <span class="hero-name">{p.name}</span>
-                      <span class="active-pill"><span class="live-dot"></span>Active</span>
-                    </div>
-                    <div class="hero-path mono" use:tooltip={prettyPath(p.root)}>{shortPath(p.root)}</div>
-                  </div>
-                </div>
-                <div class="hero-foot">
-                  <span class="scope-chip"><Filter size={11} /> {scopeLabel(p)}</span>
-                  {#if p.createdAt}<span class="meta-dot">·</span><span class="added">{addedLabel(p.createdAt)}</span>{/if}
-                  <button class="hero-edit" type="button" onclick={() => startEdit(p)} use:tooltip={"Edit project"}>
-                    <Pencil size={13} />
-                  </button>
-                  {#if assistant.canAddPane}
-                    <button class="hero-split" type="button" onclick={() => openInSplit(p)} use:tooltip={"Open in a new split pane"}>
-                      <SplitSquareHorizontal size={14} /> Split
-                    </button>
-                  {/if}
-                  <button class="hero-open" type="button" onclick={() => goHome()}>
-                    Continue <ArrowRight size={14} />
-                  </button>
-                </div>
-              </div>
-            {/if}
-
-            <!-- The rest — a 2-up grid of compact, equal cards. A lone card spans
-                 full width so it doesn't sit half-empty beside the hero. -->
-            {#if otherProjects.length > 0}
-              <div class="proj-grid" class:solo={otherProjects.length === 1}>
-                {#each otherProjects as p (p.id)}
-                  <div class="gcard" role="button" tabindex="0" onclick={() => openProject(p)}
-                    onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openProject(p); } }}>
-                    <span class="gcard-mono">{monogram(p.name)}</span>
-                    <div class="gcard-id">
-                      <div class="gcard-name">{p.name}</div>
-                      <div class="gcard-meta">
-                        <span class="gcard-path mono" use:tooltip={prettyPath(p.root)}>{shortPath(p.root)}</span>
-                        <span class="scope-chip sm"><Filter size={10} /> {scopeLabel(p)}</span>
-                      </div>
-                    </div>
-                    {#if assistant.canAddPane}
-                      <button class="gcard-split" type="button"
-                        onclick={(e) => { e.stopPropagation(); openInSplit(p); }} use:tooltip={"Open in split"} aria-label="Open in split pane">
-                        <SplitSquareHorizontal size={13} />
-                      </button>
-                    {/if}
-                    <button class="gcard-edit" type="button"
-                      onclick={(e) => { e.stopPropagation(); startEdit(p); }} use:tooltip={"Edit"} aria-label="Edit project">
-                      <Pencil size={12} />
-                    </button>
-                    <span class="gcard-go" aria-hidden="true"><ArrowRight size={15} /></span>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-          {/if}
-
-          <!-- ── Save the current folder as a project — a SINGLE, quiet prompt.
-               Only the active, not-yet-projectified folder gets a one-click
-               "save it" affordance. Recent folders are NOT surfaced here as
-               competing tiles (that read as noise + resurrected ghosts of
-               folders the user opened once); they live inside the editor's
-               folder picker, where they're a convenience, not a to-do list. ── -->
-          {#if hasRoot && !activeIsProject && !editing}
-            <button class="save-current" type="button" onclick={adoptActive}>
-              <span class="sc-ic"><Sparkles size={14} /></span>
-              <span class="sc-tx">
-                Save <b>{ctxName}</b> as a project
-                <small>Scope which files Rift reads and pin it to the sidebar</small>
-              </span>
-              <ArrowRight size={15} class="sc-go" />
-            </button>
-          {/if}
-        </section>
-
-      </div>
-
       <!-- ── What's new in AI — full-width collapsible strip below Projects.
            Reference content, not a launch target, so it sits collapsed by
            default behind a disclosure and expands inline on demand. ─────────── -->
@@ -718,12 +680,18 @@
 </div>
 
 <style>
-  .sb-main { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg); }
+  /* Transparent — the app dot-field (.app::before) stays continuous across
+     every surface (AssistantPage doctrine); an opaque page root hides the
+     user's chosen background texture. */
+  .sb-main { display: flex; flex-direction: column; height: 100%; min-height: 0; background: transparent; }
   .sb-scroll { flex: 1; min-height: 0; overflow-y: auto; }
   /* The page owns ONE scroll (the .sb-scroll viewport). Header → Activity band →
      Projects → News strip flow at natural height and the page scrolls as a whole
      — no nested per-column scroll regions (that was the twin-scroll-wheel). */
-  .sb-wrap { max-width: 1200px; margin: 0 auto; padding: 18px 40px 18px; display: flex; flex-direction: column; gap: 12px; }
+  /* Tight vertical rhythm — the whole hub targets the DEFAULT window (1600×1000)
+     with no scrollbar; scroll appears only when content genuinely demands it
+     (5+ projects, expanded news). */
+  .sb-wrap { max-width: 1200px; margin: 0 auto; padding: 14px 40px; display: flex; flex-direction: column; gap: 10px; }
 
   /* ── Header ─────────────────────────────────────────────────────────────── */
   .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
@@ -756,9 +724,9 @@
   .greet-ctx b { color: var(--fg-2); font-weight: 600; }
   .band-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
-  /* ── Bento dashboard v2 — full-width Activity band on top, then Projects · News.
-     Trades the v1 single tall right-rail (scrolled 2.7 screens) for horizontal
-     organization that fits ~one screen. ─────────────────────────────────────── */
+  /* ── Hub v3 — action-first: Jump back in → Projects → Activity → News.
+     Launch targets lead; the retrospective Activity band follows. (v2 kept the
+     band on top; v1 was a single tall right-rail that scrolled 2.7 screens.) ── */
 
   /* Section header with a trailing control (the Activity range toggle). The bare
      .section-h carries its own bottom margin; in a row we zero that + align. */
@@ -771,16 +739,18 @@
   .range button.on { background: var(--surface-active); color: var(--fg); }
 
   /* ── Activity band (full width, horizontal) ────────────────────────────── */
-  /* head + act-band hold their natural height; .dash takes the rest (below). */
+  /* Sections hold natural height; the page scrolls as a whole when needed. */
   .head, .act-band { flex: none; }
   .act-band { min-width: 0; }
+  /* Fun-fact line anchors to the side column's bottom when it has spare height. */
+  .act-side .sig { margin-top: auto; }
   .act-card { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 20px;
-    padding: 15px 18px; border-radius: var(--radius-2xl); border: 1px solid var(--border); background: var(--bg-elev-1); }
-  .act-main { display: flex; flex-direction: column; gap: 13px; min-width: 0; }
+    padding: 13px 16px; border-radius: var(--radius-2xl); border: 1px solid var(--border); background: var(--bg-elev-1); }
+  .act-main { display: flex; flex-direction: column; gap: 11px; min-width: 0; }
   /* The chart flexes to fill the band's height (matched to the side column's
      stat-grid + mix), so there's no dead vertical void beside the tiles. */
   .act-main .chart { flex: 1 1 auto; display: flex; flex-direction: column; min-height: 0; }
-  .act-main .chart-plot { flex: 1 1 auto; height: auto; min-height: 96px; }
+  .act-main .chart-plot { flex: 1 1 auto; height: auto; min-height: 140px; }
   .act-side { display: flex; flex-direction: column; gap: 14px; min-width: 0;
     padding-left: 24px; border-left: 1px solid var(--border); }
   /* Stack the two halves on narrower windows so neither gets crushed. */
@@ -805,7 +775,7 @@
   .act-retry:active { transform: translateY(1px); }
   .act-retry:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
 
-  /* ── Row 2 — Projects (full-width hero) ─────────────────────────────────── */
+  /* ── Projects (uniform grid) ────────────────────────────────────────────── */
   /* Projects is the launch target, so it owns the full width and flows at its
      natural height. No internal scroll — the page scrolls as a whole. */
   .dash { display: flex; flex-direction: column; }
@@ -813,7 +783,7 @@
 
   .hero { display: flex; flex-direction: column; gap: 5px; }
   .hero-num { display: flex; align-items: baseline; gap: 10px; }
-  .hn-v { font-size: 40px; font-weight: 760; line-height: 1; letter-spacing: -0.025em; color: var(--fg); font-variant-numeric: tabular-nums;
+  .hn-v { font-size: 38px; font-weight: 760; line-height: 1; letter-spacing: -0.025em; color: var(--fg); font-variant-numeric: tabular-nums;
     background: linear-gradient(180deg, var(--fg), color-mix(in oklab, var(--accent) 30%, var(--fg)));
     -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
   .hn-l { font-size: 13px; font-weight: 550; color: var(--fg-subtle); }
@@ -862,7 +832,7 @@
   .lg i { width: 9px; height: 9px; border-radius: 3px; flex: none; background: oklch(0.72 0.14 var(--mh)); }
   .lg small { color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
 
-  .sig { font-size: 12px; color: var(--fg-muted); padding-top: 16px; border-top: 1px solid var(--border); text-align: center; font-style: italic; }
+  .sig { font-size: 12px; color: var(--fg-muted); padding-top: 11px; border-top: 1px solid var(--border); text-align: center; font-style: italic; }
 
   :global(.act-band .spin) { animation: wsActSpin 0.9s linear infinite; }
   @keyframes wsActSpin { to { transform: rotate(360deg); } }
@@ -879,13 +849,6 @@
     transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast); }
   .chip-btn:hover { background: var(--surface-hover); color: var(--fg-2); border-color: var(--border-strong); }
   .chip-btn :global(svg) { color: var(--fg-faint); }
-  /* Resume chip = the greeting's answer. Accent-tinted so it reads as the
-     primary "pick up where you left off", with the chat title truncating. */
-  .chip-btn.resume { max-width: 300px; color: var(--accent);
-    background: color-mix(in oklab, var(--accent) 8%, transparent); border-color: color-mix(in oklab, var(--accent) 22%, transparent); }
-  .chip-btn.resume:hover { background: color-mix(in oklab, var(--accent) 15%, transparent); color: var(--accent); border-color: color-mix(in oklab, var(--accent) 34%, transparent); }
-  .chip-btn.resume b { font-weight: 650; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .chip-btn.resume :global(svg) { color: var(--accent); opacity: 0.85; flex: none; }
 
   /* Projects section header: count badge + a compact "New" affordance. */
   .projects-col .count { display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 5px; margin-left: 2px;
@@ -971,48 +934,12 @@
   .empty-sub { font-size: var(--fs-sm); color: var(--fg-muted); line-height: 1.5; }
   .empty .save-btn { margin-top: 4px; }
 
-  /* ── Hero card — the active project, framed + primary ───────────────────── */
-  .hero-card { position: relative; overflow: hidden; display: flex; flex-direction: column; gap: 11px; padding: 13px 15px; margin-bottom: 8px;
-    border-radius: var(--radius-2xl); border: 1px solid color-mix(in oklab, var(--accent) 34%, var(--border));
-    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 7%, var(--bg-elev-1)), var(--bg-elev-1) 70%);
-    box-shadow: 0 14px 36px -22px color-mix(in oklab, var(--accent) 60%, transparent); }
-  .hero-glow { position: absolute; top: -40%; right: -10%; width: 220px; height: 220px; pointer-events: none; z-index: 0;
-    background: radial-gradient(circle, color-mix(in oklab, var(--accent) 22%, transparent), transparent 68%); filter: blur(8px); }
-  .hero-card > :not(.hero-glow) { position: relative; z-index: 1; }
-  .hero-row { display: flex; align-items: center; gap: 12px; }
-  .hero-mono { width: 40px; height: 40px; flex: none; display: grid; place-items: center; border-radius: var(--radius-lg);
-    font-size: 17px; font-weight: 720; letter-spacing: -0.02em; color: var(--accent-fg);
-    background: linear-gradient(150deg, color-mix(in oklab, var(--accent) 92%, white), var(--accent));
-    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 60%, transparent), 0 4px 12px -6px color-mix(in oklab, var(--accent) 50%, transparent); }
-  .hero-id { flex: 1; min-width: 0; }
-  .hero-name-row { display: flex; align-items: center; gap: 8px; }
-  .hero-name { font-size: 16px; font-weight: 680; letter-spacing: -0.015em; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Active-project pill + live dot — ride inside the active card's name row. */
   .active-pill { flex: none; display: inline-flex; align-items: center; gap: 5px; font-size: 9.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
     padding: 3px 8px 3px 6px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
   .live-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 60%, transparent); animation: livePulse 2.2s ease-out infinite; }
   @keyframes livePulse { 0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 55%, transparent); } 70%, 100% { box-shadow: 0 0 0 5px transparent; } }
   @media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
-  .hero-path { font-size: var(--fs-xs); color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
-  .hero-foot { display: flex; align-items: center; gap: 8px; }
-  .meta-dot { color: var(--fg-faint); }
-  .added { font-size: 11px; color: var(--fg-subtle); }
-  .hero-edit { width: 30px; height: 30px; flex: none; margin-left: auto; display: grid; place-items: center; border-radius: var(--radius);
-    color: var(--fg-muted); transition: background var(--dur-fast), color var(--dur-fast); }
-  .hero-edit:hover { background: var(--surface-hover); color: var(--fg); }
-  .hero-open { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 14px; flex: none; border-radius: var(--radius-lg);
-    background: var(--accent); color: var(--accent-fg); font-size: var(--fs-sm); font-weight: 620;
-    transition: filter var(--dur-fast), transform var(--dur-fast); }
-  .hero-open:hover { filter: brightness(1.08); }
-  .hero-open:active { transform: translateY(1px); }
-  /* Secondary action — open the project in a fresh split pane. Ghost/soft so
-     Continue stays the primary. The edit pencil keeps margin-left:auto, so this
-     + Continue ride the same right-aligned cluster. */
-  .hero-split { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; flex: none; border-radius: var(--radius-lg);
-    border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 3%, transparent); color: var(--fg-2);
-    font-size: var(--fs-sm); font-weight: 580; transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast); }
-  .hero-split :global(svg) { color: var(--fg-faint); transition: color var(--dur-fast); }
-  .hero-split:hover { background: var(--surface-hover); border-color: var(--border-strong); color: var(--fg); }
-  .hero-split:hover :global(svg) { color: var(--accent); }
 
   /* Shared scope chip — used by hero + grid cards. */
   .scope-chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; border-radius: 999px;
@@ -1021,45 +948,55 @@
   .scope-chip.sm { height: 20px; padding: 0 8px; font-size: 10.5px; }
   .scope-chip :global(svg) { color: var(--fg-faint); flex: none; }
 
-  /* ── Other projects — compact horizontal rows (was tall stacked cards) ──────
-     Each project is one slim row (mono · name+path · edit · go) so the whole
-     block stays short and the page fits with no scroll. Auto-fills 2-up on a
-     wide window, 1-up when narrow. */
-  .proj-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 8px; }
+  /* ── Project cards — ONE uniform grid; each card = identity row + signal foot
+     (chats · last-active · cost). The active card wears the accent frame in
+     place — no separate hero. Auto-fills 2-up wide, 1-up narrow. */
+  /* 290px floor (not 320) — holds 3-up further down the width range, so fewer
+     rows / less fold pressure on mid-size windows. Default window = 3-up. */
+  .proj-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 8px; }
   .proj-grid.solo { grid-template-columns: minmax(0, 1fr); }
   @media (max-width: 680px) { .proj-grid { grid-template-columns: minmax(0, 1fr); } }
-  .gcard { display: flex; align-items: center; gap: 11px; padding: 9px 11px; text-align: left; cursor: pointer; font: inherit; min-width: 0;
+  .pcard { display: flex; flex-direction: column; gap: 9px; padding: 11px 13px; text-align: left; cursor: pointer; font: inherit; min-width: 0;
     border-radius: var(--radius-xl); border: 1px solid var(--border); background: var(--bg-elev-1);
     transition: border-color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast), background var(--dur-fast); }
-  .gcard:hover { border-color: var(--border-strong); background: var(--bg-elev-2);
+  .pcard:hover { border-color: var(--border-strong); background: var(--bg-elev-2);
     box-shadow: 0 8px 20px -16px color-mix(in oklab, var(--fg) 40%, transparent); transform: translateY(-1px); }
-  .gcard-mono { width: 30px; height: 30px; flex: none; display: grid; place-items: center; border-radius: var(--radius);
-    font-size: 13px; font-weight: 700; color: var(--accent);
-    background: var(--accent-soft);
+  .pcard:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+  .pcard.active { border-color: color-mix(in oklab, var(--accent) 34%, var(--border));
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 6%, var(--bg-elev-1)), var(--bg-elev-1) 75%);
+    box-shadow: 0 14px 36px -24px color-mix(in oklab, var(--accent) 55%, transparent); }
+  .pcard.active:hover { border-color: color-mix(in oklab, var(--accent) 50%, var(--border)); }
+  .pcard-top { display: flex; align-items: center; gap: 11px; min-width: 0; }
+  .pcard-mono { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: var(--radius);
+    font-size: 13px; font-weight: 700; color: var(--accent); background: var(--accent-soft);
     box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 30%, transparent); }
-  .gcard-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-  .gcard-name { font-size: var(--fs-md); font-weight: 640; letter-spacing: -0.01em; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .gcard-meta { display: flex; align-items: center; gap: 8px; min-width: 0; }
-  /* A lone full-width card has the room to lay name + meta on ONE line (like the
-     hero), so it doesn't read as a cramped 2-line stack in a wide row. The 2-up
-     grid keeps the vertical stack — narrow cards need it. */
-  .proj-grid.solo .gcard-id { flex-direction: row; align-items: center; gap: 12px; }
-  .proj-grid.solo .gcard-name { flex: none; }
-  .proj-grid.solo .gcard-meta { flex: 1; }
-  .gcard-path { font-size: var(--fs-xs); color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-  .gcard-meta .scope-chip.sm { flex: none; }
-  .gcard-go { flex: none; display: grid; place-items: center; color: var(--fg-faint); opacity: 0; transform: translateX(-4px);
-    transition: opacity var(--dur-fast), transform var(--dur-fast), color var(--dur-fast); }
-  .gcard:hover .gcard-go { opacity: 1; transform: translateX(0); color: var(--accent); }
+  .pcard.active .pcard-mono { color: var(--accent-fg);
+    background: linear-gradient(150deg, color-mix(in oklab, var(--accent) 92%, white), var(--accent));
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 60%, transparent), 0 4px 12px -6px color-mix(in oklab, var(--accent) 50%, transparent); }
+  .pcard-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+  .pcard-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .pcard-name { font-size: var(--fs-md); font-weight: 640; letter-spacing: -0.01em; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pcard-path { font-size: var(--fs-xs); color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* Edit + Split are DISTINCT actions a user can't discover if fully hidden, so
      they're hinted at rest (cont.151 affordance doctrine) — faint, brightening to
-     full on card hover + their own hover. The go-arrow stays hover-only (it's a
-     directional reinforcement of the already-clickable card, not a 3rd action). */
-  .gcard-edit, .gcard-split { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 6px;
+     full on card hover + their own hover. */
+  .pcard-act { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 6px;
     color: var(--fg-faint); opacity: 0.4; transition: opacity var(--dur-fast), background var(--dur-fast), color var(--dur-fast); }
-  .gcard:hover .gcard-edit, .gcard:hover .gcard-split { opacity: 1; }
-  .gcard-edit:hover { background: var(--surface-hover); color: var(--fg); opacity: 1; }
-  .gcard-split:hover { background: var(--surface-hover); color: var(--accent); opacity: 1; }
+  .pcard:hover .pcard-act { opacity: 1; }
+  .pcard-act:hover { background: var(--surface-hover); color: var(--fg); opacity: 1; }
+  .pcard-foot { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .pmeta { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--fg-muted);
+    font-variant-numeric: tabular-nums; flex: none; }
+  .pmeta :global(svg) { color: var(--fg-faint); }
+  .pmeta.muted { color: var(--fg-subtle); font-style: italic; }
+  .pcard-foot .scope-chip.sm { flex: none; }
+  /* Go affordance: hover-reveal on idle cards; the ACTIVE card shows a visible
+     accent "Continue" at rest — it IS the page's primary next step. */
+  .pcard-go { flex: none; margin-left: auto; display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11.5px; font-weight: 620; color: var(--fg-faint); opacity: 0; transform: translateX(-4px);
+    transition: opacity var(--dur-fast), transform var(--dur-fast), color var(--dur-fast); }
+  .pcard:hover .pcard-go { opacity: 1; transform: translateX(0); color: var(--accent); }
+  .pcard.active .pcard-go { opacity: 1; transform: none; color: var(--accent); }
 
   /* ── Save-current-folder prompt — ONE quiet, accent-tinted CTA ──────────────
      Replaces the old multi-tile "adopt zone". Only shows for an open folder
@@ -1080,7 +1017,9 @@
   .save-current:hover :global(.sc-go) { color: var(--accent); transform: translateX(2px); }
 
   /* ── What's new strip — collapsible disclosure below Projects ───────────── */
-  .news-strip { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
+  /* Docked right under the Activity band (owner call — bottom-pinned footer
+     read as orphaned); hairline keeps it read as reference, not more dashboard. */
+  .news-strip { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
   .news-strip-h { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; cursor: pointer; font: inherit; text-align: left;
     border-radius: var(--radius-xl); border: 1px solid var(--border); background: var(--bg-elev-1);
     transition: border-color var(--dur-fast), background var(--dur-fast); }

@@ -225,7 +225,7 @@
 
 <div class="app" data-dots={uiPrefs.dotField}>
   {#if showOnboarding}
-    <Titlebar setupMode={true} />
+    <Titlebar />
     <div class="ob-host">
       <OnboardingFlow onDone={finishOnboarding} />
     </div>
