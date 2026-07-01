@@ -79,6 +79,24 @@ bash scripts/cdp/c.sh act click ".sendbtn" "" 600                # custom settle
 
 Args: `act {click|key} <selector-or-key> [lookSel] [settleMs=350]`. Backed by a new `sleep` op on the `/batch` dispatcher (`{op:"sleep",params:{ms}}`, clamped 0–10000ms) — usable in any hand-authored batch too. Net: a UI change you'd verify in **3 shell calls + a 1s blind sleep** is now **1 call** (+ the `Read` of the shot). Foreground `sleep` is also blocked by the Bash tool now, so `act` is the supported way to wait for a render.
 
+## Design-inspector loop — measure · baseline · diff · state-shots (2026-07-01)
+
+Purpose-built for one-shot UI/UX work: gather real design FACTS instead of eyeballing a screenshot, and catch unintended visual regressions. See `docs/design/PREFERENCES.md` for the owner taste memo + the full loop.
+
+```bash
+bash scripts/cdp/c.sh measure ".new-chat"          # exact px + resolved CSS vars, self + children
+bash scripts/cdp/c.sh measure ".sidebar" nokids    # element only, no children
+bash scripts/cdp/c.sh baseline ".sidebar" sidebar  # snapshot a PNG reference BEFORE editing
+bash scripts/cdp/c.sh diff ".sidebar" sidebar      # % changed + bounding box of what MOVED
+bash scripts/cdp/c.sh shot-sel ".new-chat" jpeg 70 hover   # capture hover|focus|active state
+```
+
+- **`measure`** — the guessing-killer. Returns box (w×h), padding/margin/gap, font (size/weight/lh/ls), color/bg/border/radius/shadow/opacity for an element, its `::before`/`::after` pseudo-elements (when they carry content — Rift's accent bars/carets are pseudos, invisible to a plain look), AND its direct children. Values are reconstructed from **longhands** (border-radius/padding/box-shadow shorthands don't round-trip via getComputedStyle). Colors show the resolved value AND the CSS var(s) they come from (`--accent`, `--fg`…) so you edit the token, not a magic literal. `display:none` elements are flagged `[geometry N/A]` so a hidden 0×0 box isn't trusted as layout. `measure ".x" ::before` targets a pseudo directly. This turns "make it tighter" from a guess into `gap 10px → 8px`.
+- **`baseline` / `diff`** — visual regression, AA-aware. `baseline` saves a PNG ref to `.tmp/base-<name>.png`; `diff` pixel-compares the current view against it on an in-webview canvas (no npm deps) using **pixelmatch's algorithm — YIQ perceptual color distance + anti-aliasing detection** — so sub-pixel font rendering does NOT read as a change (the #1 false-positive killer for text-heavy UI). Reports real changed-pixel % + how many AA-edge px were suppressed + the bounding box of the change + a **size-mismatch warning** if dims differ (diffs the overlap, never misaligns). `0% · IDENTICAL` = nothing moved. Threshold is 0–1 (pixelmatch convention, default 0.1; smaller = stricter). Cost: ~200ms algo + ~800ms screenshot capture; component-scoped is the fast common case.
+- **State-shots** — `shot-sel <sel> <fmt> <q> hover|focus|active` drives a real CDP hover/focus/active before capturing, so you see the interactive state the user sees, not just rest. **The forced state is auto-released after capture** (mouse moved off-surface / blur) so it can't poison the next `diff`/`look`. Also available as a `state` field on the `screenshot`/batch op.
+
+New batch ops: `measure`, `vdiff`. New routes: `POST /measure`, `POST /vdiff`. `vdiff` accepts `{before, after}` as data: URLs OR disk paths (`diff` passes paths to skip base64-encode overhead) + `{threshold, includeAA}`.
+
 ## /state — the swiss army snapshot
 
 One call returns: which page is active, current model, textarea contents, bubble count, per-bubble role + reasoning label + reasoning chars + text preview, streaming flag. Use this instead of multiple eval calls for "what is the assistant currently showing."

@@ -148,6 +148,45 @@ case "$cmd" in
       ($l.errors[]? | "  ✗ " + (.text // "?")),
       ($l.shot.path // ($l.shot.error // "(no shot)"))'
     ;;
+  measure)
+    # measure <selector> [nokids] — REAL computed geometry + design tokens for an
+    # element and its direct children. The guessing-killer: edit from exact px +
+    # resolved CSS vars instead of eyeballing a screenshot.
+    #   c.sh measure ".new-chat"          -> box/pad/gap/font/color/bg/border/radius/shadow + kids
+    #   c.sh measure ".sidebar" nokids    -> just the element, no children
+    sel="${1:-}"; kids="${2:-}"
+    if [ -z "$sel" ]; then echo "usage: $0 measure <selector> [nokids|::before|::after]" >&2; exit 2; fi
+    peso=""; case "$kids" in ::before|::after|before|after) peso="$kids"; kids="" ;; esac
+    body="$(jq -nc --arg s "$sel" --arg p "$peso" --argjson c "$([ "$kids" = "nokids" ] && echo false || echo true)" \
+      '{selector:$s,children:$c} + (if $p=="" then {} else {pseudo:$p} end)')"
+    resp="$(post measure "$body")"
+    if [ -n "$(printf '%s' "$resp" | jq -r '.value.error // .error // empty')" ]; then
+      printf '%s' "$resp" | jq -r '"[measure] ERROR: " + (.value.error // .error)'
+    else
+      printf '%s' "$resp" | jq -r '
+        (.value // .) as $v |
+        def line(o): "  " + o.tag
+          + (if o.hidden then " [display:none — geometry N/A]" else "" end)
+          + "  " + (o.box.w|tostring) + "×" + (o.box.h|tostring)
+          + (if o.pad then " · pad " + o.pad else "" end)
+          + (if o.gap then " · gap " + o.gap else "" end)
+          + (if o.margin then " · m " + o.margin else "" end)
+          + (if o.font then " · " + o.font else "" end)
+          + (if o.color then " · fg " + o.color else "" end)
+          + (if o.bg then " · bg " + o.bg else "" end)
+          + (if o.border then " · bd " + o.border else "" end)
+          + (if o.radius then " · r " + o.radius else "" end)
+          + (if o.shadow then " · shadow " + (o.shadow|.[0:60]) else "" end)
+          + (if o.opacity then " · op " + o.opacity else "" end)
+          + (if o.flex then " · flex " + o.flex else "" end);
+        "[measure] " + $v.self.tag, line($v.self),
+        (if $v.pseudo then ($v.pseudo[] | "  ┗ " + .tag + "  " + (.box.w|tostring) + "×" + (.box.h|tostring)
+          + (if .bg then " · bg " + .bg else "" end) + (if .radius then " · r " + .radius else "" end)
+          + (if .color then " · fg " + .color else "" end)) else empty end),
+        (if $v.children then "[children " + (($v.children|length)|tostring) + "]" else empty end),
+        ($v.children[]? | line(.))'
+    fi
+    ;;
   eval)
     js="$1"
     post eval "$(jq -nc --arg js "$js" '{js:$js}')"
@@ -172,10 +211,61 @@ case "$cmd" in
     else printf '%s' "$resp" | jq -r '.path // (.error | "ERROR: " + .)'; fi
     ;;
   shot-sel)
+    # shot-sel <selector> [fmt] [q] [--json|state]
+    #   c.sh shot-sel ".new-chat"                 -> clip to selector
+    #   c.sh shot-sel ".new-chat" jpeg 70 hover   -> capture the HOVER state (also focus/active)
     sel="$1"; fmt="${2:-jpeg}"; q="${3:-65}"; mode="${4:-path}"
-    resp="$(post screenshot "$(jq -nc --arg s "$sel" --arg f "$fmt" --argjson q "$q" '{selector:$s,format:$f,quality:$q}')")"
+    state=""; case "$mode" in hover|focus|active) state="$mode"; mode="path" ;; esac
+    body="$(jq -nc --arg s "$sel" --arg f "$fmt" --argjson q "$q" --arg st "$state" \
+      '{selector:$s,format:$f,quality:$q} + (if $st=="" then {} else {state:$st} end)')"
+    resp="$(post screenshot "$body")"
     if [ "$mode" = "--json" ]; then printf '%s' "$resp"
     else printf '%s' "$resp" | jq -r '.path // (.error | "ERROR: " + .)'; fi
+    ;;
+  baseline)
+    # baseline [selector] [name] — capture a PNG reference to diff against later.
+    # Named refs live in .tmp/base-<name>.png (default name = "sidebar"). Whole-page
+    # or selector-clipped. Use BEFORE editing, then `c.sh diff` after each change.
+    sel="${1:-}"; name="${2:-sidebar}"
+    body="$(jq -nc --arg s "$sel" '{format:"png",quality:0} + (if $s=="" then {} else {selector:$s} end)')"
+    resp="$(post screenshot "$body")"
+    src="$(printf '%s' "$resp" | jq -r '.path // empty')"
+    if [ -z "$src" ]; then printf '%s' "$resp" | jq -r '"[baseline] ERROR: " + (.error // "no shot")'; else
+      dest="$(dirname "$src")/base-$name.png"
+      cp "$src" "$dest"
+      echo "[baseline] $name captured -> $dest"
+    fi
+    ;;
+  diff)
+    # diff [selector] [name] [threshold] — pixel-diff the CURRENT view against a
+    # saved baseline using pixelmatch's YIQ + anti-aliasing-aware algorithm, so
+    # sub-pixel font rendering doesn't read as a change. Reports real changed-pixel
+    # %/ratio + the bounding box of what moved + how many AA-edge pixels were
+    # suppressed. Catches an unintended change 400px from the edit site instantly.
+    #   c.sh baseline ".sidebar"   (before)
+    #   c.sh diff ".sidebar"       (after each edit) -> [diff] 2.14% changed · box …
+    # threshold is 0–1 (pixelmatch convention, default 0.1; smaller = stricter).
+    sel="${1:-}"; name="${2:-sidebar}"; thr="${3:-0.1}"
+    base="$(dirname "$0")/.tmp/base-$name.png"
+    [ -f "$base" ] || { echo "[diff] no baseline '$name' — run: c.sh baseline \"$sel\" $name" >&2; exit 4; }
+    body="$(jq -nc --arg s "$sel" '{format:"png",quality:0} + (if $s=="" then {} else {selector:$s} end)')"
+    cur="$(post screenshot "$body" | jq -r '.path // empty')"
+    [ -n "$cur" ] || { echo "[diff] current screenshot failed" >&2; exit 5; }
+    # Pass FILE PATHS, not base64. The server's vdiff readB64() loads either a
+    # data: URL or a disk path, so we hand it the two PNG paths and skip the
+    # base64+jq encode step entirely (was ~360ms of pure process-spawn overhead on
+    # a tiny image) AND sidestep the ARG_MAX ceiling that inlining the blobs hit.
+    # Paths are short, so a normal jq --arg body is safe.
+    dbody="$(jq -nc --arg b "$base" --arg a "$cur" --argjson t "$thr" '{before:$b,after:$a,threshold:$t}')"
+    resp="$(post vdiff "$dbody")"
+    printf '%s' "$resp" | jq -r '
+      (.value // .) as $v |
+      if $v.error then "[diff] ERROR: " + $v.error
+      else "[diff] " + ($v.pct|tostring) + "% changed (" + ($v.changed|tostring) + "/" + ($v.total|tostring) + " px, " + ($v.W|tostring) + "×" + ($v.H|tostring) + ")"
+        + (if ($v.aaSkipped // 0) > 0 then "  · " + ($v.aaSkipped|tostring) + " AA-edge px suppressed" else "" end)
+        + (if $v.box then "  · region " + ($v.box.w|tostring) + "×" + ($v.box.h|tostring) + " @ (" + ($v.box.x|tostring) + "," + ($v.box.y|tostring) + ")" else "  · IDENTICAL" end)
+        + (if $v.sizeMismatch then "\n  ⚠ SIZE MISMATCH: baseline " + ($v.dims.a.w|tostring) + "×" + ($v.dims.a.h|tostring) + " vs current " + ($v.dims.b.w|tostring) + "×" + ($v.dims.b.h|tostring) + " — diffed the overlap only" else "" end)
+      end'
     ;;
   batch)
     body="${1:-}"
@@ -224,7 +314,7 @@ case "$cmd" in
     curl -sS -X POST "$API/shutdown" 2>/dev/null || true
     ;;
   *)
-    echo "usage: $0 [-t main|browser] {health|targets|look|act|state|page|ax|console|eval|type|click|wait|shot|shot-sel|batch|key|reload|reset-viewport|diag|shutdown} ..." >&2
+    echo "usage: $0 [-t main|browser] {health|targets|look|act|state|page|ax|measure|console|eval|type|click|wait|shot|shot-sel|baseline|diff|batch|key|reload|reset-viewport|diag|shutdown} ..." >&2
     exit 2
     ;;
 esac

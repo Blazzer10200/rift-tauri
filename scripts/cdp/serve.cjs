@@ -414,7 +414,17 @@ function screenshot(opts = {}, target = 'main') {
     return _screenshotImpl(opts, target);
 }
 
-async function _screenshotImpl({ format = 'jpeg', quality = 65, clip, selector, vw, vh } = {}, target = 'main') {
+async function _screenshotImpl({ format = 'jpeg', quality = 65, clip, selector, vw, vh, state } = {}, target = 'main') {
+    // Optional interactive-state capture: drive a real hover/focus/active on the
+    // selector before shooting, so I see the button the way the user does with a
+    // mouse on it — not just the resting frame. Requires a selector to target.
+    let stateToRelease = null;
+    if (state && selector) {
+        const s = await enterState(selector, state, target);
+        if (s.error) throw new Error(`enterState(${state}): ${s.error}`);
+        await new Promise((res) => setTimeout(res, 140)); // let :hover transitions settle
+        stateToRelease = state;
+    }
     // Optional layout-viewport override (vw/vh): forces the page to lay out + render
     // at the given CSS size regardless of the real OS window size, so shots stay
     // faithful even when the window is parked tiny. Cleared after capture.
@@ -501,6 +511,24 @@ async function _screenshotImpl({ format = 'jpeg', quality = 65, clip, selector, 
     } finally {
         if (overrideViewport || autoScaled) {
             await cdp('Emulation.clearDeviceMetricsOverride', {}, 8000, target).catch(() => {});
+        }
+        // Release any interactive state we forced for the capture, else the UI is
+        // left stuck in :hover/:active (poisons the NEXT diff/look — the pointer is
+        // still parked on the element). Move the mouse off-surface + release the
+        // button; blur for focus. Verified: without this, a hover-shot left
+        // new-chat.matches(':hover')===true for every subsequent read.
+        if (stateToRelease) {
+            try {
+                if (stateToRelease === 'active') {
+                    await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 1, y: 1, button: 'left', buttons: 0, clickCount: 1 }, 8000, target).catch(() => {});
+                }
+                if (stateToRelease === 'hover' || stateToRelease === 'active') {
+                    await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 1, y: 1, buttons: 0 }, 8000, target).catch(() => {});
+                }
+                if (stateToRelease === 'focus') {
+                    await evalJs(`document.activeElement?.blur?.()`, 5000, target).catch(() => {});
+                }
+            } catch {}
         }
     }
     if (!resp.result?.data) throw new Error('CDP returned no data');
@@ -648,6 +676,245 @@ async function axTree({ selector, full, limit } = {}, target = 'main') {
     return { count: out.length, total: nodes.length, truncated: out.length >= cap, nodes: out };
 }
 
+// --- /measure — the guessing-killer (2026-07-01) ---
+// Returns the REAL computed geometry + design tokens for an element (and,
+// optionally, its direct children) so edits start from facts, not a guess at the
+// current px/color. This is the single biggest lever for one-shot UI work: a
+// screenshot shows "there's a button", measure shows "height 38px, gap 10px,
+// padding 0 10px 0 11px, radius 10px, bg rgba(.. from --accent 12%), color #e8..".
+// Colors are emitted as the resolved rgb(a) AND, when the property's value chain
+// references a CSS custom property, the var name — so I can edit the token, not a
+// magic literal.
+async function measure({ selector, children = true, depth = 1, pseudo } = {}, target = 'main') {
+    const js = `
+    (() => {
+      const root = document.querySelector(${JSON.stringify(selector)});
+      if (!root) return { error: 'selector not found: ' + ${JSON.stringify(selector)} };
+      const pseudoElt = ${pseudo ? JSON.stringify(pseudo) : 'null'};
+      const px = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? Math.round(n * 100) / 100 : v; };
+      // Which CSS custom properties (if any) does this element's inline/matched
+      // style reference for a given property? We can't cheaply reverse a resolved
+      // rgb() back to its var, so we scan the element's own style + the vars in
+      // scope and report any --token whose *resolved* value equals the computed
+      // one. Cheap, best-effort, and catches the common "color: var(--accent)" case.
+      const describe = (el, pe) => {
+        const cs = getComputedStyle(el, pe || undefined);
+        const rect = el.getBoundingClientRect();
+        // A pseudo-element with content:none / normal isn't in the render tree —
+        // its computed style is inherited defaults, not "applied styles". Flag it.
+        if (pe) {
+          const content = cs.content;
+          if (content === 'none' || content === 'normal') return { pseudo: pe, absent: true, content };
+        }
+        // display:none => no box; geometry is meaningless (0×0). Report the fact so
+        // a measurement of a hidden element isn't silently trusted as layout truth.
+        const hidden = cs.display === 'none';
+        // Collect in-scope custom props (walk up, cache on first hit) to reverse-map colors.
+        const varMap = {};
+        for (let n = el; n; n = n.parentElement) {
+          const s = n.getAttribute && n.getAttribute('style');
+          if (!s) continue;
+          for (const m of s.matchAll(/(--[\\w-]+)\\s*:/g)) {
+            const name = m[1];
+            if (!(name in varMap)) { const val = cs.getPropertyValue(name).trim(); if (val) varMap[name] = val; }
+          }
+        }
+        // Also pull the common design tokens even if not inline, so I see the palette.
+        for (const t of ['--accent','--fg','--fg-2','--fg-muted','--fg-faint','--fg-subtle','--bg','--border','--surface-hover','--ok','--danger','--status-busy']) {
+          if (!(t in varMap)) { const v = cs.getPropertyValue(t).trim(); if (v) varMap[t] = v; }
+        }
+        // Reverse-map a resolved color to its token. String-equality on the resolved
+        // value is best-effort (multiple vars can share a value, and serialization
+        // is color-space dependent) — so we return ALL matching tokens, not just one,
+        // and the caller treats it as a hint. Normalize whitespace to dodge trivial
+        // serialization spacing diffs.
+        const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+        const tokenFor = (resolved) => {
+          const r = norm(resolved); if (!r) return null;
+          const hits = [];
+          for (const [name, val] of Object.entries(varMap)) if (norm(val) === r) hits.push(name);
+          return hits.length ? hits.join('=') : null;
+        };
+        const col = (prop) => { const v = cs.getPropertyValue(prop).trim(); const tok = tokenFor(v); return tok ? v + ' (' + tok + ')' : v; };
+        // Read LONGHANDS — border-radius/padding/margin/gap/box-shadow shorthands
+        // don't round-trip reliably via getComputedStyle (MDN). Reconstruct a compact
+        // shorthand ourselves, collapsing when all sides are equal.
+        const four = (t,r,b,l) => { const v=[cs[t],cs[r],cs[b],cs[l]].map(px); return (v[0]===v[1]&&v[1]===v[2]&&v[2]===v[3]) ? v[0]+'px' : v.map(x=>x+'px').join(' '); };
+        const radius = () => { const c=[cs.borderTopLeftRadius,cs.borderTopRightRadius,cs.borderBottomRightRadius,cs.borderBottomLeftRadius]; const allZero=c.every(x=>x==='0px'); if(allZero)return undefined; const u=[...new Set(c)]; return u.length===1?u[0]:c.join(' '); };
+        const padStr = four('paddingTop','paddingRight','paddingBottom','paddingLeft');
+        const marStr = four('marginTop','marginRight','marginBottom','marginLeft');
+        const gapVal = (cs.rowGap && cs.rowGap!=='normal') ? (cs.rowGap===cs.columnGap ? px(cs.rowGap)+'px' : px(cs.rowGap)+'px '+px(cs.columnGap)+'px') : undefined;
+        const tag = el.tagName.toLowerCase() + (el.className && typeof el.className === 'string' ? '.' + el.className.trim().split(/\\s+/).join('.') : '');
+        return {
+          tag: pe ? tag + '::' + pe.replace(/^::?/,'') : tag,
+          hidden: hidden || undefined,
+          box: { w: px(rect.width), h: px(rect.height) },
+          pad: padStr !== '0px' ? padStr : undefined,
+          margin: marStr !== '0px' ? marStr : undefined,
+          gap: gapVal,
+          display: cs.display, flex: cs.display.includes('flex') ? (cs.flexDirection + ' / ' + cs.alignItems + ' / ' + cs.justifyContent) : undefined,
+          font: px(cs.fontSize) + 'px/' + cs.fontWeight + (cs.lineHeight !== 'normal' ? ' lh ' + cs.lineHeight : '') + (cs.letterSpacing !== 'normal' ? ' ls ' + cs.letterSpacing : ''),
+          color: col('color'),
+          bg: cs.backgroundColor !== 'rgba(0, 0, 0, 0)' ? col('background-color') : (cs.backgroundImage !== 'none' ? cs.backgroundImage.slice(0, 90) : undefined),
+          border: cs.borderTopWidth !== '0px' ? (cs.borderTopWidth + ' ' + cs.borderTopStyle + ' ' + col('border-top-color')) : undefined,
+          radius: radius(),
+          shadow: cs.boxShadow !== 'none' ? cs.boxShadow : undefined,
+          opacity: cs.opacity !== '1' ? cs.opacity : undefined,
+        };
+      };
+      const clean = (o) => { for (const k in o) if (o[k] === undefined) delete o[k]; return o; };
+      const out = { self: clean(describe(root, pseudoElt)) };
+      // Always surface ::before / ::after when they carry content — a lot of Rift's
+      // accent bars/carets are pseudo-elements, invisible to a plain measure.
+      if (!pseudoElt) {
+        for (const pe of ['::before','::after']) {
+          const d = describe(root, pe);
+          if (!d.absent) { (out.pseudo ||= []).push(clean(d)); }
+        }
+      }
+      if (${children ? 'true' : 'false'} && !pseudoElt) {
+        out.children = Array.from(root.children).slice(0, 24).map(c => clean(describe(c)));
+      }
+      return out;
+    })()`;
+    return evalJs(js, 30000, target);
+}
+
+// --- state-aware screenshots: drive a real hover/focus before capture ---
+// Design lives in the interactive states, not just rest. Given a selector + a
+// state ('hover'|'focus'|'active'), dispatch the real CDP Input events to enter
+// that state, let it settle, then hand back to the normal screenshot path. Rest
+// state is restored by moving the mouse to (0,0) after — callers that want to
+// keep the state open pass keepState.
+async function enterState(selector, state, target = 'main') {
+    const loc = await evalJs(`(() => {
+        const el = document.querySelector(${JSON.stringify(selector)});
+        if (!el) return { error: 'selector not found' };
+        el.scrollIntoView({ block: 'center', inline: 'center' });
+        const r = el.getBoundingClientRect();
+        return { x: r.left + r.width/2, y: r.top + r.height/2, ok: r.width>0 && r.height>0 };
+    })()`, 8000, target);
+    if (loc.value?.error || !loc.value?.ok) return { error: loc.value?.error || 'target not hittable' };
+    const { x, y } = loc.value;
+    if (state === 'hover' || state === 'active') {
+        await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, buttons: 0 }, 8000, target);
+    }
+    if (state === 'active') {
+        await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1 }, 8000, target);
+    }
+    if (state === 'focus') {
+        await evalJs(`document.querySelector(${JSON.stringify(selector)})?.focus()`, 8000, target);
+    }
+    return { ok: true };
+}
+
+// --- /vdiff — visual regression against a baseline, computed IN the webview ---
+// No new npm deps (pixelmatch/pngjs aren't installed and this is a dev tool): the
+// two screenshots are decoded + diffed on a <canvas> inside WebView2. We port
+// pixelmatch's actual algorithm (MIT, Mapbox) rather than a naive per-channel
+// abs-diff, because naive RGB-sum flags every anti-aliased text edge as "changed"
+// — the #1 false-positive source, fatal for a text-heavy UI. Two borrowed pieces:
+//   1. YIQ perceptual color distance (luma-weighted) — tracks what the eye sees,
+//      not raw RGB delta; robust to hue shifts that look identical.
+//   2. Anti-aliasing detection — a pixel that is an AA edge in EITHER image (sits
+//      on a local brightness min/max vs its 8 neighbours) is NOT counted as a real
+//      change. This is what makes sub-pixel font rendering not read as a regression.
+// `threshold` is 0–1 (pixelmatch convention, default 0.1; smaller = stricter).
+// Returns changed-pixel count + ratio (scales with image size) + a bounding box of
+// the real (non-AA) change region, and flags a size mismatch instead of silently
+// misaligning. `includeAA:true` disables the AA suppression (count everything).
+async function vdiff({ before, after, threshold = 0.1, includeAA = false } = {}, target = 'main') {
+    if (!before || !after) return { error: 'vdiff needs {before, after} base64 PNG data URLs or file paths' };
+    const readB64 = (p) => {
+        if (typeof p === 'string' && p.startsWith('data:')) return p;
+        try { return 'data:image/png;base64,' + fs.readFileSync(p).toString('base64'); }
+        catch (e) { return null; }
+    };
+    const a = readB64(before), b = readB64(after);
+    if (!a || !b) return { error: 'could not read before/after image(s)' };
+    const js = `
+    (async () => {
+      const load = (src) => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('decode failed')); i.src = src; });
+      const [ia, ib] = await Promise.all([load(${JSON.stringify(a)}), load(${JSON.stringify(b)})]);
+      const sizeMismatch = (ia.width !== ib.width || ia.height !== ib.height);
+      const W = Math.min(ia.width, ib.width), H = Math.min(ia.height, ib.height);
+      if (!W || !H) return { error: 'zero-size image' };
+      const mk = (img) => { const c = new OffscreenCanvas(W, H); const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(img, 0, 0); return x.getImageData(0, 0, W, H).data; };
+      const img1 = mk(ia), img2 = mk(ib);
+      const includeAA = ${includeAA};
+      // pixelmatch: max YIQ distance between two fully-different colours, scaled by
+      // threshold, is the per-pixel cutoff. 35215 = the squared-distance ceiling.
+      const maxDelta = 35215 * ${threshold} * ${threshold};
+
+      const rgb2y = (r,g,b) => r*0.29889531 + g*0.58662247 + b*0.11448223;
+      const rgb2i = (r,g,b) => r*0.59597799 - g*0.27417610 - b*0.32180189;
+      const rgb2q = (r,g,b) => r*0.21147017 - g*0.52261711 + b*0.31114694;
+      // Blend semi-transparent px over white (screenshots are opaque, but be safe).
+      const blend = (c,a) => 255 + (c-255)*a;
+      const px = (data,i) => { const a = data[i+3]/255; return [blend(data[i],a), blend(data[i+1],a), blend(data[i+2],a)]; };
+      // Squared YIQ color delta between px i in img a and px j in img b.
+      const colorDelta = (da, db, i, j, yOnly) => {
+        const [r1,g1,b1] = px(da,i), [r2,g2,b2] = px(db,j);
+        const y = rgb2y(r1,g1,b1) - rgb2y(r2,g2,b2);
+        if (yOnly) return y;
+        const q = rgb2q(r1,g1,b1) - rgb2q(r2,g2,b2);
+        const iq = rgb2i(r1,g1,b1) - rgb2i(r2,g2,b2);
+        const d = 0.5053*y*y + 0.299*iq*iq + 0.1957*q*q;
+        return (rgb2y(r1,g1,b1) > rgb2y(r2,g2,b2)) ? -d : d;
+      };
+      // Is (x,y) an anti-aliased pixel in \`data\`? pixelmatch: it has ≥3 neighbours
+      // that differ from it, and is the local brightness min OR max, and it has a
+      // sibling with identical value nearby. (Vyšniauskas 2009 detector.)
+      const antialiased = (data, x1, y1, w, h, data2) => {
+        const x0 = Math.max(x1-1,0), y0 = Math.max(y1-1,0), xE = Math.min(x1+1,w-1), yE = Math.min(y1+1,h-1);
+        const pos = (y1*w+x1)*4; let zeroes = (x1===x0||x1===xE||y1===y0||y1===yE)?1:0;
+        let min=0, max=0, minX=0,minY=0,maxX=0,maxY=0;
+        for (let x=x0;x<=xE;x++) for (let y=y0;y<=yE;y++) {
+          if (x===x1 && y===y1) continue;
+          const delta = colorDelta(data, data, pos, (y*w+x)*4, true);
+          if (delta===0) { zeroes++; if (zeroes>2) return false; }
+          else if (delta<min) { min=delta; minX=x; minY=y; }
+          else if (delta>max) { max=delta; maxX=x; maxY=y; }
+        }
+        if (min===0 || max===0) return false;
+        return (hasSibling(data, minX,minY,w,h) && hasSibling(data2||data, minX,minY,w,h)) ||
+               (hasSibling(data, maxX,maxY,w,h) && hasSibling(data2||data, maxX,maxY,w,h));
+      };
+      const hasSibling = (data, x1, y1, w, h) => {
+        const x0=Math.max(x1-1,0), y0=Math.max(y1-1,0), xE=Math.min(x1+1,w-1), yE=Math.min(y1+1,h-1);
+        const pos=(y1*w+x1)*4; let z=0;
+        for (let x=x0;x<=xE;x++) for (let y=y0;y<=yE;y++) {
+          if (x===x1&&y===y1) continue;
+          if (colorDelta(data,data,pos,(y*w+x)*4,true)===0) { z++; if (z>2) return true; }
+        }
+        return false;
+      };
+
+      let changed=0, aaSkipped=0, minX=W,minY=H,maxX=0,maxY=0;
+      for (let y=0;y<H;y++) for (let x=0;x<W;x++) {
+        const pos=(y*W+x)*4;
+        const delta = colorDelta(img1, img2, pos, pos, false);
+        if (Math.abs(delta) > maxDelta) {
+          // Real difference in raw terms — but is it just an AA edge? If the pixel
+          // is antialiased in EITHER image (and we're suppressing AA), skip it.
+          if (!includeAA && (antialiased(img1,x,y,W,H,img2) || antialiased(img2,x,y,W,H,img1))) {
+            aaSkipped++;
+          } else {
+            changed++;
+            if (x<minX)minX=x; if (x>maxX)maxX=x; if (y<minY)minY=y; if (y>maxY)maxY=y;
+          }
+        }
+      }
+      const total=W*H;
+      const box = changed ? { x:minX, y:minY, w:maxX-minX+1, h:maxY-minY+1 } : null;
+      return { W, H, changed, total, aaSkipped, sizeMismatch,
+        dims: { a:{w:ia.width,h:ia.height}, b:{w:ib.width,h:ib.height} },
+        pct: Math.round(changed/total*10000)/100,
+        ratio: Math.round(changed/total*1e6)/1e6, box };
+    })()`;
+    return evalJs(js, 45000, target);
+}
+
 // Drain/peek the per-target console ring buffer. `level` filters (error/warning/
 // info/log), `limit` caps to the newest N, `clear` empties after reading so the
 // next call only sees what fired since. This is the one thing eval/state can't
@@ -735,6 +1002,8 @@ async function runOp({ op, params = {}, target }, batchTarget = 'main') {
         case 'console': return consoleLogs(params, t);
         case 'ax': return axTree(params, t);
         case 'look': return look(params, t);
+        case 'measure': return measure(params, t);
+        case 'vdiff': return vdiff(params, t);
         default: return { error: `unknown op: ${op}` };
     }
 }
@@ -780,6 +1049,8 @@ const routes = {
     'GET /console': async (body, target, query) => consoleLogs(query, target),
     'GET /ax': async (body, target, query) => axTree(query, target),
     'POST /ax': async (body, target) => axTree(body, target),
+    'POST /measure': async (body, target) => measure(body, target),
+    'POST /vdiff': async (body, target) => vdiff(body, target),
     'POST /batch': async ({ ops = [], parallel = false }, target) => {
         const t0 = Date.now();
         let results;

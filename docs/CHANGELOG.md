@@ -2,6 +2,15 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## Unreleased (in-tree on `main`) — Sidebar clean-up
+
+### Changed
+- **Projects list is now readable at a glance.** The cryptic monogram chips (single letters like E/R/R/D — two projects could show the same letter) are replaced with clearly-named rows that match the rest of the sidebar. When you have a lot of projects the list stays compact by default — it shows your active project and a **Show all (N)** link, expanding only when you want it.
+- **Simpler conversation history.** The sidebar opens showing just your most recent day's chats, with a single **Show earlier** link at the bottom to reveal the rest — no more wall of date-grouped history on every glance.
+- **Removed clutter:** the separate "This project / All projects" toggle (folded into the project list — click "All projects") and the sidebar search box (the global **Ctrl+K** command palette already searches chats). The whole rail reads calmer, with more breathing room.
+
+*(Unshipped — awaiting the ship chain. Frontend-only; svelte-check clean.)*
+
 ## v0.82.1 — Warm-CLI process leaks fixed (the "why is everything slow" memory pileup)
 
 ### Fixed

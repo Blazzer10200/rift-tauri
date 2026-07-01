@@ -6,6 +6,8 @@ const COLLAPSE_KEY = "rift.ui.sidebar-collapsed.v1";
 const WIDTH_KEY = "rift.ui.sidebar-width.v1";
 const PINNED_KEY = "rift.ui.pinned-convos.v1";
 const ALL_PROJECTS_KEY = "rift.ui.conv-all-projects.v1";
+const PROJECTS_OPEN_KEY = "rift.ui.projects-expanded.v1";
+const HISTORY_OPEN_KEY = "rift.ui.history-expanded.v1";
 const MIN_W = 208;
 const MAX_W = 380;
 const DEFAULT_W = 248;
@@ -29,13 +31,17 @@ class ShellState {
   width = $state(DEFAULT_W);
   /** Live during a drag on the rail's resize handle — suppresses transitions. */
   resizing = $state(false);
-  /** Conversation-list search query (sidebar). */
-  convQuery = $state("");
   /** Pinned conversation ids — frontend-only (the backend meta has no pin). */
   pinned = $state<Set<string>>(new Set<string>());
   /** Sidebar scope: false (default) = show only the open project's chats;
    *  true = show every project's chats (with a per-row project label). */
   allProjects = $state(false);
+  /** Projects list expanded (show all) vs collapsed (active project only).
+   *  Progressive disclosure so a 20-project rail stays 2 rows tall by default. */
+  projectsExpanded = $state(false);
+  /** Conversation history shows Today only by default; expanded reveals all the
+   *  older date groups. One "Show earlier" toggle instead of per-group chevrons. */
+  historyExpanded = $state(false);
 
   /** True while the window is narrow enough that we auto-collapsed the rail.
    *  Tracked separately from `collapsed` so widening restores the user's own
@@ -62,14 +68,30 @@ class ShellState {
       if (Array.isArray(ids)) this.pinned = new Set(ids.filter((s): s is string => typeof s === "string"));
     } catch (e) { console.warn("[shell] pinned-convos parse failed:", e); }
     this.allProjects = localStorage.getItem(ALL_PROJECTS_KEY) === "1";
+    this.projectsExpanded = localStorage.getItem(PROJECTS_OPEN_KEY) === "1";
+    this.historyExpanded = localStorage.getItem(HISTORY_OPEN_KEY) === "1";
+  }
+
+  toggleProjectsExpanded() {
+    this.projectsExpanded = !this.projectsExpanded;
+    if (typeof window !== "undefined") localStorage.setItem(PROJECTS_OPEN_KEY, this.projectsExpanded ? "1" : "0");
+  }
+
+  toggleHistoryExpanded() {
+    this.historyExpanded = !this.historyExpanded;
+    if (typeof window !== "undefined") localStorage.setItem(HISTORY_OPEN_KEY, this.historyExpanded ? "1" : "0");
   }
 
   isPinned(id: string): boolean { return this.pinned.has(id); }
 
   toggleAllProjects() {
-    this.allProjects = !this.allProjects;
+    this.setAllProjects(!this.allProjects);
+  }
+
+  setAllProjects(v: boolean) {
+    this.allProjects = v;
     if (typeof window !== "undefined") {
-      localStorage.setItem(ALL_PROJECTS_KEY, this.allProjects ? "1" : "0");
+      localStorage.setItem(ALL_PROJECTS_KEY, v ? "1" : "0");
     }
   }
 

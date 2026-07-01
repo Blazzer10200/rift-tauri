@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Search, X, Pin, PinOff, MoreHorizontal, Pencil, Trash2, Circle } from "lucide-svelte";
+  import { Pin, PinOff, MoreHorizontal, Pencil, Trash2, Circle } from "lucide-svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { shell } from "$lib/state/shell.svelte";
   import { workspace } from "$lib/state/workspace.svelte";
@@ -38,7 +38,6 @@
 
   const groups = $derived.by<Group[]>(() => {
     const now = Date.now();
-    const q = shell.convQuery.trim().toLowerCase();
     // Actively-streaming convos pin to the top of their bucket — clicking another
     // chat must NOT shove the live turn below it.
     const working = new Set(assistant.liveTabs.map((t) => t.convoId));
@@ -66,7 +65,7 @@
       // there's no open folder (activeKey === "" → show everything so chats are
       // never stranded). A convo whose root matches the open folder is in-scope.
       if (!shell.allProjects && activeKey && rootKey(c.workspaceRoot) !== activeKey) return false;
-      return !q || c.title.toLowerCase().includes(q) || (c.lastSnippet ?? "").toLowerCase().includes(q);
+      return true;
     });
     const pinned: ConversationMeta[] = [];
     const buckets = new Map<string, ConversationMeta[]>();
@@ -83,6 +82,20 @@
     }
     return out;
   });
+
+  // Default view = the most recent day's chats, flat, no header — everything
+  // older tucks behind one "Show earlier" row. "Recent" = Pinned + the FIRST
+  // non-pinned bucket (Today if it has items, else Yesterday, else whatever the
+  // newest bucket is). This avoids the "list looks empty" trap when nothing was
+  // touched today. Pinned always shows on top.
+  const recentGroups = $derived.by(() => {
+    const pinned = groups.filter((g) => g.label === "Pinned");
+    const firstDay = groups.find((g) => g.label !== "Pinned");
+    return firstDay ? [...pinned, firstDay] : pinned;
+  });
+  const recentLabels = $derived(new Set(recentGroups.map((g) => g.label)));
+  const olderGroups = $derived(groups.filter((g) => !recentLabels.has(g.label)));
+  const olderCount = $derived(olderGroups.reduce((n, g) => n + g.items.length, 0));
 
   function relTime(ts: number): string {
     const s = Math.max(0, (Date.now() - ts) / 1000);
@@ -169,94 +182,77 @@
   });
 </script>
 
-<div class="conv-search" class:active={shell.convQuery.length > 0}>
-  <Search size={13} />
-  <input
-    type="text"
-    placeholder="Search conversations…"
-    bind:value={shell.convQuery}
-    spellcheck="false"
-    aria-label="Search conversations"
-  />
-  {#if shell.convQuery}
-    <button class="cs-clear" type="button" onclick={() => (shell.convQuery = "")} aria-label="Clear search"><X size={12} /></button>
-  {/if}
-</div>
+{#snippet convRow(c: ConversationMeta)}
+  <div
+    class="crow"
+    class:on={isActive(c.id)}
+    class:open={isOpen(c.id)}
+    class:menu-open={menuId === c.id}
+    role="button"
+    tabindex="0"
+    draggable={renaming === c.id ? "false" : "true"}
+    ondragstart={(e) => onRowDragStart(e, c.id)}
+    ondragend={onRowDragEnd}
+    onclick={() => open(c.id)}
+    onkeydown={(e) => { if (e.key === "Enter") open(c.id); }}
+  >
+    {#if workingIds.has(c.id)}
+      <span class="workdots on" aria-label="Working">
+        <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+      </span>
+    {:else if shell.isPinned(c.id)}
+      <span class="crow-pin"><Pin size={11} /></span>
+    {:else if isOpen(c.id)}
+      <span class="crow-open"><Circle size={7} fill="currentColor" /></span>
+    {/if}
 
-{#if assistant.activeRoot}
-  <div class="conv-scope" role="group" aria-label="Conversation scope">
-    <button
-      class="cscope-btn"
-      class:on={!shell.allProjects}
-      type="button"
-      aria-pressed={!shell.allProjects}
-      onclick={() => { if (shell.allProjects) shell.toggleAllProjects(); }}
-      title={projLabel(assistant.activeRoot)}
-    >This project</button>
-    <button
-      class="cscope-btn"
-      class:on={shell.allProjects}
-      type="button"
-      aria-pressed={shell.allProjects}
-      onclick={() => { if (!shell.allProjects) shell.toggleAllProjects(); }}
-    >All projects</button>
+    {#if renaming === c.id}
+      <!-- svelte-ignore a11y_autofocus -->
+      <input
+        class="crow-rename"
+        bind:value={renameValue}
+        onkeydown={onRenameKey}
+        onblur={commitRename}
+        onclick={(e) => e.stopPropagation()}
+        autofocus
+        aria-label="Rename conversation"
+      />
+    {:else}
+      <span class="crow-title">{c.title || "Untitled"}</span>
+      {#if shell.allProjects}
+        <span class="crow-proj" title={c.workspaceRoot ?? "Unfiled"}>{projLabel(c.workspaceRoot)}</span>
+      {/if}
+      <span class="crow-time">{relTime(c.lastActivityAt ?? c.createdAt)}</span>
+      <button class="crow-menu-btn" type="button" onclick={(e) => openMenu(e, c.id)} aria-label="Conversation actions">
+        <MoreHorizontal size={14} />
+      </button>
+    {/if}
   </div>
-{/if}
+{/snippet}
 
 <div class="conv-list">
   {#if groups.length === 0}
-    <div class="conv-empty">{shell.convQuery ? "No conversations match." : "No conversations yet.\nStart one from Home or Chat."}</div>
+    <div class="conv-empty">No conversations yet.{"\n"}Start one from Home or Chat.</div>
   {/if}
-  {#each groups as g (g.label)}
-    <div class="conv-group-label">{g.label}<span class="cgl-ct">{g.items.length}</span></div>
-    {#each g.items as c (c.id)}
-      <div
-        class="crow"
-        class:on={isActive(c.id)}
-        class:open={isOpen(c.id)}
-        class:menu-open={menuId === c.id}
-        role="button"
-        tabindex="0"
-        draggable={renaming === c.id ? "false" : "true"}
-        ondragstart={(e) => onRowDragStart(e, c.id)}
-        ondragend={onRowDragEnd}
-        onclick={() => open(c.id)}
-        onkeydown={(e) => { if (e.key === "Enter") open(c.id); }}
-      >
-        {#if workingIds.has(c.id)}
-          <span class="workdots on" aria-label="Working">
-            <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-          </span>
-        {:else if shell.isPinned(c.id)}
-          <span class="crow-pin"><Pin size={11} /></span>
-        {:else if isOpen(c.id)}
-          <span class="crow-open"><Circle size={7} fill="currentColor" /></span>
-        {/if}
 
-        {#if renaming === c.id}
-          <!-- svelte-ignore a11y_autofocus -->
-          <input
-            class="crow-rename"
-            bind:value={renameValue}
-            onkeydown={onRenameKey}
-            onblur={commitRename}
-            onclick={(e) => e.stopPropagation()}
-            autofocus
-            aria-label="Rename conversation"
-          />
-        {:else}
-          <span class="crow-title">{c.title || "Untitled"}</span>
-          {#if shell.allProjects}
-            <span class="crow-proj" title={c.workspaceRoot ?? "Unfiled"}>{projLabel(c.workspaceRoot)}</span>
-          {/if}
-          <span class="crow-time">{relTime(c.lastActivityAt ?? c.createdAt)}</span>
-          <button class="crow-menu-btn" type="button" onclick={(e) => openMenu(e, c.id)} aria-label="Conversation actions">
-            <MoreHorizontal size={14} />
-          </button>
-        {/if}
-      </div>
-    {/each}
+  <!-- Most-recent day (+ pinned) render FLAT, no date header — implied default. -->
+  {#each recentGroups as g (g.label)}
+    {#if g.label === "Pinned"}<div class="conv-group-label plain"><span class="cgl-txt">Pinned</span></div>{/if}
+    {#each g.items as c (c.id)}{@render convRow(c)}{/each}
   {/each}
+
+  <!-- Everything older tucks behind one quiet "Show earlier" toggle. -->
+  {#if olderCount > 0}
+    <button class="showmore conv-showmore" type="button" onclick={() => shell.toggleHistoryExpanded()}>
+      {shell.historyExpanded ? "Show less" : `Show earlier (${olderCount})`}
+    </button>
+    {#if shell.historyExpanded}
+      {#each olderGroups as g (g.label)}
+        <div class="conv-group-label plain"><span class="cgl-txt">{g.label}</span><span class="cgl-ct">{g.items.length}</span></div>
+        {#each g.items as c (c.id)}{@render convRow(c)}{/each}
+      {/each}
+    {/if}
+  {/if}
 </div>
 
 {#if menuId}
@@ -276,25 +272,11 @@
 {/if}
 
 <style>
-  .conv-search { display: flex; align-items: center; gap: 8px; height: 32px; margin: 2px 2px 6px; padding: 0 10px; flex: none;
-    border-radius: 9px; background: var(--bg-inset); border: 1px solid var(--border); color: var(--fg-subtle);
-    transition: border-color var(--dur-fast), background var(--dur-fast); }
-  .conv-search:focus-within { border-color: var(--border-focus); background: var(--surface); box-shadow: 0 0 0 3px var(--ring); }
-  .conv-search :global(svg) { flex: none; }
-  .conv-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font-size: 12.5px; color: var(--fg); }
-  .conv-search input::placeholder { color: var(--fg-subtle); }
-  .cs-clear { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 5px; color: var(--fg-faint); flex: none; }
-  .cs-clear:hover { background: var(--surface-active); color: var(--fg-2); }
-
-  /* per-project scope toggle — slim segmented control, radius-matched to the
-     search field above so the two read as one coupled block, not a bolt-on. */
-  .conv-scope { display: flex; gap: 3px; margin: 0 2px 6px; padding: 3px; flex: none;
-    border-radius: 9px; background: var(--bg-inset); border: 1px solid var(--border); }
-  .cscope-btn { flex: 1; min-width: 0; height: 24px; padding: 0 8px; border-radius: 6px;
-    font-size: 11px; font-weight: 600; letter-spacing: 0.01em; color: var(--fg-subtle); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-    transition: background var(--dur-fast), color var(--dur-fast); }
-  .cscope-btn:hover:not(.on) { color: var(--fg-2); background: color-mix(in oklab, var(--fg) 4%, transparent); }
-  .cscope-btn.on { background: var(--surface-active); color: var(--fg); box-shadow: var(--shadow-sm); }
+  /* Shared "show more/less" affordance — quiet text link, matches ProjectRail's
+     so projects + history rhyme. Left-aligned with the row titles above. */
+  .showmore { display: block; width: 100%; text-align: left; padding: 8px 11px 6px 11px;
+    font-size: 11.5px; font-weight: 500; color: var(--fg-subtle); transition: color var(--dur-fast); }
+  .showmore:hover { color: var(--accent); }
 
   /* per-row project label (All-projects mode only) */
   .crow-proj { flex: none; max-width: 84px; padding: 1px 6px; border-radius: 5px;
@@ -302,14 +284,14 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .crow:hover .crow-proj, .crow.menu-open .crow-proj { display: none; }
 
-  .conv-list { display: flex; flex-direction: column; gap: 1px; overflow-y: auto; min-height: 0; flex: 1; padding-bottom: 8px;
+  .conv-list { display: flex; flex-direction: column; gap: 1px; overflow-y: auto; min-height: 0; flex: 1; padding: 8px 0;
+    margin-top: 4px; border-top: 1px solid color-mix(in oklab, var(--border) 45%, transparent);
     scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
   .conv-list::-webkit-scrollbar { width: 8px; }
   .conv-list::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
-  .conv-group-label { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 7px; padding: 11px 8px 4px 11px; flex: none;
-    font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-faint);
-    background: linear-gradient(180deg, var(--sidebar-bg, color-mix(in oklab, var(--bg) 72%, transparent)) 72%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
-  .conv-group-label:first-child { padding-top: 4px; }
+  .conv-group-label { display: flex; align-items: center; gap: 7px; width: 100%; padding: 10px 8px 4px 11px; flex: none;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-faint); text-align: left; }
+  .conv-group-label .cgl-txt { flex: 1; }
   .conv-group-label .cgl-ct { font-weight: 600; opacity: 0.55; font-variant-numeric: tabular-nums; }
   .conv-empty { padding: 22px 14px; text-align: center; font-size: 11.5px; line-height: 1.6; color: var(--fg-subtle); white-space: pre-line; }
 
