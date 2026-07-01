@@ -5,6 +5,37 @@ self-contained HTML doc that links the shared `styles.css`; the cloud pane rende
 in `_ds_manifest.json`'s `cards` array. This folder is rebuilt to be **100% accurate to the live app**
 (verified against real component source + CDP screenshots of all four workspaces), not aspirational.
 
+## Workflow — how design (Claude) and code (Svelte) stay accurate on both ends
+
+Rift's app is **Svelte 5 / SvelteKit**, but Claude Design's canvas runtime is **React-only** — compiled
+Svelte can't render there, and the `/design-sync` *skill* that auto-extracts a design system assumes a React
+stack (`anthropics/claude-code#71523`, open). So we do **not** try to make Claude Design render Svelte.
+Instead we run a **layered** setup where each side owns what it's good at:
+
+| Layer | Where it lives | Job |
+|---|---|---|
+| **Tokens** (the real contract) | `src/app.css` `:root` → mirrored to `styles.css` + `_ds_manifest.json` `tokens[]` | The one thing shared verbatim across design + code. Colors / space / type / motion. |
+| **Visual reference** | these HTML cards (authored by us, pushed via DesignSync) | What each surface *looks like* — reference docs, never compiled. |
+| **Real components** | `.svelte` files in `src/` | The actual UI. Claude Code writes these; Claude Design never does. |
+| **Codebase context** *(optional)* | claude.ai/design → `+` → **Link local code** / GitHub | Lets Claude Design *read* our Svelte for smarter, on-brand generations. Additive context, NOT a source of truth — it does not replace the cards or render Svelte. |
+
+**What keeps it honest (so nobody has to remember):**
+- **Token drift** → `check-tokens.mjs` runs inside `npm run check`, which **CI runs on every PR + push**
+  (`.github/workflows/check.yml`). If `styles.css`/manifest fall out of sync with `src/app.css`, the check
+  goes red. This is the load-bearing guard — the token layer is the only thing shared byte-for-byte.
+- **Visual drift** → rebuild the affected card from live component source + a CDP screenshot, then re-push.
+  There's no automated guard here (HTML mockups can't self-verify); treat cards as reference, refresh on
+  UI changes.
+
+**Traps (learned the hard way — don't):**
+- Don't run the `/design-sync` **skill** to auto-generate the system from this Svelte repo — it's React-only
+  and will proceed as if React is implied. We author the HTML cards ourselves and push via the DesignSync
+  tool, which sidesteps that.
+- Don't treat **Link local code** as a replacement for the design-system cards — it's context, not the
+  validated brand contract.
+- Don't expect the canvas to preview Svelte. For a *real* Svelte component playground, the future move is
+  Storybook (`@storybook/addon-svelte-csf`) alongside — not inside — Claude Design.
+
 ## Layout
 
 ```
