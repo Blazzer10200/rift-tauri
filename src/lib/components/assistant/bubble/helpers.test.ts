@@ -3,7 +3,7 @@ import type { Block, ThinkingBlock, ToolBlock } from "../../../state/assistant/t
 import {
   coalesceToolGroups, elapsedFor, formatDuration, formatDurationMs, groupDurationMs,
   isCardTool, isGroupableChip,
-  isInlineDiffTool, lineDelta, nodeKind, numberActions, parseTextBlock, previewOf,
+  isInlineDiffTool, lineDelta, nodeKind, numberActions, parseTextBlock,
   mergeSplitProse, reconcileSplitHeaders, shortModel, shortToolName, statusOf, summarizeGroup,
   type TimelineUnit,
 } from "./helpers";
@@ -205,10 +205,6 @@ describe("formatDuration + elapsedFor", () => {
 });
 
 describe("formatters", () => {
-  it("previewOf strips markdown lead-in and truncates at 110", () => {
-    expect(previewOf("\n\n## **Heading** body")).toBe("Heading** body");
-    expect(previewOf("x".repeat(200))).toHaveLength(109);
-  });
   it("summarizeGroup rolls up counts and caps at 4 names", () => {
     const blocks = [tool("Read"), tool("Read"), tool("Grep"), tool("Bash"), tool("Glob"), tool("LS")];
     expect(summarizeGroup(blocks)).toBe("Read ×2 · Grep · Bash · Glob +1");

@@ -234,13 +234,6 @@ export function elapsedFor(b: ThinkingBlock, nowMs: number): string {
   return "…";
 }
 
-export function previewOf(text: string): string {
-  // First non-empty line, lightly trimmed for a glimpse-style preview.
-  const line = text.split(/\n+/).find((l) => l.trim().length > 0) ?? "";
-  const t = line.trim().replace(/^[#*>`\-_\s]+/, "");
-  return t.length > 110 ? t.slice(0, 108) + "…" : t;
-}
-
 // Compact "Read ×3 · Grep · Bash" rollup for a collapsed tool-group head.
 export function summarizeGroup(blocks: Block[]): string {
   const counts = new Map<string, number>();

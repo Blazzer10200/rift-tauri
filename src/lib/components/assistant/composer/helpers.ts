@@ -37,16 +37,6 @@ export function fuzzyScore(path: string, query: string): number | null {
   return -firstHit;
 }
 
-// Pointer-drag slider math: map clientX → nearest stop index on a track rect.
-export function effortIdxFromX(
-  clientX: number,
-  track: { left: number; width: number },
-  stopCount: number,
-): number {
-  const frac = Math.min(1, Math.max(0, (clientX - track.left) / track.width));
-  return Math.round(frac * Math.max(0, stopCount - 1));
-}
-
 export function bytesToBase64(buf: ArrayBuffer): string {
   const bytes = new Uint8Array(buf);
   let bin = "";

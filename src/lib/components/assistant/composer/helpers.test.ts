@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attachImageFiles, bytesToBase64, effortIdxFromX, fmtClock, fmtSize, fuzzyScore, isFileDrag, summarizeAttach, summarizeTextAttach } from "./helpers";
+import { attachImageFiles, bytesToBase64, fmtClock, fmtSize, fuzzyScore, isFileDrag, summarizeAttach, summarizeTextAttach } from "./helpers";
 
 describe("fmtClock", () => {
   it("formats zero and sub-second values", () => {
@@ -44,23 +44,6 @@ describe("fuzzyScore", () => {
   });
   it("returns null when characters are missing", () => {
     expect(fuzzyScore("lib/foo/Composer.svelte", "zzz")).toBeNull();
-  });
-});
-
-describe("effortIdxFromX", () => {
-  const track = { left: 100, width: 300 };
-  it("clamps below and above the track", () => {
-    expect(effortIdxFromX(0, track, 4)).toBe(0);
-    expect(effortIdxFromX(1000, track, 4)).toBe(3);
-  });
-  it("rounds to the nearest stop", () => {
-    expect(effortIdxFromX(100, track, 4)).toBe(0);
-    expect(effortIdxFromX(250, track, 4)).toBe(2); // frac 0.5 → 1.5 rounds up
-    expect(effortIdxFromX(400, track, 4)).toBe(3);
-  });
-  it("handles a single stop without dividing into negatives", () => {
-    expect(effortIdxFromX(250, track, 1)).toBe(0);
-    expect(effortIdxFromX(250, track, 0)).toBe(0);
   });
 });
 
