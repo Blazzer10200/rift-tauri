@@ -877,15 +877,6 @@ class AssistantStore {
     if (midConvo) this.cacheBustHint("effort");
   }
 
-  toggleThinking() {
-    const v = !this.thinkingEnabled;
-    this.thinkingEnabled = v;
-    saveThinkingEnabled(v, this.workspace.current);
-    const midConvo = (this.activeTab?.messages.length ?? 0) > 0;
-    this.telemetry.event("thinking.toggle", { to: v, midConvo });
-    if (midConvo) this.cacheBustHint("thinking");
-  }
-
   /** Set the unified thinking dial. Writes BOTH backing fields atomically:
    *  `enabled` (the master switch) + the chosen effort tier (only meaningful
    *  when on). Off keeps the last effort tier stored so flipping back on

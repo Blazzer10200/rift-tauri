@@ -85,42 +85,43 @@ export function modelWindowSuffix(id: ModelSelType, planCap: number): string {
 export const currentModels = MODEL_OPTIONS.filter((m) => !m.legacy);
 export const legacyModels = MODEL_OPTIONS.filter((m) => m.legacy);
 
-// ── Thinking dial ──────────────────────────────────────────────────────────
-// One control replacing the old `Extended thinking` toggle + separate effort
-// slider (two controls for one concept). Each rung is a single thinking level:
-// Off = no extended thinking (nothink shim, fastest); Low..Max = thinking on at
-// a rising effort budget. This is a PURE UI PROJECTION over the store's existing
-// `thinkingEnabled` (bool) + `thinkingEffort` (tier) — the dial reads/writes
-// those two fields, so the send-path contract + the effortToFlag 3-file lockstep
-// are untouched. Each on-rung maps to a DISTINCT CLI effort flag (none→low,
-// smart→medium, deep→high, ultra→xhigh), so the redundant `quick`/Medium+ rung
-// is intentionally not exposed here — `quick` stays a valid tier for back-compat
-// (old stored prefs / the legacy slider tests) but the dial collapses it away.
-export type DialId = "off" | "low" | "medium" | "high" | "max";
+// ── Reasoning ladder ─────────────────────────────────────────────────────────
+// ONE control for reasoning depth. The old separate `Thinking` toggle + effort
+// slider rendered two knobs over ONE wire lever: the CLI has no thinking-disable
+// flag (`--effort` is the only control), so toggle-OFF sent `--effort low`
+// regardless of the slider (the slider was decorative) and toggle-ON sent the
+// slider's tier — i.e. the toggle WAS an effort jump, which read as "thinking is
+// 5× slower for the same answer". The ladder exposes the real states, one rung
+// per distinct CLI `--effort` flag. Rung 0 (`effort: null`) writes
+// thinkingEnabled=false — the exact wire state of the old toggle-off (sends
+// `--effort low`, rides the no-think shim on the API-key path) — so the fast
+// default and the effortToFlag 3-file lockstep are untouched. Rungs 1+ write
+// thinkingEnabled=true + their tier atomically (assistant.setThinkingDial).
+// `quick` (legacy Medium+) stays a valid stored tier for back-compat; it
+// projects onto the Medium rung.
+export type DialId = "low" | "medium" | "high" | "xhigh";
 export type DialStop = {
   id: DialId;
   label: string;
   hint: string;
-  /** null = Off (thinking disabled). Otherwise the ThinkingEffort tier this
-   *  rung selects when thinking is on. */
+  /** null = fastest rung (extended thinking off → wire `--effort low`).
+   *  Otherwise the ThinkingEffort tier this rung selects (thinking on). */
   effort: ThinkingEffort | null;
 };
-// Off lives at index 0; the on-rungs follow in rising order. `effort` ties each
-// on-rung to the canonical tier so the dial never invents a flag the CLI lacks.
+// Labels track the real CLI `--effort` flag each rung sends (vanilla flag
+// names, no marketing labels — standing owner call).
 export const DIAL_STOPS: DialStop[] = [
-  { id: "off",    label: "Off",    effort: null,    hint: "Off — replies immediately, no reasoning step. Fastest." },
-  { id: "low",    label: "Low",    effort: "none",  hint: "Low — minimal reasoning before replying. Quick lookups & small edits." },
-  { id: "medium", label: "Medium", effort: "smart", hint: "Medium — balanced reasoning + fast responses. The recommended default for everyday work." },
-  { id: "high",   label: "High",   effort: "deep",  hint: "High — heavier reasoning and more thorough tool use, for complex tasks where quality matters more than speed." },
-  { id: "max",    label: "Max",    effort: "ultra", hint: "Max — deepest reasoning + autonomous multi-agent workflows. Claude orchestrates fleets of subagents for the most exhaustive answer." },
+  { id: "low",    label: "Low",    effort: null,    hint: "Low — replies immediately with minimal reasoning. Fastest for chat, quick lookups, and small edits." },
+  { id: "medium", label: "Medium", effort: "smart", hint: "Medium — balanced reasoning at a responsive pace. The recommended default for everyday work." },
+  { id: "high",   label: "High",   effort: "deep",  hint: "High — reasons before replying and works more thoroughly, for complex tasks where quality matters more than speed." },
+  { id: "xhigh",  label: "X-High", effort: "ultra", hint: "X-High — deepest reasoning + autonomous multi-agent workflows. Claude orchestrates fleets of subagents for the most exhaustive answer." },
 ];
 
-/** The dial rungs a model actually supports. Models with no effort capability
- *  (Haiku) get only `Off` — they can't extend-think at all. Otherwise the rungs
- *  are truncated at the model's effort ceiling: Sonnet/Opus/Fable (max "ultra")
- *  reach Max; Haiku (no effort) gets only Off. Off is always present. */
-function dialStopsFor(m: ModelOpt | undefined): DialStop[] {
-  if (!m?.effort) return [DIAL_STOPS[0]];
+/** The ladder rungs a model supports. Haiku (no effort capability) gets an
+ *  empty list — the panel hides the ladder entirely. Otherwise rungs truncate
+ *  at the model's effort ceiling; the Low rung is always present. */
+export function dialStopsFor(m: ModelOpt | undefined): DialStop[] {
+  if (!m?.effort) return [];
   const capIdx = EFFORT_OPTIONS.findIndex((e) => e.id === m.maxEffort);
   return DIAL_STOPS.filter(
     (s) => s.effort === null
@@ -128,36 +129,25 @@ function dialStopsFor(m: ModelOpt | undefined): DialStop[] {
   );
 }
 
-/** Clamp an index into a stops array (pure half of setEffortByIdx /
- *  setDialByIdx). Only the length matters, so it accepts any stop list. */
-export function clampEffortIdx(stops: readonly unknown[], i: number): number {
-  const max = Math.max(0, stops.length - 1);
-  return Math.min(max, Math.max(0, i));
-}
-
-// ── Effort selector (split out from the merged dial) ─────────────────────────
-// The v0.65.0 dial fused effort + thinking into one slider, making "High effort,
-// thinking OFF" impossible (any rung > Off forced thinking on). effortStopsFor
-// projects ONLY `thinkingEffort` onto a standalone slider — the thinking on/off
-// state rides a separate toggle now. Same labels/tiers as the on-rungs of
-// DIAL_STOPS (Low=none, Medium=smart, High=deep, Max=ultra), minus the Off rung.
-
-/** The effort rungs a model supports — the on-rungs of `dialStopsFor`, with no
- *  Off entry. Haiku (no effort capability) gets an empty list → no slider. */
-export function effortStopsFor(m: ModelOpt | undefined): DialStop[] {
-  if (!m?.effort) return [];
-  return dialStopsFor(m).filter((s) => s.effort !== null);
-}
-
-/** Index of the current `thinkingEffort` within a model's effort stops. `quick`
- *  (the collapsed-away tier) reads as Medium since both send the medium flag.
- *  Falls back to the Medium rung when the stored tier isn't in range. */
-export function effortIdxFor(stops: DialStop[], effort: ThinkingEffort): number {
+/** Project the store pair (thinkingEnabled, thinkingEffort) onto a rung index.
+ *  Off → the Low rung whatever tier is parked in storage — that IS the wire
+ *  truth (thinking-off sends `--effort low`). On → the tier's rung; `quick`
+ *  reads as Medium (both send the medium flag); a stale out-of-range tier
+ *  falls back to Medium. */
+export function dialIdxFor(stops: DialStop[], thinkingOn: boolean, effort: ThinkingEffort): number {
+  if (!thinkingOn || effort === "none") return 0;
   const tier = effort === "quick" ? "smart" : effort;
   const i = stops.findIndex((s) => s.effort === tier);
   if (i >= 0) return i;
   const med = stops.findIndex((s) => s.effort === "smart");
   return med >= 0 ? med : 0;
+}
+
+/** Clamp an index into a stops array (pure half of setEffortByIdx). Only the
+ *  length matters, so it accepts any stop list. */
+export function clampEffortIdx(stops: readonly unknown[], i: number): number {
+  const max = Math.max(0, stops.length - 1);
+  return Math.min(max, Math.max(0, i));
 }
 
 // Permission-mode picker options — order matches the VS Code Claude Code menu:
