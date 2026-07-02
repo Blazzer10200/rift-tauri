@@ -9,10 +9,11 @@
 - **A calmer picker:** segmented rung cards replace the drag slider, the hotkey cheat-strip is gone, and every model row shows its live rate-limit state.
 
 ### The transcript shows its work
-- **Terminal blocks know their shell** — bash, PowerShell, and cmd each get a colored badge; output is ANSI-clean and one hover-button copies command + output together.
+- **Terminal blocks know their shell** — bash, PowerShell, and cmd each get a colored badge; output is ANSI-clean and one click copies command + output.
 - **Every tool row reports what came back** — "→ 15 lines", "→ 91 files", "no matches", durations ≥1s, a red *failed* when it broke; MCP tools show their input and an output peek.
 - **Created files show their content** in the transcript (up to 60 lines) — a new file is the payload, not a "+29 −0" stub.
 - **Streaming text stays put** — narration you watched stream no longer collapses or demotes itself when the next block starts.
+- **Nothing renders ahead of the words** — code chips, bullets, heading bars, table rows, and code blocks used to pop in as empty gray boxes ahead of the streaming text; chrome now fades in exactly when its first word does.
 - **Markdown polish:** numbered lists show their numbers again; PowerShell and Batch code blocks get real syntax highlighting.
 
 ### Status bar is interactive · usage popover grew up
@@ -20,11 +21,11 @@
 
 ### Chat welcome + composer, revamped
 - Welcome: session eyebrow, one slim facts row, and **Jump back in** — your three freshest threads, one click to resume.
-- Composer is **one card**: input + docked control deck with a **real send button** (accent fill when ready, stop square mid-turn, queued-count badge).
+- Composer is **one card**: input + docked control deck with a **real send button** (accent fill, stop square mid-turn, queue badge).
 - **Hover timestamps** on new messages; glassier user bubble; the accent "pool of light" behind the transcript is now fully neutral.
 
 ### Settings — full redesign
-- Every tab is one scrolling page; the header blends into your background texture; accent is just a color (swatches + hue dial + vividness + one-click reset); the "Chat" tab is now "Claude" with plain-English card descriptions.
+- Every tab is one scrolling page; the header blends into your background texture; accent is just a color (swatches + hue dial + vividness + one-click reset); the "Chat" tab is now "Claude".
 
 ### Added
 - **Three new background textures** (Blueprint, Rings, Grain — 12 total); hover previews paint the real app background.
