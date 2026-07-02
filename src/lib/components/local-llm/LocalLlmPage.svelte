@@ -1,7 +1,7 @@
 <script lang="ts">
   import "$lib/styles/settings-controls.css";
   import { onMount } from "svelte";
-  import { Cpu, FlaskConical, Loader2, Eye, EyeOff, RefreshCw, Check, Zap, ArrowRight, Gauge, Sparkles, AlertTriangle } from "lucide-svelte";
+  import { FlaskConical, Loader2, Eye, EyeOff, RefreshCw, Check, Zap, ArrowRight, Gauge, Sparkles, AlertTriangle } from "lucide-svelte";
   import PageHero from "../shared/PageHero.svelte";
   import { localLlm } from "../../state/localLlm.svelte";
 
@@ -162,7 +162,6 @@
     title="Local LLM"
     desc="Route turns through a local Anthropic-compatible endpoint (LiteLLM / Ollama) instead of your Claude session. Toggle off any time to return to normal Claude."
   >
-    {#snippet icon()}<Cpu size={22} strokeWidth={1.75} />{/snippet}
     {#snippet chip()}
       <span class="sb-chip {readiness.key}">
         <span class="dot"></span>{localLlm.enabled ? readiness.label : "Off"}

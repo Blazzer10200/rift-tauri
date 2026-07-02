@@ -557,7 +557,6 @@
     title="AI Health"
     desc="See how you're using Claude through Rift — your plan limits, where your usage goes, and one-tap advice on how to stretch your plan further."
   >
-    {#snippet icon()}<HeartPulse size={22} strokeWidth={1.75} />{/snippet}
     {#snippet chip()}
       <!-- Verdict lives in the verdict strip below (label + note + value pills);
            a chip repeating the same label 150px above it was a duplicate readout.

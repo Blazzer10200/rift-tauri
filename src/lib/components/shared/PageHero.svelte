@@ -9,19 +9,15 @@
     padBottom?: boolean;
     /** Inner column width — hero + tab bar align to this so the body below can match. */
     maxWidth?: number;
-    icon?: Snippet;
     chip?: Snippet;
     children?: Snippet;
   }
-  const { eyebrow, title, desc, padBottom = true, maxWidth = 820, icon, chip, children }: Props = $props();
+  const { eyebrow, title, desc, padBottom = true, maxWidth = 820, chip, children }: Props = $props();
 </script>
 
 <div class="sb-topbar" style="--hero-w: {maxWidth}px">
   <div class="sb-hero" class:pb={padBottom}>
     <div class="sb-hero-l">
-      {#if icon}
-        <div class="sb-hero-ic">{@render icon()}</div>
-      {/if}
       <div class="sb-hero-tx">
         <div class="sb-eyebrow">{eyebrow}</div>
         <div class="sb-hero-tt">{title}</div>
@@ -36,15 +32,16 @@
 </div>
 
 <style>
-  .sb-topbar { flex: none; padding: 26px 40px 0; background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 5%, transparent), transparent 140px); border-bottom: 1px solid var(--border); }
+  /* Transparent chrome — the hero sits directly on the page texture instead of
+     its own tinted band, so the top of every page reads as one surface. */
+  .sb-topbar { flex: none; padding: 30px 40px 0; }
   .sb-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; max-width: var(--hero-w, 820px); margin: 0 auto; }
   .sb-hero.pb { padding-bottom: 26px; }
   /* tab bar / extra content aligns to the same centered column as the hero */
   .sb-hero-extra { max-width: var(--hero-w, 820px); margin: 0 auto; }
   .sb-hero-l { display: flex; align-items: center; gap: 14px; min-width: 0; }
-  .sb-hero-ic { width: 44px; height: 44px; border-radius: 12px; flex: none; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--ghost-border); }
-  .sb-hero-ic :global(svg) { color: var(--accent); }
-  .sb-eyebrow { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-subtle); }
+  .sb-eyebrow { display: flex; align-items: center; gap: 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: color-mix(in oklab, var(--accent) 80%, var(--fg-muted)); }
+  .sb-eyebrow::before { content: ""; width: 16px; height: 2px; border-radius: 999px; background: var(--accent); }
   .sb-hero-tt { font-size: 24px; font-weight: 760; letter-spacing: -0.025em; line-height: 1.1; margin-top: 1px; }
   .sb-hero-sub { font-size: var(--fs-sm); color: var(--fg-muted); margin-top: 3px; line-height: 1.45; max-width: 64ch; }
   .sb-hero-r { display: flex; align-items: center; gap: 8px; flex: none; }

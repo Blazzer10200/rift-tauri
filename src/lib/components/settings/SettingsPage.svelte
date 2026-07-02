@@ -4,9 +4,9 @@
   import { invoke } from "@tauri-apps/api/core";
   import {
     Cog, Info, RefreshCw, Sparkles, Palette,
-    FolderOpen, Copy, Check, Eye, EyeOff, Mic, Accessibility as A11yIcon,
+    FolderOpen, Copy, Check, Eye, EyeOff, Mic,
     CircleCheck, RotateCcw, Trash2, ArrowUpCircle, Loader2,
-    SlidersHorizontal, Bot, KeyRound, Wrench, Keyboard, Download, ShieldCheck,
+    Download, ShieldCheck,
     Activity,
   } from "lucide-svelte";
   import { appConfigDir, appLogDir } from "@tauri-apps/api/path";
@@ -44,8 +44,8 @@
 
   type Section = "appearance" | "chat" | "speech" | "about";
   const ST_SECTIONS: { id: Section; label: string; icon: typeof Cog; sub: string; dot?: "ok" | "warn" }[] = [
-    { id: "appearance", label: "Appearance", icon: Palette,  sub: "Theme, density, and chat rendering — applied instantly across Rift." },
-    { id: "chat",       label: "Chat",       icon: Sparkles, sub: "Your Claude session, reading comfort, and model routing." },
+    { id: "appearance", label: "Appearance", icon: Palette,  sub: "Accent color, texture, density, and code rendering — every change applies instantly." },
+    { id: "chat",       label: "Claude",     icon: Sparkles, sub: "Your Claude session and plan, reading comfort, and API keys." },
     { id: "speech",     label: "Speech",     icon: Mic,      sub: "Voice-to-text input — Web Speech (online) or Whisper (on-device, accent-tuned)." },
     { id: "about",      label: "About",      icon: Info,     sub: "Build info, file paths, keyboard shortcuts, and support diagnostics." },
   ];
@@ -53,7 +53,6 @@
   let activeSec = $state<Section>("appearance");
   let scrollEl = $state<HTMLDivElement>();
   const activeMeta = $derived(ST_SECTIONS.find((s) => s.id === activeSec) ?? ST_SECTIONS[0]);
-  const HeroIcon = $derived(activeMeta.icon);
 
   // Switching tabs resets the scroll position.
   function selectSec(id: Section) {
@@ -61,32 +60,7 @@
     scrollEl?.scrollTo({ top: 0 });
   }
 
-  // Per-tab rail sub-section (RailShell left nav).
-  let apprSec = $state<"theme" | "layout">("theme");
-  let chatSec = $state<"session" | "reading" | "keys">("session");
-  let spchSec = $state<"engine" | "composer">("engine");
-  let abtSec = $state<"about" | "help">("about");
-
-  // Appearance "Looks" presets — one tap sets accent + texture + density together.
-  type Look = { id: string; name: string; h: number; vib: number; dots: (typeof DOT_FIELDS)[number]["id"]; density: (typeof DENSITIES)[number] };
-  const LOOKS: Look[] = [
-    { id: "graphite", name: "Graphite", h: 163, vib: 30, dots: "off",   density: "regular" },
-    { id: "midnight", name: "Midnight", h: 250, vib: 55, dots: "dots",  density: "regular" },
-    { id: "ember",    name: "Ember",    h: 40,  vib: 72, dots: "glow",  density: "comfy"   },
-    { id: "orchid",   name: "Orchid",   h: 320, vib: 64, dots: "dots",  density: "regular" },
-    { id: "forest",   name: "Forest",   h: 150, vib: 58, dots: "grid",  density: "regular" },
-    { id: "focus",    name: "Focus",    h: 220, vib: 42, dots: "off",   density: "compact" },
-  ];
-  function applyLook(p: Look) {
-    uiPrefs.setAccentHue(p.h);
-    uiPrefs.setVividness(VIVIDNESS_MIN + (p.vib / 100) * (VIVIDNESS_MAX - VIVIDNESS_MIN));
-    uiPrefs.setDotField(p.dots);
-    uiPrefs.setDensity(p.density);
-  }
-  const lookSel = (p: Look) => {
-    const viv = VIVIDNESS_MIN + (p.vib / 100) * (VIVIDNESS_MAX - VIVIDNESS_MIN);
-    return uiPrefs.accentHue === p.h && uiPrefs.dotField === p.dots && uiPrefs.density === p.density && Math.abs(uiPrefs.vividness - viv) < 0.001;
-  };
+  const vivPct = $derived(Math.round(((uiPrefs.vividness - VIVIDNESS_MIN) / (VIVIDNESS_MAX - VIVIDNESS_MIN)) * 100));
 
   // Command-palette deep-link: open the requested tab, then clear (one-shot).
   $effect(() => {
@@ -307,8 +281,7 @@
 
 <div class="sb-main">
   <!-- ── Hero + sticky tab bar ── -->
-  <PageHero eyebrow="Settings" title={activeMeta.label} desc={activeMeta.sub} padBottom={false} maxWidth={1040}>
-    {#snippet icon()}<HeroIcon size={22} strokeWidth={1.75} />{/snippet}
+  <PageHero eyebrow="Settings" title={activeMeta.label} desc={activeMeta.sub} padBottom={false} maxWidth={820}>
     {#snippet chip()}
       <span class="sb-chip"><span class="mono">local workspace</span></span>
       <button
@@ -332,7 +305,7 @@
         {#each ST_SECTIONS as s (s.id)}
           {@const Icon = s.icon}
           {@const dot = s.id === "chat" ? assistantDot : s.dot}
-          <button class="snav" class:on={activeSec === s.id} role="tab" aria-selected={activeSec === s.id} onclick={() => selectSec(s.id)} type="button">
+          <button class="snav" class:on={activeSec === s.id} role="tab" aria-selected={activeSec === s.id} onclick={() => selectSec(s.id)} type="button" title={dot === "warn" ? "Claude session needs attention" : dot === "ok" ? "Claude session connected" : undefined}>
             <Icon size={15} strokeWidth={1.75} />
             <span>{s.label}</span>
             {#if dot}<span class="snav-dot" class:warn={dot === "warn"}></span>{/if}
@@ -345,36 +318,11 @@
   <div class="surface-body" bind:this={scrollEl}>
 
     {#if activeSec === "appearance"}
-      <div class="set-surface"><div class="set-rail">
-        <nav class="set-railnav">
-          <button class:on={apprSec === "theme"} type="button" onclick={() => (apprSec = "theme")}><Palette size={16} strokeWidth={1.75} /> Theme</button>
-          <button class:on={apprSec === "layout"} type="button" onclick={() => (apprSec = "layout")}><SlidersHorizontal size={16} strokeWidth={1.75} /> Layout</button>
-        </nav>
-        <div class="set-railbody">
+      <div class="set-surface"><div class="set-col">
 
-          {#if apprSec === "theme"}
           <div class="card">
-            <div class="card-tt">Looks &amp; accent</div>
-            <div class="card-sub">One tap sets accent, texture, and density together — or fine-tune the accent color below.</div>
-            <div class="looks">
-              {#each LOOKS as p (p.id)}
-                <button class="look" class:sel={lookSel(p)} type="button" onclick={() => applyLook(p)} style="--lk: oklch(0.72 0.16 {p.h}); --lkh: {p.h};" use:tooltip={p.name}>
-                  <span class="look-tile">
-                    <span class="look-orb"></span>
-                    <span class="look-bar"></span>
-                    <span class="look-ck"><Check size={11} strokeWidth={3} /></span>
-                  </span>
-                  <span class="look-name">{p.name}</span>
-                </button>
-              {/each}
-            </div>
-
-            <div class="card-divider"></div>
-            <div class="accent-panel">
-              <div class="ap-head">
-                <span class="sub-label">Accent color</span>
-                <span class="ap-dot" style="background: oklch(0.72 var(--accent-c) var(--accent-h));"></span>
-              </div>
+            <div class="card-tt">Accent color <span class="ap-dot" style="background: oklch(0.72 var(--accent-c) var(--accent-h));"></span></div>
+            <div class="card-sub">The highlight color used across Rift — buttons, toggles, and selection. Pick a swatch or dial in your own hue. Only the accent changes; your background stays put.</div>
               <div class="swatches">
                 {#each ACCENTS as a (a.id)}
                   <button class="sw" class:sel={uiPrefs.accentHue === a.hue} type="button" style="background: oklch(0.72 0.16 {a.hue});" onclick={() => uiPrefs.setAccentHue(a.hue)} aria-pressed={uiPrefs.accentHue === a.hue} use:tooltip={a.label}>
@@ -382,16 +330,22 @@
                   </button>
                 {/each}
               </div>
-              <input class="hue-range" type="range" min="0" max="360" step="1" value={uiPrefs.accentHue} oninput={(e) => uiPrefs.setAccentHue(Number(e.currentTarget.value))} aria-label="Custom accent hue" />
+              <div class="hue-row">
+                <input class="hue-range" type="range" min="0" max="360" step="1" value={uiPrefs.accentHue} oninput={(e) => uiPrefs.setAccentHue(Number(e.currentTarget.value))} aria-label="Custom accent hue" />
+                <span class="range-val">{uiPrefs.accentHue}°</span>
+              </div>
               <div class="ap-divider"></div>
               <div class="ctl-row tight">
                 <div><div class="ctl-t">Vividness</div><div class="ctl-s">How saturated the accent reads across the app.</div></div>
                 <div class="range-wrap">
-                  <input class="set-range" type="range" min={VIVIDNESS_MIN} max={VIVIDNESS_MAX} step="0.005" value={uiPrefs.vividness} oninput={(e) => uiPrefs.setVividness(Number(e.currentTarget.value))} aria-label="Accent vividness" />
-                  <span class="range-val">{Math.round((uiPrefs.vividness - VIVIDNESS_MIN) / (VIVIDNESS_MAX - VIVIDNESS_MIN) * 100)}%</span>
+                  <input class="set-range" type="range" min={VIVIDNESS_MIN} max={VIVIDNESS_MAX} step="0.005" value={uiPrefs.vividness} style="--fill: {vivPct}%" oninput={(e) => uiPrefs.setVividness(Number(e.currentTarget.value))} aria-label="Accent vividness" />
+                  <span class="range-val">{vivPct}%</span>
                 </div>
               </div>
-            </div>
+              <div class="ctl-row tight">
+                <div><div class="ctl-t">Reset accent</div><div class="ctl-s">Back to the stock emerald look.</div></div>
+                <button class="st-btn" type="button" onclick={() => uiPrefs.resetAccent()}><RotateCcw size={14} /> Reset</button>
+              </div>
           </div>
 
           <div class="card">
@@ -410,7 +364,6 @@
             </div>
           </div>
 
-          {:else}
           <div class="card">
             <div class="card-tt">Density</div>
             <div class="card-sub">Spacing of rows and cards across the app.</div>
@@ -444,20 +397,11 @@
                 <button class="toggle" class:on={uiPrefs.code.ligatures} role="switch" aria-checked={uiPrefs.code.ligatures} aria-label="Font ligatures" type="button" onclick={() => uiPrefs.setCode({ ligatures: !uiPrefs.code.ligatures })}><span class="toggle-knob"></span></button>
               </div>
           </div>
-          {/if}
-        </div>
       </div></div>
     {/if}
 
     {#if activeSec === "chat"}
-      <div class="set-surface"><div class="set-rail">
-        <nav class="set-railnav">
-          <button class:on={chatSec === "session"} type="button" onclick={() => (chatSec = "session")}><Bot size={16} strokeWidth={1.75} /> Session</button>
-          <button class:on={chatSec === "reading"} type="button" onclick={() => (chatSec = "reading")}><A11yIcon size={16} strokeWidth={1.75} /> Reading</button>
-          <button class:on={chatSec === "keys"} type="button" onclick={() => (chatSec = "keys")}><KeyRound size={16} strokeWidth={1.75} /> Cost &amp; keys</button>
-        </nav>
-        <div class="set-railbody">
-        {#if chatSec === "session"}
+      <div class="set-surface"><div class="set-col">
         <!-- session status promoted to a hero banner — auth + CLI version share one surface -->
         <div class="sb-status {assistantDot ?? 'ok'}">
           <div class="sb-status-l">
@@ -535,6 +479,7 @@
 
         <div class="card">
           <div class="card-tt">Claude session</div>
+          <div class="card-sub">How each turn runs — config layering, git access, and the plan behind the context gauge.</div>
           <div class="ctl-row tight">
             <div><div class="ctl-t">Use my full Claude Code config</div><div class="ctl-s">Runs Rift as your Claude Code: layers your global <code>~/.claude</code> setup — <code>CLAUDE.md</code>, <code>settings.json</code>, hooks, slash commands, skills, and MCP servers — into every turn alongside Rift's own MCP tools. Off = sandboxed (Rift MCP only, no global config or hooks).</div></div>
             <button class="toggle" class:on={assistantStore.useFullConfig && !assistantStore.hasApiKey} role="switch" aria-checked={assistantStore.useFullConfig && !assistantStore.hasApiKey} aria-label="Use full Claude Code config" disabled={assistantStore.hasApiKey} type="button" onclick={() => void assistantStore.setUseFullConfig(!assistantStore.useFullConfig)}><span class="toggle-knob"></span></button>
@@ -555,7 +500,7 @@
             </div>
           </div>
         </div>
-        {:else if chatSec === "reading"}
+
           <div class="card">
             <div class="card-tt">Reading comfort</div>
             <div class="card-sub">Make Claude's replies easier to read. These affect the chat only — the rest of Rift keeps the dark theme.</div>
@@ -622,7 +567,6 @@
               </div>
             {/if}
           </div>
-        {:else}
           <!-- Per-turn dollar cap only does anything in API-key mode (pay-per-token,
                --max-budget-usd stops the turn). A subscription session bills against
                plan usage-limit windows, not dollars, so the cap is inert there and
@@ -630,6 +574,7 @@
           {#if assistantStore.hasApiKey}
             <div class="card">
               <div class="card-tt">Cost guard</div>
+              <div class="card-sub">A hard dollar ceiling per turn — only applies when running on an API key.</div>
               <div class="ctl-row tight">
                 <div><label class="ctl-t" for="asst-budget">Per-turn cost cap</label><div class="ctl-s">Stops a turn before it spends more than this dollar amount of API credit. Applies to API-key turns only. Leave blank for no cap.</div></div>
                 <div class="ctl-actions">
@@ -667,21 +612,14 @@
               <div class="st-note">⚠ A system <code>ANTHROPIC_API_KEY</code> environment variable is set, but Rift ignores env keys so it can't silently override your login. To use that key, paste it above; otherwise remove it from your environment.</div>
             {/if}
           </div>
-        {/if}
-        </div>
       </div></div>
     {/if}
 
     {#if activeSec === "speech"}
-      <div class="set-surface"><div class="set-rail">
-        <nav class="set-railnav">
-          <button class:on={spchSec === "engine"} type="button" onclick={() => (spchSec = "engine")}><Mic size={16} strokeWidth={1.75} /> Engine &amp; models</button>
-          <button class:on={spchSec === "composer"} type="button" onclick={() => (spchSec = "composer")}><Keyboard size={16} strokeWidth={1.75} /> Composer</button>
-        </nav>
-        <div class="set-railbody">
-        {#if spchSec === "engine"}
+      <div class="set-surface"><div class="set-col">
           <div class="card">
             <div class="card-tt">Engine</div>
+            <div class="card-sub">Turn voice input on and pick what transcribes it.</div>
             <div class="ctl-row tight">
               <div><div class="ctl-t">Speech-to-text</div><div class="ctl-s">Master switch. When off, the mic button in the composer is hidden.</div></div>
               <button class="toggle" class:on={stt.config.enabled} role="switch" aria-checked={stt.config.enabled} aria-label="Enable speech-to-text" type="button" onclick={() => void stt.setConfig({ enabled: !stt.config.enabled })}><span class="toggle-knob"></span></button>
@@ -718,6 +656,7 @@
           {#if stt.config.engine === "web_speech"}
             <div class="card">
               <div class="card-tt">Web Speech</div>
+              <div class="card-sub">Language and listening behavior for the online recognizer.</div>
               <div class="ctl-row stack">
                 <div><div class="ctl-t">Language</div><div class="ctl-s">BCP-47 tag passed to the recognizer. Pick another language if you speak something other than English.</div></div>
                 <div class="set-pick-grid" role="radiogroup" aria-label="Speech recognition language">
@@ -739,6 +678,7 @@
           {#if stt.config.engine === "whisper"}
             <div class="card">
               <div class="card-tt">Whisper model</div>
+              <div class="card-sub">Bigger models hear more accurately but download larger and transcribe slower.</div>
               <div class="set-model-list">
                   {#each stt.models as m (m.id)}
                     {@const prog = stt.modelDownloads[m.id]}
@@ -780,6 +720,7 @@
 
             <div class="card">
               <div class="card-tt">Capture &amp; cleanup</div>
+              <div class="card-sub">Which microphone Whisper hears, and how the transcript gets polished.</div>
               <div class="ctl-row tight">
                 <div><div class="ctl-t">Input device</div><div class="ctl-s">Microphone used by Whisper capture. System default is usually correct.</div></div>
                 <div class="ctl-actions set-mic-r">
@@ -807,6 +748,7 @@
 
             <div class="card">
               <div class="card-tt">Vocabulary priming</div>
+              <div class="card-sub">Teach Whisper your project names and jargon so it stops guessing.</div>
               <div class="ctl-row stack">
                 <div><div class="ctl-t">Style prompt</div><div class="ctl-s">Whisper's <code>initial_prompt</code> biases the decoder toward your speaking style.</div></div>
                 <textarea class="set-textarea" rows="3" disabled={!stt.config.enabled} value={stt.config.initial_prompt} oninput={(e) => void stt.setConfig({ initial_prompt: (e.currentTarget as HTMLTextAreaElement).value })}></textarea>
@@ -822,9 +764,10 @@
             <div class="st-warn">Your WebView doesn't expose <code>SpeechRecognition</code>, so Web Speech can't run here.{#if stt.backendAvailable} Switch to the Whisper engine above — it runs on-device and needs no browser support.{:else} On-device Whisper isn't built into this release either; see the note under <strong>Engine</strong> for how to enable it.{/if}</div>
           {/if}
           {#if stt.lastError}<div class="st-warn">{stt.lastError}</div>{/if}
-        {:else}
+
           <div class="card">
             <div class="card-tt">Composer integration</div>
+            <div class="card-sub">How spoken words land in the message box.</div>
             <div class="ctl-row tight">
               <div><div class="ctl-t">Live partial transcripts</div><div class="ctl-s">Words appear in the composer as you speak. Off = wait for each sentence to commit.</div></div>
               <button class="toggle" class:on={stt.config.show_interim} role="switch" aria-checked={stt.config.show_interim} aria-label="Live partial transcripts" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ show_interim: !stt.config.show_interim })}><span class="toggle-knob"></span></button>
@@ -846,21 +789,14 @@
               </div>
             </div>
           </div>
-        {/if}
-        </div>
       </div></div>
     {/if}
 
     {#if activeSec === "about"}
-      <div class="set-surface"><div class="set-rail">
-        <nav class="set-railnav">
-          <button class:on={abtSec === "about"} type="button" onclick={() => (abtSec = "about")}><Info size={16} strokeWidth={1.75} /> About</button>
-          <button class:on={abtSec === "help"} type="button" onclick={() => (abtSec = "help")}><Wrench size={16} strokeWidth={1.75} /> Tools &amp; help</button>
-        </nav>
-        <div class="set-railbody">
-        {#if abtSec === "about"}
+      <div class="set-surface"><div class="set-col">
           <div class="card">
             <div class="card-tt">Build</div>
+            <div class="card-sub">This copy of Rift and the stack it's built on.</div>
             {#each [["Rift", `${appVersion} · Tauri 2`], ["Engine", "SvelteKit · Svelte 5 (runes)"], ["Style", "Graphite Ink · Tailwind v4 · OKLCH"], ["License", "Proprietary · github.com/Blazzer10200/rift"]] as kv (kv[0])}
               <div class="st-kv"><span class="st-kv-k">{kv[0]}</span><span class="st-kv-v">{kv[1]}</span></div>
             {/each}
@@ -868,6 +804,7 @@
 
           <div class="card">
             <div class="card-tt">Paths</div>
+            <div class="card-sub">Where Rift keeps its settings and logs on this machine.</div>
             <div class="ctl-row tight">
               <div><div class="ctl-t">Config</div><div class="ctl-s"><span class="mono" use:tooltip={configDir}>{configDir || "—"}</span></div></div>
               <button class="st-btn" type="button" disabled={!configDir} onclick={() => openDir(configDir)}><FolderOpen size={14} /> Open</button>
@@ -891,9 +828,10 @@
               </div>
             {/each}
           </div>
-        {:else}
+
           <div class="card">
             <div class="card-tt">Local tools</div>
+            <div class="card-sub">Optional programs that unlock extra assistant abilities — install any missing one with a click.</div>
             {#each LOCAL_TOOLS as t (t.key)}
               {@const present = environment[t.key]}
               {@const installing = environment.installing[t.key]}
@@ -919,6 +857,7 @@
 
           <div class="card">
             <div class="card-tt">Help &amp; diagnostics</div>
+            <div class="card-sub">Fix a wonky install, replay the intro, or grab info for a bug report.</div>
             <button class="st-about-row" type="button" onclick={() => updates.open()}>
               <span class="st-about-ic"><RefreshCw size={15} /></span>
               <span class="st-about-body"><span class="st-about-t">Check for updates</span><span class="st-about-s">Compare against the latest GitHub release</span></span>
@@ -940,8 +879,6 @@
               <span class="st-about-body"><span class="st-about-t">Repair installation</span><span class="st-about-s">Re-download and reinstall the current version — fixes corrupted or missing program files. Rift will restart.</span></span>
             </button>
           </div>
-        {/if}
-        </div>
       </div></div>
     {/if}
 
@@ -961,7 +898,7 @@
   @keyframes blockIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
   /* hero tab bar */
-  .tabnav { display: flex; gap: 4px; flex: none; }
+  .tabnav { display: flex; gap: 4px; flex: none; border-bottom: 1px solid var(--border); }
   .snav { display: inline-flex; align-items: center; gap: 7px; height: 42px; padding: 0 4px; margin: 0 8px; background: none; border: 0; cursor: pointer; color: var(--fg-muted); font: inherit; font-size: 13px; font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color var(--dur-fast); }
   .tabnav .snav:first-child { margin-left: 0; }
   .snav:hover { color: var(--fg-2); }
@@ -974,35 +911,23 @@
   .surface-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
 
   /* shared rail layout */
-  .set-surface { max-width: 1040px; margin: 0 auto; padding: 26px 40px 48px; }
-  .set-rail { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 34px; align-items: start; }
-  .set-railnav { position: sticky; top: 22px; display: flex; flex-direction: column; gap: 3px; }
-  .set-railnav button { display: flex; align-items: center; gap: 11px; height: 40px; padding: 0 12px; border: 0; background: none; border-radius: 9px; cursor: pointer; color: var(--fg-muted); font: inherit; font-size: 13px; font-weight: 500; text-align: left; transition: background var(--dur-fast), color var(--dur-fast); }
-  .set-railnav button :global(svg) { color: var(--fg-subtle); flex: none; transition: color var(--dur-fast); }
-  .set-railnav button:hover { background: var(--bg-elev-1); color: var(--fg-2); }
-  .set-railnav button:hover :global(svg) { color: var(--fg-2); }
-  .set-railnav button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
-  .set-railnav button.on :global(svg) { color: var(--accent); }
-  .set-railbody { min-width: 0; min-height: 440px; }
-  .set-railbody > .card { margin-bottom: 16px; animation: blockIn var(--dur-base) var(--ease-page) both; }
-  .set-railbody > .card:last-child { margin-bottom: 0; }
+  .set-surface { max-width: 820px; margin: 0 auto; padding: 26px 40px 48px; }
+  .set-col { min-width: 0; }
+  .set-col > .card { margin-bottom: 16px; animation: blockIn var(--dur-base) var(--ease-page) both; }
+  .set-col > .card:last-child { margin-bottom: 0; }
   /* Gentle top-down stagger so a section's cards assemble in order rather than
      flashing in together — same cadence as the AI Health dashboard. */
-  .set-railbody > .card:nth-child(2) { animation-delay: 50ms; }
-  .set-railbody > .card:nth-child(3) { animation-delay: 100ms; }
-  .set-railbody > .card:nth-child(4) { animation-delay: 150ms; }
-  .set-railbody > .card:nth-child(n+5) { animation-delay: 190ms; }
-  @media (prefers-reduced-motion: reduce) { .set-railbody > .card { animation: none; } }
+  .set-col > .card:nth-child(2) { animation-delay: 50ms; }
+  .set-col > .card:nth-child(3) { animation-delay: 100ms; }
+  .set-col > .card:nth-child(4) { animation-delay: 150ms; }
+  .set-col > .card:nth-child(n+5) { animation-delay: 190ms; }
+  @media (prefers-reduced-motion: reduce) { .set-col > .card { animation: none; } }
 
   /* card */
   .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; }
-  .card-tt { font-size: 14px; font-weight: 650; margin-bottom: 3px; }
+  .card-tt { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 650; margin-bottom: 3px; }
   .card-sub { font-size: 11.5px; color: var(--fg-subtle); margin-bottom: 14px; }
   .card-divider { height: 1px; background: var(--border); margin: 20px 0; }
-  .sub-label { font-size: 12px; font-weight: 600; color: var(--fg-2); letter-spacing: 0.01em; }
-  /* accent sub-panel — groups swatches + hue + vividness as one deliberate unit */
-  .accent-panel { background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; }
-  .ap-head { display: flex; align-items: center; gap: 9px; margin-bottom: 13px; }
   .ap-dot { width: 13px; height: 13px; border-radius: 50%; box-shadow: 0 0 0 1px var(--border-strong), 0 0 10px -1px oklch(0.72 var(--accent-c) var(--accent-h) / 0.6); flex: none; }
   .ap-divider { height: 1px; background: var(--border); margin: 16px 0 14px; }
   .card-sub code, .ctl-s code { font-family: var(--font-mono); background: var(--code-bg); border: 1px solid var(--code-border); padding: 1px 5px; border-radius: 4px; color: var(--code-fg); }
@@ -1046,14 +971,15 @@
   .sw { aspect-ratio: 1.4; border-radius: 9px; border: 1px solid var(--border); cursor: pointer; display: grid; place-items: center; transition: transform var(--dur-fast); }
   .sw:hover { transform: translateY(-2px); }
   .sw.sel { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
-  .hue-range { -webkit-appearance: none; appearance: none; width: 100%; height: 12px; border-radius: 999px; cursor: pointer; margin-top: 12px; border: 1px solid var(--border);
+  .hue-row { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+  .hue-range { -webkit-appearance: none; appearance: none; flex: 1; min-width: 0; height: 12px; border-radius: 999px; cursor: pointer; border: 1px solid var(--border);
     background: linear-gradient(90deg, oklch(0.72 0.17 20), oklch(0.78 0.16 70), oklch(0.80 0.16 110), oklch(0.78 0.15 160), oklch(0.74 0.13 200), oklch(0.70 0.15 250), oklch(0.68 0.18 300), oklch(0.72 0.18 340), oklch(0.72 0.17 380)); }
   .hue-range::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%; background: oklch(0.82 var(--accent-c) var(--accent-h)); border: 3px solid var(--bg-inset); box-shadow: 0 0 0 1px var(--border-strong), var(--shadow-sm); cursor: pointer; transition: transform var(--dur-fast) var(--ease-page); }
   .hue-range::-webkit-slider-thumb:hover { transform: scale(1.12); }
   .hue-range:focus { outline: none; }
   .range-wrap { display: flex; align-items: center; gap: 12px; }
   .range-val { font-size: 11.5px; color: var(--fg-muted); font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }
-  .set-range { -webkit-appearance: none; appearance: none; width: 150px; height: 4px; border-radius: 999px; background: var(--track); cursor: pointer; }
+  .set-range { -webkit-appearance: none; appearance: none; width: 150px; height: 6px; border-radius: 999px; border: 1px solid var(--border); background: linear-gradient(90deg, var(--accent) var(--fill, 0%), var(--track) var(--fill, 0%)); cursor: pointer; }
   .set-range::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg-inset); box-shadow: var(--shadow-sm); cursor: pointer; transition: transform var(--dur-fast) var(--ease-page); }
   .set-range::-webkit-slider-thumb:hover { transform: scale(1.14); }
   .set-range:focus { outline: none; }
@@ -1073,34 +999,11 @@
   .bg-opt:hover .bg-name { color: var(--fg-2); }
   .bg-opt.sel .bg-name { color: var(--fg-2); font-weight: 550; }
 
-  /* looks (one-tap presets) */
-  .looks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-  .look { display: flex; flex-direction: column; gap: 9px; padding: 0; background: none; border: 0; cursor: pointer; text-align: left; border-radius: 12px; transition: transform var(--dur-fast) var(--ease-page); }
-  .look:hover { transform: translateY(-2px); }
-  .look:active { transform: translateY(0) scale(0.985); }
-  .look-tile { position: relative; aspect-ratio: 1.62; border-radius: 11px; overflow: hidden; border: 1px solid var(--border); background: linear-gradient(150deg, color-mix(in oklab, var(--lk) 16%, oklch(0.16 0.004 250)), oklch(0.135 0.004 250) 78%); transition: border-color var(--dur-fast), box-shadow var(--dur-fast); }
-  .look:hover .look-tile { border-color: var(--border-strong); }
-  .look.sel .look-tile { border-color: transparent; box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--lk); }
-  .look-orb { position: absolute; left: 13px; bottom: 12px; width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(circle at 32% 30%, oklch(0.88 0.15 var(--lkh)), oklch(0.66 0.15 var(--lkh))); box-shadow: 0 4px 16px -2px color-mix(in oklab, var(--lk) 60%, transparent), inset 0 1px 0 oklch(1 0 0 / 0.3); }
-  .look-bar { position: absolute; right: 12px; bottom: 16px; left: 50px; height: 7px; border-radius: 999px; background: color-mix(in oklab, var(--lk) 22%, oklch(0.30 0.005 250)); overflow: hidden; }
-  .look-bar::after { content: ""; position: absolute; inset: 0; right: 38%; border-radius: 999px; background: var(--lk); }
-  .look-ck { position: absolute; top: 7px; right: 7px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: var(--lk); color: oklch(0.22 0.05 var(--lkh)); opacity: 0; transform: scale(0.5); transition: opacity var(--dur-fast), transform var(--dur-fast) var(--ease-page); }
-  .look.sel .look-ck { opacity: 1; transform: none; }
-  .look-name { font-size: 12px; color: var(--fg-muted); text-align: center; transition: color var(--dur-fast); }
-  .look:hover .look-name { color: var(--fg-2); }
-  .look.sel .look-name { color: var(--fg); font-weight: 600; }
-
   /* keyboard shortcut rows (spec flex variant) */
   .keys { display: inline-flex; gap: 4px; }
   .keys b { font-family: var(--font-mono); font-size: 11px; color: var(--fg-muted); background: var(--bg-elev-2); border: 1px solid var(--border-strong); border-radius: 4px; padding: 2px 7px; }
   .kbd-or { color: var(--fg-faint); font-size: 10px; margin: 0 2px; }
   .mono { font-family: var(--font-mono); }
-
-  @media (max-width: 980px) {
-    .set-rail { grid-template-columns: 1fr; gap: 16px; }
-    .set-railnav { position: static; flex-direction: row; flex-wrap: wrap; gap: 6px; }
-    .set-railnav button { height: 34px; }
-  }
 
   /* ── Hero tab bar (hero chrome via PageHero component) ── */
   .sb-chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--fg-2); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: default; }
@@ -1134,7 +1037,7 @@
   /* Status rows: label + status-cluster on the top line, description full-width below. */
   /* CLI install list + update CTA live inside the hero banner — span its full width. */
   .sb-status > .st-cli-installs, .sb-status > .st-cli-act, .sb-status > .st-cli-err, .sb-status > .st-cli-ok, .sb-status > .st-cli-warn { flex: 1 1 100%; margin-top: 0; }
-  .st-note { padding: 10px 17px; font-size: var(--fs-xs); color: var(--fg-muted); border-top: 1px solid var(--border); }
+  .st-note { padding: 10px 0 0; margin-top: 8px; font-size: var(--fs-xs); color: var(--fg-muted); border-top: 1px solid var(--border); }
   .st-note code { font-family: var(--font-mono); background: var(--code-bg); border: 1px solid var(--code-border); padding: 1px 5px; border-radius: 4px; color: var(--code-fg); }
   .st-warn { display: block; font-size: var(--fs-xs); color: var(--warn); line-height: 1.5; padding: 10px 13px; background: var(--warn-soft); border: 1px solid color-mix(in oklab, var(--warn) 32%, transparent); border-radius: var(--r-card); }
   .st-warn code { background: color-mix(in oklab, var(--warn) 16%, transparent); border: 1px solid color-mix(in oklab, var(--warn) 30%, transparent); padding: 1px 5px; border-radius: 4px; color: var(--warn); font-family: var(--font-mono); }
@@ -1183,11 +1086,11 @@
   .st-cli-note { margin-top: 7px; font-size: var(--fs-xs); color: var(--fg-muted); line-height: 1.4; cursor: help; }
 
   /* ── About: kv + resource rows ── */
-  .st-kv { display: flex; align-items: center; gap: 16px; padding: 11px 17px; }
+  .st-kv { display: flex; align-items: center; gap: 16px; padding: 11px 0; }
   .st-kv + .st-kv { border-top: 1px solid var(--border); }
   .st-kv-k { font-size: var(--fs-md); font-weight: 600; color: var(--fg); flex: none; width: 84px; }
   .st-kv-v { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .st-about-row { display: flex; align-items: center; gap: 12px; padding: 13px 17px; width: 100%; border: 0; background: none; text-align: left; font: inherit; cursor: pointer; }
+  .st-about-row { display: flex; align-items: center; gap: 12px; padding: 13px 12px; margin: 0 -12px; width: calc(100% + 24px); border: 0; background: none; text-align: left; font: inherit; cursor: pointer; border-radius: 10px; }
   .st-about-row + .st-about-row { border-top: 1px solid var(--border); }
   .st-about-ic { width: 32px; height: 32px; border-radius: var(--radius); display: grid; place-items: center; background: var(--field); border: 1px solid var(--field-border); color: var(--fg-muted); flex: none; }
   .st-about-body { flex: 1; min-width: 0; }
@@ -1220,7 +1123,7 @@
   .set-pick-sub { font-size: 10px; color: var(--fg-muted); }
   .set-pick[data-active="true"] .set-pick-sub { color: color-mix(in oklab, var(--accent) 80%, var(--fg-muted)); }
   .set-pick:disabled:not([data-active="true"]) { opacity: 0.5; cursor: not-allowed; }
-  .set-model-list { display: flex; flex-direction: column; gap: 6px; padding: 14px 17px; }
+  .set-model-list { display: flex; flex-direction: column; gap: 6px; }
   .set-model-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--field); border: 1px solid var(--field-border); border-radius: var(--radius); }
   .set-model-row[data-active="true"] { border-color: color-mix(in oklab, var(--accent) 40%, var(--border)); background: var(--accent-soft); }
   .set-model-meta { flex: 1 1 auto; min-width: 0; }

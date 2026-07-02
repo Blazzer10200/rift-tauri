@@ -70,7 +70,7 @@
     // Settings sections (deep-link)
     const sects: { id: SettingsSection; label: string; icon: Icon; kw?: string }[] = [
       { id: "appearance", label: "Appearance", icon: Palette },
-      { id: "chat",       label: "Chat",       icon: Sparkles, kw: "assistant accessibility reading comfort session keys cost" },
+      { id: "chat",       label: "Claude",     icon: Sparkles, kw: "chat assistant accessibility reading comfort session keys cost plan" },
       { id: "speech",     label: "Speech",     icon: Mic },
       { id: "about",      label: "About",      icon: Info, kw: "shortcuts keyboard tools help diagnostics" },
     ];

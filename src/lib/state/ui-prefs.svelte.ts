@@ -199,6 +199,12 @@ class UiPrefs {
     this.applyAccent();
   }
 
+  /** Back to the stock emerald accent (hue + vividness only — texture/density untouched). */
+  resetAccent() {
+    this.setAccentHue(163);
+    this.setVividness(DEFAULT_VIVIDNESS);
+  }
+
   // dotField drives `.app[data-dots]` via a template binding in AppShell — no
   // DOM write needed here beyond persisting the choice.
   setDotField(d: DotField) {
