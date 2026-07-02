@@ -5,7 +5,7 @@
 // display-only highlighting in chat.
 //
 // Language list mirrors the stack: Rust + TS/JS + Svelte + Bash + JSON +
-// TOML + Lua + Python. Theme: github-dark-dimmed — matches the OKLCH dark
+// TOML + Lua + Python + PowerShell + Batch. Theme: github-dark-dimmed — matches the OKLCH dark
 // palette better than One Dark / Dracula / Monokai.
 //
 // Usage from Markdown.svelte:
@@ -20,6 +20,7 @@ import { createJavaScriptRegexEngine } from "@shikijs/engine-javascript";
 const LANGS = [
   "rust", "typescript", "javascript", "svelte",
   "bash", "json", "toml", "lua", "python",
+  "powershell", "bat",
 ] as const;
 
 const LANG_ALIASES: Record<string, string> = {
@@ -32,6 +33,11 @@ const LANG_ALIASES: Record<string, string> = {
   sh: "bash",
   shell: "bash",
   zsh: "bash",
+  ps: "powershell",
+  ps1: "powershell",
+  pwsh: "powershell",
+  cmd: "bat",
+  batch: "bat",
 };
 
 const SUPPORTED = new Set<string>(LANGS);
@@ -52,6 +58,8 @@ function ensureHighlighter(): Promise<HighlighterCore> {
       import("@shikijs/langs/toml"),
       import("@shikijs/langs/lua"),
       import("@shikijs/langs/python"),
+      import("@shikijs/langs/powershell"),
+      import("@shikijs/langs/bat"),
     ],
     engine: createJavaScriptRegexEngine(),
   });

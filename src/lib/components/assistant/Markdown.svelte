@@ -729,8 +729,9 @@
     opacity: 0.5;
   }
   /* Ordered lists keep native numbering but with tabular alignment.
-     Markers in accent color so they pop out as the "column anchor." */
-  .md :global(ol) { padding-left: 30px; }
+     Markers in accent color so they pop out as the "column anchor."
+     Tailwind preflight zeroes list-style on ol — restore it explicitly. */
+  .md :global(ol) { list-style: decimal; padding-left: 30px; }
   .md :global(ol > li) {
     padding-left: 6px;
     font-variant-numeric: tabular-nums;

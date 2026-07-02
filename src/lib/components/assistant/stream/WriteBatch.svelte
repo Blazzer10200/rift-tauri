@@ -17,12 +17,17 @@
   // toggle survives re-renders.
   let openMap = $state<Record<string, boolean>>({});
   const SMALL = 14;
+  // Creates get a wider auto-open budget: a new file's content IS the payload
+  // (hiding it behind "+29 −0" was the audit's "Created … shows nothing"
+  // complaint), and EditDiff.compact clamps the body at 280px so a bigger
+  // create can't eat the transcript.
+  const SMALL_CREATE = 60;
 
   function hasDiff(t: StreamTool): boolean {
     return !!t.input && (t.add != null || t.del != null);
   }
   function autoOpen(t: StreamTool): boolean {
-    return (t.add ?? 0) + (t.del ?? 0) <= SMALL;
+    return (t.add ?? 0) + (t.del ?? 0) <= (t.kind === "create" ? SMALL_CREATE : SMALL);
   }
   function isOpen(t: StreamTool): boolean {
     return openMap[t.id] ?? autoOpen(t);

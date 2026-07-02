@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { messageToTurn, parseAskUserResult, groupNames, workLineMode, isFillerSay, classifySay, outputPeek, groupBlocks } from "./streamModel";
+import { messageToTurn, parseAskUserResult, groupNames, workLineMode, isFillerSay, classifySay, outputPeek, groupBlocks, shellFlavor, resultMeta } from "./streamModel";
 import type { StreamTool } from "./streamModel";
 import type { ChatMessage } from "$lib/state/assistant.svelte";
 
@@ -380,5 +380,50 @@ describe("adaptTool — shell carries its stdout; rich only when it has output",
     const groups = groupBlocks(messageToTurn(msg([bash(null)])).blocks);
     const work = groups.find((g) => g.type === "work");
     expect(work && work.type === "work" && work.segs.every((s) => s.seg !== "rich")).toBe(true);
+  });
+});
+
+describe("streamModel — shell flavor + detail surfacing (transcript revamp)", () => {
+  const toolOf = (m: ChatMessage) => {
+    const b = messageToTurn(m).blocks.find((x) => x.type === "tool");
+    return b && b.type === "tool" ? b.tool : null;
+  };
+
+  it("PowerShell is a shell-kind tool with a pwsh flavor and the command as caption", () => {
+    const tb = { ...tool("PowerShell", "done", { command: "Get-Date" }), result: "Thursday, July 2" };
+    const t = toolOf(msg([tb]))!;
+    expect(t.kind).toBe("shell");
+    expect(t.flavor).toBe("pwsh");
+    expect(t.cap).toBe("Get-Date");
+    expect(t.result).toBe("Thursday, July 2");
+  });
+
+  it("shellFlavor: Bash → bash; Bash shelling to cmd.exe → cmd", () => {
+    expect(shellFlavor("Bash", "ls -la")).toBe("bash");
+    expect(shellFlavor("Bash", "cmd /c dir")).toBe("cmd");
+    expect(shellFlavor("Bash", "CMD.EXE /C echo hi")).toBe("cmd");
+    expect(shellFlavor("PowerShell", null)).toBe("pwsh");
+  });
+
+  it("mcp tools carry input + result through, and caption peeks the input", () => {
+    const tb = { ...tool("ScheduleWakeup", "done", { reason: "watching the CI run finish" }), result: "wakeup set" };
+    const t = toolOf(msg([tb]))!;
+    expect(t.kind).toBe("mcp");
+    expect(t.cap).toContain("ScheduleWakeup");
+    expect(t.cap).toContain("watching the CI run");
+    expect(t.result).toBe("wakeup set");
+    expect(t.input).toEqual({ reason: "watching the CI run finish" });
+  });
+
+  it("resultMeta: read → line count; grep → match count; Glob → files; no result → null", () => {
+    const read = { ...tool("Read", "done", { file_path: "/a/b.ts" }), result: "l1\nl2\nl3" };
+    expect(resultMeta(toolOf(msg([read]))!)).toBe("3 lines");
+    const grep = { ...tool("Grep", "done", { pattern: "x" }), result: "a.ts:1: x\nb.ts:2: x" };
+    expect(resultMeta(toolOf(msg([grep]))!)).toBe("2 matches");
+    const glob = { ...tool("Glob", "done", { pattern: "*.md" }), result: "a.md" };
+    expect(resultMeta(toolOf(msg([glob]))!)).toBe("1 file");
+    const none = { ...tool("Grep", "done", { pattern: "x" }), result: "No matches found" };
+    expect(resultMeta(toolOf(msg([none]))!)).toBe("no matches");
+    expect(resultMeta(toolOf(msg([tool("Read")]))!)).toBeNull();
   });
 });

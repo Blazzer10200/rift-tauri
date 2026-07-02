@@ -50,8 +50,19 @@ export type StreamTool = {
   items?: PlanItem[]; // plan
   query?: string; sources?: string[]; count?: number | null; // web/fetch
   fail?: number | null; pass?: number | null; // test/lint
-  task?: string; result?: string | null; // agent
+  task?: string; result?: string | null; // agent · shell · read/grep/mcp detail
+  flavor?: ShellFlavor; // shell only — which shell ran it (badge identity)
 };
+
+/** Which shell a command ran under — drives the StreamShell identity badge.
+ *  `PowerShell` is the CLI's dedicated tool; a Bash command that shells out to
+ *  cmd.exe reads as cmd. Everything else on the Bash tool is bash. */
+export type ShellFlavor = "bash" | "pwsh" | "cmd";
+export function shellFlavor(name: string, command: string | null): ShellFlavor {
+  if (name === "PowerShell") return "pwsh";
+  if (command && /^\s*cmd(\.exe)?\s+\/c/i.test(command)) return "cmd";
+  return "bash";
+}
 
 type StreamBlock =
   | { type: "say"; text: string }
@@ -88,6 +99,15 @@ const shortName = (n: string) => n.replace(/^mcp__rift__/, "");
 const trim = (s: string, n = 60) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 const hostOf = (u: string) => { try { return new URL(u).host; } catch { return u; } };
 
+// Strip ANSI escape sequences (SGR colors, cursor moves) from tool output —
+// PowerShell/cargo/npm emit them, and raw `\x1b[31;1m` renders as literal
+// garbage in the transcript. Display + copy both want clean text.
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
+export function stripAnsi(s: string): string {
+  return s.replace(ANSI_RE, "");
+}
+
 export function fmtDur(t: number): string {
   const raw = Math.max(0, t);
   t = Math.round(raw);
@@ -104,6 +124,7 @@ function nameToKind(name: string): TKind {
   if (n === "Edit" || n === "MultiEdit" || n === "NotebookEdit") return "edit";
   if (n === "Write") return "create";
   if (n === "Bash" || n === "remote_bash" || n === "BashOutput" || n === "KillBash" || n === "KillShell") return "shell";
+  if (n === "PowerShell") return "shell"; // CC's dedicated PowerShell tool — same in/out shape as Bash
   if (n === "Agent" || n === "Task") return "agent";
   if (n === "WebSearch") return "web";
   if (n === "WebFetch") return "fetch";
@@ -129,7 +150,7 @@ function caption(tb: ToolBlock): string {
     return fp ? `${fp} · ${c} edits` : `${c} edits`;
   }
   if (n === "NotebookEdit") return fp ?? "notebook";
-  if (n === "Bash" || n === "remote_bash") return typeof inp.command === "string" ? trim(inp.command, 70) : "shell";
+  if (n === "Bash" || n === "remote_bash" || n === "PowerShell") return typeof inp.command === "string" ? trim(inp.command, 70) : "shell";
   if (n === "Glob") {
     const pat = typeof inp.pattern === "string" ? inp.pattern : "?";
     const scope = typeof inp.path === "string" ? ` in ${inp.path}` : "";
@@ -152,7 +173,26 @@ function caption(tb: ToolBlock): string {
     const c = Array.isArray(inp.todos) ? inp.todos.length : 0;
     return `${c} task${c === 1 ? "" : "s"}`;
   }
-  return n;
+  // Unknown/MCP tool: name + a peek at its most meaningful input, so "Called
+  // ScheduleWakeup" becomes "ScheduleWakeup · reason: watching CI run". The
+  // input IS the detail — hiding it made every MCP call an opaque stub.
+  const peek = firstInputPeek(inp);
+  return peek ? `${n} · ${peek}` : n;
+}
+
+// The most caption-worthy string field of a tool's input, preferred keys first
+// (command/query/url/…), else the first short string value found. Trimmed hard
+// so the caption stays one line; the full input renders on expand.
+const PEEK_KEYS = ["command", "query", "url", "path", "file_path", "pattern", "prompt", "description", "reason", "message", "text", "title"];
+function firstInputPeek(inp: Record<string, unknown>): string | null {
+  for (const k of PEEK_KEYS) {
+    const v = inp[k];
+    if (typeof v === "string" && v.trim()) return trim(v.trim().replace(/\s+/g, " "), 48);
+  }
+  for (const v of Object.values(inp)) {
+    if (typeof v === "string" && v.trim()) return trim(v.trim().replace(/\s+/g, " "), 48);
+  }
+  return null;
 }
 
 // Full file path off a tool's input (read/edit/create/notebook), normalized to
@@ -267,10 +307,38 @@ function adaptTool(tb: ToolBlock): StreamTool {
   if (kind === "shell") {
     // Carry the full stdout/stderr through so the live stream can show the
     // command's in-and-out (gated by the `commandOutput` pref at render time).
-    // Already on the tool block (streaming.ts fillToolResult) — just forward it.
-    t.result = tb.result ?? null;
+    // ANSI-stripped: PowerShell/cargo color codes render as literal `[31;1m`
+    // garbage otherwise (observed on failed pwsh output).
+    t.result = tb.result != null ? stripAnsi(tb.result) : null;
+    t.flavor = shellFlavor(t.name, typeof inp.command === "string" ? inp.command : null);
+  }
+  if (kind === "read" || kind === "grep" || kind === "mcp") {
+    // Forward the result for detail surfacing: read/grep rows show honest
+    // line/match counts, MCP rows can expand to the actual response. The data
+    // was always on the block — dropping it here made "show me what happened"
+    // impossible downstream.
+    t.result = tb.result != null ? stripAnsi(tb.result) : null;
+    if (kind === "mcp") t.input = inp;
   }
   return t;
+}
+
+/** Honest one-glance result meta for a WorkLine row: what the tool came back
+ *  with, not just that it ran. Read → line count; Grep/Glob/list_dir → match/
+ *  entry count. Null when there's no result to summarize. */
+export function resultMeta(t: StreamTool): string | null {
+  if (typeof t.result !== "string" || t.result.trim().length === 0) return null;
+  const n = t.result.replace(/\s+$/, "").split("\n").filter((l) => l.trim().length > 0).length;
+  if (t.kind === "read") return n === 1 ? "1 line" : `${n} lines`;
+  if (t.kind === "grep") {
+    if (/^No (files |matches )?found/i.test(t.result.trim())) return "no matches";
+    const [one, many] =
+      t.name === "Glob" ? ["file", "files"]
+      : t.name === "list_dir" ? ["entry", "entries"]
+      : ["match", "matches"];
+    return `${n} ${n === 1 ? one : many}`;
+  }
+  return null;
 }
 
 // Trailing-lines preview of a shell result for "peek" mode: the last `n`

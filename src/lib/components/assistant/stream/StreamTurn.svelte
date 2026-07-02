@@ -59,12 +59,26 @@
     message.blocks.map((b) => (b.type === "text" ? b.text : "")).join("").trim(),
   );
 
+  // Narration a user WATCHED stream must never be yanked away. Without this
+  // latch, a filler/connective line rendered "full" while live got reclassified
+  // the instant the next tool started (or the turn ended) — text collapsed to a
+  // muted beat or vanished mid-read, the subtle "streaming feels glitchy" jank.
+  // Latch every say index that ever rendered full while live; demotion then only
+  // applies to blocks that were never live-shown (history loads, older turns).
+  // Session-scoped by design — a reopened convo demotes normally.
+  const liveShown = new Set<number>();
+  $effect(() => {
+    if (!streaming) return;
+    const gi = groups.length - 1;
+    if (groups[gi]?.type === "say") liveShown.add(gi);
+  });
+
   // Decide how a `say` block renders given the narration-density pref. Returns
   // "full" (normal prose block), "muted" (demoted inline connective beat), or
   // "hide". The live-streaming LAST block is always shown full — never demote the
   // text that's actively typing. `prose` is always full regardless of pref.
-  function sayMode(text: string, isLiveLast: boolean): "full" | "muted" | "hide" {
-    if (isLiveLast) return "full";
+  function sayMode(text: string, isLiveLast: boolean, gi: number): "full" | "muted" | "hide" {
+    if (isLiveLast || liveShown.has(gi)) return "full";
     const w = classifySay(text);
     if (w === "prose") return "full";
     const pref = uiPrefs.narration;
@@ -224,7 +238,7 @@
 
   {#each groups as g, gi (gi)}
     {#if g.type === "say"}
-      {@const sm = sayMode(g.text, streaming && gi === groups.length - 1)}
+      {@const sm = sayMode(g.text, streaming && gi === groups.length - 1, gi)}
       {#if sm === "hide"}
         <!-- connective narration demoted to nothing (focused mode / pure filler) -->
       {:else if sm === "muted"}
