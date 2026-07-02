@@ -2,56 +2,45 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — Settings redesign, workspace hub, composer + welcome revamp, live status bar
+## Unreleased — Reasoning ladder, transcript detail, settings redesign, workspace hub, live status bar
+
+### Reasoning effort, honest and visible
+- **The Thinking toggle is gone — it was an effort jump in disguise.** One four-rung ladder (Low / Medium / High / X-High): Low answers immediately, higher rungs think longer. Fable explains its always-on reasoning; Haiku simply hides the ladder.
+- **A calmer picker:** segmented rung cards replace the drag slider, the hotkey cheat-strip is gone, and every model row shows its live rate-limit state.
+
+### The transcript shows its work
+- **Terminal blocks know their shell** — bash, PowerShell, and cmd each get a colored badge; output is ANSI-clean and one hover-button copies command + output together.
+- **Every tool row reports what came back** — "→ 15 lines", "→ 91 files", "no matches", durations ≥1s, a red *failed* when it broke; MCP tools show their input and an output peek.
+- **Created files show their content** in the transcript (up to 60 lines) — a new file is the payload, not a "+29 −0" stub.
+- **Streaming text stays put** — narration you watched stream no longer collapses or demotes itself when the next block starts.
+- **Markdown polish:** numbered lists show their numbers again; PowerShell and Batch code blocks get real syntax highlighting.
 
 ### Status bar is interactive · usage popover grew up
-- **Click the 5h/7d pills** → full Plan-limits popover above the bar: every window w/ reset countdowns, an **IN USE** chip on the binding window, manual refresh, live "updated Xs ago". Pills tint amber/red as a window heats; tooltips carry reset times.
-- **Weekly Fable limit shows now** (the endpoint moved model windows into a generic list — future models appear automatically), and **extra-usage credits** ($X of $Y) finally display.
-- **Project name → Workspace hub; the Claude item → Settings → Claude** (the door to fixing "Not connected").
+- **Click the 5h/7d pills** → full Plan-limits popover (reset countdowns, **IN USE** chip, manual refresh); pills tint amber/red as a window heats; weekly Fable limit + extra-usage credits now display. Project name → Workspace hub; Claude item → Settings → Claude.
 
 ### Chat welcome + composer, revamped
-- Welcome: session eyebrow over "What's next for *project*?", one slim facts row (branch · files · path + Switch folder/Activity), and **Jump back in** — your three freshest threads, one click to resume. Quick-start chips removed; "New to Rift?" opens into three step cards.
-- Composer is **one card**: input + a docked control deck (perm · attach · dictate · draft tools | model · ctx ring · **real send button** — filled accent circle when ready, stop square mid-turn, queued-count badge). The ↵/⇧↵ hints retired into the send tooltip.
-
-### Chat display
-- **Hover timestamps** — new messages remember when they were sent; hover a turn head or your bubble for "2:42 AM" (older chats simply show none).
-- Glassier user bubble, a hair more reading line-height, and the accent "pool of light" behind the transcript is now fully neutral — no more green wash under every texture.
+- Welcome: session eyebrow, one slim facts row, and **Jump back in** — your three freshest threads, one click to resume.
+- Composer is **one card**: input + docked control deck with a **real send button** (accent fill when ready, stop square mid-turn, queued-count badge).
+- **Hover timestamps** on new messages; glassier user bubble; the accent "pool of light" behind the transcript is now fully neutral.
 
 ### Settings — full redesign
-- **Every tab is one scrolling page** — the second navigation layer inside each tab is gone; the column is narrower and centered.
-- **The header blends into the page** — no more tinted band cutting the top off; titles sit directly on your background texture (Settings, AI Health, Local LLM all match).
-- **Accent color is just a color now.** The "Looks" presets that silently changed texture/density are gone: swatches + a hue dial with live degree readout + vividness, and one-click **Reset accent**.
-- **The "Chat" tab is now "Claude"**, and every previously bare card opens with a one-line plain-English description. The Vividness slider finally shows a filled track.
+- Every tab is one scrolling page; the header blends into your background texture; accent is just a color (swatches + hue dial + vividness + one-click reset); the "Chat" tab is now "Claude" with plain-English card descriptions.
 
 ### Added
-- **Three new background textures — and live preview.** The Appearance picker gains **Blueprint** (accent-tinted two-scale grid), **Rings** (concentric arcs), and **Grain** (film noise), for 12 options total. Hovering any tile now previews the *real* texture live on the app background behind the page — no more guessing from a thumbnail; click commits, move away reverts.
-- **The New/Edit project editor got a real face.** Icon + subtitle header, Name and Folder on one row, live "N patterns" counts on valid Include/Exclude globs, a saving spinner, and proper keyboard flow: the Name field focuses on open, **Enter saves, Escape closes**.
-- **The Workspace page is now a real hub.** Projects lead as one uniform grid with live signal per card (**chats · last active · spend**), ordered by where you actually work; the active project wears the accent frame with in-place **Continue**. Activity analytics sit below the launch targets, and the page fits the default window with no scrollbar.
-- **Collapsed sidebar is now a mini-rail** — a slim 52px icon column keeps New chat, search, and Workspace/Chat/AI Health/Settings one click away.
-- **Workspace dashboard shows momentum, not just totals** — 7d/30d stat tiles carry trend chips vs the prior window (rising spend reads neutral); the **spent** tile jumps to AI Health.
-
-### Changed
-- **The topbar ⋮ menu is gone — its actions are now one click:** Split editor, New window, and a **notifications bell** with an unread badge sit directly in the topbar.
-- **The Ctrl+K search was redesigned** — single-line rows with key chips, recent chats tagged with project + last activity, Split editor / New window from the keyboard, less matching noise.
-- **Your background texture now covers the whole app** — Workspace, Settings, and the in-app browser no longer paint solid panels over it.
+- **Three new background textures** (Blueprint, Rings, Grain — 12 total); hover previews paint the real app background.
+- **Workspace page is a real hub** — uniform project grid with live signal (chats · last active · spend), accent frame + in-place **Continue** on the active project, momentum stat tiles.
+- **Project editor got a real face** — icon header, live glob counts, Enter saves / Escape closes.
+- **Collapsed sidebar is a 52px mini-rail**; topbar ⋮ menu replaced by direct Split / New window / notification-bell buttons; Ctrl+K search redesigned; textures cover the whole app.
 
 ### Fixed
-- **The Margins texture actually shows up now.** Its old elliptical fade peaked at ~27% strength at the screen corners — effectively invisible. It now draws a proper dotted frame along all four edges.
-- **The notifications panel no longer covers its own bell**, and repeated identical notifications collapse into one entry with a count.
-- **Deleting a chat right after a reply no longer resurrects it** — a background auto-save/title-generation could re-create it moments later; deletions now hold, even mid-save.
-- **AI Health reads honestly** (dropped a misleading "typical reply" figure; no mid-word truncation), and **dev builds don't cry wolf** with a red "reinstall needed" chip.
-
-### Fixed — overnight full-stack review (split-pane correctness, error honesty, races)
-- **Split panes truly keep to themselves now.** Retrying a turn, continuing a truncated reply, or a queued message auto-firing in a background pane all land in *that* pane's conversation — never the one you happen to be looking at — and a background pane finishing its work no longer yanks your cursor to it. An unfocused pane also stops briefly showing another pane's file count / git branch.
-- **Errored turns say what actually went wrong.** A turn that stops on a thinking-budget or context-window limit now keeps its plain-English reason instead of being overwritten by a raw diagnostic dump.
-- **The "applied automatically" badge on a past turn reflects the mode it *ran* with**, not whatever permission mode you switched to afterward.
-- **AI Health's "Apply" for a reasoning-effort tip now works even when Thinking is off** (it flips Thinking on for you) instead of silently doing nothing while showing a green check.
-- **Dismissed voice/ask questions** in history now read "Dismissed — no answer given." instead of leaking the internal instruction text; in-progress answers no longer get wiped if the question list changes mid-stream.
-- **Copy-diff** only says "Copied" when the copy truly succeeded; a **too-many-patterns** project glob now blocks Save with a warning instead of silently truncating; assorted backend races hardened (concurrent model-download cancel, interrupted-download resume, project-folder resolution).
-- **The sidebar's branch pill stays put** when you open Settings (it used to flip to "Local workspace" mid-navigation).
+- **Margins texture actually visible** (proper dotted edge frame); notifications panel no longer covers its bell; repeated notifications coalesce into one entry.
+- **Deleting a chat right after a reply holds** — a background auto-save can no longer resurrect it.
+- **Split panes truly keep to themselves** — retries, continues, and queued sends land in *their* pane; no cursor-yank, no cross-pane branch/file bleed.
+- **Errored turns keep their plain-English reason**; the "applied automatically" badge reflects the mode a turn *ran* with; dismissed voice/ask questions read "Dismissed — no answer given."
+- AI Health reads honestly; the effort tip's Apply works with Thinking off; copy-diff only claims success when it copied; oversized project globs block Save loudly; assorted backend races hardened.
 
 ### Changed — under the hood
-- **One toggle-switch style app-wide** (was three near-identical copies), one danger-text color token, ~250 lines of dead CSS/TS removed. No visible change; the UI is just more consistent and lighter.
+- One toggle-switch style app-wide, one danger-text token, ~250 lines of dead CSS/TS plus orphaned helpers removed.
 
 ## v0.83.0 — Sidebar redesign + Fable 5 always in the picker
 - **Project-first sidebar:** switcher (monogram + branch) on top, New chat + search, scope toggle, recent-day history, icon footer.
