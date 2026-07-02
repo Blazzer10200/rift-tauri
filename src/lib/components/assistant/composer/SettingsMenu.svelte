@@ -5,7 +5,7 @@
   // ←/→ effort nudges); this child renders, handles clicks, and owns the
   // pointer-drag slider. Derives re-compute here from the shared modelMatrix
   // + assistant store — same pure helpers the parent uses, so they can't drift.
-  import { Check, HelpCircle, ChevronRight, Layers, Plus } from "lucide-svelte";
+  import { Check, ChevronRight, Layers, Plus } from "lucide-svelte";
   import { tick } from "svelte";
   import { assistant } from "../../../state/assistant.svelte";
   import { uiPrefs } from "../../../state/ui-prefs.svelte";
@@ -13,7 +13,6 @@
   import { usage, limitZone, type ScopedLimit } from "../../../state/usage.svelte";
   import { portal } from "$lib/actions/portal";
   import { tooltip } from "$lib/actions/tooltip";
-  import { effortIdxFromX } from "./helpers";
   import {
     MODEL_OPTIONS, currentModels, legacyModels, modelShortcut, modelWindowSuffix,
     dialStopsFor, dialIdxFor, clampEffortIdx,
@@ -87,7 +86,6 @@
   const effortIdx = $derived(dialIdxFor(effortStops, assistant.thinkingEnabled, assistant.thinkingEffort));
   const currentEffort = $derived(effortStops[effortIdx] ?? effortStops[0]);
   const stops = $derived(effortStops.length);
-  const effortPct = $derived(stops > 1 ? (effortIdx / (stops - 1)) * 100 : 0);
   function setEffortByIdx(i: number) {
     const s = effortStops[clampEffortIdx(effortStops, i)];
     if (!s) return;
@@ -117,26 +115,6 @@
     const ls = usage.rateLimits?.limits ?? [];
     return ls.find((l) => (l.scope?.model?.displayName ?? "").toLowerCase().includes(fam)) ?? null;
   }
-  // Pointer-drag the dial: map clientX → nearest stop. Pointer-capture on the
-  // track keeps move/up flowing even when the cursor leaves the row.
-  let effortTrackEl: HTMLDivElement | null = $state(null);
-  let draggingEffort = $state(false);
-  function dialIdxFromClientX(clientX: number): number {
-    if (!effortTrackEl) return effortIdx;
-    return effortIdxFromX(clientX, effortTrackEl.getBoundingClientRect(), effortStops.length);
-  }
-  function startEffortDrag(e: PointerEvent) {
-    e.preventDefault();
-    draggingEffort = true;
-    setEffortByIdx(dialIdxFromClientX(e.clientX));
-    effortTrackEl?.setPointerCapture?.(e.pointerId);
-  }
-  function moveEffortDrag(e: PointerEvent) {
-    if (!draggingEffort) return;
-    setEffortByIdx(dialIdxFromClientX(e.clientX));
-  }
-  function endEffortDrag() { draggingEffort = false; }
-
   // "More models" flyout — previous-generation models live behind this submenu
   // (matches the desktop picker) instead of a permanently-expanded Legacy block.
   // Opens on hover/focus of the trigger row; the active model being a legacy one
@@ -260,87 +238,46 @@
 
   {#if dialApplies}
     <div class="rift-menu-divider"></div>
-    <!-- Effort — the ONE reasoning control. Rung 0 (Low) = replies immediately
-         (thinking off on the wire); higher rungs reason before replying at that
-         depth. Every rung is live — no dead states. -->
-    <div class="effort-head" class:ultra={currentEffort.id === "xhigh"}>
+    <!-- Effort — segmented rung cards, one per CLI `--effort` flag. A slider
+         implied a continuum that doesn't exist; these are four discrete gears.
+         Rung 0 replies immediately (thinking off on the wire); higher rungs
+         reason before replying at their depth. Every rung is live. -->
+    <div class="effort-head">
       <span class="effort-head-k">Effort</span>
-      <span class="effort-head-v" aria-live="polite">{currentEffort.label}</span>
       {#if currentModel?.id === "claude-fable-5"}<span class="effort-head-note">always reasons — effort sets depth</span>
       {:else if effortIdx === 0}<span class="effort-head-note">replies immediately</span>
       {:else}<span class="effort-head-note">reasons before replying</span>{/if}
-      <button
-        type="button"
-        role="menuitem"
-        class="effort-help"
-        use:tooltip={currentEffort.hint}
-        onmousedown={(e) => e.preventDefault()}
-        aria-label="What does effort do?"
-      ><HelpCircle size={12} /></button>
     </div>
     <div
-      class="effort-slider"
+      class="effort-seg"
       class:active={activeKind === "effort"}
-      class:ultra={currentEffort.id === "xhigh"}
-      class:dragging={draggingEffort}
-      role="slider"
+      role="radiogroup"
       tabindex="0"
       aria-label="Effort"
       onkeydown={(e) => { if (e.key === 'ArrowRight') { e.preventDefault(); setEffortByIdx(effortIdx + 1); } else if (e.key === 'ArrowLeft') { e.preventDefault(); setEffortByIdx(effortIdx - 1); } }}
-      aria-valuemin={1}
-      aria-valuemax={stops}
-      aria-valuenow={effortIdx + 1}
-      aria-valuetext={currentEffort.label}
+      style="grid-template-columns: repeat({stops}, 1fr);"
     >
-      <div
-        class="effort-track"
-        role="presentation"
-        bind:this={effortTrackEl}
-        onpointerdown={startEffortDrag}
-        onpointermove={moveEffortDrag}
-        onpointerup={endEffortDrag}
-        onpointercancel={endEffortDrag}
-      >
-        <div class="effort-fill" class:off={effortIdx === 0} style="width: {effortPct}%"></div>
-        {#each effortStops as s, i (s.id)}
-          <button
-            type="button"
-            class="effort-notch"
-            class:on={i <= effortIdx}
-            class:cur={i === effortIdx}
-            class:ultra={s.id === "xhigh"}
-            style="left: {stops > 1 ? (i / (stops - 1)) * 100 : 0}%"
-            use:tooltip={s.hint}
-            aria-label={s.label}
-            onmousedown={(ev) => { ev.preventDefault(); setEffortByIdx(i); }}
-          ></button>
-        {/each}
-        <div class="effort-knob" style="left: {effortPct}%"></div>
-      </div>
-      <div class="effort-ticks">
-        {#each effortStops as s, i (s.id)}
-          <button
-            type="button"
-            class="effort-tick"
-            class:cur={i === effortIdx}
-            class:done={i < effortIdx}
-            style="left: {stops > 1 ? (i / (stops - 1)) * 100 : 0}%"
-            tabindex="-1"
-            aria-hidden="true"
-            onmousedown={(ev) => { ev.preventDefault(); setEffortByIdx(i); }}
-          >{s.label}</button>
-        {/each}
-      </div>
+      {#each effortStops as s, i (s.id)}
+        <button
+          type="button"
+          role="radio"
+          aria-checked={i === effortIdx}
+          class="eseg"
+          class:on={i === effortIdx}
+          class:passed={i < effortIdx}
+          class:xhigh={s.id === "xhigh"}
+          use:tooltip={s.hint}
+          onmousedown={(ev) => { ev.preventDefault(); setEffortByIdx(i); }}
+        >
+          <span class="eseg-bars" aria-hidden="true">
+            {#each { length: i + 1 } as _, bi (bi)}<i style="height: {4 + bi * 3}px"></i>{/each}
+          </span>
+          <span class="eseg-label">{s.label}</span>
+        </button>
+      {/each}
     </div>
   {/if}
   <p class="model-caption" class:warn={dialApplies && currentEffort.id === "xhigh"}>{modelCaption}</p>
-
-  <div class="rift-menu-hint">
-    <span><kbd>1–{MODEL_OPTIONS.length}</kbd>model</span>
-    {#if dialApplies}<span><kbd>←→</kbd>effort</span>{/if}
-    <span><kbd>↵</kbd>pick</span>
-    <span><kbd>Esc</kbd>close</span>
-  </div>
 </div>
 
 <style>
@@ -598,7 +535,9 @@
   :global(.settings-menu .model-row:hover .model-num),
   :global(.settings-menu .model-row.active .model-num) { color: var(--fg-muted); }
 
-  /* Effort ladder — stepped tier rail (Low→X-High), stops = dialStopsFor(model). */
+  /* Effort — segmented rung cards (Low→X-High), stops = dialStopsFor(model).
+     One card per CLI flag on a recessed glass rail; the ascending-bars glyph is
+     the depth metaphor (no fake slider continuum). */
   :global(.settings-menu .effort-head) {
     display: flex; align-items: center; gap: 8px;
     padding: 10px 9px 4px;
@@ -609,183 +548,92 @@
     font-size: var(--sm-eyebrow); font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
     color: var(--fg-faint);
   }
-  /* Active tier value — accent chip that re-pops on every change. */
-  :global(.settings-menu .effort-head .effort-head-v) {
-    font-family: var(--font-mono); font-size: 11px; font-weight: 600;
-    color: var(--accent); letter-spacing: 0.01em; line-height: 1;
-    padding: 2px 7px; border-radius: 6px;
-    background: color-mix(in oklab, var(--accent) 12%, transparent);
-    border: 1px solid color-mix(in oklab, var(--accent) 26%, transparent);
-    animation: effort-pop 0.3s var(--ease-page);
-  }
-  :global(.settings-menu .effort-head.ultra .effort-head-v) {
-    color: var(--accent);
-    background: color-mix(in oklab, var(--accent) 20%, transparent);
-    border-color: color-mix(in oklab, var(--accent) 45%, transparent);
-    box-shadow: 0 0 10px color-mix(in oklab, var(--accent) 35%, transparent);
-  }
-  @keyframes effort-pop {
-    0% { transform: scale(0.86); opacity: 0.4; }
-    55% { transform: scale(1.06); }
-    100% { transform: scale(1); opacity: 1; }
-  }
-  :global(.settings-menu .effort-head .effort-help) {
-    margin-left: auto; display: inline-flex; padding: 2px; border: 0;
-    background: transparent; color: var(--fg-faint); cursor: help;
-    transition: color 140ms ease;
-  }
-  :global(.settings-menu .effort-head .effort-help:hover) { color: var(--fg-muted); }
-  /* Inline latency note beside the tier chip — names what the rung actually
-     does ("replies immediately" / "reasons before replying"). */
+  /* Latency note, right-aligned — names what the active rung actually does
+     ("replies immediately" / "reasons before replying" / Fable's always-on). */
   :global(.settings-menu .effort-head .effort-head-note) {
+    margin-left: auto;
     font-size: 10px; color: var(--fg-faint); font-style: italic; line-height: 1;
   }
-  :global(.settings-menu .effort-slider) {
-    padding: 14px 16px 6px; margin: 0;
-    transition: opacity 160ms ease;
-  }
-  /* Glassy capsule track — soft groove, no near-black well. A faint top sheen +
-     1px inner ring read as a polished rail rather than a flat line. */
-  :global(.settings-menu .effort-track) {
-    position: relative; height: 6px; border-radius: 999px;
+  :global(.settings-menu .effort-seg) {
+    display: grid; gap: 4px;
+    margin: 2px 8px 0; padding: 4px;
+    border-radius: 12px;
     background: linear-gradient(180deg,
-      color-mix(in oklch, var(--fg) 7%, transparent),
-      color-mix(in oklch, var(--fg) 13%, transparent));
-    box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.05),
-                inset 0 1px 1px oklch(0 0 0 / 0.18);
-    cursor: grab; touch-action: none;
+      color-mix(in oklab, var(--fg) 3%, transparent),
+      color-mix(in oklab, var(--fg) 6%, transparent));
+    border: 1px solid color-mix(in oklab, var(--fg) 9%, transparent);
+    box-shadow: inset 0 1px 2px oklch(0 0 0 / 0.16);
+    transition: border-color 160ms ease;
   }
-  /* Invisible vertical hit-area so the 6px track is easy to grab. */
-  :global(.settings-menu .effort-track::before) { content: ""; position: absolute; inset: -11px 0; }
-  :global(.settings-menu .effort-slider.dragging .effort-track) { cursor: grabbing; }
-  :global(.settings-menu .effort-fill) {
-    position: absolute; left: 0; top: 0; height: 100%; border-radius: 999px;
-    background: linear-gradient(
-      90deg,
-      color-mix(in oklab, var(--accent) 55%, var(--fg-faint)),
-      var(--accent)
-    );
-    box-shadow: 0 0 10px color-mix(in oklab, var(--accent) 45%, transparent),
-                inset 0 1px 0 oklch(1 0 0 / 0.18);
-    transition: width 280ms cubic-bezier(0.22, 1, 0.36, 1),
-                background 220ms ease, box-shadow 220ms ease;
+  /* Keyboard cursor parked on the effort row (Composer onKey ↑↓). */
+  :global(.settings-menu .effort-seg.active) {
+    border-color: color-mix(in oklab, var(--accent) 32%, transparent);
   }
-  :global(.settings-menu .effort-slider.ultra .effort-fill) {
-    box-shadow: 0 0 14px color-mix(in oklab, var(--accent) 60%, transparent),
-                inset 0 1px 0 oklch(1 0 0 / 0.22);
+  :global(.settings-menu .eseg) {
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding: 8px 2px 7px; border-radius: 9px;
+    border: 1px solid transparent; background: transparent;
+    color: var(--fg-faint); cursor: pointer; font: inherit;
+    transition: color 140ms ease, background 140ms ease,
+                border-color 140ms ease, transform 200ms var(--ease-page);
   }
-  /* Off rung (dial at index 0) — neutral, no accent glow, so "thinking off"
-     reads as a quiet state rather than a lit tier. The knob still sits at the
-     left edge over the bare track. */
-  :global(.settings-menu .effort-fill.off) {
-    background: color-mix(in oklab, var(--fg-faint) 55%, transparent);
-    box-shadow: none;
+  :global(.settings-menu .eseg:hover) { color: var(--fg-2); background: var(--surface-hover); }
+  :global(.settings-menu .eseg:active) { transform: scale(0.95); }
+  /* Rungs below the active one read "crossed" — a notch brighter than idle. */
+  :global(.settings-menu .eseg.passed) { color: var(--fg-muted); }
+  :global(.settings-menu .eseg.on) {
+    color: var(--accent);
+    background:
+      radial-gradient(120% 90% at 50% 0%,
+        color-mix(in oklab, var(--accent) 16%, transparent), transparent 72%),
+      color-mix(in oklab, var(--accent) 7%, transparent);
+    border-color: color-mix(in oklab, var(--accent) 32%, transparent);
+    box-shadow: 0 0 12px -2px color-mix(in oklab, var(--accent) 35%, transparent),
+                inset 0 1px 0 oklch(1 0 0 / 0.08);
+    animation: eseg-in 0.26s var(--ease-page);
   }
-  :global(.settings-menu .effort-slider:has(.effort-fill.off) .effort-knob) {
-    border-color: var(--fg-faint);
+  @keyframes eseg-in {
+    from { transform: scale(0.9); }
+    60% { transform: scale(1.04); }
+    to { transform: scale(1); }
   }
-  :global(.settings-menu .effort-notch) {
-    position: absolute; top: 50%; width: 5px; height: 5px; padding: 0;
-    transform: translate(-50%, -50%);
-    border-radius: 999px; border: 0;
-    background: oklch(1 0 0 / 0.26); cursor: pointer;
-    box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 40%, transparent);
-    transition: background 160ms ease, box-shadow 200ms ease,
-                transform 220ms cubic-bezier(0.34, 1.4, 0.5, 1);
+  /* X-High lit = the hot gear — amped glow flags its cost/autonomy. */
+  :global(.settings-menu .eseg.xhigh.on) {
+    border-color: color-mix(in oklab, var(--accent) 50%, transparent);
+    box-shadow: 0 0 18px -2px color-mix(in oklab, var(--accent) 60%, transparent),
+                inset 0 1px 0 oklch(1 0 0 / 0.12);
   }
-  :global(.settings-menu .effort-notch:hover) {
-    transform: translate(-50%, -50%) scale(1.5);
-    background: oklch(1 0 0 / 0.6);
-    box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 14%, transparent);
+  /* Ascending signal bars — rung N draws N bars, heights 4→13px. currentColor
+     keys them to the card state (faint idle, accent lit). */
+  :global(.settings-menu .eseg-bars) {
+    display: flex; align-items: flex-end; gap: 2px; height: 13px;
   }
-  /* Passed stops glow faintly with the accent so the filled track reads as
-     "tiers crossed", not just a colored bar. */
-  :global(.settings-menu .effort-notch.on) {
-    background: oklch(1 0 0 / 0.85);
-    box-shadow: 0 0 5px color-mix(in oklab, var(--accent) 50%, transparent);
+  :global(.settings-menu .eseg-bars i) {
+    width: 3px; border-radius: 1.5px; background: currentColor; opacity: 0.5;
+    transition: opacity 140ms ease;
   }
-  :global(.settings-menu .effort-notch.cur) { transform: translate(-50%, -50%) scale(0); }
-  :global(.settings-menu .effort-knob) {
-    position: absolute; top: 50%; width: 16px; height: 16px; z-index: 2;
-    transform: translate(-50%, -50%);
-    border-radius: 999px;
-    background: radial-gradient(circle at 36% 28%, oklch(1 0 0), oklch(0.9 0 0) 60%, oklch(0.82 0 0));
-    border: 2px solid var(--accent);
-    box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 16%, transparent),
-                0 0 9px color-mix(in oklab, var(--accent) 40%, transparent),
-                0 2px 5px oklch(0 0 0 / 0.45);
-    transition: left 280ms cubic-bezier(0.34, 1.4, 0.5, 1),
-                width 160ms ease, height 160ms ease,
-                border-color 220ms ease, box-shadow 220ms ease;
-    pointer-events: none;
+  :global(.settings-menu .eseg.on .eseg-bars i) {
+    opacity: 1;
+    box-shadow: 0 0 5px color-mix(in oklab, var(--accent) 55%, transparent);
   }
-  :global(.settings-menu .effort-slider.dragging .effort-fill) { transition: background 220ms ease, box-shadow 220ms ease; }
-  :global(.settings-menu .effort-slider.dragging .effort-knob) {
-    transition: width 120ms ease, height 120ms ease, border-color 220ms ease, box-shadow 220ms ease;
-    width: 18px; height: 18px;
-  }
-  :global(.settings-menu .effort-slider.active .effort-knob),
-  :global(.settings-menu .effort-slider.ultra .effort-knob) {
-    box-shadow: 0 0 0 5px color-mix(in oklab, var(--accent) 22%, transparent),
-                0 0 13px color-mix(in oklab, var(--accent) 55%, transparent),
-                0 2px 6px oklch(0 0 0 / 0.45);
-  }
-  /* Per-stop tier labels under the rail — each notch names its flag (Low /
-     Medium / High / X-High). Absolutely positioned so they sit dead-under their
-     notch; the active one lifts + goes accent, passed ones brighten. */
-  :global(.settings-menu .effort-ticks) {
-    position: relative; height: 14px; margin-top: 13px;
-  }
-  :global(.settings-menu .effort-tick) {
-    position: absolute; top: 0; transform: translateX(-50%);
-    padding: 0; border: 0; background: transparent; cursor: pointer;
+  :global(.settings-menu .eseg-label) {
     font-family: var(--font-mono); font-size: 9px; font-weight: 600;
-    letter-spacing: 0.02em; line-height: 1; white-space: nowrap;
-    color: var(--fg-subtle);
-    transition: color 200ms ease, transform 240ms cubic-bezier(0.34, 1.4, 0.5, 1), opacity 200ms ease;
+    letter-spacing: 0.03em; line-height: 1; white-space: nowrap;
   }
-  /* First/last hug the rail ends so they don't clip the panel edge. */
-  :global(.settings-menu .effort-tick:first-child) { transform: translateX(0); left: 0 !important; }
-  :global(.settings-menu .effort-tick:last-child) { transform: translateX(-100%); }
-  :global(.settings-menu .effort-tick:hover) { color: var(--fg-muted); }
-  :global(.settings-menu .effort-tick.done) { color: var(--fg-faint); }
-  :global(.settings-menu .effort-tick.cur) {
-    color: var(--accent); transform: translateX(-50%) translateY(-2px) scale(1.08);
-  }
-  :global(.settings-menu .effort-tick.cur:first-child) { transform: translateX(0) translateY(-2px) scale(1.08); }
-  :global(.settings-menu .effort-tick.cur:last-child) { transform: translateX(-100%) translateY(-2px) scale(1.08); }
-  /* Plain-language "what you're getting" line under the effort slider. Amber on
-     the Ultracode tier to flag its higher cost / autonomous behavior. */
+  /* Plain-language "what you're getting" line under the rung cards. Amber on
+     the X-High tier to flag its higher cost / autonomous behavior. */
   :global(.settings-menu .model-caption) {
-    margin: 10px 10px 2px; padding: 0;
+    margin: 10px 10px 4px; padding: 0;
     font-size: var(--sm-sub); font-weight: 450; line-height: 1.45; color: var(--fg-muted);
     transition: color 180ms ease;
   }
   :global(.settings-menu .model-caption.warn) { color: var(--warn); }
 
-  /* Footer hotkey strip — hairline top-rule closes the panel without a heavy
-     inset slab; keys sit on the glass, not in a black well. */
-  :global(.settings-menu .rift-menu-hint) {
-    gap: 10px; flex-wrap: nowrap;
-    margin: 8px 2px 1px; padding: 8px 6px 3px;
-    border-top: 1px solid color-mix(in oklab, var(--fg) 8%, transparent);
-    font-size: var(--sm-mono); color: var(--fg-faint); letter-spacing: 0.01em;
-  }
-  :global(.settings-menu .rift-menu-hint span) { display: inline-flex; align-items: center; white-space: nowrap; }
-  :global(.settings-menu .rift-menu-hint kbd) {
-    margin-right: 3px;
-    background: color-mix(in oklab, var(--fg) 7%, transparent);
-    border: 1px solid color-mix(in oklab, var(--fg) 10%, transparent);
-  }
-
   @media (prefers-reduced-motion: reduce) {
     :global(.settings-menu),
     :global(.settings-menu > *),
     :global(.settings-menu .pop-ck),
-    :global(.settings-menu .effort-fill),
-    :global(.settings-menu .effort-knob),
-    :global(.settings-menu .effort-head-v),
-    :global(.settings-menu .effort-tick),
-    :global(.settings-menu .effort-notch) { animation: none; transition: none; }
+    :global(.settings-menu .eseg),
+    :global(.settings-menu .eseg-bars i) { animation: none; transition: none; }
   }
 </style>
