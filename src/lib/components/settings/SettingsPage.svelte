@@ -52,6 +52,9 @@
 
   let activeSec = $state<Section>("appearance");
   let scrollEl = $state<HTMLDivElement>();
+  // If the page unmounts mid-hover (palette nav etc.) pointerleave never fires —
+  // drop any texture hover-preview so the app can't get stuck on it.
+  $effect(() => () => uiPrefs.setPreviewField(null));
   const activeMeta = $derived(ST_SECTIONS.find((s) => s.id === activeSec) ?? ST_SECTIONS[0]);
 
   // Switching tabs resets the scroll position.
@@ -350,10 +353,16 @@
 
           <div class="card">
             <div class="card-tt">Background texture</div>
-            <div class="card-sub">A faint pattern behind the workspace.</div>
+            <div class="card-sub">A faint pattern behind the workspace — hover a tile to preview it live on this page. Blueprint and Glow follow your accent color.</div>
             <div class="bg-grid">
               {#each DOT_FIELDS as df (df.id)}
-                <button class="bg-opt" class:sel={uiPrefs.dotField === df.id} type="button" onclick={() => uiPrefs.setDotField(df.id)} aria-pressed={uiPrefs.dotField === df.id}>
+                <button class="bg-opt" class:sel={uiPrefs.dotField === df.id} type="button"
+                  onclick={() => { uiPrefs.setDotField(df.id); uiPrefs.setPreviewField(null); }}
+                  onpointerenter={() => uiPrefs.setPreviewField(df.id)}
+                  onpointerleave={() => uiPrefs.setPreviewField(null)}
+                  onfocus={() => uiPrefs.setPreviewField(df.id)}
+                  onblur={() => uiPrefs.setPreviewField(null)}
+                  aria-pressed={uiPrefs.dotField === df.id}>
                   <span class="bg-tile">
                     {#if df.id === "off"}<span class="bg-tile-none">—</span>{:else}<span class="bg-tile-pat" data-dots={df.id}></span>{/if}
                     <span class="bg-tile-ck"><Check size={11} strokeWidth={3} /></span>
@@ -1101,12 +1110,15 @@
   /* ── Appearance: background-texture preview tiles (live field on .app[data-dots]::before) ── */
   .bg-tile-pat[data-dots="dots"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 24%, transparent) 1px, transparent 1.6px); background-size: 11px 11px; }
   .bg-tile-pat[data-dots="dense"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 22%, transparent) 0.9px, transparent 1.4px); background-size: 7px 7px; }
-  .bg-tile-pat[data-dots="margins"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 28%, transparent) 1px, transparent 1.6px); background-size: 11px 11px; -webkit-mask-image: radial-gradient(120% 120% at 50% 50%, transparent 38%, #000 96%); mask-image: radial-gradient(120% 120% at 50% 50%, transparent 38%, #000 96%); }
+  .bg-tile-pat[data-dots="margins"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 28%, transparent) 1px, transparent 1.6px); background-size: 11px 11px; -webkit-mask-image: linear-gradient(to right, #000, transparent 30% 70%, #000), linear-gradient(to bottom, #000, transparent 34% 66%, #000); mask-image: linear-gradient(to right, #000, transparent 30% 70%, #000), linear-gradient(to bottom, #000, transparent 34% 66%, #000); }
   .bg-tile-pat[data-dots="grid"] { background-image: linear-gradient(to right, color-mix(in oklab, var(--fg) 20%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--fg) 20%, transparent) 1px, transparent 1px); background-size: 12px 12px; }
   .bg-tile-pat[data-dots="lines"] { background-image: linear-gradient(to bottom, color-mix(in oklab, var(--fg) 20%, transparent) 1px, transparent 1px); background-size: 100% 10px; }
   .bg-tile-pat[data-dots="diagonal"] { background-image: repeating-linear-gradient(45deg, color-mix(in oklab, var(--fg) 18%, transparent) 0 1px, transparent 1px 9px); }
   .bg-tile-pat[data-dots="crosshatch"] { background-image: repeating-linear-gradient(45deg, color-mix(in oklab, var(--fg) 22%, transparent) 0 1px, transparent 1px 10px), repeating-linear-gradient(-45deg, color-mix(in oklab, var(--fg) 22%, transparent) 0 1px, transparent 1px 10px); }
-  .bg-tile-pat[data-dots="glow"] { background-image: radial-gradient(120% 90% at 50% 0%, color-mix(in oklab, var(--accent) 38%, transparent), transparent 62%); }
+  .bg-tile-pat[data-dots="glow"] { background-image: radial-gradient(120% 90% at 50% 0%, color-mix(in oklab, var(--accent) 22%, transparent), transparent 62%); }
+  .bg-tile-pat[data-dots="blueprint"] { background-image: linear-gradient(to right, color-mix(in oklab, var(--accent) 22%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--accent) 22%, transparent) 1px, transparent 1px), linear-gradient(to right, color-mix(in oklab, var(--accent) 11%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--accent) 11%, transparent) 1px, transparent 1px); background-size: 36px 36px, 36px 36px, 9px 9px, 9px 9px; }
+  .bg-tile-pat[data-dots="rings"] { background-image: repeating-radial-gradient(circle at 50% -20%, color-mix(in oklab, var(--fg) 24%, transparent) 0 1px, transparent 1px 13px); }
+  .bg-tile-pat[data-dots="grain"] { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); background-size: 160px 160px; opacity: 0.2; }
   .bg-tile-pat[data-dots="off"] { background-image: none; }
 
   /* ── Keyboard shortcut rows ── */

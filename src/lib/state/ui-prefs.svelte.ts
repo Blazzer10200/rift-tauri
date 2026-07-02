@@ -69,16 +69,20 @@ const PRESET_MAP: Record<DensityPreset, { toolDetail: ToolDetail; narration: Nar
 // Background texture driving `.app[data-dots]` (variant CSS lives in AppShell).
 // "dots" = the default base field (no override); "off" hides it entirely.
 export type DotField =
-  | "dots" | "dense" | "margins" | "grid" | "lines" | "diagonal" | "crosshatch" | "glow" | "off";
+  | "dots" | "dense" | "margins" | "grid" | "blueprint" | "lines" | "diagonal" | "crosshatch"
+  | "rings" | "glow" | "grain" | "off";
 export const DOT_FIELDS: { id: DotField; label: string }[] = [
   { id: "dots", label: "Dots" },
   { id: "dense", label: "Dense" },
   { id: "margins", label: "Margins" },
   { id: "grid", label: "Grid" },
+  { id: "blueprint", label: "Blueprint" },
   { id: "lines", label: "Lines" },
   { id: "diagonal", label: "Diagonal" },
   { id: "crosshatch", label: "Crosshatch" },
+  { id: "rings", label: "Rings" },
   { id: "glow", label: "Glow" },
+  { id: "grain", label: "Grain" },
   { id: "off", label: "Off" },
 ];
 const DOT_FIELD_IDS = new Set<string>(DOT_FIELDS.map((d) => d.id));
@@ -110,6 +114,9 @@ class UiPrefs {
   accentHue = $state(163);
   vividness = $state(DEFAULT_VIVIDNESS);
   dotField = $state<DotField>("dots");
+  // Transient hover-preview from the settings texture picker — overrides the
+  // rendered field while non-null, never persisted.
+  previewField = $state<DotField | null>(null);
   code = $state<CodePrefs>({ ...DEFAULT_CODE });
   // Stream mode = the redesigned boxless turn render (the spec's default tool
   // display, redesign-port.md §"Net-new"). Default ON; only an explicit opt-out
@@ -210,6 +217,11 @@ class UiPrefs {
   setDotField(d: DotField) {
     this.dotField = d;
     localStorage.setItem(DOTFIELD_KEY, d);
+  }
+
+  /** Live try-before-you-buy from the picker; null = show the committed field. */
+  setPreviewField(d: DotField | null) {
+    this.previewField = d;
   }
 
   setCode(patch: Partial<CodePrefs>) {

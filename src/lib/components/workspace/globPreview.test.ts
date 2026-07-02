@@ -267,11 +267,12 @@ describe("validateGlobs — GlobCheck shape", () => {
 
 describe("globSummary", () => {
   it("empty text => invalid:0, firstError:null", () => {
-    expect(globSummary("")).toEqual({ invalid: 0, firstError: null });
+    expect(globSummary("")).toEqual({ total: 0, invalid: 0, firstError: null });
   });
 
   it("all-valid patterns => invalid:0, firstError:null", () => {
     expect(globSummary("*.ts\nsrc/**/*.js\nvendor/**")).toEqual({
+      total: 3,
       invalid: 0,
       firstError: null,
     });
@@ -305,6 +306,6 @@ describe("globSummary", () => {
   });
 
   it("whitespace-only text => invalid:0, firstError:null", () => {
-    expect(globSummary("   \n\t\n")).toEqual({ invalid: 0, firstError: null });
+    expect(globSummary("   \n\t\n")).toEqual({ total: 0, invalid: 0, firstError: null });
   });
 });

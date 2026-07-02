@@ -75,12 +75,13 @@ export function validateGlobs(text: string): { checks: GlobCheck[]; listError: s
   return { checks, listError };
 }
 
-/** Convenience for the editor: the count of invalid patterns + the first error
+/** Convenience for the editor: pattern count + invalid count + the first error
  *  message, for a compact inline hint. */
-export function globSummary(text: string): { invalid: number; firstError: string | null } {
+export function globSummary(text: string): { total: number; invalid: number; firstError: string | null } {
   const { checks, listError } = validateGlobs(text);
   const bad = checks.filter((c) => !c.ok);
   return {
+    total: checks.length,
     invalid: bad.length,
     firstError: listError ?? bad[0]?.error ?? null,
   };

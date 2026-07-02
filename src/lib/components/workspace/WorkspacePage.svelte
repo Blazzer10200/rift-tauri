@@ -152,6 +152,9 @@
   let dInclude = $state("");
   let dExclude = $state("");
   let recentOpen = $state(false);
+  let nameEl = $state<HTMLInputElement | null>(null);
+  // Land the caret in Name whenever the editor opens (or switches target).
+  $effect(() => { if (editing) nameEl?.focus(); });
 
   const incGlobs = $derived(globSummary(dInclude));
   const excGlobs = $derived(globSummary(dExclude));
@@ -372,23 +375,34 @@
 
       <!-- Inline project editor — focused task, spans full width above columns. -->
       {#if editing}
-        <section class="editor">
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -- Escape-to-close is a keyboard-only enhancement; all controls stay reachable -->
+        <section class="editor" role="form" aria-label={isNew ? "New project" : "Edit project"}
+          onkeydown={(e) => { if (e.key === "Escape") { e.stopPropagation(); cancelEdit(); } }}>
           <div class="ed-head">
-            <span class="ed-title">{isNew ? "New project" : "Edit project"}</span>
+            <span class="ed-ic">{#if isNew}<Sparkles size={16} />{:else}<Pencil size={14} />{/if}</span>
+            <div class="ed-id">
+              <span class="ed-title">{isNew ? "New project" : "Edit project"}</span>
+              <span class="ed-sub">{isNew
+                ? "Point Rift at a folder and scope which files it can read."
+                : "Rename, move, or re-scope this project."}</span>
+            </div>
             <button class="ico-btn" type="button" onclick={cancelEdit} aria-label="Cancel">
               <X size={16} />
             </button>
           </div>
 
+          <div class="id-grid">
           <label class="fld">
             <span class="fld-lbl">Name</span>
-            <input class="rift-input" type="text" placeholder="My project" bind:value={dName} autocomplete="off" />
+            <input class="rift-input" type="text" placeholder="My project" bind:value={dName} bind:this={nameEl} autocomplete="off"
+              onkeydown={(e) => { if (e.key === "Enter" && canSave && !saving) { e.preventDefault(); void save(); } }} />
           </label>
 
           <div class="fld">
             <span class="fld-lbl">Folder</span>
             <div class="folder-row">
-              <input class="rift-input mono" type="text" placeholder="Pick a folder…" bind:value={dRoot} autocomplete="off" />
+              <input class="rift-input mono" type="text" placeholder="Pick a folder…" bind:value={dRoot} autocomplete="off"
+                onkeydown={(e) => { if (e.key === "Enter" && canSave && !saving) { e.preventDefault(); void save(); } }} />
               {#if editorRecents.length > 0}
                 <div class="recent-wrap">
                   <button class="browse-btn" type="button" aria-label="Recent folders"
@@ -420,16 +434,19 @@
               </button>
             </div>
           </div>
+          </div>
 
           <div class="pat-grid">
             <label class="fld">
-              <span class="fld-lbl">Include <span class="fld-hint">one glob per line · empty = everything</span></span>
+              <span class="fld-lbl">Include <span class="fld-hint">one glob per line · empty = everything</span>
+                {#if incGlobs.invalid === 0 && incGlobs.total > 0}<span class="glob-ct">{incGlobs.total} pattern{incGlobs.total === 1 ? "" : "s"}</span>{/if}</span>
               <textarea class="rift-input mono pat" class:bad={incGlobs.invalid > 0}
                 placeholder={"src/**\n*.ts\ndocs/**"} bind:value={dInclude} spellcheck="false"></textarea>
               {#if incGlobs.invalid > 0}<span class="glob-err">{incGlobs.invalid} invalid · {incGlobs.firstError}</span>{/if}
             </label>
             <label class="fld">
-              <span class="fld-lbl">Exclude <span class="fld-hint">wins over include</span></span>
+              <span class="fld-lbl">Exclude <span class="fld-hint">wins over include</span>
+                {#if excGlobs.invalid === 0 && excGlobs.total > 0}<span class="glob-ct">{excGlobs.total} pattern{excGlobs.total === 1 ? "" : "s"}</span>{/if}</span>
               <textarea class="rift-input mono pat" class:bad={excGlobs.invalid > 0}
                 placeholder={"**/node_modules/**\n*.lock\ndist/**"} bind:value={dExclude} spellcheck="false"></textarea>
               {#if excGlobs.invalid > 0}<span class="glob-err">{excGlobs.invalid} invalid · {excGlobs.firstError}</span>{/if}
@@ -445,7 +462,8 @@
             <div class="ed-foot-r">
               <button class="ghost-btn" type="button" onclick={cancelEdit}>Cancel</button>
               <button class="save-btn" type="button" disabled={!canSave || saving} onclick={save}>
-                <Check size={15} strokeWidth={2.4} /> {isNew ? "Create" : "Save"}
+                {#if saving}<Loader2 size={15} class="spin" />{:else}<Check size={15} strokeWidth={2.4} />{/if}
+                {isNew ? "Create" : "Save"}
               </button>
             </div>
           </div>
@@ -863,10 +881,23 @@
 
   /* ── Editor ─────────────────────────────────────────────────────────────── */
   .editor { display: flex; flex-direction: column; gap: 16px; padding: 20px; border-radius: var(--radius-2xl);
-    border: 1px solid var(--border-strong); background: var(--bg-elev-1);
-    box-shadow: 0 10px 30px -16px color-mix(in oklab, var(--fg) 30%, transparent); }
-  .ed-head { display: flex; align-items: center; justify-content: space-between; }
+    border: 1px solid color-mix(in oklab, var(--accent) 18%, var(--border-strong));
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 4%, var(--bg-elev-1)), var(--bg-elev-1) 96px);
+    box-shadow: 0 10px 30px -16px color-mix(in oklab, var(--fg) 30%, transparent);
+    animation: edIn 200ms var(--ease-page); }
+  @keyframes edIn { from { opacity: 0; transform: translateY(-5px); } }
+  @media (prefers-reduced-motion: reduce) { .editor { animation: none; } }
+  .ed-head { display: flex; align-items: center; gap: 12px; }
+  .ed-ic { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 10px;
+    background: var(--accent-soft); color: var(--accent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 26%, transparent); }
+  .ed-id { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
   .ed-title { font-size: var(--fs-lg); font-weight: 680; letter-spacing: -0.01em; color: var(--fg); }
+  .ed-sub { font-size: var(--fs-sm); color: var(--fg-muted); }
+  /* Name (short) + Folder (long) share one row; stack when narrow. */
+  .id-grid { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(0, 1.9fr); gap: 14px; }
+  @media (max-width: 760px) { .id-grid { grid-template-columns: minmax(0, 1fr); } }
+  :global(.editor .spin) { animation: wsActSpin 0.9s linear infinite; }
   .ico-btn { width: 30px; height: 30px; display: grid; place-items: center; border-radius: var(--radius); color: var(--fg-muted);
     transition: background var(--dur-fast), color var(--dur-fast); }
   .ico-btn:hover { background: var(--surface-hover); color: var(--fg); }
@@ -911,6 +942,8 @@
   .recent-forget:hover { background: var(--danger-soft, color-mix(in oklab, red 14%, transparent)); color: var(--danger, #f87171); }
 
   .pat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 680px) { .pat-grid { grid-template-columns: minmax(0, 1fr); } }
+  .glob-ct { margin-left: auto; font-size: var(--fs-xs); font-weight: 500; color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
   .ed-foot { display: flex; align-items: center; justify-content: space-between; padding-top: 4px; }
   .ed-foot-r { display: flex; gap: 8px; margin-left: auto; }
   .del-btn { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border-radius: var(--radius-lg);
