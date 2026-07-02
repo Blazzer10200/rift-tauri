@@ -541,7 +541,7 @@
   });
 </script>
 
-<div class="md" bind:this={container} onclick={onClick} onkeydown={onKey} role="presentation"></div>
+<div class="md" class:streaming bind:this={container} onclick={onClick} onkeydown={onKey} role="presentation"></div>
 
 <style>
   .md {
@@ -573,6 +573,35 @@
   @media (prefers-reduced-motion: reduce) {
     .md :global(.md-w) { animation: none; }
     .md :global(.md-w-hold) { opacity: 1; filter: none; }
+  }
+  /* Chrome-hold — word spans hide only TEXT, so an element's own chrome (code
+     chip bg, list bullets, heading bars, quote bar, table borders) used to
+     paint the instant a delta landed, racing empty gray boxes ahead of the
+     reveal cursor. While every word inside an element is still held, fade the
+     whole element (opacity keeps layout — no reflow). The guard self-retires:
+     the first word flipping to .md-w stops the :not() match and the chrome
+     fades in with its text. Static renders never have .md-w-hold spans, so
+     these selectors cost nothing outside a live stream. */
+  @media (prefers-reduced-motion: no-preference) {
+    .md :global(:is(code, kbd, mark, h1, h2, h3, h4, h5, h6, li, blockquote, table, tr)) {
+      transition: opacity 220ms ease;
+    }
+    .md :global(:is(code, kbd, mark, a, h1, h2, h3, h4, h5, h6, li, blockquote, table, tr):has(.md-w-hold):not(:has(.md-w, .md-w-shown))) {
+      opacity: 0;
+    }
+    /* hr carries no words — hold it while the element after it is fully held,
+       and while it's the trailing element of an in-flight stream. */
+    .md :global(hr) { transition: opacity 220ms ease; }
+    .md :global(hr:has(+ :is(p, ul, ol, h1, h2, h3, h4, h5, h6, blockquote, table):has(.md-w-hold):not(:has(.md-w, .md-w-shown)))) {
+      opacity: 0;
+    }
+    .md.streaming :global(hr:last-child) { opacity: 0; }
+    /* Code blocks / images carry no word spans either — hold one while any
+       earlier sibling still has held words, so a finished block never pops in
+       ahead of the prose above it. Once the prose catches up it fades in and
+       may keep growing line-by-line (the live-typing feel is kept). */
+    .md :global(:is(pre, .shiki-block, img)) { transition: opacity 220ms ease; }
+    .md :global(*:has(.md-w-hold) ~ :is(pre, .shiki-block, img)) { opacity: 0; }
   }
 
   /* First/last children flush so the bubble itself controls outer padding. */
@@ -810,7 +839,7 @@
     text-decoration-color: color-mix(in oklch, var(--accent) 35%, transparent);
     text-underline-offset: 2px;
     text-decoration-thickness: 1px;
-    transition: text-decoration-color 140ms ease-out, color 140ms ease-out;
+    transition: text-decoration-color 140ms ease-out, color 140ms ease-out, opacity 220ms ease;
   }
   .md :global(a:hover) { color: var(--accent); text-decoration-color: var(--accent); }
 
