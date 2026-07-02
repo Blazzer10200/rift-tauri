@@ -277,10 +277,11 @@
     e.stopPropagation();
     const text = typeof input.new_string === "string" ? input.new_string
       : typeof input.content === "string" ? input.content : "";
-    navigator.clipboard?.writeText(text).catch(() => {});
-    copied = true;
-    if (copyTimer) clearTimeout(copyTimer);
-    copyTimer = setTimeout(() => { copied = false; }, 1400);
+    navigator.clipboard?.writeText(text).then(() => {
+      copied = true;
+      if (copyTimer) clearTimeout(copyTimer);
+      copyTimer = setTimeout(() => { copied = false; }, 1400);
+    }).catch((err) => console.warn("copy failed", err));
   }
   onDestroy(() => { if (copyTimer) clearTimeout(copyTimer); });
 

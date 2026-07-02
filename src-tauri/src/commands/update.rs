@@ -59,7 +59,7 @@ pub async fn repair_install(
 }
 
 /// Download the pending update package. Emits `update-progress` (i16 0..=100)
-/// as bytes arrive, then `update-downloaded` on success.
+/// as bytes arrive.
 #[tauri::command]
 pub async fn download_update(
     app: tauri::AppHandle,
@@ -123,10 +123,7 @@ pub async fn download_update(
     let _ = pump.join();
 
     match outcome {
-        Ok(()) => {
-            let _ = app.emit("update-downloaded", ());
-            Ok(())
-        }
+        Ok(()) => Ok(()),
         Err(e) => {
             // RR-9: invalidate the abandoned attempt so a zombie blocking task
             // that finishes later can't flip `downloaded` and arm a stale apply.

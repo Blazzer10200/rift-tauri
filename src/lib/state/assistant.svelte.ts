@@ -553,11 +553,6 @@ class AssistantStore {
     return this.panes.length > 1;
   }
 
-  /** Returns the focused pane's tabId. Always defined (panes always length≥1). */
-  get focusedPaneTabId(): string | null {
-    return this.panes[this.focusedPaneIdx]?.tabId ?? this.currentConvoId;
-  }
-
   get canAddPane(): boolean {
     return this.panes.length < MAX_PANES;
   }
@@ -1608,7 +1603,9 @@ class AssistantStore {
       if (idx >= 0) this.setFocusedPane(idx);
       else this.currentConvoId = tabId;
     }
-    return sendImpl(this, prompt);
+    // Pass the explicit target through when it resolves — sendImpl then scopes
+    // every tab read/write to it (belt-and-suspenders on top of the retarget).
+    return sendImpl(this, prompt, tabId && this.tabFor(tabId) ? tabId : undefined);
   }
 
   /** Stage a binary attachment for the next send. Returns false if the size
@@ -1824,9 +1821,10 @@ class AssistantStore {
     );
   }
 
-  /** Re-send the most recent user prompt — see ./assistant/send. */
-  async retryLast() {
-    return sendRetryLast(this);
+  /** Re-send the most recent user prompt — see ./assistant/send.
+   *  `tabId` scopes the retry to that pane's tab (split-pane Retry). */
+  async retryLast(tabId?: string | null) {
+    return sendRetryLast(this, tabId);
   }
 
   /** Copy the latest assistant message's text to the clipboard. */

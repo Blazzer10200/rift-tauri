@@ -548,8 +548,10 @@ async function assistantState(target = 'main') {
         (() => {
             const tab = Array.from(document.querySelectorAll('button')).find(b => /^Assistant/.test(b.textContent?.trim()));
             const ta = document.querySelector('.assistant textarea');
-            const bubbles = Array.from(document.querySelectorAll('.bubble')).map(b => {
-                const role = b.getAttribute('data-role');
+            // Stream mode renders assistant turns as .sturn (StreamTurn), not
+            // .bubble — count both or completed replies read as "missing".
+            const bubbles = Array.from(document.querySelectorAll('.bubble, .sturn')).map(b => {
+                const role = b.getAttribute('data-role') || (b.classList.contains('sturn') ? 'assistant' : null);
                 const reasoning = b.querySelector('.reasoning');
                 const text = b.querySelector('.body .content .text');
                 return {

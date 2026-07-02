@@ -1228,11 +1228,14 @@ async fn resolve_spawn(
     // `clamp_effort`/`model_max_effort` mirror MODEL_MAX_EFFORT in
     // src/lib/state/assistant/helpers.ts.
     if !is_valid_effort_tier(&effort) {
-        log::warn!("assistant_send: unknown effort tier {effort:?} — treating as deep (high)");
+        log::warn!("resolve_spawn: unknown effort tier {effort:?} — treating as deep (high)");
     }
     let effort_tier = clamp_effort(&effort, &model);
     let effort_level = effort_tier_to_flag(effort_tier);
-    log::info!("assistant_send: effort tier={effort_tier} flag={effort_level} model={model} session={session_id}");
+    // NB: resolve_spawn runs for BOTH real sends and prewarms — the old
+    // "assistant_send:" prefix here made every boot prewarm read as a phantom
+    // user turn in the log.
+    log::info!("resolve_spawn: effort tier={effort_tier} flag={effort_level} model={model} session={session_id}");
     // Local-LLM mode skips `--effort` wholesale — local models/proxies don't
     // implement Anthropic extended-thinking tiers and 4xx or silently ignore it.
     //
@@ -1267,7 +1270,7 @@ async fn resolve_spawn(
     }
 
     log::info!(
-        "assistant_send: spawn session_id={} first_turn={} model={} effort={} thinking_on={} perm={} use_full_config={} mcp={} api_key={} local_llm={} cli_ver={:?} caps=[effort={} perm_tool={} excl_dyn={} partial={} budget={} settings={}]",
+        "resolve_spawn: spawn session_id={} first_turn={} model={} effort={} thinking_on={} perm={} use_full_config={} mcp={} api_key={} local_llm={} cli_ver={:?} caps=[effort={} perm_tool={} excl_dyn={} partial={} budget={} settings={}]",
         session_id, is_first_turn, model, effort_level, thinking_on, permission_mode, use_full_config, mcp_config_path.is_some(), use_api_key, cfg.local_llm_enabled,
         caps.version, caps.effort, caps.permission_prompt_tool, caps.exclude_dynamic_sections, caps.include_partial_messages, caps.max_budget_usd, caps.settings_flag
     );
@@ -1476,6 +1479,7 @@ async fn dispatch_turn(
                             // respawn with the preserved user_line — no UI error.
                             Ok(Err(ref s)) if s == RETRY_COLD_SENTINEL => {
                                 in_progress.store(false, Ordering::Release);
+                                emit_dispatch(&session_id, "dead_on_send", &model, &key);
                                 retry_line
                             }
                             Ok(r) => return r,
@@ -1498,6 +1502,7 @@ async fn dispatch_turn(
                         in_progress.store(false, Ordering::Release);
                         warm_pool::remove_if(&session_id, &arc);
                         log::info!("warm_pool: warm child for {session_id} dead on send — cold respawn");
+                        emit_dispatch(&session_id, "dead_on_send", &model, &key);
                         send_err.0.user_line
                     }
                 }
@@ -1540,6 +1545,7 @@ fn emit_dispatch(session_id: &str, outcome: &str, model: &str, key: &warm_pool::
         "hit" => crate::metric!("warm_pool.hit"),
         "cold" => crate::metric!("warm_pool.cold"),
         "signature_drain" => crate::metric!("warm_pool.drain"),
+        "dead_on_send" => crate::metric!("warm_pool.dead_on_send"),
         _ => {}
     }
     crate::diagnostics::emit_with_fields(
@@ -1633,7 +1639,24 @@ async fn cold_spawn_and_run(
         last_used: std::time::Instant::now(),
         pid: turn_pid,
     }));
-    warm_pool::insert(&session_id, warm.clone());
+    // #76 send-vs-prewarm race: an in-flight prewarm resolving inside
+    // dispatch_turn's get()→here window can register a spare first; a bare
+    // insert would displace its Arc with NO kill — invisible to idle-evict and
+    // the shutdown sweep, leaking the spare + its MCP grandchild. Take the slot
+    // atomically; if a racer won it, reap the racer and retake (the user's live
+    // turn outranks a parked spare mid-handshake). Loop: a second racer can in
+    // principle slip in between the reap and the retake.
+    while !warm_pool::insert_if_absent(&session_id, warm.clone()) {
+        if let Some(racer) = warm_pool::get(&session_id) {
+            let racer_pid = match racer.lock() { Ok(g) => g.pid, Err(p) => p.into_inner().pid };
+            warm_pool::remove_if(&session_id, &racer);
+            if let Some(p) = racer_pid { kill_child_tree(p); }
+            log::info!("cold_spawn: reaped racing warm child pid={racer_pid:?} for {session_id} — live send takes the slot");
+            // The racer's set_session_pid may have overwritten ours — re-assert
+            // so stop/velopack sweeps see the child that actually survives.
+            if let Some(p) = turn_pid { set_session_pid(&session_id, p); }
+        }
+    }
 
     // The first turn's completion signal.
     let (done_tx, done_rx) = oneshot::channel();

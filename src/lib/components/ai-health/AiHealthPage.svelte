@@ -359,6 +359,7 @@
       // governed by usage-limit windows (a $ cap does nothing). maxBudgetUsd is
       // only meaningful — and only sent — in api-key mode.
       currentSetup: {
+        thinkingEnabled: assistant.thinkingEnabled,
         effortDefault: assistant.thinkingEffort,
         model: modelKey(assistant.model),
         authMode: assistant.hasApiKey ? "api-key" : "subscription",
@@ -498,7 +499,7 @@
 
   // Read the live value a given apply action would replace — for current→new.
   function currentValueFor(a: AdviceApply): string {
-    if (a.kind === "effort") return EFFORT_LABEL[assistant.thinkingEffort] ?? assistant.thinkingEffort;
+    if (a.kind === "effort") return assistant.thinkingEnabled ? (EFFORT_LABEL[assistant.thinkingEffort] ?? assistant.thinkingEffort) : "Off";
     if (a.kind === "model") return MODEL_LABEL[assistant.model] ?? assistant.model;
     return budgetLabel(assistant.maxBudgetUsd);
   }
@@ -511,7 +512,9 @@
   // True when the action wouldn't actually change anything (model already
   // re-validated; this catches "current == proposed" the analyzer missed).
   function isNoop(a: AdviceApply): boolean {
-    if (a.kind === "effort") return assistant.thinkingEffort === a.value;
+    // Thinking disabled is never a no-op — the master switch always needs
+    // flipping on, regardless of whether the stored effort tier matches.
+    if (a.kind === "effort") return assistant.thinkingEnabled && assistant.thinkingEffort === a.value;
     if (a.kind === "model") return modelKey(assistant.model) === a.value;
     return assistant.maxBudgetUsd === a.value;
   }
@@ -527,8 +530,12 @@
     // Snapshot the prior value so undo can restore it exactly.
     let prev: string | number | null;
     if (a.kind === "effort") {
-      prev = assistant.thinkingEffort;
-      assistant.setThinkingEffort(a.value as never);
+      // setThinkingEffort alone is a silent no-op when the master switch is
+      // off (the default) — go through setThinkingDial to flip it on
+      // atomically, same as onboarding. Snapshot enabled+effort together so
+      // undo can restore both.
+      prev = `${assistant.thinkingEnabled}:${assistant.thinkingEffort}`;
+      assistant.setThinkingDial(true, a.value as never);
     } else if (a.kind === "model") {
       prev = modelKey(assistant.model);
       assistant.setModel(applyKeyToModel(String(a.value)));
@@ -542,8 +549,10 @@
   async function undoAction(title: string, a: AdviceApply) {
     const st = applied[title];
     if (!st) return;
-    if (a.kind === "effort") assistant.setThinkingEffort(st.prev as never);
-    else if (a.kind === "model") assistant.setModel(applyKeyToModel(String(st.prev ?? "sonnet")));
+    if (a.kind === "effort") {
+      const [prevEnabled, prevEffort] = String(st.prev).split(":");
+      assistant.setThinkingDial(prevEnabled === "true", prevEffort as never);
+    } else if (a.kind === "model") assistant.setModel(applyKeyToModel(String(st.prev ?? "sonnet")));
     else await assistant.setMaxBudgetUsd(st.prev as number | null);
     const next = { ...applied };
     delete next[title];

@@ -33,23 +33,10 @@ export function haikuAvailable(): boolean {
   return !HAIKU_DISABLED;
 }
 
-// Claude Sonnet 5 — released 2026-06-09. The bare CLI alias `sonnet` still
-// resolves to claude-sonnet-4-6 on shipped CLIs (the alias table lags the
-// release), so the backend pins the explicit id before `--model` (turn.rs ·
-// config.rs canonical_model_alias). The frontend keeps `sonnet` as the picker
-// SELECTION id (so per-workspace pins + hotkeys are stable) — this const exists
-// so display/test code can reference the resolved id, and to mirror the backend
-// SONNET_MODEL so the two-file lockstep is visible. `opus`/`haiku` aliases
-// already resolve to their newest snapshot, so only `sonnet` needs pinning.
-export const SONNET_MODEL = "claude-sonnet-5";
-
-/** Resolve a model selection to the explicit id the CLI runs. Maps the lagging
- *  `sonnet` alias → claude-sonnet-5; everything else passes through. Mirrors
- *  `canonical_model_alias` in config.rs. The send path itself sends the bare
- *  selection (the backend resolves it); this is for display/telemetry parity. */
-export function canonicalModelAlias(model: string): string {
-  return model === "sonnet" ? SONNET_MODEL : model;
-}
+// The bare `sonnet` alias resolution lives BACKEND-side only (config.rs
+// SONNET_MODEL / canonical_model_alias, applied in turn.rs before `--model`).
+// A frontend mirror (SONNET_MODEL + canonicalModelAlias) existed here but had
+// zero callers — removed 2026-07-01; the send path sends the bare selection.
 
 const MODEL_KEY = "rift.assistant.model";
 const EFFORT_KEY = "rift.assistant.thinkingEffort";

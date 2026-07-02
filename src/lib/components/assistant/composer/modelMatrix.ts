@@ -119,24 +119,13 @@ export const DIAL_STOPS: DialStop[] = [
  *  (Haiku) get only `Off` — they can't extend-think at all. Otherwise the rungs
  *  are truncated at the model's effort ceiling: Sonnet/Opus/Fable (max "ultra")
  *  reach Max; Haiku (no effort) gets only Off. Off is always present. */
-export function dialStopsFor(m: ModelOpt | undefined): DialStop[] {
+function dialStopsFor(m: ModelOpt | undefined): DialStop[] {
   if (!m?.effort) return [DIAL_STOPS[0]];
   const capIdx = EFFORT_OPTIONS.findIndex((e) => e.id === m.maxEffort);
   return DIAL_STOPS.filter(
     (s) => s.effort === null
       || (capIdx >= 0 && EFFORT_OPTIONS.findIndex((e) => e.id === s.effort) <= capIdx),
   );
-}
-
-/** Project the store's (thinkingEnabled, thinkingEffort) pair onto a dial rung.
- *  Off when thinking is disabled. When on, the rung whose `effort` tier matches
- *  — `quick` (the collapsed-away rung) maps to "medium" since both send the same
- *  CLI flag, so an old `quick` pref reads as Medium on the dial. */
-export function dialIdFor(enabled: boolean, effort: ThinkingEffort): DialId {
-  if (!enabled) return "off";
-  if (effort === "quick") return "medium"; // quick + smart both → medium flag
-  const stop = DIAL_STOPS.find((s) => s.effort === effort);
-  return stop ? stop.id : "medium";
 }
 
 /** Clamp an index into a stops array (pure half of setEffortByIdx /
@@ -148,11 +137,10 @@ export function clampEffortIdx(stops: readonly unknown[], i: number): number {
 
 // ── Effort selector (split out from the merged dial) ─────────────────────────
 // The v0.65.0 dial fused effort + thinking into one slider, making "High effort,
-// thinking OFF" impossible (any rung > Off forced thinking on). These helpers
-// project ONLY `thinkingEffort` onto a standalone slider — the thinking on/off
+// thinking OFF" impossible (any rung > Off forced thinking on). effortStopsFor
+// projects ONLY `thinkingEffort` onto a standalone slider — the thinking on/off
 // state rides a separate toggle now. Same labels/tiers as the on-rungs of
 // DIAL_STOPS (Low=none, Medium=smart, High=deep, Max=ultra), minus the Off rung.
-export const EFFORT_STOPS: DialStop[] = DIAL_STOPS.filter((s) => s.effort !== null);
 
 /** The effort rungs a model supports — the on-rungs of `dialStopsFor`, with no
  *  Off entry. Haiku (no effort capability) gets an empty list → no slider. */

@@ -47,12 +47,16 @@
     }
     return ms;
   });
+  // The mode the turn RAN with (snapshotted at send time) — falls back to the
+  // live global only for pre-field conversations, so switching modes later
+  // can't retroactively relabel a historical turn's badge.
+  const turnMode = $derived(message.permissionMode ?? assistant.permissionMode);
   const autoApplied = $derived(
-    assistant.permissionMode === "acceptEdits" ||
-    assistant.permissionMode === "bypassPermissions" ||
-    assistant.permissionMode === "auto",
+    turnMode === "acceptEdits" ||
+    turnMode === "bypassPermissions" ||
+    turnMode === "auto",
   );
-  const bypassApplied = $derived(assistant.permissionMode === "bypassPermissions");
+  const bypassApplied = $derived(turnMode === "bypassPermissions");
 </script>
 
 {#if turnStats.files > 0}

@@ -82,7 +82,7 @@ export function globSummary(text: string): { total: number; invalid: number; fir
   const bad = checks.filter((c) => !c.ok);
   return {
     total: checks.length,
-    invalid: bad.length,
+    invalid: bad.length + (listError ? 1 : 0),
     firstError: listError ?? bad[0]?.error ?? null,
   };
 }

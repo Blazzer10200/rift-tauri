@@ -261,7 +261,7 @@
         <span class="tt-name">Thinking</span>
         <span class="tt-sub">{thinkingOn ? "Reasons first — slower, deeper" : "Replies immediately — fastest"}</span>
       </span>
-      <span class="tt-switch" class:on={thinkingOn} aria-hidden="true"><span class="tt-knob"></span></span>
+      <span class="rift-toggle sm" class:on={thinkingOn} aria-hidden="true"><span class="rift-toggle-knob"></span></span>
     </button>
 
     <!-- Effort — tunes reasoning depth. Independent of the toggle: usable whether
@@ -599,24 +599,10 @@
   :global(.settings-menu .think-toggle .tt-text) { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
   :global(.settings-menu .think-toggle .tt-name) { font-size: var(--sm-title); font-weight: 600; color: var(--fg); }
   :global(.settings-menu .think-toggle .tt-sub) { font-size: var(--sm-sub); color: var(--fg-faint); }
-  /* iOS-style switch — off=neutral track, on=accent track + knob right. */
-  :global(.settings-menu .think-toggle .tt-switch) {
-    flex: none; position: relative;
-    width: 34px; height: 20px; border-radius: 999px;
-    background: color-mix(in oklab, var(--fg) 16%, transparent);
-    transition: background 0.16s ease;
-  }
-  :global(.settings-menu .think-toggle .tt-switch.on) { background: var(--accent); }
-  :global(.settings-menu .think-toggle .tt-switch .tt-knob) {
-    position: absolute; top: 2px; left: 2px;
-    width: 16px; height: 16px; border-radius: 50%;
-    background: #fff;
-    transition: transform 0.16s ease;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.3);
-  }
-  :global(.settings-menu .think-toggle .tt-switch.on .tt-knob) { transform: translateX(14px); }
+  /* switch — canonical .rift-toggle.sm from app.css (span variant, parent
+     button owns the click; hardcoded #fff knob replaced by --accent-fg) */
 
-  /* Effort slider — stepped tier rail (Low→Max), stops = EFFORT_STOPS. */
+  /* Effort slider — stepped tier rail (Low→Max), stops = effortStopsFor(model). */
   :global(.settings-menu .effort-head) {
     display: flex; align-items: center; gap: 8px;
     padding: 10px 9px 4px;

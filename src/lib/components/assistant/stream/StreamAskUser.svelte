@@ -40,9 +40,9 @@
     const n = askQuestions.length;
     untrack(() => {
       if (n === askSingleIdx.length) return;
-      askSingleIdx = askQuestions.map(() => -2);
-      askMultiSet = askQuestions.map(() => new Set());
-      askOtherText = askQuestions.map(() => "");
+      askSingleIdx = Array.from({ length: n }, (_, i) => askSingleIdx[i] ?? -2);
+      askMultiSet = Array.from({ length: n }, (_, i) => askMultiSet[i] ?? new Set<number>());
+      askOtherText = Array.from({ length: n }, (_, i) => askOtherText[i] ?? "");
     });
   });
 

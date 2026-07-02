@@ -66,7 +66,7 @@
   .winctl { display: flex; gap: 2px; }
   .wc { width: 36px; height: 30px; display: grid; place-items: center; color: var(--fg-muted); border-radius: 7px; transition: background var(--dur-fast); }
   .wc:hover { background: var(--surface-hover); }
-  .wc-x:hover { background: var(--danger); color: white; }
+  .wc-x:hover { background: var(--danger); color: var(--danger-fg); }
   .wc-min { width: 10px; height: 1.5px; background: currentColor; }
   .wc-max { width: 9px; height: 9px; border: 1.5px solid currentColor; border-radius: 2px; }
 </style>

@@ -931,9 +931,14 @@ export function onStreamDone(tab: TabState) {
     const msg = tab.streamingMsgId
       ? tab.messages.find((m) => m.id === tab.streamingMsgId)
       : null;
-    const hadTools = !!msg && msg.blocks.some((b) => b.type === "tool");
-    if (!hadTools) blankTurn = true;
-    if (!hadTools) {
+    // Thinking counts as content: a thinking-only turn (e.g. the thinking
+    // budget tripped before any text/tool) is an errored turn, not a
+    // blank/malformed stream — the result-subtype handler already messaged it.
+    const hadContent = !!msg && msg.blocks.some((b) => b.type === "tool" || b.type === "thinking");
+    if (!hadContent) blankTurn = true;
+    // Don't clobber a friendly error the `result` subtype handler set moments
+    // ago with the raw NDJSON dump — that dump is a last-resort diagnostic.
+    if (!hadContent && tab.lastError == null) {
       const lines = tab.rawLineLog.slice();
       console.warn("[assistant] turn ended with no text and no tools. Raw stream lines:", lines);
       const types: string[] = [];
@@ -979,8 +984,11 @@ export function onStreamDone(tab: TabState) {
     tab.currentTurnRecord.envelopeFallback = envelopeFallback;
     tab.currentTurnRecord.blankTurn = blankTurn;
     if (!tab.currentTurnRecord.endKind) {
-      tab.currentTurnRecord.endKind = blankTurn ? "error" : "success";
-      if (blankTurn) tab.currentTurnRecord.errorMsg = tab.lastError ?? "blank turn";
+      // lastError is cleared at turn start, so non-null here means THIS turn
+      // errored (result subtype) even when it produced thinking/tool content.
+      const errored = blankTurn || tab.lastError != null;
+      tab.currentTurnRecord.endKind = errored ? "error" : "success";
+      if (errored) tab.currentTurnRecord.errorMsg = tab.lastError ?? "blank turn";
     }
     tab.currentTurnRecord = null;
   }

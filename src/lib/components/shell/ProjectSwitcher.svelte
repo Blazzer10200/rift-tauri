@@ -22,7 +22,20 @@
   const isActive = (p: Project) => !!activeKey && projectRootKey(p.root) === activeKey;
   const monogram = (name: string) => (name.trim().match(/[a-z0-9]/i)?.[0] ?? "·").toUpperCase();
   const activeProject = $derived(list.find(isActive) ?? null);
-  const branch = $derived(assistant.workspaceBranch);
+  // `assistant.workspaceBranch` is the FOCUSED-tab store field: it transiently
+  // clears whenever a non-chat surface (Settings, AI Health) mounts and the
+  // focused root shifts off the project, which made the branch pill flip to
+  // "Local workspace" mid-navigation. Latch the last non-null branch per active
+  // project so the pill stays stable while a project is still selected; only
+  // reset when the active project actually changes.
+  let latchedBranch = $state<string | null>(null);
+  let latchedKey = $state<string | null>(null);
+  $effect(() => {
+    const key = activeKey;
+    if (key !== latchedKey) { latchedKey = key; latchedBranch = null; }
+    if (assistant.workspaceBranch) latchedBranch = assistant.workspaceBranch;
+  });
+  const branch = $derived(assistant.workspaceBranch ?? latchedBranch);
 
   // ── dropdown ───────────────────────────────────────────────────────────
   let menuOpen = $state(false);

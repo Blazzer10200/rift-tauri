@@ -425,6 +425,14 @@ export async function deleteAllConversations(host: PersistenceHost): Promise<voi
   if (failed > 0) {
     host.lastError = `Failed to delete ${failed} of ${ids.length} conversation(s)`;
   }
+  // Re-arm the save debounce for survivors whose delete FAILED — their timer
+  // was cleared up front (RR10) but never fires again otherwise, silently
+  // dropping any pending edits.
+  for (const id of ids) {
+    if (deletedOk.has(id)) continue;
+    const tab = host.tabs.get(id);
+    if (tab && tab.messages.length > 0) scheduleSave(host, false, id);
+  }
   // Drop only the tabs whose convo was actually deleted; survivors stay open.
   // dropTab (not closeTab) since there's no neighbor worth picking after a purge.
   for (const id of [...host.openTabs]) {

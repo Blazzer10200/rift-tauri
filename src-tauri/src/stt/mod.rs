@@ -694,10 +694,14 @@ pub async fn stt_download_model(
         }
         *slot = Some(cancel.clone());
     }
-    let res = model_manager::download(app, &model_id, cancel).await;
+    let res = model_manager::download(app, &model_id, cancel.clone()).await;
     {
         let mut slot = state.0.lock().map_err(|e| format!("cancel slot lock: {e}"))?;
-        *slot = None;
+        // Only clear if the slot still holds THIS call's cancel Arc — a newer
+        // concurrent download may have already replaced it.
+        if slot.as_ref().is_some_and(|s| std::sync::Arc::ptr_eq(s, &cancel)) {
+            *slot = None;
+        }
     }
     res
 }

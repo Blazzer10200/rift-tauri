@@ -337,7 +337,7 @@
   // modelMatrix DIAL_STOPS.
   // Effort + thinking are two INDEPENDENT controls now (the bar pill mirrors the
   // SettingsMenu split). The slider projects ONLY thinkingEffort; thinking on/off
-  // is its own flag. See modelMatrix EFFORT_STOPS.
+  // is its own flag. See modelMatrix effortStopsFor.
   const effortStops = $derived(effortStopsFor(currentModel));
   const dialApplies = $derived(effortStops.length > 0);
   const thinkingOn = $derived(assistant.thinkingEnabled);
@@ -980,7 +980,9 @@
   }
 
   function onBtnClick() {
-    if (streaming && draft.trim().length === 0) {
+    // Staged attachments count as a draft (fire() allows attachments-only
+    // sends), so a streaming turn + image-only composer queues, not stops.
+    if (streaming && draft.trim().length === 0 && attachments.length === 0) {
       void assistant.stop(tabId);
       return;
     }
@@ -988,12 +990,12 @@
   }
 
   // Three modes for the action button:
-  //   idle + draft           → Send
-  //   streaming + empty      → Stop (kill the running turn)
-  //   streaming + draft      → Queue (append to message queue)
+  //   idle + draft                    → Send
+  //   streaming + empty               → Stop (kill the running turn)
+  //   streaming + draft/attachments   → Queue (append to message queue)
   const mode = $derived.by<"send" | "stop" | "queue">(() => {
-    if (streaming && !hasDraft) return "stop";
-    if (streaming && hasDraft) return "queue";
+    if (streaming && !hasDraft && attachments.length === 0) return "stop";
+    if (streaming) return "queue";
     return "send";
   });
   const canFire = $derived(

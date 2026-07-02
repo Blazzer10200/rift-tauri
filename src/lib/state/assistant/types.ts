@@ -157,6 +157,10 @@ export type ChatMessage = {
   // the output cap) or "refusal" (model declined). Null/absent for normal
   // completions. Drives the truncation/refusal notice in MessageBubble.
   stopReason?: "max_tokens" | "refusal" | null;
+  // Permission mode the turn actually RAN with (snapshotted at send time) —
+  // TurnSummary's "Applied automatically"/bypass badge reads this so a later
+  // mode switch can't retroactively relabel history. Absent on pre-field convos.
+  permissionMode?: PermissionMode | null;
 };
 
 export type ConversationMeta = {

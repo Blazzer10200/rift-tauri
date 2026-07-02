@@ -172,7 +172,13 @@ pub fn assistant_save_project(
     if !raw.is_dir() {
         return Err(format!("not a directory: {}", raw.display()));
     }
-    let canonical = std::fs::canonicalize(&raw).unwrap_or(raw);
+    // canonicalize can fail on a junction-to-nowhere even when is_dir() passed;
+    // only fall back to raw if raw itself still resolves, else fail loud.
+    let canonical = match std::fs::canonicalize(&raw) {
+        Ok(c) => c,
+        Err(_) if raw.is_dir() => raw,
+        Err(e) => return Err(format!("could not resolve {}: {e}", raw.display())),
+    };
     let include = sanitize_patterns(include)?;
     let exclude = sanitize_patterns(exclude)?;
 

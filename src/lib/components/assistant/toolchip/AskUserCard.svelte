@@ -62,6 +62,7 @@
   // <pre> dump. Falls back to the <pre> when parse yields nothing (dismissal /
   // unparseable text).
   const answeredPairs = $derived(askAnswered ? parseAskUserResult(tool.result) : []);
+  const askDismissed = $derived(askAnswered && /^User dismissed the question/i.test(tool.result ?? ""));
 
   function toggleAskMulti(qi: number, oi: number) {
     const cur = askMultiSet[qi] ?? new Set<number>();
@@ -165,7 +166,9 @@
       <!-- Final state — parse the model's "Q:/A:" tool_result into clean
            question + answer-chip rows; fall back to the raw text on a
            dismissal or anything unparseable. -->
-      {#if answeredPairs.length > 0}
+      {#if askDismissed}
+        <div class="ask-empty">Dismissed — no answer given.</div>
+      {:else if answeredPairs.length > 0}
         <div class="ask-answered">
           {#each answeredPairs as pair, pi (pi)}
             <div class="ask-answered-row">

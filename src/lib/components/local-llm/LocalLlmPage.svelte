@@ -439,7 +439,7 @@
 
   /* ── Mode master strip ── */
   .mode-bar { transition: border-color 200ms var(--ease-soft), background 200ms var(--ease-soft); }
-  .mode-bar:has(.rift-toggle.on) { border-color: color-mix(in oklch, var(--accent) 30%, var(--border)); background: color-mix(in oklab, var(--accent) 5%, var(--surface)); }
+  .mode-bar:has(:global(.rift-toggle.on)) { border-color: color-mix(in oklch, var(--accent) 30%, var(--border)); background: color-mix(in oklab, var(--accent) 5%, var(--surface)); }
   .mode-bar .mode-main { display: flex; align-items: center; gap: 16px; padding: 15px 18px; }
   .mode-body { flex: 1 1 auto; min-width: 0; }
   .mode-title { font-size: 14px; font-weight: 650; color: var(--fg); }
@@ -542,12 +542,7 @@
 
   .st-warn { display: block; font-size: var(--fs-xs); color: var(--warn); line-height: 1.5; padding: 10px 13px; background: var(--warn-soft); border: 1px solid color-mix(in oklab, var(--warn) 32%, transparent); border-radius: var(--r-card); }
 
-  .rift-toggle { position: relative; width: 40px; height: 23px; border-radius: 999px; border: 1px solid var(--border-strong); padding: 0; background: var(--track, var(--bg-elev-2)); cursor: pointer; transition: background var(--dur-base), border-color var(--dur-base); flex: none; }
-  .rift-toggle.on { background: var(--accent); border-color: transparent; }
-  .rift-toggle:disabled { opacity: 0.5; cursor: not-allowed; }
-  .rift-toggle:focus-visible { outline: 0; box-shadow: 0 0 0 3px var(--ring); }
-  .rift-toggle-knob { position: absolute; top: 2px; left: 2px; width: 17px; height: 17px; border-radius: 999px; background: var(--fg-muted); transition: transform var(--dur-base) var(--ease-page), background var(--dur-base); }
-  .rift-toggle.on .rift-toggle-knob { transform: translateX(17px); background: var(--accent-fg); }
+  /* toggle — canonical .rift-toggle from app.css */
 
   /* Input · button · status-pill kit → $lib/styles/settings-controls.css */
 </style>

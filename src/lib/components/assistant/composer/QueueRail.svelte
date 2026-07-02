@@ -51,10 +51,7 @@
   function removeQueued(id: string) {
     if (tab) tab.queue = tab.queue.filter((it) => it.id !== id);
   }
-  const caption = $derived.by(() => {
-    if (queue.length === 0) return "Working…";
-    return queue.length === 1 ? "Sends when ready" : `${queue.length} queued`;
-  });
+  const caption = $derived.by(() => (queue.length === 1 ? "Sends when ready" : `${queue.length} queued`));
   // Drag-to-reorder queued chips — the queue order IS the send order. Reorder
   // live on dragover so the rail rearranges under the cursor.
   let dragId = $state<string | null>(null);

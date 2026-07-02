@@ -220,6 +220,15 @@ pub async fn download(
         return Err(format!("HF returned HTTP {status} for {url}"));
     }
 
+    // Server ignored our Range header and sent the full body (200) instead of
+    // a partial (206) — restart from scratch or the full stream gets appended
+    // after the existing partial bytes, corrupting the file.
+    let resume_from = if resume_from > 0 && status.as_u16() != 206 {
+        0
+    } else {
+        resume_from
+    };
+
     // Append-mode if resuming, create-truncate otherwise.
     let mut file = std::fs::OpenOptions::new()
         .create(true)

@@ -24,12 +24,20 @@ import { finalizeInflightBlocks } from "./streaming";
 // One-shot per app session — the sunset warning shouldn't nag on every send.
 let fableSunsetNoticed = false;
 
-export async function send(store: AssistantStore, prompt: string) {
+export async function send(store: AssistantStore, prompt: string, targetConvoId?: string | null) {
   const trimmed = prompt.trim();
+  // Explicit-target sends (queue drains, per-pane bubble actions) scope every
+  // tab read/write below to THAT tab without retargeting pane focus. Omitted →
+  // the focused-pane path, behavior unchanged (the resolved tab IS activeTab).
+  const targetTab = targetConvoId ? store.tabFor(targetConvoId) : null;
+  if (targetConvoId && !targetTab) return; // target retired mid-flight
+  const liveTab = targetTab ?? store.activeTab;
   // Empty prompts are allowed when attachments are staged (paste-and-go).
   // Drop only if the prompt AND both attachment kinds are empty.
-  if (!trimmed && store.composerAttachments.length === 0 && store.composerTextAttachments.length === 0) return;
-  // Try-handle as a slash command first; if it matched, we're done.
+  if (!trimmed && (liveTab?.attachments.length ?? 0) === 0 && (liveTab?.textAttachments.length ?? 0) === 0) return;
+  // Try-handle as a slash command first; if it matched, we're done. (A KNOWN
+  // slash command never reaches the queue — send() consumes it before the
+  // queue-on-busy branch — so drain-path re-entry always falls through here.)
   if (trimmed.startsWith("/") && runSlash(store, trimmed)) return;
   // Auth chokepoint — every send path funnels here (composer Enter/button,
   // queue drains, programmatic retries). A turn with no usable Claude session
@@ -46,14 +54,14 @@ export async function send(store: AssistantStore, prompt: string) {
   // composer attachments NOW: send() clears them right after enqueue, so a
   // queued message that didn't capture them would drain with its image/files
   // silently dropped (the user's "I queued an image and it vanished" bug).
-  if (store.streaming) {
-    const images = store.composerAttachments.map((a) => ({
+  if (liveTab?.streaming) {
+    const images = liveTab.attachments.map((a) => ({
       id: a.id, mime: a.mime, dataBase64: a.dataBase64, sizeBytes: a.sizeBytes,
     }));
-    const textFiles = store.composerTextAttachments.map((t) => ({
+    const textFiles = liveTab.textAttachments.map((t) => ({
       id: t.id, name: t.name, text: t.text, sizeBytes: t.sizeBytes, truncated: t.truncated,
     }));
-    store.queue = [...store.queue, {
+    liveTab.queue = [...liveTab.queue, {
       id: crypto.randomUUID(),
       text: trimmed,
       ...(images.length ? { images } : {}),
@@ -61,8 +69,8 @@ export async function send(store: AssistantStore, prompt: string) {
     }];
     // Clear the composer so the snapshotted attachments don't ALSO ride the
     // current turn / linger as a double-send. Mirrors send()'s own clear.
-    store.composerAttachments = [];
-    store.composerTextAttachments = [];
+    liveTab.attachments = [];
+    liveTab.textAttachments = [];
     return;
   }
   // Phase 2 (S72): the CLI owns conversation state now. First turn mints a
@@ -70,16 +78,19 @@ export async function send(store: AssistantStore, prompt: string) {
   // v0.4: newTab() mints currentConvoId up-front so the tab can render
   // before send() — gate isFirstTurn on convoCreatedAt instead so the very
   // first send still passes --session-id, not --resume.
-  if (!store.currentConvoId) {
+  if (!targetTab && !store.currentConvoId) {
     store.currentConvoId = crypto.randomUUID();
   }
+  const convoId = targetTab ? targetConvoId! : store.currentConvoId!;
   // #143: per-tab fields live on TabState now — ensureTab BEFORE touching
   // them so the writes don't no-op via the store's activeTab=null setter
   // path. ensureTab seeds cliSessionId to convoId for fresh tabs.
-  const tab = store.ensureTab(store.currentConvoId, store.currentConvoId);
+  const tab = store.ensureTab(convoId, convoId);
+  // The model THIS tab's turns run on — per-tab override, else the global pick.
+  const effModel = tab.modelOverride ?? store.model;
   const isFirstTurn = !tab.convoCreatedAt;
   if (!tab.cliSessionId) {
-    tab.cliSessionId = store.currentConvoId;
+    tab.cliSessionId = convoId;
   }
   if (!tab.convoCreatedAt) {
     tab.convoCreatedAt = Date.now();
@@ -90,33 +101,32 @@ export async function send(store: AssistantStore, prompt: string) {
   // model the running turns truly use (drives the picker's "this session" tag +
   // "New chat in <model>" honesty). Only set once, on the first turn.
   if (isFirstTurn && !tab.pinnedModel) {
-    tab.pinnedModel = store.effectiveModel;
+    tab.pinnedModel = effModel;
   }
   // A real turn — advance the sidebar's activity clock. Tab-switch auto-saves
   // deliberately don't touch this, so opening a chat no longer reshuffles.
   tab.lastActivityAt = Date.now();
   // v0.4: catches the raw newConversation→send path (slash /new) so tabs
   // never drift out of sync with the streaming convo.
-  if (!store.openTabs.includes(store.currentConvoId)) {
-    store.openTabs = [...store.openTabs, store.currentConvoId];
+  if (!store.openTabs.includes(convoId)) {
+    store.openTabs = [...store.openTabs, convoId];
     store.persistTabs();
   }
   tab.beginTurn();
   store.lastNotice = null;
   // #184: clear stale error banner so it doesn't bleed into the new turn.
-  // Setter routes to tab.lastError when activeTab is set, store-level otherwise.
-  store.lastError = null;
-  // No workspace AND no scratch fallback → the backend runs the turn in no-tools
-  // mode; say so up front. In local mode (scratch available) the turn silently
-  // runs in `%LOCALAPPDATA%\Rift\local` with full tools — the "Local" badge is
-  // the signal, so stay quiet.
-  if (!store.workspace.current && !store.localScratchPath) {
+  tab.lastError = null;
+  // No folder for THIS tab AND no scratch fallback → the backend runs the turn
+  // in no-tools mode; say so up front. In local mode (scratch available) the
+  // turn silently runs in `%LOCALAPPDATA%\Rift\local` with full tools — the
+  // "Local" badge is the signal, so stay quiet.
+  if (!store.effectiveRoot(tab) && !store.localScratchPath) {
     notify.warn("No folder open", {
       detail: "The assistant can't read or edit files this turn. Open one from the Workspace page.",
     });
   }
   // turn.rs swaps Fable to Opus silently once the limited run ends — warn ahead.
-  if (!fableSunsetNoticed && store.effectiveModel === "claude-fable-5"
+  if (!fableSunsetNoticed && effModel === "claude-fable-5"
       && Date.now() >= FABLE_SUNSET_MS - 7 * 86_400_000) {
     fableSunsetNoticed = true;
     notify.warn(
@@ -127,7 +137,7 @@ export async function send(store: AssistantStore, prompt: string) {
   }
   // Telemetry: build the turn record + attach to tab. TabState fills it as
   // envelopes arrive; finalized in onDone/onError.
-  const attachBytes = store.composerAttachments.reduce((s, a) => s + a.sizeBytes, 0);
+  const attachBytes = tab.attachments.reduce((s, a) => s + a.sizeBytes, 0);
   // The send tier IS the user's persisted tier — no per-turn auto-scaling.
   // (#244's autoScaleEffort is retired: the default tier now maps to `medium`,
   // so a trivial greeting is already light, AND any per-turn effort change forces
@@ -137,15 +147,15 @@ export async function send(store: AssistantStore, prompt: string) {
   const sendEffort = store.thinkingEffort;
   const turnRecord: TurnRecord = {
     ts: Date.now(),
-    convoId: store.currentConvoId,
+    convoId,
     cliSessionId: tab.cliSessionId,
     isFirstTurn,
-    model: store.effectiveModel,
+    model: effModel,
     effort: sendEffort,
-    effortFlag: effortToFlag(sendEffort, store.effectiveModel),
+    effortFlag: effortToFlag(sendEffort, effModel),
     promptLen: trimmed.length,
     promptPreview: trimmed.length > 120 ? trimmed.slice(0, 120) + "…" : trimmed,
-    attachmentsCount: store.composerAttachments.length,
+    attachmentsCount: tab.attachments.length,
     attachmentsBytes: attachBytes,
     envelopeUsage: null,
     resultUsage: null,
@@ -173,8 +183,8 @@ export async function send(store: AssistantStore, prompt: string) {
   }
   // User bubble text: when paste-and-go with no text, show an attachment
   // marker so the bubble isn't blank. Counts both kinds.
-  const attachCount = store.composerAttachments.length;
-  const textCount = store.composerTextAttachments.length;
+  const attachCount = tab.attachments.length;
+  const textCount = tab.textAttachments.length;
   const markerParts: string[] = [];
   if (attachCount > 0) markerParts.push(`📎 ${attachCount} image${attachCount === 1 ? "" : "s"}`);
   if (textCount > 0) markerParts.push(`📄 ${textCount} file${textCount === 1 ? "" : "s"}`);
@@ -183,7 +193,7 @@ export async function send(store: AssistantStore, prompt: string) {
   // then the text block. Order matches the visual stack (thumbs above text)
   // in MessageBubble's user-side render path.
   const userBlocks: Block[] = [];
-  for (const a of store.composerAttachments) {
+  for (const a of tab.attachments) {
     userBlocks.push({
       type: "image",
       mime: a.mime,
@@ -195,7 +205,7 @@ export async function send(store: AssistantStore, prompt: string) {
   // the visible bubble (the full contents are inlined into the prompt below, not
   // shown — they'd flood the transcript). One line per file so the user sees
   // what they sent.
-  for (const t of store.composerTextAttachments) {
+  for (const t of tab.textAttachments) {
     userBlocks.push({ type: "text", text: `📄 ${t.name}${t.truncated ? " (truncated)" : ""}` });
   }
   userBlocks.push({ type: "text", text: bubbleText });
@@ -203,7 +213,12 @@ export async function send(store: AssistantStore, prompt: string) {
     ...tab.messages,
     { id: crypto.randomUUID(), role: "user", blocks: userBlocks },
   ];
-  const asst: ChatMessage = { id: crypto.randomUUID(), role: "assistant", blocks: [] };
+  // Snapshot the permission mode this turn runs with — TurnSummary's badge
+  // reads the message copy so a later mode switch can't relabel history.
+  const asst: ChatMessage = {
+    id: crypto.randomUUID(), role: "assistant", blocks: [],
+    permissionMode: store.permissionMode,
+  };
   tab.messages = [...tab.messages, asst];
   tab.streamingMsgId = asst.id;
   // #146: asst placeholder is at the tail of messages; cache its index so
@@ -211,27 +226,27 @@ export async function send(store: AssistantStore, prompt: string) {
   tab.streamingMsgIdx = tab.messages.length - 1;
   // Snapshot attachments for this turn + clear the composer so a fast retype
   // doesn't accidentally re-attach.
-  const turnAttachments = store.composerAttachments.map((a) => ({
+  const turnAttachments = tab.attachments.map((a) => ({
     mime: a.mime,
     dataBase64: a.dataBase64,
   }));
   // Inline text-file attachments into the prompt as fenced blocks before the
   // user's typed text. The backend pipes `prompt` to the CLI verbatim, so no
   // backend change is needed — the assistant simply sees the file contents.
-  const textBlocks = store.composerTextAttachments
+  const textBlocks = tab.textAttachments
     .map((t) => `\`\`\`${t.name}\n${t.text}\n\`\`\``)
     .join("\n\n");
   const effectivePrompt = textBlocks
     ? (trimmed ? `${textBlocks}\n\n${trimmed}` : textBlocks)
     : trimmed;
-  store.composerAttachments = [];
-  store.composerTextAttachments = [];
+  tab.attachments = [];
+  tab.textAttachments = [];
   try {
     await invoke("assistant_send", {
       prompt: effectivePrompt,
       sessionId: tab.cliSessionId,
       isFirstTurn,
-      model: store.effectiveModel,
+      model: effModel,
       attachments: turnAttachments.length > 0 ? turnAttachments : null,
       dyslexiaMode: accessibility.dyslexiaMode,
       thinkingEffort: sendEffort,
@@ -299,21 +314,20 @@ export function drainQueue(store: AssistantStore, tab: TabState | null) {
     if (!tab.queue.some((q) => q.id === next.id)) return;
     tab.queue = tab.queue.filter((q) => q.id !== next.id);
     // Restore the snapshotted attachments onto the DRAINING tab so send() picks
-    // them up. Write directly to the tab fields (not the store proxy, which
-    // targets the focused pane) — store.send(text, tabId) below retargets
-    // currentConvoId to this tab first, so its composerAttachments getter then
-    // resolves to exactly these. Without this the queued image is lost on drain.
+    // them up — send(store, text, convoId) below reads THIS tab's staged
+    // attachments via its explicit target. Without this the queued image is
+    // lost on drain.
     tab.attachments = next.images
       ? next.images.map((a) => ({ id: a.id, mime: a.mime, dataBase64: a.dataBase64, sizeBytes: a.sizeBytes }))
       : [];
     tab.textAttachments = next.textFiles
       ? next.textFiles.map((t) => ({ id: t.id, name: t.name, text: t.text, sizeBytes: t.sizeBytes, truncated: t.truncated }))
       : [];
-    // Route through the STORE wrapper (not the bare sendImpl) with the draining
-    // tab's id: sendImpl keys off currentConvoId, so a drain on a non-focused
-    // pane-visible tab must retarget first or the queued message fires into the
-    // focused pane instead. store.send(text, tabId) does that retarget.
-    store.send(next.text, capturedTabConvoId).catch(e => tab.onError(String(e)));
+    // Fire the bare sendImpl with an explicit target — it scopes every tab
+    // read/write to the draining tab itself, so a drain on a sibling-pane tab
+    // no longer yanks the user's pane focus (the old store.send() retarget
+    // called setFocusedPane from this non-user-initiated path).
+    send(store, next.text, capturedTabConvoId).catch(e => tab.onError(String(e)));
   });
 }
 
@@ -491,33 +505,34 @@ function runSlash(store: AssistantStore, input: string): boolean {
 
 /** Re-send the most recent user prompt. Drops the prior user+assistant
  *  pair from the visible history so the retry looks like a redo, not a
- *  duplicate. Aborts an in-flight stream first. */
-export async function retryLast(store: AssistantStore) {
+ *  duplicate. Aborts an in-flight stream first. `tabId` scopes the retry to
+ *  that pane's tab (split-pane Retry button); omitted → focused tab. */
+export async function retryLast(store: AssistantStore, tabId?: string | null) {
   // #185: re-entrance guard so a fast double-click only strips one pair.
   if (store.retrying) return;
   store.retrying = true;
   try {
-    const tab = store.activeTab;
+    const tab = tabId ? store.tabFor(tabId) : store.activeTab;
     const last = tab?.promptHistory[tab.promptHistory.length - 1];
     if (!last || !tab) {
       store.lastError = "No previous prompt to retry.";
       return;
     }
     if (tab.streaming) {
-      await stop(store);
+      await stop(store, tabId);
     }
-    // RR7: stop() awaits an IPC round-trip; the user may have switched tabs
-    // during it. send() below routes through store.currentConvoId (the LIVE
-    // active tab), so retrying now would fire into the wrong tab. Abort if the
-    // captured tab is no longer active — the prompt stays in promptHistory.
-    if (store.activeTab !== tab) return;
+    // RR7: stop() awaits an IPC round-trip; the tab may have been closed or
+    // replaced during it. Abort if the captured tab is gone — the prompt stays
+    // in promptHistory. (With an explicit tabId, send() below targets the tab
+    // directly, so mere focus movement no longer cancels the retry.)
+    if ((tabId ? store.tabFor(tabId) : store.activeTab) !== tab) return;
     // Strip the trailing assistant turn (if any) and the matching user turn
     // so the replayed history doesn't double-include the prompt.
     const msgs = tab.messages.slice();
     if (msgs[msgs.length - 1]?.role === "assistant") msgs.pop();
     if (msgs[msgs.length - 1]?.role === "user") msgs.pop();
     tab.messages = msgs;
-    await send(store, last);
+    await send(store, last, tabId ?? undefined);
   } finally {
     store.retrying = false;
   }

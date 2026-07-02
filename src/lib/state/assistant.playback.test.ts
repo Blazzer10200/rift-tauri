@@ -863,4 +863,51 @@ describe("split-pane — background-pane isolation", () => {
     );
   });
 
+  it("a queue drain on a visible bg pane fires into THAT pane without stealing focus (#78)", async () => {
+    const { a, b, tabB } = twoPaneStore();
+    // Pane B (unfocused, visible) finishes a turn with a queued follow-up. The
+    // drain must send into B and leave the user's focus on A — the pre-#78 drain
+    // routed through store.send(text, tabId) which called setFocusedPane.
+    tabB.streaming = true;
+    tabB.queue = [{ id: "q1", text: "drain B" }];
+    mockInvoke.mockClear();
+
+    tabB.streaming = false;
+    tabB.onTurnComplete?.(tabB);
+    await settle();
+
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "assistant_send",
+      expect.objectContaining({ sessionId: b, prompt: "drain B" }),
+    );
+    // Focus never moved: currentConvoId + focusedPaneIdx still point at A.
+    expect(assistant.currentConvoId).toBe(a);
+    expect(assistant.focusedPaneIdx).toBe(0);
+  });
+
+  it("an explicit-target send writes into the target tab, not the focused one (#78)", async () => {
+    const { a, b, tabA, tabB } = twoPaneStore();
+    mockInvoke.mockClear();
+
+    // Send addressed to pane B while A is focused (the Retry/Continue path).
+    // Both tabs are live in `tabs`, so setFocusedPane's meta-load branch is a
+    // no-op; seed `conversations` so its `.some()` lookup doesn't throw in the
+    // test harness (the real store always has this array).
+    assistant.conversations = [];
+    await assistant.send("into B", b);
+    await settle();
+
+    // The user + assistant messages landed on B; A is untouched.
+    expect(tabB.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
+    expect(tabB.messages[0].blocks).toEqual([{ type: "text", text: "into B" }]);
+    expect(tabA.messages).toHaveLength(0);
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "assistant_send",
+      expect.objectContaining({ sessionId: b, prompt: "into B" }),
+    );
+    // Explicit target in a pane still focuses it (this IS a user action) — but
+    // the messages were written to B regardless, which is the isolation guarantee.
+    void a;
+  });
+
 });

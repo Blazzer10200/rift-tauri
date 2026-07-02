@@ -494,6 +494,7 @@
                 <MessageBubble
                   message={m}
                   {tab}
+                  {tabId}
                   isLast={mi === messages.length - 1}
                   streaming={streaming
                     && mi === messages.length - 1

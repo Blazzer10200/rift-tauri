@@ -28,6 +28,18 @@
 - **Deleting a chat right after a reply no longer resurrects it** — a background auto-save/title-generation could re-create it moments later; deletions now hold, even mid-save.
 - **AI Health reads honestly** (dropped a misleading "typical reply" figure; no mid-word truncation), and **dev builds don't cry wolf** with a red "reinstall needed" chip.
 
+### Fixed — overnight full-stack review (split-pane correctness, error honesty, races)
+- **Split panes truly keep to themselves now.** Retrying a turn, continuing a truncated reply, or a queued message auto-firing in a background pane all land in *that* pane's conversation — never the one you happen to be looking at — and a background pane finishing its work no longer yanks your cursor to it. An unfocused pane also stops briefly showing another pane's file count / git branch.
+- **Errored turns say what actually went wrong.** A turn that stops on a thinking-budget or context-window limit now keeps its plain-English reason instead of being overwritten by a raw diagnostic dump.
+- **The "applied automatically" badge on a past turn reflects the mode it *ran* with**, not whatever permission mode you switched to afterward.
+- **AI Health's "Apply" for a reasoning-effort tip now works even when Thinking is off** (it flips Thinking on for you) instead of silently doing nothing while showing a green check.
+- **Dismissed voice/ask questions** in history now read "Dismissed — no answer given." instead of leaking the internal instruction text; in-progress answers no longer get wiped if the question list changes mid-stream.
+- **Copy-diff** only says "Copied" when the copy truly succeeded; a **too-many-patterns** project glob now blocks Save with a warning instead of silently truncating; assorted backend races hardened (concurrent model-download cancel, interrupted-download resume, project-folder resolution).
+- **The sidebar's branch pill stays put** when you open Settings (it used to flip to "Local workspace" mid-navigation).
+
+### Changed — under the hood
+- **One toggle-switch style app-wide** (was three near-identical copies), one danger-text color token, ~250 lines of dead CSS/TS removed. No visible change; the UI is just more consistent and lighter.
+
 ## v0.83.0 — Sidebar redesign + Fable 5 always in the picker
 - **Project-first sidebar:** switcher (monogram + branch) on top, New chat + search, scope toggle, recent-day history, icon footer.
 - **Fable 5 always visible** — graceful "currently unavailable" while gated; fixed the thinking-off request that failed API-key Fable turns.

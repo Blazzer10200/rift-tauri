@@ -64,6 +64,7 @@
   --ok:     oklch(0.73 0.18 150); --ok-soft:     oklch(0.73 0.18 150 / 0.14);
   --warn:   oklch(0.78 0.16 70);  --warn-soft:   oklch(0.78 0.16 70 / 0.14);
   --danger: oklch(0.71 0.17 22);  --danger-soft: oklch(0.71 0.17 22 / 0.14);
+  --danger-fg: oklch(0.985 0.005 20);   /* text/icon ON solid danger */
   --info:   oklch(0.76 0.13 230); --info-soft:   oklch(0.76 0.13 230 / 0.14);
 
   /* ── radius ladder ── */

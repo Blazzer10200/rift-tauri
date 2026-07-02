@@ -403,7 +403,7 @@
               </div>
               <div class="ctl-row tight">
                 <div><div class="ctl-t">Font ligatures</div><div class="ctl-s">Render <code>→ ≠ &gt;=</code> as joined glyphs in JetBrains Mono.</div></div>
-                <button class="toggle" class:on={uiPrefs.code.ligatures} role="switch" aria-checked={uiPrefs.code.ligatures} aria-label="Font ligatures" type="button" onclick={() => uiPrefs.setCode({ ligatures: !uiPrefs.code.ligatures })}><span class="toggle-knob"></span></button>
+                <button class="rift-toggle" class:on={uiPrefs.code.ligatures} role="switch" aria-checked={uiPrefs.code.ligatures} aria-label="Font ligatures" type="button" onclick={() => uiPrefs.setCode({ ligatures: !uiPrefs.code.ligatures })}><span class="rift-toggle-knob"></span></button>
               </div>
           </div>
       </div></div>
@@ -491,7 +491,7 @@
           <div class="card-sub">How each turn runs — config layering, git access, and the plan behind the context gauge.</div>
           <div class="ctl-row tight">
             <div><div class="ctl-t">Use my full Claude Code config</div><div class="ctl-s">Runs Rift as your Claude Code: layers your global <code>~/.claude</code> setup — <code>CLAUDE.md</code>, <code>settings.json</code>, hooks, slash commands, skills, and MCP servers — into every turn alongside Rift's own MCP tools. Off = sandboxed (Rift MCP only, no global config or hooks).</div></div>
-            <button class="toggle" class:on={assistantStore.useFullConfig && !assistantStore.hasApiKey} role="switch" aria-checked={assistantStore.useFullConfig && !assistantStore.hasApiKey} aria-label="Use full Claude Code config" disabled={assistantStore.hasApiKey} type="button" onclick={() => void assistantStore.setUseFullConfig(!assistantStore.useFullConfig)}><span class="toggle-knob"></span></button>
+            <button class="rift-toggle" class:on={assistantStore.useFullConfig && !assistantStore.hasApiKey} role="switch" aria-checked={assistantStore.useFullConfig && !assistantStore.hasApiKey} aria-label="Use full Claude Code config" disabled={assistantStore.hasApiKey} type="button" onclick={() => void assistantStore.setUseFullConfig(!assistantStore.useFullConfig)}><span class="rift-toggle-knob"></span></button>
           </div>
           <div class="ctl-row tight">
             <div><div class="ctl-t">Git tools</div><div class="ctl-s">Local <code>git</code> tools for the model. Read-only = status, diff, log. Standard adds commit, pull, and push.</div></div>
@@ -515,7 +515,7 @@
             <div class="card-sub">Make Claude's replies easier to read. These affect the chat only — the rest of Rift keeps the dark theme.</div>
             <div class="ctl-row tight">
               <div><div class="ctl-t">Dyslexia-friendly mode</div><div class="ctl-s">Switches to the Lexend font with wider spacing, and asks Claude to read phonetic typos and voice-to-text slips charitably.</div></div>
-              <button class="toggle" class:on={accessibility.dyslexiaMode} role="switch" aria-checked={accessibility.dyslexiaMode} aria-label="Dyslexia-friendly mode" type="button" onclick={() => accessibility.setDyslexiaMode(!accessibility.dyslexiaMode)}><span class="toggle-knob"></span></button>
+              <button class="rift-toggle" class:on={accessibility.dyslexiaMode} role="switch" aria-checked={accessibility.dyslexiaMode} aria-label="Dyslexia-friendly mode" type="button" onclick={() => accessibility.setDyslexiaMode(!accessibility.dyslexiaMode)}><span class="rift-toggle-knob"></span></button>
             </div>
             <div class="ctl-row tight" data-disabled={!accessibility.dyslexiaMode}>
               <div><div class="ctl-t">UI font</div><div class="ctl-s">Lexend has the strongest research backing for improving reading rate in dyslexic readers.</div></div>
@@ -526,11 +526,11 @@
             </div>
             <div class="ctl-row tight" data-disabled={!accessibility.dyslexiaMode}>
               <div><div class="ctl-t">Wider line and letter spacing</div><div class="ctl-s">Raises line height to 1.85 inside chat bubbles and the composer.</div></div>
-              <button class="toggle" class:on={accessibility.lineHeightBoost} role="switch" aria-checked={accessibility.lineHeightBoost} aria-label="Wider line and letter spacing" disabled={!accessibility.dyslexiaMode} type="button" onclick={() => accessibility.setLineHeightBoost(!accessibility.lineHeightBoost)}><span class="toggle-knob"></span></button>
+              <button class="rift-toggle" class:on={accessibility.lineHeightBoost} role="switch" aria-checked={accessibility.lineHeightBoost} aria-label="Wider line and letter spacing" disabled={!accessibility.dyslexiaMode} type="button" onclick={() => accessibility.setLineHeightBoost(!accessibility.lineHeightBoost)}><span class="rift-toggle-knob"></span></button>
             </div>
             <div class="ctl-row tight">
               <div><div class="ctl-t">Warm reading tint</div><div class="ctl-s">A soft sepia overlay on chat bubbles to ease bright-white-on-dark glare.</div></div>
-              <button class="toggle" class:on={accessibility.warmTint} role="switch" aria-checked={accessibility.warmTint} aria-label="Warm reading tint" type="button" onclick={() => accessibility.setWarmTint(!accessibility.warmTint)}><span class="toggle-knob"></span></button>
+              <button class="rift-toggle" class:on={accessibility.warmTint} role="switch" aria-checked={accessibility.warmTint} aria-label="Warm reading tint" type="button" onclick={() => accessibility.setWarmTint(!accessibility.warmTint)}><span class="rift-toggle-knob"></span></button>
             </div>
           </div>
 
@@ -539,7 +539,7 @@
             <div class="card-sub">How Claude's activity and replies are laid out.</div>
             <div class="ctl-row tight">
               <div><div class="ctl-t">Stream view</div><div class="ctl-s">A boxless, text-first activity stream — a "Working for Ns" header, collapsed reasoning, and grouped tool lines.</div></div>
-              <button class="toggle" class:on={uiPrefs.streamMode} role="switch" aria-checked={uiPrefs.streamMode} aria-label="Stream view" type="button" onclick={() => uiPrefs.toggleStreamMode()}><span class="toggle-knob"></span></button>
+              <button class="rift-toggle" class:on={uiPrefs.streamMode} role="switch" aria-checked={uiPrefs.streamMode} aria-label="Stream view" type="button" onclick={() => uiPrefs.toggleStreamMode()}><span class="rift-toggle-knob"></span></button>
             </div>
             {#if uiPrefs.streamMode}
               <div class="ctl-row tight">
@@ -606,7 +606,7 @@
               <div class="ctl-actions">
                 {#if assistantStore.hasApiKey}
                   <span class="st-pill ok"><span class="dot"></span>Configured</span>
-                  <button class="st-btn" type="button" disabled={asstApiKeySaving} onclick={() => { asstApiKeyDraft = ""; void saveAsstApiKey(); }}>Clear</button>
+                  <button class="st-btn danger-btn" type="button" disabled={asstApiKeySaving} onclick={() => { asstApiKeyDraft = ""; void saveAsstApiKey(); }}>Clear</button>
                 {:else}
                   <span class="st-secret">
                     <input id="asst-apikey" class="st-input mono" type={asstApiKeyVisible ? "text" : "password"} placeholder="sk-ant-api03-…" style="width:100%; max-width:188px;" bind:value={asstApiKeyDraft} autocomplete="off" spellcheck="false" />
@@ -631,7 +631,7 @@
             <div class="card-sub">Turn voice input on and pick what transcribes it.</div>
             <div class="ctl-row tight">
               <div><div class="ctl-t">Speech-to-text</div><div class="ctl-s">Master switch. When off, the mic button in the composer is hidden.</div></div>
-              <button class="toggle" class:on={stt.config.enabled} role="switch" aria-checked={stt.config.enabled} aria-label="Enable speech-to-text" type="button" onclick={() => void stt.setConfig({ enabled: !stt.config.enabled })}><span class="toggle-knob"></span></button>
+              <button class="rift-toggle" class:on={stt.config.enabled} role="switch" aria-checked={stt.config.enabled} aria-label="Enable speech-to-text" type="button" onclick={() => void stt.setConfig({ enabled: !stt.config.enabled })}><span class="rift-toggle-knob"></span></button>
             </div>
             <div class="ctl-row stack">
               <div><div class="ctl-t">Recognition engine</div><div class="ctl-s">Web Speech is zero-install via Edge / Azure. Whisper runs on-device with stronger accent tolerance and vocabulary priming.</div></div>
@@ -679,7 +679,7 @@
               </div>
               <div class="ctl-row tight">
                 <div><div class="ctl-t">Continuous mode</div><div class="ctl-s">Keep listening across pauses until you click stop.</div></div>
-                <button class="toggle" class:on={stt.config.continuous} role="switch" aria-checked={stt.config.continuous} aria-label="Continuous mode" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ continuous: !stt.config.continuous })}><span class="toggle-knob"></span></button>
+                <button class="rift-toggle" class:on={stt.config.continuous} role="switch" aria-checked={stt.config.continuous} aria-label="Continuous mode" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ continuous: !stt.config.continuous })}><span class="rift-toggle-knob"></span></button>
               </div>
             </div>
           {/if}
@@ -716,7 +716,7 @@
                           {:else}
                             <span class="st-pill ok"><span class="dot"></span>Active</span>
                           {/if}
-                          <button type="button" class="st-btn" onclick={() => void stt.deleteModel(m.id)} use:tooltip={"Delete model"} aria-label="Delete"><Trash2 size={14} /></button>
+                          <button type="button" class="st-btn danger-btn" onclick={() => void stt.deleteModel(m.id)} use:tooltip={"Delete model"} aria-label="Delete"><Trash2 size={14} /></button>
                         {:else}
                           <button type="button" class="st-btn primary" disabled={!stt.config.enabled} onclick={() => void stt.downloadModel(m.id)}>Download</button>
                         {/if}
@@ -747,11 +747,11 @@
               </div>
               <div class="ctl-row tight">
                 <div><div class="ctl-t">Clean up transcript</div><div class="ctl-s">Polishes the final transcript with Claude — fixes punctuation, capitalizes proper nouns. Adds a short tail after you stop.</div></div>
-                <button class="toggle" class:on={stt.config.cleanup_enabled} role="switch" aria-checked={stt.config.cleanup_enabled} aria-label="Clean up transcript with Claude" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ cleanup_enabled: !stt.config.cleanup_enabled })}><span class="toggle-knob"></span></button>
+                <button class="rift-toggle" class:on={stt.config.cleanup_enabled} role="switch" aria-checked={stt.config.cleanup_enabled} aria-label="Clean up transcript with Claude" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ cleanup_enabled: !stt.config.cleanup_enabled })}><span class="rift-toggle-knob"></span></button>
               </div>
               <div class="ctl-row tight">
                 <div><div class="ctl-t">Beam search</div><div class="ctl-s">Higher-accuracy decode (beam width 5) instead of greedy — sharper on technical terms, ~2-4× slower. GPU recommended.</div></div>
-                <button class="toggle" class:on={(stt.config.beam_size ?? 1) > 1} role="switch" aria-checked={(stt.config.beam_size ?? 1) > 1} aria-label="Use beam search decoding" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ beam_size: (stt.config.beam_size ?? 1) > 1 ? null : 5 })}><span class="toggle-knob"></span></button>
+                <button class="rift-toggle" class:on={(stt.config.beam_size ?? 1) > 1} role="switch" aria-checked={(stt.config.beam_size ?? 1) > 1} aria-label="Use beam search decoding" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ beam_size: (stt.config.beam_size ?? 1) > 1 ? null : 5 })}><span class="rift-toggle-knob"></span></button>
               </div>
             </div>
 
@@ -779,15 +779,15 @@
             <div class="card-sub">How spoken words land in the message box.</div>
             <div class="ctl-row tight">
               <div><div class="ctl-t">Live partial transcripts</div><div class="ctl-s">Words appear in the composer as you speak. Off = wait for each sentence to commit.</div></div>
-              <button class="toggle" class:on={stt.config.show_interim} role="switch" aria-checked={stt.config.show_interim} aria-label="Live partial transcripts" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ show_interim: !stt.config.show_interim })}><span class="toggle-knob"></span></button>
+              <button class="rift-toggle" class:on={stt.config.show_interim} role="switch" aria-checked={stt.config.show_interim} aria-label="Live partial transcripts" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ show_interim: !stt.config.show_interim })}><span class="rift-toggle-knob"></span></button>
             </div>
             <div class="ctl-row tight">
               <div><div class="ctl-t">Insertion mode</div><div class="ctl-s">Append preserves what's typed; off = transcript replaces composer contents (mic-first workflow).</div></div>
-              <button class="toggle" class:on={stt.config.append_to_draft} role="switch" aria-checked={stt.config.append_to_draft} aria-label="Append transcript to existing draft" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ append_to_draft: !stt.config.append_to_draft })}><span class="toggle-knob"></span></button>
+              <button class="rift-toggle" class:on={stt.config.append_to_draft} role="switch" aria-checked={stt.config.append_to_draft} aria-label="Append transcript to existing draft" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ append_to_draft: !stt.config.append_to_draft })}><span class="rift-toggle-knob"></span></button>
             </div>
             <div class="ctl-row tight">
               <div><div class="ctl-t">Voice commands</div><div class="ctl-s">"send it" fires the message, "new line" / "new paragraph" insert breaks, "scratch that" deletes the last phrase.</div></div>
-              <button class="toggle" class:on={stt.config.voice_commands} role="switch" aria-checked={stt.config.voice_commands} aria-label="Voice commands" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ voice_commands: !stt.config.voice_commands })}><span class="toggle-knob"></span></button>
+              <button class="rift-toggle" class:on={stt.config.voice_commands} role="switch" aria-checked={stt.config.voice_commands} aria-label="Voice commands" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ voice_commands: !stt.config.voice_commands })}><span class="rift-toggle-knob"></span></button>
             </div>
             <div class="ctl-row tight">
               <div><div class="ctl-t">Auto-stop on silence</div><div class="ctl-s">Ends the recording by itself after a pause — hands-free dictation. Needs live partials on the Web Speech engine.</div></div>
@@ -967,13 +967,7 @@
   .seg button.on { background: var(--surface-active); color: var(--fg); box-shadow: var(--shadow-sm); }
   .seg button:disabled { opacity: 0.5; cursor: not-allowed; }
 
-  /* toggle */
-  .toggle { width: 40px; height: 23px; border-radius: 999px; background: var(--track); border: 1px solid var(--border-strong); position: relative; flex: none; cursor: pointer; padding: 0; transition: background var(--dur-base); }
-  .toggle.on { background: var(--accent); border-color: transparent; }
-  .toggle:disabled { opacity: 0.5; cursor: not-allowed; }
-  .toggle:focus-visible { outline: 0; box-shadow: 0 0 0 3px var(--ring); }
-  .toggle-knob { position: absolute; top: 2px; left: 2px; width: 17px; height: 17px; border-radius: 50%; background: var(--fg-muted); transition: transform var(--dur-base) var(--ease-page), background var(--dur-base); }
-  .toggle.on .toggle-knob { transform: translateX(17px); background: var(--accent-fg); }
+  /* toggle — canonical .rift-toggle from app.css */
 
   /* accent swatches + hue spectrum + vividness */
   .swatches { display: grid; grid-template-columns: repeat(8, 1fr); gap: 9px; max-width: 460px; }

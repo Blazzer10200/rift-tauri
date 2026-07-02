@@ -43,7 +43,7 @@
   // Cheap (~ms) on typical FiveM resource folders; cached on the store.
   $effect(() => {
     if (
-      paneRoot &&
+      sharedRootMatches &&
       assistant.workspaceFiles.length === 0 &&
       assistant.workspaceFilesLoadingFor == null
     ) {
@@ -52,12 +52,20 @@
   });
   // Resolve the workspace git branch lazily for the context strip (null = not a repo).
   $effect(() => {
-    if (paneRoot && assistant.workspaceBranch == null) void assistant.loadWorkspaceBranch();
+    if (sharedRootMatches && assistant.workspaceBranch == null) void assistant.loadWorkspaceBranch();
   });
 
   // Per-pane root: this pane's own folder (or the global default), so two
   // panes showing the welcome can advertise different project dirs.
   const paneRoot = $derived(assistant.effectiveRoot(targetTab));
+  // The shared file/branch caches belong to the FOCUSED pane's root (the
+  // loader resolves assistant.activeRoot). Only load from — and display in —
+  // a pane whose own root matches, so an unfocused split pane can't show (or
+  // poll for) a sibling pane's file count/branch. Also closes the loop where
+  // an unfocused pane with a root kept re-firing the loader while the focused
+  // pane had none (loader's `!root → workspaceFiles = []` write re-triggers
+  // the load effect). #74 family — the loader itself stays untouched.
+  const sharedRootMatches = $derived(paneRoot != null && paneRoot === assistant.activeRoot);
   const hasRoot = $derived(paneRoot != null);
   const recents = $derived(assistant.workspace.recent);
 
@@ -67,8 +75,8 @@
   const ctxName = $derived(
     hasRoot ? leafName(paneRoot!) : "workspace",
   );
-  const fileCount = $derived(assistant.workspaceFiles.length);
-  const branch = $derived(assistant.workspaceBranch);
+  const fileCount = $derived(sharedRootMatches ? assistant.workspaceFiles.length : 0);
+  const branch = $derived(sharedRootMatches ? assistant.workspaceBranch : null);
 
   // Time-of-day greeting eyebrow (mockup parity).
   // #182: tick the hour each minute so the greeting refreshes across day

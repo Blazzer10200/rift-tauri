@@ -34,8 +34,9 @@
 
   // `tab` is THIS pane's tab; the heartbeat reads its turn start, not the
   // global activeTab getter (which would mirror the focused pane in split mode).
-  let { message, streaming = false, isLast = false, tab = null }:
-    { message: ChatMessage; streaming?: boolean; isLast?: boolean; tab?: TabState | null } = $props();
+  // `tabId` routes Retry/Continue into THIS pane's conversation.
+  let { message, streaming = false, isLast = false, tab = null, tabId = null }:
+    { message: ChatMessage; streaming?: boolean; isLast?: boolean; tab?: TabState | null; tabId?: string | null } = $props();
   const liveTab = $derived(tab ?? assistant.activeTab);
 
   function onBubbleContext(e: MouseEvent) {
@@ -299,7 +300,7 @@
               <button
                 class="copybtn"
                 type="button"
-                onclick={() => assistant.retryLast()}
+                onclick={() => assistant.retryLast(tabId)}
                 use:tooltip={"Retry this turn — re-runs your last prompt"}
                 aria-label="Retry this turn"
               >
@@ -465,7 +466,7 @@
             <button
               type="button"
               class="stop-notice-btn"
-              onclick={() => assistant.send("Continue from where you left off.")}
+              onclick={() => assistant.send("Continue from where you left off.", tabId)}
               use:tooltip={"Ask Claude to continue the truncated response"}
             >Continue</button>
           {/if}

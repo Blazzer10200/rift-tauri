@@ -300,9 +300,10 @@ describe("globSummary", () => {
     const normalPats = Array.from({ length: PATTERNS_MAX }, (_, i) => `*.x${i}`).join("\n");
     const text = `${longPat}\n${normalPats}`; // total = PATTERNS_MAX + 1
     const { invalid, firstError } = globSummary(text);
-    // listError wins for firstError, but the per-pattern bad count is still tracked
+    // listError wins for firstError; invalid folds in the per-pattern bad
+    // count (1) PLUS the list-level overflow (1) so canSave still blocks.
     expect(firstError).toMatch(/too many/);
-    expect(invalid).toBe(1);
+    expect(invalid).toBe(2);
   });
 
   it("whitespace-only text => invalid:0, firstError:null", () => {
