@@ -185,10 +185,12 @@ pub(super) fn pool_size() -> usize {
     with_warm(|m| m.len())
 }
 
-/// Put a warm child (back) into the registry unconditionally. Sole remaining
-/// caller is the evictor's raced-in-turn path, which re-inserts the SAME arc it
-/// just pulled — spawn paths must use `insert_if_absent` below instead.
-fn insert(session_id: &str, child: Arc<Mutex<WarmChild>>) {
+/// Put a warm child into the registry unconditionally. Callers: the evictor's
+/// raced-in-turn path (re-inserts the SAME arc it just pulled) and cold_spawn's
+/// bounded take-race fallback (after `insert_if_absent` kept losing). The normal
+/// spawn path must use `insert_if_absent` below instead — a bare insert can
+/// silently displace a racing child with no kill.
+pub(super) fn insert(session_id: &str, child: Arc<Mutex<WarmChild>>) {
     with_warm(|m| {
         m.insert(session_id.to_string(), child);
     });

@@ -1644,8 +1644,11 @@ async fn cold_spawn_and_run(
     // insert would displace its Arc with NO kill — invisible to idle-evict and
     // the shutdown sweep, leaking the spare + its MCP grandchild. Take the slot
     // atomically; if a racer won it, reap the racer and retake (the user's live
-    // turn outranks a parked spare mid-handshake). Loop: a second racer can in
-    // principle slip in between the reap and the retake.
+    // turn outranks a parked spare mid-handshake). Bounded so a pathological
+    // re-inserting racer can't spin the executor — after a few tries fall
+    // through to a plain `insert` (the racer, if any, is then reaped by
+    // idle-evict, exactly the pre-fix outcome, never worse).
+    let mut take_tries = 0u8;
     while !warm_pool::insert_if_absent(&session_id, warm.clone()) {
         if let Some(racer) = warm_pool::get(&session_id) {
             let racer_pid = match racer.lock() { Ok(g) => g.pid, Err(p) => p.into_inner().pid };
@@ -1655,6 +1658,13 @@ async fn cold_spawn_and_run(
             // The racer's set_session_pid may have overwritten ours — re-assert
             // so stop/velopack sweeps see the child that actually survives.
             if let Some(p) = turn_pid { set_session_pid(&session_id, p); }
+        }
+        take_tries += 1;
+        if take_tries >= 4 {
+            log::warn!("cold_spawn: slot for {session_id} kept losing the take race — forcing insert");
+            warm_pool::insert(&session_id, warm.clone());
+            if let Some(p) = turn_pid { set_session_pid(&session_id, p); }
+            break;
         }
     }
 
