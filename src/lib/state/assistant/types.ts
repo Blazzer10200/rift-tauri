@@ -153,6 +153,9 @@ export type ChatMessage = {
   blocks: Block[];
   costUsd?: number | null;
   model?: string | null;
+  /** Creation time (ms epoch) — stamped at send/turn-start since 2026-07-02.
+   *  Absent on older persisted convos; UI hides the hover timestamp then. */
+  ts?: number | null;
   // Terminal stop reason when noteworthy: "max_tokens" (response truncated at
   // the output cap) or "refusal" (model declined). Null/absent for normal
   // completions. Drives the truncation/refusal notice in MessageBubble.

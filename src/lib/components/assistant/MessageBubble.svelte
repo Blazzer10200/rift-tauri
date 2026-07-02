@@ -99,6 +99,17 @@
   });
 
   const isUser = $derived(message.role === "user");
+  // Hover timestamp — `ts` is stamped at send since 2026-07-02; absent on older
+  // convos (renders nothing then). Same-day shows time only; older adds the date.
+  const msgTime = $derived.by(() => {
+    const t = message.ts;
+    if (!t) return null;
+    const d = new Date(t);
+    const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    return d.toDateString() === new Date().toDateString()
+      ? time
+      : `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${time}`;
+  });
   const isSystem = $derived(message.role === "system");
   // Compaction boundary: the system-role message owns a single
   // BoundaryBlock. Extract it here so the boundary render path stays
@@ -265,6 +276,9 @@
         {#if modelLabel && !isLocalModel}
           <span class="head-sep" aria-hidden="true">·</span>
           <span class="head-model" use:tooltip={"Model for this turn"}>{modelLabel}</span>
+        {/if}
+        {#if msgTime && !streaming}
+          <span class="head-time" use:tooltip={"When this turn ran"}>{msgTime}</span>
         {/if}
         {#if streaming}
           <!-- #39 P0-4: while a thinking block is on screen it carries its own
@@ -480,6 +494,10 @@
 
       {#if !isUser && !streaming}
         <TurnSummary {message} {costLabel} />
+      {/if}
+
+      {#if isUser && msgTime}
+        <span class="user-time" aria-hidden="true">{msgTime}</span>
       {/if}
 
     </div>
@@ -1079,10 +1097,13 @@
   /* User prose: right-aligned accent-tinted bubble with a bottom-right tail.
      Position + tint signal "you" without an avatar or role label. */
   .bubble[data-role="user"] .text {
-    padding: 10px 14px;
-    background: color-mix(in oklab, var(--accent) 8%, var(--bg-inset));
-    border: 1px solid color-mix(in oklab, var(--accent) 14%, var(--border));
-    border-radius: 14px 14px 4px 14px;
+    padding: 10px 15px;
+    background: linear-gradient(180deg,
+      color-mix(in oklab, var(--accent) 11%, var(--bg-inset)),
+      color-mix(in oklab, var(--accent) 6%, var(--bg-inset)));
+    border: 1px solid color-mix(in oklab, var(--accent) 16%, var(--border));
+    border-radius: 16px 16px 5px 16px;
+    box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.05), 0 4px 14px -10px oklch(0 0 0 / 0.55);
     color: var(--fg);
     line-height: 1.6;
     align-self: flex-end;
@@ -1091,7 +1112,28 @@
     width: fit-content;
     white-space: pre-wrap;
   }
-  .bubble[data-role="assistant"] .text { max-width: 78ch; }
+  .bubble[data-role="assistant"] .text { max-width: 78ch; line-height: 1.62; }
+  /* Hover timestamps — quiet mono, invisible until the pointer says "when?" */
+  .head-time {
+    font-family: var(--font-mono, monospace);
+    font-size: 9.5px;
+    color: var(--fg-faint);
+    letter-spacing: 0.02em;
+    opacity: 0;
+    transition: opacity 140ms ease-out;
+  }
+  .bubble:hover .head-time { opacity: 0.9; }
+  .bubble[data-role="user"] .user-time {
+    align-self: flex-end;
+    margin-top: 3px;
+    font-family: var(--font-mono, monospace);
+    font-size: 9.5px;
+    color: var(--fg-faint);
+    letter-spacing: 0.02em;
+    opacity: 0;
+    transition: opacity 140ms ease-out;
+  }
+  .bubble[data-role="user"]:hover .user-time { opacity: 0.9; }
 
   /* User image thumbnails — pasted/dropped into the composer get persisted
      on the user message and render here above the text bubble. Click opens

@@ -830,16 +830,16 @@
     overflow: hidden;
     pointer-events: none;
   }
-  /* Ambient lift — a soft, hue-neutral pool of light behind the hero plus a
-     faint floor vignette. No colored top band; the surface reads as gently
-     lit rather than washed with accent, so it blends into --bg. The center
-     pool borrows a whisper of accent (~3%) only so it isn't a grey smudge. */
+  /* Ambient lift — a soft, FULLY hue-neutral pool of light behind the hero
+     plus a faint floor vignette. Deliberately no accent anywhere: even a 3%
+     accent whisper read as a visible colored blob against every texture
+     (owner call, cont.264). Neutral fg-mix only. */
   .atmos-glow {
     position: absolute;
     inset: 0;
     background:
       radial-gradient(120% 80% at 50% 34%,
-        color-mix(in oklab, var(--accent) 3%, transparent) 0%,
+        color-mix(in oklab, var(--fg) 2.5%, transparent) 0%,
         color-mix(in oklab, var(--fg) 1.5%, transparent) 34%,
         transparent 66%),
       radial-gradient(140% 60% at 50% 118%,

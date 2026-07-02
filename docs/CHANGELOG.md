@@ -2,7 +2,20 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — Settings redesign, workspace hub revamp, mini-rail, cleaner chrome
+## Unreleased — Settings redesign, workspace hub, composer + welcome revamp, live status bar
+
+### Status bar is interactive · usage popover grew up
+- **Click the 5h/7d pills** → full Plan-limits popover above the bar: every window w/ reset countdowns, an **IN USE** chip on the binding window, manual refresh, live "updated Xs ago". Pills tint amber/red as a window heats; tooltips carry reset times.
+- **Weekly Fable limit shows now** (the endpoint moved model windows into a generic list — future models appear automatically), and **extra-usage credits** ($X of $Y) finally display.
+- **Project name → Workspace hub; the Claude item → Settings → Claude** (the door to fixing "Not connected").
+
+### Chat welcome + composer, revamped
+- Welcome: session eyebrow over "What's next for *project*?", one slim facts row (branch · files · path + Switch folder/Activity), and **Jump back in** — your three freshest threads, one click to resume. Quick-start chips removed; "New to Rift?" opens into three step cards.
+- Composer is **one card**: input + a docked control deck (perm · attach · dictate · draft tools | model · ctx ring · **real send button** — filled accent circle when ready, stop square mid-turn, queued-count badge). The ↵/⇧↵ hints retired into the send tooltip.
+
+### Chat display
+- **Hover timestamps** — new messages remember when they were sent; hover a turn head or your bubble for "2:42 AM" (older chats simply show none).
+- Glassier user bubble, a hair more reading line-height, and the accent "pool of light" behind the transcript is now fully neutral — no more green wash under every texture.
 
 ### Settings — full redesign
 - **Every tab is one scrolling page** — the second navigation layer inside each tab is gone; the column is narrower and centered.

@@ -10,10 +10,8 @@
 
   let {
     queue,
-    composerFocused,
   }: {
     queue: { id: string; text: string }[];
-    composerFocused: boolean;
   } = $props();
 
   // The in-flight live-status (agents · shells · tools · elapsed · tokens) now
@@ -34,13 +32,9 @@
       </span>
     {/if}
   </div>
-{:else if composerFocused}
-  <div class="kbd-hint" aria-hidden="true">
-    <kbd>↵</kbd><span class="kh-t">send</span>
-    <span class="kh-sep">·</span>
-    <kbd>⇧↵</kbd><span class="kh-t">new line</span>
-  </div>
 {/if}
+<!-- The ↵/⇧↵ keyboard hint retired 2026-07-02 — a learned-once fact shouldn't
+     be permanent chrome; it lives in the send button's tooltip now. -->
 
 <style>
   /* One neutral capsule (same surface as the settings pill) for the lone
@@ -71,24 +65,4 @@
   .live-pill :global(svg) { color: var(--fg-faint); transition: color 140ms ease-out; }
   .live-pill:hover :global(svg) { color: var(--fg-muted); }
   .live-pill .mono { font-variant-numeric: tabular-nums; color: var(--fg-2); }
-  /* Keyboard hint — occupies the toolbar's middle slot while the composer is
-     focused (and no turn is live); keeps the idle bar empty + calm. */
-  .kbd-hint {
-    display: inline-flex; align-items: center; gap: 5px;
-    font-size: 10.5px; color: var(--fg-faint);
-    user-select: none; white-space: nowrap;
-    animation: enter 160ms ease-out;
-  }
-  .kbd-hint .kh-t { letter-spacing: 0.01em; }
-  .kbd-hint .kh-sep { color: var(--fg-subtle); opacity: 0.55; margin: 0 1px; }
-  .kbd-hint kbd {
-    display: inline-flex; align-items: center; justify-content: center;
-    min-width: 16px; height: 16px; padding: 0 4px;
-    font-family: var(--font-ui); font-size: 10px; font-weight: 600; line-height: 1;
-    color: var(--fg-muted);
-    background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
-    border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
-    border-radius: 4px;
-  }
-  @media (prefers-reduced-motion: reduce) { .kbd-hint { animation: none; } }
 </style>

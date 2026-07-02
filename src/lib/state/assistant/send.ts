@@ -211,13 +211,14 @@ export async function send(store: AssistantStore, prompt: string, targetConvoId?
   userBlocks.push({ type: "text", text: bubbleText });
   tab.messages = [
     ...tab.messages,
-    { id: crypto.randomUUID(), role: "user", blocks: userBlocks },
+    { id: crypto.randomUUID(), role: "user", blocks: userBlocks, ts: Date.now() },
   ];
   // Snapshot the permission mode this turn runs with — TurnSummary's badge
   // reads the message copy so a later mode switch can't relabel history.
   const asst: ChatMessage = {
     id: crypto.randomUUID(), role: "assistant", blocks: [],
     permissionMode: store.permissionMode,
+    ts: Date.now(),
   };
   tab.messages = [...tab.messages, asst];
   tab.streamingMsgId = asst.id;

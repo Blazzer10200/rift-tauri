@@ -11,10 +11,18 @@ export type ExtraUsage = {
   // Minor-unit exponent: monthlyLimit/usedCredits are scaled integers (8000 @ dp=2 = $80).
   decimalPlaces: number;
 };
+// Newer generic window list — model-scoped weeklies (e.g. Fable) only exist
+// here; the legacy per-model buckets above come back null now.
+export type ScopedLimit = {
+  kind: string | null; group: string | null; percent: number;
+  severity: string | null; resetsAt: string | null;
+  scope: { model: { displayName: string | null } | null } | null;
+  isActive: boolean;
+};
 export type RateLimits = {
   fiveHour: LimitWindow | null; sevenDay: LimitWindow | null;
   sevenDayOpus: LimitWindow | null; sevenDaySonnet: LimitWindow | null;
-  extraUsage: ExtraUsage | null; fetchedAt: number;
+  extraUsage: ExtraUsage | null; limits: ScopedLimit[]; fetchedAt: number;
 };
 
 // AI Health advisor — one recommendation card from the analyzer. Shape mirrors
@@ -31,6 +39,15 @@ export type AdviceCard = {
   title: string; detail: string; impact: AdviceImpact; apply: AdviceApply | null;
 };
 export type UsageAdvice = { summary: string; cards: AdviceCard[] };
+
+/** Shared warn/hot zoning for limit bars (status bar + usage panel). Percent
+ *  thresholds, overridden by the endpoint's own `severity` when it says things
+ *  are worse — it knows the plan better than our cutoffs do. */
+export function limitZone(u: number, severity: string | null = null): string {
+  if (severity === "exceeded" || severity === "critical") return "hot";
+  if (severity === "warning" || severity === "elevated") return "warn";
+  return u < 60 ? "ok" : u < 85 ? "warn" : "hot";
+}
 
 const EFFORT_VALUES = ["none", "quick", "smart", "deep", "ultra"] as const;
 const MODEL_VALUES = ["opus", "sonnet", "haiku", "fable"] as const;
@@ -70,10 +87,11 @@ class UsageStore {
   adviceError = $state<string | null>(null);
 
   /** Live plan-limit gauge — best-effort: an OAuth hiccup (no login, throttle)
-   *  only sets the error string. */
-  async refreshRateLimits(cliVersion: string | null): Promise<void> {
+   *  only sets the error string. `force` busts the backend's 60s cache (the
+   *  panel's manual refresh button). */
+  async refreshRateLimits(cliVersion: string | null, force = false): Promise<void> {
     try {
-      this.rateLimits = await invoke<RateLimits>("usage_rate_limits", { cliVersion });
+      this.rateLimits = await invoke<RateLimits>("usage_rate_limits", { cliVersion, force });
       this.rateLimitsError = null;
     } catch (e) {
       this.rateLimitsError = String(e);

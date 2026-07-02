@@ -45,6 +45,34 @@ fn default_decimal_places() -> u32 {
     2
 }
 
+/// One entry of the endpoint's newer generic `limits[]` array — the legacy
+/// model buckets (`seven_day_opus`/`seven_day_sonnet`) now come back null and
+/// model-scoped windows (e.g. Fable) only exist here.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ScopedLimit {
+    pub kind: Option<String>,
+    pub group: Option<String>,
+    #[serde(default)]
+    pub percent: f64,
+    pub severity: Option<String>,
+    #[serde(rename = "resetsAt", alias = "resets_at")]
+    pub resets_at: Option<String>,
+    pub scope: Option<LimitScope>,
+    #[serde(rename = "isActive", alias = "is_active", default)]
+    pub is_active: bool,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct LimitScope {
+    pub model: Option<ScopedModel>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct ScopedModel {
+    #[serde(rename = "displayName", alias = "display_name")]
+    pub display_name: Option<String>,
+}
+
 /// Deserializes the endpoint's snake_case body (via `alias`), serializes
 /// camelCase to the frontend. Unknown buckets in the response are ignored.
 #[derive(Clone, Serialize, Deserialize)]
@@ -59,6 +87,10 @@ pub struct RateLimits {
     pub seven_day_sonnet: Option<LimitWindow>,
     #[serde(rename = "extraUsage", alias = "extra_usage")]
     pub extra_usage: Option<ExtraUsage>,
+    /// Newer generic window list (session / weekly_all / weekly_scoped per
+    /// model). Preferred by the frontend when non-empty.
+    #[serde(default)]
+    pub limits: Vec<ScopedLimit>,
     /// Set by us, not the API — ms epoch of the fetch (drives "as of" UI).
     #[serde(rename = "fetchedAt", default)]
     pub fetched_at: i64,
@@ -102,7 +134,7 @@ pub fn spawn_background_refresh() {
         return;
     }
     tauri::async_runtime::spawn(async {
-        if let Err(e) = usage_rate_limits(None).await {
+        if let Err(e) = usage_rate_limits(None, None).await {
             // The three swallowed states (missing creds / API-key user / expired
             // token) look identical at debug level — classify so the diagnostics
             // console can distinguish "needs login" from "broken" at a glance.
@@ -182,11 +214,15 @@ fn read_oauth_token() -> Result<String, String> {
 
 /// Fetch live plan-limit utilization. `cli_version` feeds the User-Agent —
 /// without a `claude-code/<ver>` UA the endpoint throttles aggressively.
+/// `force` skips the 60s cache read (manual refresh button); the fresh result
+/// still lands in the cache for everyone else.
 #[tauri::command]
-pub async fn usage_rate_limits(cli_version: Option<String>) -> Result<RateLimits, String> {
-    if let Some((at, cached)) = CACHE.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
-        if at.elapsed() < CACHE_TTL {
-            return Ok(cached.clone());
+pub async fn usage_rate_limits(cli_version: Option<String>, force: Option<bool>) -> Result<RateLimits, String> {
+    if !force.unwrap_or(false) {
+        if let Some((at, cached)) = CACHE.lock().unwrap_or_else(|p| p.into_inner()).as_ref() {
+            if at.elapsed() < CACHE_TTL {
+                return Ok(cached.clone());
+            }
         }
     }
 
@@ -229,4 +265,67 @@ pub async fn usage_rate_limits(cli_version: Option<String>) -> Result<RateLimits
     limits.fetched_at = now_ms();
     *CACHE.lock().unwrap_or_else(|p| p.into_inner()) = Some((Instant::now(), limits.clone()));
     Ok(limits)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Trimmed copy of a real 2026-07 endpoint response: legacy model buckets
+    /// null, generic limits[] carrying the model-scoped (Fable) window, plus
+    /// unknown future buckets that must parse-tolerate.
+    const FIXTURE: &str = r#"{
+      "five_hour": {"utilization": 16, "resets_at": "2026-07-02T07:09:59+00:00", "limit_dollars": null},
+      "seven_day": {"utilization": 10, "resets_at": "2026-07-07T14:59:59+00:00"},
+      "seven_day_opus": null, "seven_day_sonnet": null,
+      "seven_day_cowork": null, "tangelo": null, "iguana_necktie": null,
+      "extra_usage": {"is_enabled": true, "monthly_limit": 8000, "used_credits": 0, "utilization": null, "currency": "USD", "decimal_places": 2, "daily": null},
+      "limits": [
+        {"kind": "session", "group": "session", "percent": 16, "severity": "normal", "resets_at": "2026-07-02T07:09:59+00:00", "scope": null, "is_active": true},
+        {"kind": "weekly_all", "group": "weekly", "percent": 10, "severity": "normal", "resets_at": "2026-07-07T14:59:59+00:00", "scope": null, "is_active": false},
+        {"kind": "weekly_scoped", "group": "weekly", "percent": 16, "severity": "normal", "resets_at": "2026-07-07T14:59:59+00:00", "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null}, "is_active": false}
+      ],
+      "spend": {"percent": 0}
+    }"#;
+
+    #[test]
+    fn parses_generic_limits_and_extra_usage() {
+        let l: RateLimits = serde_json::from_str(FIXTURE).expect("fixture parses");
+        assert!(l.seven_day_opus.is_none());
+        assert_eq!(l.limits.len(), 3);
+        assert!(l.limits[0].is_active);
+        let fable = &l.limits[2];
+        assert_eq!(fable.kind.as_deref(), Some("weekly_scoped"));
+        assert_eq!(
+            fable.scope.as_ref().and_then(|s| s.model.as_ref()).and_then(|m| m.display_name.as_deref()),
+            Some("Fable")
+        );
+        assert!((fable.percent - 16.0).abs() < f64::EPSILON);
+        let x = l.extra_usage.expect("extra_usage present");
+        assert!(x.is_enabled);
+        assert_eq!(x.monthly_limit, Some(8000.0));
+        assert_eq!(x.decimal_places, 2);
+    }
+
+    /// The frontend contract is camelCase — a serde rename regression here
+    /// silently blanks the panel, so pin the wire shape.
+    #[test]
+    fn serializes_camelcase_for_frontend() {
+        let l: RateLimits = serde_json::from_str(FIXTURE).expect("fixture parses");
+        let out = serde_json::to_string(&l).expect("serializes");
+        for key in ["\"fiveHour\"", "\"resetsAt\"", "\"isActive\"", "\"displayName\"", "\"extraUsage\"", "\"limits\""] {
+            assert!(out.contains(key), "missing {key} in serialized output");
+        }
+        assert!(!out.contains("resets_at"), "snake_case leaked to frontend");
+    }
+
+    /// A body without the newer array (older endpoint) must still parse —
+    /// `limits` defaults empty and the frontend falls back to legacy buckets.
+    #[test]
+    fn tolerates_missing_limits_array() {
+        let l: RateLimits =
+            serde_json::from_str(r#"{"five_hour": {"utilization": 5, "resets_at": null}}"#).expect("minimal body parses");
+        assert!(l.limits.is_empty());
+        assert!((l.five_hour.expect("five_hour").utilization - 5.0).abs() < f64::EPSILON);
+    }
 }

@@ -148,6 +148,17 @@
           ? (liveSecs != null ? `Thinking… ${liveSecs}s` : "Thinking…")
           : "Working…"
   );
+  // Completed-turn hover timestamp — `message.ts` stamped at send (2026-07-02+);
+  // absent on older convos, hidden while live (the head already ticks then).
+  const turnTime = $derived.by(() => {
+    const t = message.ts;
+    if (!t || streaming) return null;
+    const d = new Date(t);
+    const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    return d.toDateString() === new Date().toDateString()
+      ? time
+      : `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${time}`;
+  });
 
   // Live footer verb: a pending tool drives the real action word ("Reading X");
   // with no tool in flight (e.g. the model is thinking before any tool call) we
@@ -204,6 +215,7 @@
   <div class="sturn-head {streaming ? 'live' : ''}" class:awaiting-head={awaitingInput}>
     <span class="sh-dot"></span>
     <span class="sh-label">{headLabel}</span>
+    {#if turnTime}<span class="sh-time" use:tooltip={"When this turn ran"}>{turnTime}</span>{/if}
   </div>
 
   {#if turn.thinking && !turn.thinking.active}

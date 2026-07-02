@@ -9,7 +9,6 @@
   import { modelFamily } from "../../state/assistant/helpers";
   import { requestPrewarm, resetPrewarmDedup } from "../../state/assistant/prewarm";
   import { fuzzyScore, isFileDrag, attachImageFiles, summarizeAttach, attachTextFiles, summarizeTextAttach } from "./composer/helpers";
-  import { quickStartsFor } from "./composer/quickStarts";
   import AttachmentsRow from "./composer/AttachmentsRow.svelte";
   import QueueRail from "./composer/QueueRail.svelte";
   import LivePills from "./composer/LivePills.svelte";
@@ -21,7 +20,6 @@
   import CtxRing from "./composer/CtxRing.svelte";
   import PermMenu from "./composer/PermMenu.svelte";
   import PreviewPanel from "./composer/PreviewPanel.svelte";
-  import QuickChips from "./composer/QuickChips.svelte";
   import {
     MODEL_OPTIONS, MODE_OPTIONS,
     effortStopsFor, effortIdxFor, clampEffortIdx, permToneFor,
@@ -75,16 +73,6 @@
     tabId?: string | null;
     hero?: boolean;
   } = $props();
-
-  // Hero-mode quick-starts — stack-aware launchpad chips that sit above the
-  // input on the home surface. Reads the workspace-file walk that
-  // AssistantWelcome (always mounted alongside the hero composer) kicks off, so
-  // there's a single writer of `workspaceFiles`.
-  const quickStarts = $derived(quickStartsFor(assistant.workspaceFiles));
-  function pickChip(prompt: string) {
-    setDraft(prompt);
-    void tick().then(() => { ta?.focus(); autosize(); });
-  }
 
   // Per-pane composer: bind to THIS tab's draft/attachments/queue/streaming
   // rather than the focused-pane shims, so two panes can compose & stream
@@ -157,7 +145,6 @@
   // keyboard nav here and the rendered rows there can never disagree.
 
   // Idle placeholder — static ghost with `/` `@` keycaps (mock `.ph-ghost`).
-  let composerFocused = $state(false);
 
   function autosize() {
     if (!ta) return;
@@ -1144,10 +1131,6 @@
       />
     {/if}
 
-    {#if hero && draft.length === 0 && !streaming && attachments.length === 0}
-      <QuickChips {quickStarts} onPick={pickChip} />
-    {/if}
-
     <div class="composer" class:hero={hero} class:streaming={streaming} class:enchanting={enhancing} data-mode={mode}>
       <!-- WELL: attachments + input + inline send arrow (Claude-Code style).
            All chrome (border/glass/focus-ring/streaming edge) lives here now. -->
@@ -1174,9 +1157,7 @@
           }}
           onkeyup={(e) => { if (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End") refreshMention(); }}
           onclick={refreshMention}
-          onfocus={() => { composerFocused = true; }}
           onblur={() => {
-            composerFocused = false;
             if (!mentionState) return;
             requestAnimationFrame(() => { mentionState = null; });
           }}
@@ -1206,41 +1187,10 @@
           </span>
         {/if}
       </div>
-
-        <!-- Inline send — bare arrow riding the trailing edge of the well.
-             Same multi-mode action button (send / queue / stop), restyled. -->
-        <button
-          class="send-inline"
-          class:ready={canFire && mode !== "stop"}
-          class:stop={mode === "stop"}
-          class:queue={mode === "queue"}
-          type="button"
-          onclick={onBtnClick}
-          disabled={!canFire}
-          aria-label={mode === 'stop' ? 'Stop current turn' : mode === 'queue' ? 'Queue message' : 'Send message'}
-          use:tooltip={mode === "stop"
-            ? { text: "Halt the current turn", kbd: "Esc" }
-            : mode === "queue"
-            ? { text: "Queue for the next turn", kbd: "Enter" }
-            : { text: "Send", kbd: "Enter" }}
-        >
-          <span class="icon-stack">
-            <span class="icon-slot" class:active={mode === "send" || mode === "queue"}><Send size={14} /></span>
-            <span class="icon-slot" class:active={mode === "stop"}><Square size={12} fill="currentColor" /></span>
-          </span>
-          {#key fireKey}
-            {#if fireKey > 0}
-              <span class="send-ripple" aria-hidden="true"></span>
-              <span class="send-ripple send-ripple-2" aria-hidden="true"></span>
-            {/if}
-          {/key}
-        </button>
-      </div>
       </div>
 
-      <!-- FLAT control bar below the well (Claude-Code style): perm + tool
-           icons on the left, live pills in the middle, model pill on the right.
-           No border, no internal ctx-gauge hairline. -->
+      <!-- Control deck — docked inside the well's bottom edge: perm + tools
+           left, queue pill middle, model pill + ctx ring + send right. -->
       <div class="composer-bar">
         <div class="cbar-l">
           <button
@@ -1371,7 +1321,7 @@
           {/if}
         </div>
 
-        <LivePills {queue} {composerFocused} />
+        <LivePills {queue} />
 
         <div class="cbar-r">
           {#if localLlm.enabled}
@@ -1444,7 +1394,40 @@
               onClick={() => (assistant.ui.usageOpen = !assistant.ui.usageOpen)}
             />
           {/if}
+
+          <!-- Send — the deck's anchor. Same multi-mode action (send / queue /
+               stop) with a queued-count badge; accent-filled when ready. -->
+          <button
+            class="send-btn"
+            class:ready={canFire && mode !== "stop"}
+            class:stop={mode === "stop"}
+            class:queue={mode === "queue"}
+            type="button"
+            onclick={onBtnClick}
+            disabled={!canFire}
+            aria-label={mode === 'stop' ? 'Stop current turn' : mode === 'queue' ? 'Queue message' : 'Send message'}
+            use:tooltip={mode === "stop"
+              ? { text: "Halt the current turn", kbd: "Esc" }
+              : mode === "queue"
+              ? { text: "Queue for the next turn — ⇧↵ for a new line", kbd: "Enter" }
+              : { text: "Send — ⇧↵ for a new line", kbd: "Enter" }}
+          >
+            <span class="icon-stack">
+              <span class="icon-slot" class:active={mode === "send" || mode === "queue"}><Send size={14} /></span>
+              <span class="icon-slot" class:active={mode === "stop"}><Square size={12} fill="currentColor" /></span>
+            </span>
+            {#if queue.length > 0}
+              <span class="send-count" aria-hidden="true">{queue.length}</span>
+            {/if}
+            {#key fireKey}
+              {#if fireKey > 0}
+                <span class="send-ripple" aria-hidden="true"></span>
+                <span class="send-ripple send-ripple-2" aria-hidden="true"></span>
+              {/if}
+            {/key}
+          </button>
         </div>
+      </div>
       </div>
     </div>
   </div>
@@ -1553,9 +1536,9 @@
   }
 
   /* Hero mode — home surface. The composer is the centerpiece: a larger,
-     more rounded card with stack-aware quick-start chips floating above it.
-     Chip styles moved to composer/QuickChips.svelte. */
+     more rounded card. */
   .composer.hero .composer-box { border-radius: 16px; padding: 3px; }
+  .composer.hero .composer-bar { padding: 6px 6px 5px 7px; }
   .composer.hero textarea { font-size: 14.5px; line-height: 1.55; padding: 11px 12px 11px 14px; min-height: 30px; letter-spacing: -0.003em; }
   /* Keep the hero placeholder in lockstep with the hero textarea so the ghost
      prompt and the text you type read at the same size. */
@@ -1658,14 +1641,18 @@
     border: 0;
   }
 
-  /* ── Flat control bar (Claude-Code style) ─────────────────────────────
-     Sits below the well, no border. Left cluster = perm + tool icons;
-     LivePills float in the middle; right cluster = model pill. */
+  /* ── Control deck — docked INSIDE the well, under the input. A faint
+     hairline separates it from the textarea; everything a turn needs
+     (perm · attach · dictate · draft tools | queue | model · ctx · send)
+     lives on the one card, so focus/streaming/drag states read on a single
+     object instead of scattered chrome. */
   .composer-bar {
     position: relative;
     z-index: 1;
     display: flex; align-items: center; gap: 3px;
-    padding: 7px 2px 0;
+    margin-top: 3px;
+    padding: 5px 5px 4px 6px;
+    border-top: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
   }
   .cbar-l { display: flex; align-items: center; gap: 2px; min-width: 0; }
   .cbar-r { margin-left: auto; display: flex; align-items: center; gap: 5px; position: relative; }
@@ -1810,42 +1797,62 @@
      the active model and open the Activity panel on click. */
   /* Live-pills + lp-dot styles moved to composer/LivePills.svelte (C4). */
 
-  /* Send — primary CTA, accent surface w/ glow. Bigger than v2 (32px), more
-     pronounced shadow, smoother mode-swap (send → stop → queue). */
-  /* Inline-blend send (spec `.send-inline`): a bare arrow that lives in the
-     well — subtle grey when idle, accent when ready, soft-bg on hover. No
-     filled box / glow. */
-  .send-inline {
+  /* Send — the deck's anchor: a filled circular CTA. Dim when empty, accent-
+     tinted when ready, danger square while streaming; queued-count badge rides
+     the top-right corner. */
+  .send-btn {
     position: relative;
-    width: 34px; height: 34px;
-    margin: 0 4px 0 2px;
+    width: 30px; height: 30px;
+    margin-left: 3px;
     display: flex; align-items: center; justify-content: center;
     background: transparent;
     color: var(--fg-subtle);
-    border: 1px solid transparent; border-radius: 50%;
+    border: 1px solid transparent; border-radius: 999px;
     cursor: pointer;
     flex-shrink: 0;
-    overflow: hidden;
-    transition: color 140ms ease-out, background 140ms ease-out, transform 140ms ease-out;
+    transition: color 160ms ease-out, background 160ms ease-out,
+                border-color 160ms ease-out, box-shadow 160ms ease-out,
+                transform 120ms ease-out;
   }
-  .composer-box.multiline .send-inline { align-self: flex-end; margin-bottom: 5px; }
-  .send-inline:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg-2); }
-  .send-inline:active:not(:disabled) { transform: scale(0.88); }
-  .send-inline:disabled { cursor: default; color: var(--fg-subtle); }
-  .send-inline:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
-  /* ready (send / queue) → bare accent arrow; soft-bg only on hover. */
-  .send-inline.ready { color: var(--accent); }
-  .send-inline.ready:hover:not(:disabled) { background: var(--accent-soft); color: var(--accent); }
-  /* stop → danger tint while a run is in flight. */
-  .send-inline.stop { background: var(--danger-soft); color: var(--danger); }
-  .send-inline.stop:hover { background: var(--danger-soft); filter: brightness(1.08); }
+  .send-btn:active:not(:disabled) { transform: scale(0.9); }
+  .send-btn:disabled { cursor: default; opacity: 0.55; }
+  .send-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
+  .send-btn.ready {
+    background: color-mix(in oklch, var(--model-color) 20%, transparent);
+    border-color: color-mix(in oklch, var(--model-color) 45%, transparent);
+    color: var(--model-color);
+    box-shadow: 0 0 14px -5px color-mix(in oklch, var(--model-color) 50%, transparent);
+  }
+  .send-btn.ready:hover:not(:disabled) {
+    background: color-mix(in oklch, var(--model-color) 30%, transparent);
+    box-shadow: 0 0 18px -4px color-mix(in oklch, var(--model-color) 65%, transparent);
+    transform: translateY(-1px);
+  }
+  /* stop → danger while a run is in flight. */
+  .send-btn.stop {
+    background: var(--danger-soft);
+    border-color: color-mix(in oklch, var(--danger) 40%, transparent);
+    color: var(--danger);
+  }
+  .send-btn.stop:hover { filter: brightness(1.1); }
+  .send-count {
+    position: absolute; top: -4px; right: -4px;
+    min-width: 15px; height: 15px; padding: 0 4px;
+    display: grid; place-items: center;
+    border-radius: 999px;
+    background: var(--model-color);
+    color: oklch(0.16 0.01 250);
+    font-size: 9.5px; font-weight: 700; line-height: 1;
+    font-variant-numeric: tabular-nums;
+    box-shadow: 0 0 0 2px var(--bg-inset);
+  }
   /* Launch ripple — two concentric rings expand outward on every fire().
      Mounted by {#key fireKey}; self-removed when the animation ends via
      the unmount on the next key flip. */
   .send-ripple {
     position: absolute;
     inset: -2px;
-    border-radius: 14px;
+    border-radius: 999px;
     border: 1.5px solid color-mix(in oklch, var(--model-color) 70%, transparent);
     opacity: 0.85;
     pointer-events: none;

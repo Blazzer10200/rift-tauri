@@ -1,7 +1,7 @@
 <script lang="ts">
   import {
     Sparkles, FolderOpen, HardDrive,
-    X, Folder, FolderGit2, GitBranch, ChevronRight, ChevronDown,
+    X, Folder, GitBranch, ChevronRight, ChevronDown,
     Compass, MessageSquare, Shield, Zap, BarChart3,
   } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
@@ -9,7 +9,7 @@
   import RiftLogo from "$lib/components/shell/RiftLogo.svelte";
   import ClaudeConnect from "$lib/components/onboarding/ClaudeConnect.svelte";
   import { leafName, shortPath } from "$lib/components/shell/tabsbar/helpers";
-  import { greeting } from "$lib/components/workspace/welcomeShared";
+  import { greeting, fmtAgo } from "$lib/components/workspace/welcomeShared";
 
   import { tooltip } from "$lib/actions/tooltip";
   // Optional tabId — when set (split-pane), suggestion clicks write into THIS
@@ -91,6 +91,20 @@
   // Warm-home "New to Rift?" collapsible orientation footer (spec NewToRift).
   let newToRiftOpen = $state(false);
 
+  // "Jump back in" — the 3 most recently active conversations for THIS pane's
+  // root (same root-key normalization the sidebar scope filter uses).
+  const rootKey = (r: string | null | undefined) =>
+    (r ?? "").replace(/[/\\]+$/, "").replace(/[/\\]/g, "/").toLowerCase();
+  const resumables = $derived.by(() => {
+    if (!paneRoot) return [];
+    const key = rootKey(paneRoot);
+    return assistant.conversations
+      .filter((c) => rootKey(c.workspaceRoot) === key)
+      .slice()
+      .sort((a, b) => (b.lastActivityAt ?? b.updatedAt) - (a.lastActivityAt ?? a.updatedAt))
+      .slice(0, 3);
+  });
+
 </script>
 
 <div class="welcome">
@@ -107,30 +121,50 @@
     </div>
   {:else if hasRoot}
     <div class="wel-inner home-launchpad">
-      <!-- Greeting — one quiet line: time-of-day + the project question. -->
+      <!-- Greeting — session eyebrow over the project question. -->
       <div class="greet">
-        <p class="greet-line">
-          <span class="greet-hello">{greet}.</span>
-          {#if hasRoot}
-            <span class="greet-ctx"> What's next for <b>{ctxName}</b>?</span>
-          {:else}
-            <span class="greet-ctx"> What's on your mind?</span>
-          {/if}
-        </p>
-        <div class="greet-row">
-          <span class="greet-cue">
-            <FolderGit2 size={12} />
-            {#if branch}<span class="branch-pill"><GitBranch size={11} />{branch}</span>{/if}
-            {#if fileCount > 0}<b>{fileCount.toLocaleString()}</b> files{/if}
-          </span>
+        <span class="greet-eyebrow"><span class="ge-dot"></span>{greet}</span>
+        <h1 class="greet-title">What's next for <b>{ctxName}</b>?</h1>
+      </div>
+
+      <!-- Context row — live signals + actions. The title above owns the
+           project name; repeating it here (or in a hero-style card) would
+           triple-state what the sidebar switcher + status bar already show. -->
+      <div class="ctx-row">
+        <span class="ctx-facts">
+          {#if branch}<span class="branch-pill"><GitBranch size={11} />{branch}</span>{/if}
+          {#if fileCount > 0}<span class="ctx-files"><b>{fileCount.toLocaleString()}</b> files</span>{/if}
+          <span class="ctx-path" use:tooltip={paneRoot ?? ""}>{shortPath(paneRoot!)}</span>
+        </span>
+        <span class="ctx-actions">
           <button class="greet-switch" type="button" onclick={() => void assistant.pickTabFolder(tabId)}>
             <Folder size={13} /> Switch folder
           </button>
           <button class="greet-switch" type="button" onclick={() => workspace.setActive("home")} use:tooltip={"Your activity — usage stats on the Workspace page"}>
             <BarChart3 size={13} /> Activity
           </button>
-        </div>
+        </span>
       </div>
+
+      <!-- Jump back in — the project's freshest threads, one click to resume. -->
+      {#if resumables.length > 0}
+        <div class="resume">
+          <div class="wo-label">Jump back in</div>
+          <div class="resume-row">
+            {#each resumables as c (c.id)}
+              {@const title = c.title ?? "Untitled chat"}
+              <button class="resume-card" type="button" onclick={() => void assistant.openTab(c.id)} use:tooltip={title}>
+                <span class="rc-ic"><MessageSquare size={13} /></span>
+                <span class="rc-body">
+                  <span class="rc-t">{title}</span>
+                  <span class="rc-m">{fmtAgo(c.lastActivityAt ?? c.updatedAt)}</span>
+                </span>
+                <ChevronRight size={14} class="rc-go" />
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/if}
 
       <!-- New to Rift? — quiet, collapsible orientation footer. -->
       <div class="newrift" class:open={newToRiftOpen}>
@@ -140,17 +174,15 @@
         </button>
         {#if newToRiftOpen}
           <div class="newrift-body">
-            <ol class="primer compact">
+            <div class="nr-grid">
               {#each RIFT_STEPS as step, i (step.title)}
-                <li class="primer-step">
-                  <span class="ps-num">{i + 1}</span>
-                  <span class="ps-body">
-                    <span class="ps-title"><span class="ps-ic"><step.icon size={13} /></span>{step.title}</span>
-                    <span class="ps-text">{step.body}</span>
-                  </span>
-                </li>
+                <div class="nr-card">
+                  <span class="nr-head"><span class="nr-num">{i + 1}</span><step.icon size={14} /></span>
+                  <span class="nr-ct">{step.title}</span>
+                  <span class="nr-cx">{step.body}</span>
+                </div>
               {/each}
-            </ol>
+            </div>
           </div>
         {/if}
       </div>
@@ -303,20 +335,30 @@
     50%      { transform: scale(1.04); }
   }
 
-  /* ── Warm launchpad — greeting · quick-chips · new-to-rift ─────────────── */
+  /* ── Warm launchpad — greeting · project strip · resume · new-to-rift ──── */
   /* spec-margined children, so the .wel-inner column gap is dropped here. */
   .wel-inner.home-launchpad { gap: 0; max-width: 680px; text-align: left; }
-  .greet { margin-bottom: 0; }
-  .greet-line { font-family: "Lexend", var(--font-ui); font-size: 23px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.38; margin: 0; text-wrap: pretty; }
-  .greet-hello { color: var(--fg); }
-  .greet-ctx { color: var(--fg-subtle); font-weight: 400; }
-  .greet-ctx b { color: var(--fg-2); font-weight: 600; }
-  .greet-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 9px; }
-  .greet-cue { display: flex; width: fit-content; align-items: center; gap: 6px; padding: 4px 10px 4px 8px;
-    border-radius: 999px; background: color-mix(in oklab, var(--fg) 4%, transparent); border: 1px solid var(--border);
-    font-size: 12px; color: var(--fg-muted); letter-spacing: 0.005em; }
-  .greet-cue :global(svg) { color: var(--fg-faint); }
-  .greet-cue b { color: var(--fg-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .wel-inner.home-launchpad > :nth-child(4) { animation-delay: 200ms; }
+  .greet { display: flex; flex-direction: column; gap: 8px; }
+  .greet-eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 10.5px; font-weight: 700;
+    letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg-subtle); }
+  .ge-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+    box-shadow: 0 0 10px color-mix(in oklab, var(--accent) 70%, transparent); }
+  @media (prefers-reduced-motion: no-preference) {
+    .ge-dot { animation: ge-breathe 3.4s ease-in-out infinite; }
+  }
+  @keyframes ge-breathe { 50% { opacity: 0.45; } }
+  .greet-title { font-family: "Lexend", var(--font-ui); font-size: 27px; font-weight: 600; letter-spacing: -0.025em;
+    line-height: 1.3; margin: 0; color: var(--fg-subtle); text-wrap: pretty; }
+  .greet-title b { color: var(--fg); font-weight: 650; }
+
+  /* context row — slim facts (branch · files · path) left, actions right */
+  .ctx-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 13px; }
+  .ctx-facts { display: inline-flex; align-items: center; gap: 10px; min-width: 0; font-size: 12px; color: var(--fg-muted); }
+  .ctx-files b { color: var(--fg-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .ctx-path { font-family: var(--font-mono, monospace); font-size: 10.5px; color: var(--fg-faint);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+  .ctx-actions { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
   /* .branch-pill → app.css (shared w/ WorkspacePage). */
   .greet-switch { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px; border-radius: 999px;
     border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 3%, transparent); color: var(--fg-muted);
@@ -325,18 +367,41 @@
   .greet-switch:hover { background: var(--surface-hover); color: var(--fg-2); border-color: var(--border-strong); }
   .greet-switch :global(svg) { color: var(--fg-faint); }
 
+  /* jump back in — freshest threads for this project */
+  .resume { display: flex; flex-direction: column; gap: 10px; margin-top: 22px; }
+  .resume-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 9px; }
+  .resume-card { display: flex; align-items: center; gap: 10px; padding: 10px 11px; border-radius: 12px;
+    border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 2.5%, transparent);
+    color: var(--fg); font: inherit; text-align: left; cursor: pointer; min-width: 0;
+    transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast) var(--ease-page); }
+  .resume-card:hover { background: var(--surface-hover); border-color: var(--border-strong); transform: translateY(-1px); }
+  .rc-ic { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: 8px;
+    background: var(--bg-elev-2); border: 1px solid var(--border); color: var(--fg-muted); }
+  .resume-card:hover .rc-ic { color: var(--accent); background: var(--accent-soft); border-color: var(--ghost-border); }
+  .rc-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .rc-t { font-size: 12.5px; font-weight: 600; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rc-m { font-size: 10.5px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+  :global(.resume-card .rc-go) { flex: none; color: var(--accent); opacity: 0.35; transition: opacity var(--dur-fast); }
+  .resume-card:hover :global(.rc-go) { opacity: 1; }
+
   /* new to rift? — collapsible orientation footer */
-  .newrift { margin-top: 22px; border-top: 1px solid var(--border); padding-top: 14px; }
+  .newrift { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 14px; }
   .newrift-toggle { display: flex; align-items: center; gap: 8px; width: 100%; font: inherit; font-size: 12.5px; font-weight: 500;
     color: var(--fg-muted); padding: 3px 2px; cursor: pointer; background: none; border: 0; transition: color var(--dur-fast); }
   .newrift-toggle:hover { color: var(--fg-2); }
   .newrift-toggle :global(.nr-chev) { margin-left: auto; transition: transform var(--dur-fast); }
   .newrift.open :global(.nr-chev) { transform: rotate(180deg); }
   .newrift-toggle > :global(svg:first-child) { color: var(--accent); }
-  .newrift-body { padding-top: 8px; animation: gcReveal 0.3s var(--ease-page); }
-  .primer.compact .primer-step { padding: 8px 9px; gap: 11px; }
-  .primer.compact .ps-num { width: 21px; height: 21px; font-size: 11px; }
-  .primer.compact .ps-text { font-size: 12px; }
+  .newrift-body { padding-top: 12px; animation: gcReveal 0.3s var(--ease-page); }
+  .nr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 9px; }
+  .nr-card { display: flex; flex-direction: column; gap: 6px; padding: 12px 13px; border-radius: 12px;
+    border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 2.5%, transparent); min-width: 0; }
+  .nr-head { display: flex; align-items: center; gap: 8px; color: var(--fg-muted); }
+  .nr-num { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 999px;
+    background: var(--accent-soft); border: 1px solid var(--ghost-border); color: var(--accent);
+    font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .nr-ct { font-size: 12.5px; font-weight: 600; color: var(--fg); }
+  .nr-cx { font-size: 11.5px; line-height: 1.5; color: var(--fg-subtle); text-wrap: pretty; }
   @keyframes gcReveal { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
 
   /* ── Cold welcome (no folder) — branded hero · viewfinder · primer ─────── */
