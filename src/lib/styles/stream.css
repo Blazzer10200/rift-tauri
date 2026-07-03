@@ -34,20 +34,6 @@
 .snarr { color: var(--fg-2); margin: 13px 0; animation: blockIn var(--dur-base) var(--ease-page) both; }
 .snarr :global(.md-p), .snarr :global(.md-li) { color: var(--fg-2); }
 
-/* Streaming caret (CC-UI ref §2): a thin bar at the tail of the block currently
-   receiving tokens — the one universal "still streaming" signal. step-end ~1.05s
-   blink (a caret snaps on/off, it doesn't fade), scoped to the active block only.
-   Inline so it sits right after the last revealed word. Reduced-motion → solid. */
-.stream-caret {
-  display: inline-block; width: 2px; height: 1.05em;
-  margin-left: 1px; vertical-align: text-bottom;
-  background: var(--status-busy);
-  border-radius: 1px;
-  animation: stream-caret-blink 1.05s step-end infinite;
-}
-@keyframes stream-caret-blink { 0%, 50% { opacity: 1; } 50.01%, 100% { opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .stream-caret { animation: none; opacity: 1; } }
-
 /* demoted connective beat (balanced narration) — a between-tools line ("now the
    release build:", "exe still locked, kill harder:") rendered as quiet inline
    tissue that hugs the work rows instead of a full prose block. Muted, smaller,
@@ -82,12 +68,22 @@
 .sthink-chev.open { transform: rotate(180deg); }
 .sthink-text { margin: 8px 0 0; max-width: 64ch; font-size: 12.5px; line-height: 1.55; color: var(--fg-faint); font-style: italic; white-space: pre-wrap; }
 
-/* live footer status line */
+/* live footer status line — verb breathes on the left, elapsed/tokens sit as a
+   quiet mono cluster at the right edge so the numbers stop crowding the word.
+   {#key} remounts .sf-verb per word swap → verbIn gives each new word a soft
+   rise instead of a hard cut. */
 .sfooter { display: flex; align-items: center; gap: 7px; margin: 15px 0 2px; font-size: 12.5px;
   color: var(--fg-faint); font-variant-numeric: tabular-nums; animation: blockIn var(--dur-base) var(--ease-page) both; }
 .sfooter .sf-verb { color: var(--fg-muted); }
+.sfooter .sf-verb-wrap { display: inline-flex; animation: verbIn 320ms var(--ease-page) both; }
+@keyframes verbIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.sfooter .sf-fill { flex: 1; min-width: 16px; }
+.sfooter .sf-cluster { display: inline-flex; align-items: baseline; gap: 7px; flex: none;
+  font-family: var(--font-mono, monospace); font-size: 10.5px; letter-spacing: 0.02em;
+  color: var(--fg-faint); opacity: 0.85; }
 .sfooter .sf-meta { color: var(--fg-subtle); }
 .sfooter .sf-pip { opacity: 0.5; }
+@media (prefers-reduced-motion: reduce) { .sfooter .sf-verb-wrap { animation: none; } }
 
 /* Stall watchdog — a live turn with no token back past the threshold. The wait
    is API-side (prefill/queue), so kill the shimmer (it implies local progress)

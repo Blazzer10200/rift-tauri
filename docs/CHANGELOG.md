@@ -2,6 +2,12 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## Unreleased — stream polish: pinned plan, calmer live line
+
+- **The plan never scrolls away anymore** — a pinned, glassy Plan HUD floats at the top of the conversation while a plan is active: current task, slim progress bar, done/total count. Click it to expand the full checklist; when everything completes it flashes green for a moment and retires itself. The inline plan card in the transcript stays as the historical record.
+- **The blinking green streaming caret is gone** — the flashing block at the tail of streaming text read as visual noise, not signal. The pulsing head dot + shimmer already say "live".
+- **The live status line grew up** — elapsed time reads `3m 56s` instead of `236s` (the ticking "Thinking…" header too), the seconds/tokens meta moved to a quiet right-aligned mono cluster instead of crowding the verb, each verb swap eases in instead of hard-cutting, and the rotating words were curated to a calmer set (Tracing, Distilling, Untangling… — Sussing and Noodling retired).
+
 ## v0.84.1 — Follow-up fixes from self-verification
 
 - **Warm sessions no longer respawn spuriously** — a v0.84.0 stdout line-cap change accidentally capped the *whole* stream instead of a single line, so a long session that streamed more than ~8 MB total would falsely look like a dead process and cold-restart. Reverted; the reader is unbounded again (it reads our own CLI, not an untrusted socket).

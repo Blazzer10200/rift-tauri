@@ -159,7 +159,7 @@
       : awaitingInput
         ? "Waiting for you"
         : thinkingNow
-          ? (liveSecs != null ? `Thinking… ${liveSecs}s` : "Thinking…")
+          ? (liveSecs != null ? `Thinking… ${fmtDur(liveSecs)}` : "Thinking…")
           : "Working…"
   );
   // Completed-turn hover timestamp — `message.ts` stamped at send (2026-07-02+);
@@ -179,9 +179,8 @@
   // cycle a whimsical present-participle every ~2.4s so the turn reads as alive
   // instead of frozen. Mirrors app/stream.jsx StreamFooter (the DS reference).
   const WHIM_WORDS = [
-    "Thinking", "Sussing", "Spelunking", "Pondering", "Brewing",
-    "Reckoning", "Mulling", "Cogitating", "Hatching", "Conjuring",
-    "Noodling", "Untangling",
+    "Thinking", "Pondering", "Tracing", "Weighing", "Mapping",
+    "Sketching", "Distilling", "Untangling", "Composing", "Sifting",
   ];
   let whimTick = $state(0);
   $effect(() => {
@@ -244,11 +243,8 @@
       {:else if sm === "muted"}
         <div class="snarr-beat">{g.text.trim()}</div>
       {:else}
-        <!-- Trailing caret on the actively-streaming final text block only (CC-UI
-             ref §2): a thin bar, step-end ~1s blink, scoped to the one block
-             receiving tokens. Every settled block has none. -->
         <div class="snarr">
-          <Markdown text={g.text} {streaming} />{#if streaming && gi === groups.length - 1}<span class="stream-caret" aria-hidden="true"></span>{/if}
+          <Markdown text={g.text} {streaming} />
         </div>
       {/if}
     {:else}
@@ -289,23 +285,25 @@
 
   {#if streaming}
     <div class="sfooter" class:stalled={stallLevel > 0} class:awaiting={awaitingInput}>
-      {#key footerVerb}<span class="sf-verb">{footerVerb}</span>{/key}
+      {#key footerVerb}<span class="sf-verb-wrap"><span class="sf-verb">{footerVerb}</span></span>{/key}
       {#if awaitingInput}
         <!-- Parked on the user: no climbing clock (it's human time, not the
              model's), no token meter. Just the calm verb + a nudge. -->
         <span class="sf-meta sf-await-hint">— choose an option above to continue</span>
-      {:else}
+      {:else if liveSecs != null || liveTokens != null}
         <!-- The command/file caption is intentionally NOT repeated here — it
-             already shows in the active work row above (was a duplicate). -->
-
-        {#if liveSecs != null}
-          <span class="sf-pip">·</span>
-          <span class="sf-meta"><AnimatedCount value={liveSecs} durationMs={300} />s</span>
-        {/if}
-        {#if liveTokens != null}
-          <span class="sf-pip">·</span>
-          <span class="sf-meta"><AnimatedCount value={liveTokens} format={fmtTokens} /> tokens</span>
-        {/if}
+             already shows in the active work row above (was a duplicate).
+             Meta reads as a quiet right-aligned mono cluster, not inline pips. -->
+        <span class="sf-fill" aria-hidden="true"></span>
+        <span class="sf-cluster">
+          {#if liveSecs != null}
+            <span class="sf-meta"><AnimatedCount value={liveSecs} format={fmtDur} durationMs={300} /></span>
+          {/if}
+          {#if liveSecs != null && liveTokens != null}<span class="sf-pip">·</span>{/if}
+          {#if liveTokens != null}
+            <span class="sf-meta"><AnimatedCount value={liveTokens} format={fmtTokens} /> tokens</span>
+          {/if}
+        </span>
       {/if}
     </div>
     {#if stallLevel >= 3}

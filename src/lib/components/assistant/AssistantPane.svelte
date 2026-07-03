@@ -5,6 +5,7 @@
   import { workspace } from "../../state/workspace.svelte";
   import MessageBubble from "./MessageBubble.svelte";
   import StreamTurn from "./stream/StreamTurn.svelte";
+  import PlanHud from "./stream/PlanHud.svelte";
   import { uiPrefs } from "$lib/state/ui-prefs.svelte";
   import AssistantWelcome from "./AssistantWelcome.svelte";
   import Composer from "./Composer.svelte";
@@ -504,6 +505,9 @@
             {/each}
           </div>
         </div>
+        <!-- Pinned plan HUD — floats over the stream's top edge so the live
+             plan stays glanceable while the timeline scrolls past it. -->
+        <PlanHud {tab} {streaming} />
       {/if}
 
       {#if showError || showNotice}
