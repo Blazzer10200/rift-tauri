@@ -193,6 +193,11 @@
     animation: none; -webkit-text-fill-color: currentColor; color: var(--fg-muted); }
   .acount.live .acount-v { animation: none; }
   .splan-ring { animation: none; }
+  /* Entrance slides + pulse dots — everything blockIn/workOpen/streamLivePulse
+     drives. animation:none on a `both`-fill entrance lands at natural styles. */
+  .sturn-head, .snarr, .snarr-beat, .sfooter, .sstall-note,
+  .wline-list, .wline-active, .wbrow, .splan, .sweb, .sresult { animation: none; }
+  .sturn-head.live .sh-dot, .wline-active .wa-dot, .wb-dot.live { animation: none; }
 }
 
 /* turn footer — inline, boxless; label varies by what the turn actually did */

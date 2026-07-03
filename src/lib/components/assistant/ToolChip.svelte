@@ -171,7 +171,10 @@
   function shortDuration(ms: number): string {
     if (ms < 1000) return "";
     const s = ms / 1000;
-    return s < 10 ? `${s.toFixed(1)}s` : `${Math.round(s)}s`;
+    if (s < 10) return `${s.toFixed(1)}s`;
+    if (s < 60) return `${Math.round(s)}s`;
+    const m = Math.floor(s / 60), rem = Math.round(s % 60);
+    return rem ? `${m}m ${rem}s` : `${m}m`;
   }
   const durationLabel = $derived.by<string | null>(() => {
     if (tool.status !== "done") return null;

@@ -1,8 +1,9 @@
 <script lang="ts">
   import { Brain, ChevronDown } from "lucide-svelte";
+  import { fmtDur } from "./streamModel";
   let { active = false, durSecs = 0, text = "" }: { active?: boolean; durSecs?: number; text?: string } = $props();
   let open = $state(false);
-  const label = $derived(active ? "Thinking…" : durSecs >= 1 ? `Thought for ${Math.round(durSecs)}s` : "Thought");
+  const label = $derived(active ? "Thinking…" : durSecs >= 1 ? `Thought for ${fmtDur(durSecs)}` : "Thought");
 </script>
 
 <div class="sthink">
