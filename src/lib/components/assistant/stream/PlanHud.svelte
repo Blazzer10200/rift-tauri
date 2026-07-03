@@ -23,13 +23,34 @@
 
   let open = $state(false);
 
-  // Completion linger — only after the HUD was live-visible this session, so
+  // Completion linger — only after the HUD was live-visible for THIS tab, so
   // reopening an old convo with a finished plan doesn't flash a stale 4/4.
   let sawLive = $state(false);
   let linger = $state(false);
   let lingerTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Per-tab reset — the pane reuses ONE HUD instance across tab switches (`tab`
+  // swaps as a prop; deliberately NOT a {#key} remount at the mount site,
+  // because tearing the subtree down while .phud-bar held focus dropped
+  // keyboard focus to <body> on Ctrl+Tab). Without this, tab A's sawLive let
+  // tab B's long-finished plan flash the stale green linger, and an expanded
+  // checklist carried over. Declared BEFORE the linger effect — effects run in
+  // declaration order, so the reset settles before linger sees the new tasks.
+  let seenTab: TabState | null | undefined;
   $effect(() => {
-    if (total > 0 && !allDone) {
+    if (tab === seenTab) return;
+    seenTab = tab;
+    sawLive = false;
+    linger = false;
+    open = false;
+    if (lingerTimer) { clearTimeout(lingerTimer); lingerTimer = null; }
+  });
+
+  $effect(() => {
+    // sawLive requires a LIVE stream frame, not just unfinished tasks —
+    // tab.tasks persists to disk, so a reopened convo has total>0 without
+    // ever having been live in this view.
+    if (streaming && total > 0 && !allDone) {
       sawLive = true;
       linger = false;
       if (lingerTimer) { clearTimeout(lingerTimer); lingerTimer = null; }
@@ -40,12 +61,31 @@
   });
   $effect(() => () => { if (lingerTimer) clearTimeout(lingerTimer); });
 
-  const visible = $derived(total > 0 && (!allDone || linger));
+  // Visible only while the plan is actually LIVE (mid-stream) or in its brief
+  // completion linger. tab.tasks is never reset on the error/stop path, so a
+  // tasks-only gate wedged a live-looking bar at frozen progress forever after
+  // a failed turn — streaming is the only honest liveness signal. The
+  // transcript's inline plan card + error banner keep the record between
+  // turns; the next turn's task frames bring the HUD straight back.
+  const visible = $derived((streaming && total > 0 && !allDone) || linger);
   $effect(() => { if (!visible) open = false; });
+
+  // Focus rescue — the HUD hides on events the user didn't initiate (linger
+  // timeout, stream end); if the expand button held focus, the {#if} teardown
+  // would silently drop focus to <body>, restarting keyboard Tab order at the
+  // top of the document. Pre-effect runs BEFORE the DOM update, while the node
+  // is still attached — hand focus to this pane's composer textarea instead.
+  let hudEl = $state<HTMLElement | null>(null);
+  $effect.pre(() => {
+    if (visible) return;
+    const el = hudEl;
+    if (!el || !el.contains(document.activeElement)) return;
+    el.closest(".pane-shell")?.querySelector<HTMLElement>("textarea")?.focus();
+  });
 </script>
 
 {#if visible}
-  <div class="phud" class:complete={allDone} class:open>
+  <div class="phud" class:complete={allDone} class:open bind:this={hudEl}>
     <button
       class="phud-bar"
       type="button"
