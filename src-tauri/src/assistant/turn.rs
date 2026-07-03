@@ -1379,6 +1379,17 @@ async fn resolve_spawn(
     // key differs from the warm child's must drain + cold-respawn (with
     // `--resume`). `addendum` is a `&'static str` (one of three constants), so
     // its pointer is a stable, cheap fingerprint of the system-prompt variant.
+    // cred_fp/local_llm_fp: fingerprint (not the raw value) of what's actually
+    // baked into the child's env at spawn, so a key rotation or endpoint change
+    // forces a respawn even though the bools above are unchanged.
+    let cred_fp = api_key.as_deref().map(warm_pool::fingerprint).unwrap_or(0);
+    let local_llm_fp = if cfg.local_llm_enabled {
+        let base = cfg.local_llm_base_url.as_deref().unwrap_or("");
+        let local_key = crate::secrets::get(crate::secrets::LOCAL_LLM_API_KEY).unwrap_or_default();
+        warm_pool::fingerprint(&format!("{base}\u{0}{local_key}"))
+    } else {
+        0
+    };
     let key = warm_pool::SpawnKey {
         model: model.clone(),
         root: roots.first().map(|p| p.to_string_lossy().into_owned()),
@@ -1386,7 +1397,9 @@ async fn resolve_spawn(
         prompting_mode,
         use_full_config,
         use_api_key,
+        cred_fp,
         local_llm_enabled: cfg.local_llm_enabled,
+        local_llm_fp,
         thinking_on,
         effort_level: effort_level.to_string(),
         trust_level: trust_level.clone(),
@@ -1623,8 +1636,16 @@ async fn cold_spawn_and_run(
         clear_session_pid(&session_id);
         return Err("claude stdin unavailable — process killed".into());
     };
-    let stdout = child.stdout.take().ok_or_else(|| "claude stdout missing".to_string())?;
-    let stderr = child.stderr.take().ok_or_else(|| "claude stderr missing".to_string())?;
+    let Some(stdout) = child.stdout.take() else {
+        let _ = child.start_kill();
+        clear_session_pid(&session_id);
+        return Err("claude stdout unavailable — process killed".into());
+    };
+    let Some(stderr) = child.stderr.take() else {
+        let _ = child.start_kill();
+        clear_session_pid(&session_id);
+        return Err("claude stderr unavailable — process killed".into());
+    };
 
     // Per-child turn channel: dispatch_turn sends a TurnCmd; the loop runs it.
     let (turn_tx, turn_rx) = mpsc::unbounded_channel::<warm_pool::TurnCmd>();
@@ -1773,8 +1794,16 @@ fn prewarm_spawn(
         clear_session_pid(&session_id);
         return Err("prewarm: claude stdin unavailable — process killed".into());
     };
-    let stdout = child.stdout.take().ok_or_else(|| "prewarm: claude stdout missing".to_string())?;
-    let stderr = child.stderr.take().ok_or_else(|| "prewarm: claude stderr missing".to_string())?;
+    let Some(stdout) = child.stdout.take() else {
+        let _ = child.start_kill();
+        clear_session_pid(&session_id);
+        return Err("prewarm: claude stdout unavailable — process killed".into());
+    };
+    let Some(stderr) = child.stderr.take() else {
+        let _ = child.start_kill();
+        clear_session_pid(&session_id);
+        return Err("prewarm: claude stderr unavailable — process killed".into());
+    };
 
     let (turn_tx, turn_rx) = mpsc::unbounded_channel::<warm_pool::TurnCmd>();
     // A spare is IDLE from birth: no turn in progress. (A racing real send sees
@@ -1869,11 +1898,14 @@ struct RunCtx {
 /// the turn channel closes (evict / signature drain — all senders dropped), a
 /// turn requested bg-evict (M3), or a fatal stdin write error.
 async fn run_turn_loop(mut ctx: RunCtx) {
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
     use std::sync::atomic::Ordering;
 
+    // Mirrors bridge.rs's MAX_BRIDGE_LINE — bound a single NDJSON line so a
+    // pathological unbounded line from the child can't OOM the reader.
+    const MAX_STDOUT_LINE: u64 = 8 * 1024 * 1024;
     let mut stdin = ctx.stdin;
-    let mut lines = BufReader::new(ctx.stdout).lines();
+    let mut lines = BufReader::new(ctx.stdout.take(MAX_STDOUT_LINE)).lines();
     let mut turn_rx = ctx.turn_rx;
 
     // Persistent stderr reader (M2): on the warm path `child.wait()` never
@@ -2059,6 +2091,15 @@ async fn run_turn_loop(mut ctx: RunCtx) {
                     kill_child_tree(pid);
                 }
                 warm_pool::remove_if(&ctx.session_id, &ctx.warm);
+                // Mirror assistant_stop's safety net: a stall while parked on
+                // ask_user/can_use_tool would otherwise leave the registry entry
+                // dangling until its own independent timeout.
+                if let Some(reg) = ctx.app.try_state::<std::sync::Arc<AskUserRegistry>>() {
+                    reg.cancel_all_for_session(&ctx.session_id);
+                }
+                if let Some(reg) = ctx.app.try_state::<std::sync::Arc<PermissionRegistry>>() {
+                    reg.cancel_all_for_session(&ctx.session_id);
+                }
                 let _ = app_out.emit_to(&win_label, ERROR_EVENT, serde_json::json!({
                     "session_id": stream_sid, "message": msg.clone(),
                 }));
@@ -2164,7 +2205,7 @@ enum TurnOutcome {
 /// arg limit.
 struct StreamCtx<'a> {
     stdin: &'a mut tokio::process::ChildStdin,
-    lines: &'a mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+    lines: &'a mut tokio::io::Lines<BufReader<tokio::io::Take<tokio::process::ChildStdout>>>,
     app_out: &'a AppHandle,
     win_label: &'a str,
     stream_sid: &'a str,

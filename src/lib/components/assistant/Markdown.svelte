@@ -329,9 +329,13 @@
     if (!a) return;
     const href = a.getAttribute("href");
     if (!href || href.startsWith("#")) return;
+    // Deny-by-default: anything DOMPurify lets through that isn't an explicitly
+    // handled scheme (http/https/mailto) must NOT fall through to native anchor
+    // navigation — that includes tel:/sms:/cid:/xmpp: and relative/protocol-
+    // relative hrefs DOMPurify's default URI regex also permits.
+    e.preventDefault();
     const safe = /^https?:\/\//i.test(href) || href.startsWith("mailto:");
     if (!safe) return;
-    e.preventDefault();
     // Local-dev URLs open in the in-app browser dock instead of the system
     // browser — the preview belongs next to the chat that produced it.
     if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:\d+)?([/?#]|$)/i.test(href)) {

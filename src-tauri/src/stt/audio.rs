@@ -52,8 +52,9 @@ fn pick_device(name: Option<&str>) -> Result<Device, String> {
         }
         return Err(format!("input device '{n}' not found"));
     }
-    host.default_input_device()
-        .ok_or_else(|| "no default input device".into())
+    host.default_input_device().ok_or_else(|| {
+        "No microphone found or access denied — check Windows mic permissions or that a mic is connected".into()
+    })
 }
 
 /// Open the device, pick the best supported f32 input config, build the cpal

@@ -333,6 +333,17 @@ fn load_config_raw() -> AssistantConfig {
     match config_path().and_then(|p| std::fs::read_to_string(&p).map_err(|e| e.to_string())) {
         Ok(s) => serde_json::from_str(&s).unwrap_or_else(|e| {
             log::warn!("assistant config unreadable — falling back to defaults: {e}");
+            // Preserve the unparseable bytes before the next save_config()
+            // overwrites them with an all-defaults struct — otherwise a
+            // transient corruption (dirty shutdown, AV rewrite, disk fault)
+            // permanently loses recent_roots/projects/trust_level with only
+            // this log line as a trace.
+            if let Ok(p) = config_path() {
+                let bak = p.with_extension("json.corrupt.bak");
+                if let Err(e) = std::fs::copy(&p, &bak) {
+                    log::warn!("assistant: failed to back up corrupt config to {}: {e}", bak.display());
+                }
+            }
             AssistantConfig::default()
         }),
         Err(_) => AssistantConfig::default(),

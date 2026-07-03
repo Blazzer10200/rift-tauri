@@ -32,19 +32,24 @@
   // Copy the command + its output as one shell-session snippet — what you'd
   // paste into an issue or a terminal to reproduce.
   let copied = $state(false);
+  let copyFailed = $state(false);
   let copyTimer: ReturnType<typeof setTimeout> | null = null;
   $effect(() => () => { if (copyTimer) clearTimeout(copyTimer); });
   async function copyAll(e: MouseEvent) {
     e.stopPropagation();
     const cmd = tool.cap ?? "";
     const body = typeof tool.result === "string" ? tool.result.replace(/\s+$/, "") : "";
+    if (copyTimer) clearTimeout(copyTimer);
     try {
       await navigator.clipboard.writeText(body ? `$ ${cmd}\n${body}` : `$ ${cmd}`);
       copied = true;
-      if (copyTimer) clearTimeout(copyTimer);
+      copyFailed = false;
       copyTimer = setTimeout(() => { copied = false; copyTimer = null; }, 1200);
     } catch (err) {
       console.warn("shell copy failed", err);
+      copied = false;
+      copyFailed = true;
+      copyTimer = setTimeout(() => { copyFailed = false; copyTimer = null; }, 1200);
     }
   }
 </script>

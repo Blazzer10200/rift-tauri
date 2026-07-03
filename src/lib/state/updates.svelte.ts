@@ -33,8 +33,10 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { confirm } from "@tauri-apps/plugin-dialog";
 import { toast } from "./toast.svelte";
 import { humanizeError } from "../utils/humanizeError";
+import { assistant } from "./assistant.svelte";
 
 /** Public release repo — used only to synthesize the human "View release on
  *  GitHub" link (Velopack's source doesn't return an html_url). */
@@ -248,6 +250,16 @@ class UpdateStore {
    *  manually from the GitHub release link. */
   async download() {
     if (this.state !== "available") return;
+    // Applying kills every in-flight Claude turn (backend drains + kills session
+    // children before relaunch) — warn before committing rather than silently
+    // tearing down a live conversation.
+    if (assistant.liveTabs.length > 0) {
+      const ok = await confirm(
+        "An update is ready to install, but you have an active conversation running. Installing will end it now. Update anyway?",
+        { title: "Update Rift", kind: "warning", okLabel: "Update anyway", cancelLabel: "Not now" },
+      );
+      if (!ok) return;
+    }
     this.downloadError = "";
     this.progress = 0;
     this.state = "downloading";

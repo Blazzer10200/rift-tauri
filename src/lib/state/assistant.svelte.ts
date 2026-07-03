@@ -1014,6 +1014,12 @@ class AssistantStore {
           if (p?.bg_task) {
             const key = sid ?? "__active__";
             if (!this.bgTaskWarnedSessions.has(key)) {
+              // Cap unbounded growth over a long-running session — evict the
+              // oldest entry (Set preserves insertion order) once at the bound.
+              if (this.bgTaskWarnedSessions.size >= 200) {
+                const oldest = this.bgTaskWarnedSessions.values().next().value;
+                if (oldest !== undefined) this.bgTaskWarnedSessions.delete(oldest);
+              }
               this.bgTaskWarnedSessions.add(key);
               notify.warn("Background task won't auto-report", {
                 detail: "This turn started a task in the background, but Rift can't notify you when it finishes. Send a message to ask how it went.",

@@ -264,8 +264,11 @@ export function shortModel(id: string): string {
   return m[3] ? `${name} ${m[2]}.${m[3]}` : `${name} ${m[2]}`;
 }
 
-export function lineDelta(oldS: unknown, newS: unknown): { adds: number; dels: number } {
-  if (typeof oldS !== "string" || typeof newS !== "string") return { adds: 0, dels: 0 };
+export function lineDelta(oldSrc: unknown, newSrc: unknown): { adds: number; dels: number } {
+  if (typeof oldSrc !== "string" || typeof newSrc !== "string") return { adds: 0, dels: 0 };
+  // Normalize CRLF so a CRLF-old vs LF-new pair isn't counted as an all-lines-changed diff.
+  const oldS = oldSrc.replace(/\r\n/g, "\n");
+  const newS = newSrc.replace(/\r\n/g, "\n");
   // Skip exact diff for very large strings; return approx line counts instead.
   if (oldS.length + newS.length > 200_000) {
     return { adds: newS.split("\n").length, dels: oldS.split("\n").length };

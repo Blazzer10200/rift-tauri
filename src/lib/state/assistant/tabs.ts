@@ -171,6 +171,11 @@ export function dropTabIntoPane(host: TabsHost, tabId: string, paneIdx: number) 
     if (!host.conversations.some((c) => c.id === tabId)) return;
     host.openTabs = [...host.openTabs, tabId];
   }
+  // Snapshot before any focus/currentConvoId mutation below — the branches
+  // that don't route through setFocusedPane must invalidate the @-mention +
+  // branch caches themselves when the drop changes the effective root
+  // (mirrors setFocusedPane's own guard at ~139-142).
+  const prevRoot = host.activeRoot;
 
   if (host.panes.length === 1) {
     // Single-pane → drop on a half = enter split. The half-detect passes
@@ -213,6 +218,10 @@ export function dropTabIntoPane(host: TabsHost, tabId: string, paneIdx: number) 
     } else {
       host.currentConvoId = tabId;
     }
+    if (host.activeRoot !== prevRoot) {
+      host.workspaceFiles = [];
+      host.workspaceBranch = null;
+    }
     host.persistTabs();
     return;
   } else {
@@ -244,6 +253,10 @@ export function dropTabIntoPane(host: TabsHost, tabId: string, paneIdx: number) 
     } else {
       host.currentConvoId = tabId;
     }
+  }
+  if (host.activeRoot !== prevRoot) {
+    host.workspaceFiles = [];
+    host.workspaceBranch = null;
   }
   host.persistTabs();
 }
@@ -388,6 +401,11 @@ export async function closeTab(host: TabsHost, id: string) {
     | undefined;
   if (closingTab?.queue?.length) {
     notify.warn(`${closingTab.queue.length} queued message(s) discarded`, { detail: "The tab was closed mid-queue." });
+    // Clear the queue BEFORE stop()'s synchronous onTurnComplete->drainQueue
+    // can peek it — else a queued send races the still-in-flight stop() and
+    // fires into a tab that's about to be dropped (orphaned turn, silently
+    // discarded once tabByCliSession can no longer find it).
+    closingTab.queue = [];
   }
   host.pruneTabUi(id);
   // Stop the CLI subprocess for the CLOSING tab — `host.streaming` reads the

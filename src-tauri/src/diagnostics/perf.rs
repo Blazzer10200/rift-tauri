@@ -12,6 +12,7 @@
 //! `append_turn_perf` offloads to `spawn_blocking` so file I/O never touches the
 //! turn's async hot path.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
@@ -170,6 +171,13 @@ pub fn classify_latency_cause(
 }
 
 static TURNS_LOG: OnceLock<Option<Mutex<std::fs::File>>> = OnceLock::new();
+/// Bytes written to `turns.ndjson` since it was last (re)opened — tracked in
+/// memory so a long-lived process can rotate periodically without a `stat` on
+/// every write. `init_turns_log`'s own metadata check only ever runs once
+/// (`OnceLock::get_or_init` semantics), so this is what makes rotation actually
+/// happen for a session that outlives one 5MB fill.
+static TURNS_LOG_BYTES: AtomicU64 = AtomicU64::new(0);
+const TURNS_LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
 
 /// `<appLogDir>/turns.ndjson` — beside `rift.log` (mirrors `write_crash_report`).
 fn turns_log_path() -> Option<std::path::PathBuf> {
@@ -182,8 +190,8 @@ fn turns_log_path() -> Option<std::path::PathBuf> {
 /// rename fails so a stuck backup can't grow the file unbounded.
 fn init_turns_log() -> Option<Mutex<std::fs::File>> {
     let path = turns_log_path()?;
-    const MAX_BYTES: u64 = 5 * 1024 * 1024;
-    let oversized = std::fs::metadata(&path).map(|m| m.len() > MAX_BYTES).unwrap_or(false);
+    let start_len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    let oversized = start_len > TURNS_LOG_MAX_BYTES;
     let rotate_failed =
         oversized && std::fs::rename(&path, path.with_extension("ndjson.old")).is_err();
     let mut opts = std::fs::OpenOptions::new();
@@ -193,7 +201,14 @@ fn init_turns_log() -> Option<Mutex<std::fs::File>> {
     } else {
         opts.append(true);
     }
-    opts.open(&path).ok().map(Mutex::new)
+    let file = opts.open(&path).ok()?;
+    // Seed the tracked byte-count from the just-opened file's actual size (0
+    // after a rotate/truncate, else the pre-existing size we're appending to)
+    // so `append_turn_perf` can rotate on crossing the threshold without a
+    // `stat` per write.
+    let seed = if rotate_failed || oversized { 0 } else { start_len };
+    TURNS_LOG_BYTES.store(seed, Ordering::Relaxed);
+    Some(Mutex::new(file))
 }
 
 /// Append one record to `turns.ndjson`, fire-and-forget. File I/O is offloaded to
@@ -211,7 +226,16 @@ pub fn append_turn_perf(rec: TurnPerf) {
         };
         let Ok(mut line) = serde_json::to_string(&rec) else { return };
         line.push('\n');
-        use std::io::Write as _;
+        use std::io::{Seek, Write as _};
+        let written = TURNS_LOG_BYTES.fetch_add(line.len() as u64, Ordering::Relaxed) + line.len() as u64;
+        // Periodic rotation: the OnceLock init above only ever runs its size
+        // check ONCE per process, so a long-lived session would otherwise never
+        // rotate again. Re-check the cheap in-memory counter (no `stat`) on
+        // every write instead; when it crosses the cap, truncate the live
+        // handle in place and reset the counter.
+        if written > TURNS_LOG_MAX_BYTES && f.set_len(0).is_ok() && f.seek(std::io::SeekFrom::Start(0)).is_ok() {
+            TURNS_LOG_BYTES.store(0, Ordering::Relaxed);
+        }
         let _ = f.write_all(line.as_bytes());
         let _ = f.flush();
     });

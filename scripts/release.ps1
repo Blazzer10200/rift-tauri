@@ -313,7 +313,7 @@ $uploadArgs = @(
     '--repoUrl', "https://github.com/$releaseRepo",
     '--channel', 'win',
     '--publish',
-    '--releaseName', $(if ($releaseTitle) { "$tag $([char]0x2014) $releaseTitle" } else { $tag }),
+    '--releaseName', $(if ($releaseTitle) { "$tag - $releaseTitle" } else { $tag }),
     '--tag', $tag,
     '--token', $ghToken
 )

@@ -418,6 +418,7 @@ fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
     let ws_root = roots.first().cloned().unwrap_or_else(|| search_root.clone());
 
     let mut files_scanned = 0usize;
+    let mut files_skipped = 0usize;
     let mut matches: Vec<String> = Vec::new();
 
     'walk: for entry in walkdir::WalkDir::new(&search_root)
@@ -476,11 +477,15 @@ fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
             continue;
         }
         if bytes.iter().take(8192).any(|&b| b == 0) {
+            files_skipped += 1;
             continue;
         }
         let text = match std::str::from_utf8(&bytes) {
             Ok(s) => s,
-            Err(_) => continue,
+            Err(_) => {
+                files_skipped += 1;
+                continue;
+            }
         };
         for (lineno, line) in text.lines().enumerate() {
             if re.is_match(line) {
@@ -506,7 +511,13 @@ fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
     }
 
     if matches.is_empty() {
-        Ok(format!("(no matches for `{}` in {} files under {})", pattern, files_scanned, search_root.display()))
+        let searched = files_scanned.saturating_sub(files_skipped);
+        let skipped_note = if files_skipped > 0 {
+            format!(" ({} skipped: binary/non-UTF8)", files_skipped)
+        } else {
+            String::new()
+        };
+        Ok(format!("(no matches for `{}` in {} files{} under {})", pattern, searched, skipped_note, search_root.display()))
     } else {
         Ok(matches.join("\n"))
     }

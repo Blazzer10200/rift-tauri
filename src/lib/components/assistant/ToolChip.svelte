@@ -310,11 +310,17 @@
     return "plain";
   });
 
+  // Char cap alongside the line cap — a huge single-line result (minified
+  // JSON, base64, one-line Bash stdout) has lines.length===1 and would
+  // otherwise sail through the 60-line cap untruncated.
+  const RESULT_CHAR_CAP = 20000;
   const resultLines = $derived.by(() => {
     if (!tool.result) return null;
-    const lines = tool.result.split("\n");
-    if (lines.length <= 60) return { shown: lines, more: 0 };
-    return { shown: lines.slice(0, 60), more: lines.length - 60 };
+    const capped = tool.result.length > RESULT_CHAR_CAP;
+    const src = capped ? tool.result.slice(0, RESULT_CHAR_CAP) : tool.result;
+    const lines = src.split("\n");
+    if (lines.length <= 60 && !capped) return { shown: lines, more: 0 };
+    return { shown: lines.slice(0, 60), more: lines.length > 60 ? lines.length - 60 : capped ? 1 : 0 };
   });
 
   // ── Shell terminal — badge + prompt prefix + per-line tone ──────────────

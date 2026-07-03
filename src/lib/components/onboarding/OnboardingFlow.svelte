@@ -38,7 +38,10 @@
   let warnSkipConnect = $state(false);
 
   function goto(n: number) {
-    if (n < step) step = n; // rail nodes only navigate backward (completed)
+    if (n < step) {
+      if (n <= 2) warnSkipConnect = false;
+      step = n; // rail nodes only navigate backward (completed)
+    }
   }
   function next() {
     if (step === 2 && !connectConnected && !warnSkipConnect) {

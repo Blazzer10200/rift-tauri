@@ -72,6 +72,11 @@ struct Inner {
     /// repeats to debug. Reset whenever the manager recovers so a genuinely new
     /// failure logs again.
     reason_logged: bool,
+    /// Set for the duration of `apply()`. Guards against a second concurrent
+    /// call (stale/duplicate frontend invoke, devtools, a second window)
+    /// re-entering the child-reap + taskkill + exit sequence while the first
+    /// is still in flight.
+    applying: bool,
 }
 
 pub struct UpdateService {
@@ -100,7 +105,7 @@ impl UpdateService {
             }
         };
         Self {
-            inner: Mutex::new(Inner { mgr, pending: None, downloaded: false, download_epoch: 0, init_error, reason_logged: false }),
+            inner: Mutex::new(Inner { mgr, pending: None, downloaded: false, download_epoch: 0, init_error, reason_logged: false, applying: false }),
         }
     }
 
@@ -410,7 +415,10 @@ impl UpdateService {
     /// shutdown (so WebView2 children unwind in order, no file lock).
     pub fn apply(&self, app: &tauri::AppHandle) -> Result<(), String> {
         let (mgr, info) = {
-            let g = self.lock();
+            let mut g = self.lock();
+            if g.applying {
+                return Err("update already applying".to_string());
+            }
             let mgr = g.mgr.clone().ok_or_else(|| "no update source configured".to_string())?;
             let info = g
                 .pending
@@ -419,6 +427,7 @@ impl UpdateService {
             if !g.downloaded {
                 return Err("update not downloaded — call download_update first".to_string());
             }
+            g.applying = true;
             (mgr, info)
         };
         // silent = true (no Velopack UI → unattended), restart = true (relaunch
@@ -432,11 +441,11 @@ impl UpdateService {
             "apply started",
             serde_json::json!({"stage": "apply", "version": info.TargetFullRelease.Version}),
         );
-        mgr.wait_exit_then_apply_updates(&info, true, true, Vec::<&str>::new())
-            .map_err(|e| {
-                log::error!("update apply FAILED: {e}");
-                format!("wait_exit_then_apply_updates: {e}")
-            })?;
+        if let Err(e) = mgr.wait_exit_then_apply_updates(&info, true, true, Vec::<&str>::new()) {
+            log::error!("update apply FAILED: {e}");
+            self.lock().applying = false;
+            return Err(format!("wait_exit_then_apply_updates: {e}"));
+        }
         log::info!("update apply: swap scheduled, reaping children + exiting");
 
         // Velopack's Update.exe waits only for THIS (main) PID, then renames

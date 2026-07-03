@@ -274,6 +274,8 @@
     </div>
     {#if askError}
       <div class="sask-hint" style="color:var(--danger)">{askError}</div>
+    {:else if tool.status === "error"}
+      <div class="sask-hint">This turn ended before you answered.</div>
     {:else if !askRequestId}
       <div class="sask-hint">Connecting to the chat session…</div>
     {/if}

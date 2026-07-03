@@ -281,8 +281,13 @@
   }
 
   async function openProject(p: Project) {
-    projects.setActiveId(p.id);
+    const before = assistant.lastError;
     await assistant.setRoot(p.root);
+    if (assistant.lastError && assistant.lastError !== before) {
+      notify.warn("Couldn't open project", { detail: assistant.lastError });
+      return;
+    }
+    projects.setActiveId(p.id);
     goHome();
   }
 

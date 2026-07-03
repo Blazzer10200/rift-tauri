@@ -221,6 +221,11 @@
       enhanceOriginal = null;
       enhanceStatus = null;
       enhanceMeta = null;
+      // The enhance-undo affordance is likewise un-keyed to the tab — without
+      // this, Undo on the newly-focused tab would clobber its draft with the
+      // previous tab's pre-enhance text.
+      undoDraft = null;
+      clearTimeout(undoTimer);
       // #67: drop the pre-warm dedup latch so the newly-focused fresh tab can
       // request its own spare even if its signature matches the prior tab's.
       resetPrewarmDedup();
@@ -1241,17 +1246,19 @@
             class="cbtn ic micbtn"
             class:recording={stt.recording}
             class:transcribing={stt.transcribing}
+            class:mic-error={!!stt.lastError}
             type="button"
             onclick={toggleMic}
             disabled={micBusy || stt.transcribing}
             use:tooltip={
               stt.recording ? "Stop recording" :
               stt.transcribing ? "Transcribing…" :
+              stt.lastError ? stt.lastError :
               stt.config.engine === "whisper"
                 ? "Dictate — Whisper (local) · Ctrl+D or hold Space"
                 : "Dictate — Web Speech · Ctrl+D or hold Space"
             }
-            aria-label={stt.recording ? "Stop recording" : "Start recording"}
+            aria-label={stt.recording ? "Stop recording" : stt.lastError ? `Start recording (last error: ${stt.lastError})` : "Start recording"}
           >
             {#if stt.transcribing}
               <Loader2 size={15} class="mic-spin" />
@@ -1699,6 +1706,11 @@
   .micbtn.transcribing {
     color: var(--accent);
     border-color: color-mix(in oklab, var(--accent) 40%, var(--border));
+    opacity: 1;
+  }
+  .micbtn.mic-error:not(.recording):not(.transcribing) {
+    color: var(--danger);
+    border-color: color-mix(in oklab, var(--danger) 40%, var(--border));
     opacity: 1;
   }
   :global(.mic-spin) { animation: mic-spin 0.9s linear infinite; }

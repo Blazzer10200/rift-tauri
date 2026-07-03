@@ -67,8 +67,12 @@
       return out;
     }
 
-    const oldLines = oldStr.split("\n");
-    const newLines = newStr.split("\n");
+    // Normalize CRLF→LF before splitting: old_string (matched verbatim against
+    // file bytes) and new_string (often model-composed with bare \n) can carry
+    // mismatched line endings on a CRLF file, which would make every line
+    // fail exact-match comparison and render as a full delete+add.
+    const oldLines = oldStr.replace(/\r\n/g, "\n").split("\n");
+    const newLines = newStr.replace(/\r\n/g, "\n").split("\n");
     const chunks = diffArrays(oldLines, newLines);
 
     for (let i = 0; i < chunks.length; i++) {

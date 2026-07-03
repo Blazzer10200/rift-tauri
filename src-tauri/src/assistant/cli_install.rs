@@ -114,9 +114,14 @@ fn classify_install_method(p: &Path) -> &'static str {
         // install is classified "npm" (→ correct `npm i -g` update), not "unknown".
         || s.contains("\\node_modules\\@anthropic-ai\\claude-code\\")
         || s.contains("/node_modules/@anthropic-ai/claude-code/")
-        || s.ends_with(".cmd")
-        || s.ends_with(".bat")
     {
+        "npm"
+    } else if (s.ends_with(".cmd") || s.ends_with(".bat"))
+        && (s.contains("\\npm\\") || s.contains("/npm/"))
+    {
+        // A .cmd/.bat shim outside an npm root (Scoop, or any other manager's
+        // forwarder) isn't npm — classifying it "npm" would drive `npm install
+        // -g` against the wrong install (or the wrong error when npm's absent).
         "npm"
     } else if s.contains("anthropicclaude")
         || s.contains("\\.local\\bin\\")
@@ -256,6 +261,28 @@ pub(super) fn enumerate_claude_installs() -> Vec<ClaudeInstall> {
         // ~/.local/bin native-script install.
         if let Some(home) = std::env::var_os("USERPROFILE") {
             add(PathBuf::from(&home).join(".local").join("bin").join("claude.exe"), &mut paths);
+        }
+        // pnpm global bin (default install dir; a custom PNPM_HOME still gets
+        // caught by the PATH/where.exe probes above).
+        if let Some(lad) = std::env::var_os("LOCALAPPDATA") {
+            let pnpm = PathBuf::from(&lad).join("pnpm");
+            add(pnpm.join("claude.exe"), &mut paths);
+            add(pnpm.join("claude.cmd"), &mut paths);
+        }
+        // Volta shim dir.
+        if let Some(lad) = std::env::var_os("LOCALAPPDATA") {
+            add(PathBuf::from(&lad).join("Volta").join("bin").join("claude.exe"), &mut paths);
+        }
+        if let Some(home) = std::env::var_os("USERPROFILE") {
+            add(PathBuf::from(&home).join(".volta").join("bin").join("claude.exe"), &mut paths);
+            // Scoop shims.
+            let shims = PathBuf::from(&home).join("scoop").join("shims");
+            add(shims.join("claude.exe"), &mut paths);
+            add(shims.join("claude.cmd"), &mut paths);
+            // Bun global bin.
+            let bun = PathBuf::from(&home).join(".bun").join("bin");
+            add(bun.join("claude.exe"), &mut paths);
+            add(bun.join("claude.cmd"), &mut paths);
         }
         // Last-resort: `.cmd`/`.bat` shims on PATH (custom npm prefix with no
         // bundled `.exe` at the default site). Ranked below any real binary and

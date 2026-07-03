@@ -3,12 +3,22 @@
   // navigate away from / over the first-run flow. (The old full titlebar —
   // workspace topnav, ⌘K pill, settings gear — was dead code here since the
   // Topbar/Sidebar redesign took over normal-mode chrome; trimmed 2026-07-01.)
+  import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { Minus, Square, X } from "lucide-svelte";
+  import { Minus, Square, Copy, X } from "lucide-svelte";
   import RiftLogo from "./RiftLogo.svelte";
   import { tooltip } from "$lib/actions/tooltip";
 
   const win = getCurrentWindow();
+  let maximized = $state(false);
+
+  onMount(() => {
+    win.isMaximized().then((m) => { maximized = m; }).catch(console.error);
+    const unlisten = win.onResized(() => {
+      win.isMaximized().then((m) => { maximized = m; }).catch(console.error);
+    });
+    return () => { void unlisten.then((fn) => fn()); };
+  });
 </script>
 
 <div class="titlebar" data-tauri-drag-region>
@@ -21,8 +31,8 @@
     <button class="wb" onclick={() => win.minimize().catch(console.error)} use:tooltip={"Minimize"} type="button" aria-label="Minimize">
       <Minus size={10}/>
     </button>
-    <button class="wb" onclick={() => win.toggleMaximize().catch(console.error)} use:tooltip={"Maximize"} type="button" aria-label="Maximize">
-      <Square size={9}/>
+    <button class="wb" onclick={() => win.toggleMaximize().catch(console.error)} use:tooltip={maximized ? "Restore" : "Maximize"} type="button" aria-label={maximized ? "Restore" : "Maximize"}>
+      {#if maximized}<Copy size={9}/>{:else}<Square size={9}/>{/if}
     </button>
     <button class="wb close" onclick={() => win.close().catch(console.error)} use:tooltip={"Close"} type="button" aria-label="Close">
       <X size={10}/>

@@ -52,7 +52,12 @@ fn default_decimal_places() -> u32 {
 pub struct ScopedLimit {
     pub kind: Option<String>,
     pub group: Option<String>,
-    #[serde(default)]
+    // `f64` (not Option) but via a lenient deserializer: the endpoint is
+    // undocumented, so a present-but-wrong-typed value (string/null/bool) must
+    // NOT fail the whole `limits[]` array — that would blank the entire usage
+    // panel over one bad element. `#[serde(default)]` alone only covers a
+    // MISSING key, not a wrong-typed one.
+    #[serde(default, deserialize_with = "de_percent_lenient")]
     pub percent: f64,
     pub severity: Option<String>,
     #[serde(rename = "resetsAt", alias = "resets_at")]
@@ -60,6 +65,15 @@ pub struct ScopedLimit {
     pub scope: Option<LimitScope>,
     #[serde(rename = "isActive", alias = "is_active", default)]
     pub is_active: bool,
+}
+
+/// Coerce a wrong-typed `percent` (string/null/bool/object) to 0.0 instead of
+/// failing the whole `ScopedLimit` (and thus the whole `limits[]` Vec).
+fn de_percent_lenient<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(serde_json::Value::deserialize(deserializer)?.as_f64().unwrap_or(0.0))
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -97,6 +111,10 @@ pub struct RateLimits {
 }
 
 static CACHE: Mutex<Option<(Instant, RateLimits)>> = Mutex::new(None);
+/// Last failed-attempt timestamp — lets a permanently-failing user (API-key /
+/// signed-out / expired) back off on the same TTL as a success, instead of
+/// hot-looping a fetch+fail every single turn for the app's lifetime.
+static LAST_FAILURE: Mutex<Option<Instant>> = Mutex::new(None);
 
 /// Non-blocking cache read for the per-turn "Rift environment snapshot"
 /// (`turn.rs`). Accepts a slightly stale value (≤5 min) — utilization moves
@@ -123,6 +141,14 @@ pub fn spawn_background_refresh() {
             }
         }
     }
+    {
+        let Ok(guard) = LAST_FAILURE.lock() else { return };
+        if let Some(at) = guard.as_ref() {
+            if at.elapsed() < CACHE_TTL {
+                return;
+            }
+        }
+    }
     // Cap concurrent refreshes at one: a message queue draining back-to-back hits
     // spawn_background_refresh once per turn, all seeing the same stale cache —
     // without this each would spawn its own HTTP task. Cleared when the task ends.
@@ -135,6 +161,12 @@ pub fn spawn_background_refresh() {
     }
     tauri::async_runtime::spawn(async {
         if let Err(e) = usage_rate_limits(None, None).await {
+            // Record the failed attempt so the TTL gate above backs off a
+            // permanently-failing user (API-key/signed-out/expired) instead of
+            // re-fetching every turn for the app's lifetime.
+            if let Ok(mut guard) = LAST_FAILURE.lock() {
+                *guard = Some(Instant::now());
+            }
             // The three swallowed states (missing creds / API-key user / expired
             // token) look identical at debug level — classify so the diagnostics
             // console can distinguish "needs login" from "broken" at a glance.

@@ -145,6 +145,25 @@ pub async fn download(
     model_id: &str,
     cancel: Arc<AtomicBool>,
 ) -> Result<(), String> {
+    match download_inner(&app, model_id, cancel).await {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            // Every failure path below (network/write/hash/etc) must still
+            // unstick the Settings progress bar — only the explicit cancel
+            // branch inside download_inner emits its own "error" phase.
+            if e != "download cancelled" {
+                emit_progress(&app, model_id, 0, 0, "error", Some(e.clone()));
+            }
+            Err(e)
+        }
+    }
+}
+
+async fn download_inner(
+    app: &AppHandle,
+    model_id: &str,
+    cancel: Arc<AtomicBool>,
+) -> Result<(), String> {
     let entry = entry_for(model_id).ok_or_else(|| format!("unknown model id: {model_id}"))?;
     let dir = models_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir {}: {e}", dir.display()))?;
@@ -166,7 +185,7 @@ pub async fn download(
                     None => true,
                 };
                 if verified {
-                    emit_progress(&app, entry.id, md.len(), md.len(), "done", None);
+                    emit_progress(app, entry.id, md.len(), md.len(), "done", None);
                     return Ok(());
                 }
                 // Failed verification — quarantine and fall through to re-download.
@@ -213,7 +232,7 @@ pub async fn download(
         }
         std::fs::rename(&partial_path, &final_path)
             .map_err(|e| format!("promote partial -> final (416 path): {e}"))?;
-        emit_progress(&app, entry.id, on_disk, on_disk, "done", None);
+        emit_progress(app, entry.id, on_disk, on_disk, "done", None);
         return Ok(());
     }
     if !status.is_success() && status.as_u16() != 206 {
@@ -248,7 +267,7 @@ pub async fn download(
         _ => entry.approx_size_bytes,
     };
 
-    emit_progress(&app, entry.id, resume_from, total, "start", None);
+    emit_progress(app, entry.id, resume_from, total, "start", None);
 
     let mut downloaded = resume_from;
     let mut last_emit = std::time::Instant::now();
@@ -263,7 +282,7 @@ pub async fn download(
     while let Some(chunk) = stream.next().await {
         if cancel.load(Ordering::Relaxed) {
             emit_progress(
-                &app,
+                app,
                 entry.id,
                 downloaded,
                 total,
@@ -280,7 +299,7 @@ pub async fn download(
         }
         downloaded = downloaded.saturating_add(bytes.len() as u64);
         if last_emit.elapsed() >= std::time::Duration::from_millis(100) {
-            emit_progress(&app, entry.id, downloaded, total, "progress", None);
+            emit_progress(app, entry.id, downloaded, total, "progress", None);
             last_emit = std::time::Instant::now();
         }
     }
@@ -334,7 +353,7 @@ pub async fn download(
     std::fs::rename(&partial_path, &final_path)
         .map_err(|e| format!("promote partial → final: {e}"))?;
 
-    emit_progress(&app, entry.id, on_disk, on_disk, "done", None);
+    emit_progress(app, entry.id, on_disk, on_disk, "done", None);
     Ok(())
 }
 

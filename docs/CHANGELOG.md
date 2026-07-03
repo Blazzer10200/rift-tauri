@@ -2,46 +2,30 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — Reasoning ladder, transcript detail, settings redesign, workspace hub, live status bar
+## v0.84.0 — Built for your machine: adaptability & correctness pass, reasoning ladder, transcript detail, settings redesign
 
-### Reasoning effort, honest and visible
-- **The Thinking toggle is gone — it was an effort jump in disguise.** One four-rung ladder (Low / Medium / High / X-High): Low answers immediately, higher rungs think longer. Fable explains its always-on reasoning; Haiku simply hides the ladder.
-- **A calmer picker:** segmented rung cards replace the drag slider, the hotkey cheat-strip is gone, and every model row shows its live rate-limit state.
+### Works on more than one machine
+- **Rift now finds Claude wherever you installed it** — pnpm-global, Volta, Scoop, and Bun install locations are probed alongside npm and the native installer; a Scoop/other shim is no longer mislabeled "npm" (so the *right* update command is suggested).
+- **Honest degradation when things aren't set up** — the usage gauge backs off instead of hammering a failing endpoint for signed-out / API-key users; one malformed rate-limit entry can no longer blank the whole usage panel; a corrupt `config.json` is backed up (not silently wiped) before defaults load, so your projects/roots survive.
+- **Dead mic, stuck downloads, gone drives — all speak up now:** a mic that's denied or missing shows an actionable hint on the button (not just in Settings); a Whisper download that drops mid-stream shows *failed*, not a frozen bar; opening a project whose folder was deleted or unplugged surfaces a warning instead of dumping you on a blank tab.
+- **Rotate your API key or local-LLM endpoint mid-session** and the next turn actually uses it — warm processes are keyed to the credential now, not just "is a key set".
 
-### The transcript shows its work
-- **Terminal blocks know their shell** — bash, PowerShell, and cmd each get a colored badge; output is ANSI-clean and one click copies command + output.
-- **Every tool row reports what came back** — "→ 15 lines", "→ 91 files", "no matches", durations ≥1s, a red *failed* when it broke; MCP tools show their input and an output peek.
-- **Created files show their content** in the transcript (up to 60 lines) — a new file is the payload, not a "+29 −0" stub.
-- **Streaming text stays put** — narration you watched stream no longer collapses or demotes itself when the next block starts.
-- **Nothing renders ahead of the words** — code chips, bullets, heading bars, table rows, and code blocks used to pop in as empty gray boxes ahead of the streaming text; chrome now fades in exactly when its first word does.
-- **Markdown polish:** numbered lists show their numbers again; PowerShell and Batch code blocks get real syntax highlighting.
+### Fewer ways to lose work or get a wrong answer
+- **Closing a busy tab can't misfire a queued message** into the tab that's about to vanish; dragging a project into a split pane refreshes its file list and branch (no more stale @-mentions from the wrong project).
+- **Installing an update warns first** if a conversation is live, instead of tearing it down silently.
+- **The Enhance "Undo" can't reach across tabs** and overwrite what you typed somewhere else; diffs line up even when line-endings differ (CRLF vs LF); a giant single-line tool result is capped so it can't bloat the view.
+- **Links only open what they should** — the in-app link handler defaults to deny, not fall-through. Aborted ask-cards read as cancelled, not a perpetual "Connecting…". Copy buttons only claim success when the clipboard actually took it.
 
-### Status bar is interactive · usage popover grew up
-- **Click the 5h/7d pills** → full Plan-limits popover (reset countdowns, **IN USE** chip, manual refresh); pills tint amber/red as a window heats; weekly Fable limit + extra-usage credits now display. Project name → Workspace hub; Claude item → Settings → Claude.
+### Under the hood (backend hardening)
+- Plugged process/PID leaks on spawn-failure paths; stalled turns clear pending ask/permission registrations; the child-stdout reader is length-capped; update-apply is guarded against double-fire and re-arms after a failure; the perf log rotates on long-lived processes; grep's file count no longer conflates skipped binaries with searched files.
 
-### Chat welcome + composer, revamped
-- Welcome: session eyebrow, one slim facts row, and **Jump back in** — your three freshest threads, one click to resume.
-- Composer is **one card**: input + docked control deck with a **real send button** (accent fill, stop square mid-turn, queue badge).
-- **Hover timestamps** on new messages; glassier user bubble; the accent "pool of light" behind the transcript is now fully neutral.
-
-### Settings — full redesign
-- Every tab is one scrolling page; the header blends into your background texture; accent is just a color (swatches + hue dial + vividness + one-click reset); the "Chat" tab is now "Claude".
-
-### Added
-- **Three new background textures** (Blueprint, Rings, Grain — 12 total); hover previews paint the real app background.
-- **Workspace page is a real hub** — uniform project grid with live signal (chats · last active · spend), accent frame + in-place **Continue** on the active project, momentum stat tiles.
-- **Project editor got a real face** — icon header, live glob counts, Enter saves / Escape closes.
-- **Collapsed sidebar is a 52px mini-rail**; topbar ⋮ menu replaced by direct Split / New window / notification-bell buttons; Ctrl+K search redesigned; textures cover the whole app.
-
-### Fixed
-- **Margins texture actually visible** (proper dotted edge frame); notifications panel no longer covers its bell; repeated notifications coalesce into one entry.
-- **Deleting a chat right after a reply holds** — a background auto-save can no longer resurrect it.
-- **Split panes truly keep to themselves** — retries, continues, and queued sends land in *their* pane; no cursor-yank, no cross-pane branch/file bleed.
-- **Errored turns keep their plain-English reason**; the "applied automatically" badge reflects the mode a turn *ran* with; dismissed voice/ask questions read "Dismissed — no answer given."
-- AI Health reads honestly; the effort tip's Apply works with Thinking off; copy-diff only claims success when it copied; oversized project globs block Save loudly; assorted backend races hardened.
-
-### Changed — under the hood
-- One toggle-switch style app-wide, one danger-text token, ~250 lines of dead CSS/TS plus orphaned helpers removed.
+### Also in this release (the cont.257–265 arc)
+- **Reasoning ladder replaces the Thinking toggle** — one honest four-rung dial (Low / Medium / High / X-High) instead of a toggle that was secretly an effort jump. Segmented rung cards, live rate-limit chips per model row; Fable explains its always-on reasoning, Haiku hides the ladder.
+- **The transcript shows its work** — shell badges (bash / PowerShell / cmd) with ANSI-clean copyable output; every tool row reports what came back ("→ 15 lines", *failed*, durations); created files show their content inline; streaming text no longer collapses mid-turn; chrome fades in with its first word instead of popping in as empty gray boxes; numbered lists and PowerShell/Batch highlighting restored.
+- **Interactive status bar** — the 5h/7d pills open a full Plan-limits popover (reset countdowns, IN USE chip, manual refresh, weekly Fable limit + credits) and tint amber/red as a window heats.
+- **Welcome + composer revamp** — Jump-back-in resumes your three freshest threads; the composer is one card with a real send button; hover timestamps; the accent wash behind the transcript went neutral.
+- **Settings full redesign** — each tab one scrolling page, texture-blended header, accent-is-just-a-color; three new textures (12 total) with live hover previews; Workspace is a real hub (project grid with chats · last-active · spend); 52px collapsed mini-rail.
+- **Fixes** — split panes truly isolate (retries/continues/queued sends stay in their pane); deleting a chat after a reply holds; errored turns keep their plain-English reason; ~250 lines of dead CSS/TS removed.
 
 ## v0.83.0 — Sidebar redesign + Fable 5 always in the picker
 - **Project-first sidebar:** switcher (monogram + branch) on top, New chat + search, scope toggle, recent-day history, icon footer.

@@ -328,14 +328,21 @@ function adaptTool(tb: ToolBlock): StreamTool {
  *  entry count. Null when there's no result to summarize. */
 export function resultMeta(t: StreamTool): string | null {
   if (typeof t.result !== "string" || t.result.trim().length === 0) return null;
+  const trimmed = t.result.trim();
   const n = t.result.replace(/\s+$/, "").split("\n").filter((l) => l.trim().length > 0).length;
-  if (t.kind === "read") return n === 1 ? "1 line" : `${n} lines`;
+  if (t.kind === "read") {
+    if (t.name === "list_dir") {
+      // Backend always emits a header line (the resolved dir path) before the
+      // per-entry lines — subtract it so an empty dir reads "0 entries", not
+      // "1 line" off a header nobody asked to see counted.
+      const entries = Math.max(0, n - 1);
+      return entries === 1 ? "1 entry" : `${entries} entries`;
+    }
+    return n === 1 ? "1 line" : `${n} lines`;
+  }
   if (t.kind === "grep") {
-    if (/^No (files |matches )?found/i.test(t.result.trim())) return "no matches";
-    const [one, many] =
-      t.name === "Glob" ? ["file", "files"]
-      : t.name === "list_dir" ? ["entry", "entries"]
-      : ["match", "matches"];
+    if (/^No (files |matches )?found/i.test(trimmed) || /^\(no matches/i.test(trimmed)) return "no matches";
+    const [one, many] = t.name === "Glob" ? ["file", "files"] : ["match", "matches"];
     return `${n} ${n === 1 ? one : many}`;
   }
   return null;

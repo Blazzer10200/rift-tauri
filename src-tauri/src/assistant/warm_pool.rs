@@ -112,7 +112,16 @@ pub(super) struct SpawnKey {
     pub prompting_mode: bool,
     pub use_full_config: bool,
     pub use_api_key: bool,
+    /// Fingerprint (NOT the raw secret) of the resolved `ANTHROPIC_API_KEY`
+    /// value baked into env at spawn. 0 when `use_api_key` is false. Without
+    /// this, rotating the key mid-session left `use_api_key` unchanged, so a
+    /// warm child kept running with the OLD credential until some other field
+    /// forced a respawn.
+    pub cred_fp: u64,
     pub local_llm_enabled: bool,
+    /// Fingerprint of the local-LLM base URL + key baked into env at spawn. 0
+    /// when `local_llm_enabled` is false. Same rotation hazard as `cred_fp`.
+    pub local_llm_fp: u64,
     pub thinking_on: bool,
     /// `--effort` is baked at spawn (NOT re-readable per-turn over stream-json,
     /// red-team M4) → effort change MUST respawn. Silent wrong-effort is worse
@@ -127,6 +136,15 @@ pub(super) struct SpawnKey {
     /// Cheap fingerprint of the system-prompt addendum variant (TOOLS / NO_WS /
     /// LOCAL) — a change here means a different `--append-system-prompt`.
     pub addendum_ptr: usize,
+}
+
+/// Cheap stable fingerprint for a secret/URL string, for `SpawnKey.cred_fp` /
+/// `local_llm_fp` — never store the raw value in the key struct.
+pub(super) fn fingerprint(s: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    s.hash(&mut h);
+    h.finish()
 }
 
 /// A persistent `claude` child kept warm across turns for one CLI session.
