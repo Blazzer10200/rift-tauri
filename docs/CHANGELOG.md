@@ -4,11 +4,11 @@
 
 ## v0.85.1 — Plan HUD hardening, restored project roots, one Medium
 
-- **Resumed conversations keep their project folder** — the per-tab root was saved with every conversation but never read back, so after a restart a resumed conversation silently ran against the wrong folder (file reads, project tools, @-mentions). It now restores exactly; legacy records still fall back to their pinned session cwd.
-- **The plan HUD can't wedge or double-flash** — a failed/stopped turn used to leave a frozen, live-looking progress bar forever; completion could green-flash twice; the completion moment replayed the bar's entrance animation; switching tabs could flash another tab's long-finished plan or leave the expanded checklist open. The HUD is now strictly live-or-linger, resets per tab, flashes exactly once, and when it hides while holding keyboard focus it hands focus to the composer instead of dropping it.
-- **Tool durations can't read "1m 60s"** — long tool-chip durations round the total once (59.7s reads 1m, not 60s).
-- **One Medium** — the legacy hidden "quick" tier (a second Medium that sent the same wire flag as the default) is retired everywhere: picker, AI Health advice contract, backend. Stored preferences migrate automatically on load.
-- **Fresher CLI status** — Rift re-checks your Claude install/version when you return to the window (max once a minute), so updating the CLI in a terminal no longer leaves a stale version badge or upgrade hint.
+- **Resumed conversations keep their project folder** — the per-tab root was saved with every conversation but never read back, so after a restart a resumed conversation silently ran against the wrong folder (file reads, project tools, @-mentions). It now restores exactly.
+- **The plan HUD can't wedge or double-flash** — a failed/stopped turn used to leave a frozen live-looking progress bar forever; completion could green-flash twice and replayed the bar's entrance animation; switching tabs could flash another tab's long-finished plan. The HUD is now strictly live-or-linger, resets per tab, flashes exactly once, and hands keyboard focus back to the composer when it hides.
+- **Tool durations can't read "1m 60s"** — long tool-chip durations round the total once (59.7s reads 1m).
+- **One Medium** — the legacy hidden "quick" tier (a second Medium sending the same wire flag as the default) is retired everywhere; stored preferences migrate automatically.
+- **Fresher CLI status** — Rift re-checks your Claude install/version when you return to the window (max once a minute), so a terminal-side CLI update no longer leaves a stale version badge.
 
 ## v0.85.0 — Stream polish: pinned plan, calmer live line
 
