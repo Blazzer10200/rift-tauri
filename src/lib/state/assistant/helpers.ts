@@ -139,7 +139,11 @@ export function loadEffort(ws?: string | null): ThinkingEffort {
     if (typeof localStorage !== "undefined") {
       const k = wsKey(EFFORT_KEY, ws);
       const v = (k ? localStorage.getItem(k) : null) ?? localStorage.getItem(EFFORT_KEY);
-      if (v === "none" || v === "quick" || v === "smart" || v === "deep" || v === "ultra") return v;
+      // Legacy "quick" (retired — also sent the medium flag) folds into "smart"
+      // read-side so old pins keep their wire behavior. Mirrors the backend's
+      // normalize_effort_tier (config.rs).
+      if (v === "quick") return "smart";
+      if (v === "none" || v === "smart" || v === "deep" || v === "ultra") return v;
     }
   } catch {
     /* SSR or storage disabled */
@@ -334,7 +338,7 @@ export function ctxWindowForModelId(model: string | null, planCap?: number): num
 
 /** Effort tiers low→high — canonical order for clamping + ladder UIs. */
 export const EFFORT_ORDER: readonly ThinkingEffort[] = [
-  "none", "quick", "smart", "deep", "ultra",
+  "none", "smart", "deep", "ultra",
 ] as const;
 
 /** Highest effort tier each model honors server-side — the single source of
@@ -361,7 +365,7 @@ export function clampEffort(effort: ThinkingEffort, model: ModelSel): ThinkingEf
 }
 
 /** Effort → CLI flag mapping. Must mirror src-tauri/src/assistant/turn.rs.
- *  Ladder: none→low · quick→medium · smart→medium · deep→high · ultra→xhigh;
+ *  Ladder: none→low · smart→medium · deep→high · ultra→xhigh;
  *  ultra's autonomous-workflow behavior rides the separate `ultracode` settings
  *  key, set in turn.rs. The effort is clamped to the model's ceiling first, so an
  *  out-of-range tier can never emit a flag the model rejects.
@@ -381,7 +385,7 @@ export function effortToFlag(
   if (model === "haiku") return null;
   const e = clampEffort(effort, model);
   if (e === "none") return "low";
-  if (e === "quick" || e === "smart") return "medium";
+  if (e === "smart") return "medium";
   if (e === "ultra") return "xhigh";
   return "high"; // "deep"
 }

@@ -2,8 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage, ToolBlock } from "./types";
 import {
   FABLE_DISABLED, FABLE_SUNSET_MS, clampEffort, effortToFlag, fableAvailable,
-  flattenToolResult, messagesHaveContextSignals, migrateThinkingPins, modelFamily,
-  previewToolInput, ctxWindowForModelId, modelNativeWindow, planContextCap,
+  flattenToolResult, loadEffort, messagesHaveContextSignals, migrateThinkingPins,
+  modelFamily, previewToolInput, ctxWindowForModelId, modelNativeWindow, planContextCap,
 } from "./helpers";
 
 const tool = (name: string, status: ToolBlock["status"], extra: Partial<ToolBlock> = {}): ToolBlock =>
@@ -121,6 +121,38 @@ describe("migrateThinkingPins", () => {
   });
 });
 
+describe("loadEffort — legacy quick-tier migration (retired 2026-07-03)", () => {
+  const installLS = (seed: Record<string, string>) => {
+    const store = new Map(Object.entries(seed));
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    });
+    return store;
+  };
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("folds a stored 'quick' baseline into 'smart' (same medium wire flag)", () => {
+    installLS({ "rift.assistant.thinkingEffort": "quick" });
+    expect(loadEffort()).toBe("smart");
+  });
+
+  it("folds a per-workspace 'quick' pin into 'smart' without touching valid tiers", () => {
+    installLS({
+      "rift.assistant.thinkingEffort::C:/proj/a": "quick",
+      "rift.assistant.thinkingEffort": "deep",
+    });
+    expect(loadEffort("C:/proj/a")).toBe("smart"); // legacy pin coerced
+    expect(loadEffort()).toBe("deep");             // baseline untouched
+  });
+
+  it("still rejects garbage → default 'smart'", () => {
+    installLS({ "rift.assistant.thinkingEffort": "bogus" });
+    expect(loadEffort()).toBe("smart");
+  });
+});
+
 describe("modelFamily", () => {
   it("maps every selector to its aurora family", () => {
     expect(modelFamily("haiku")).toBe("haiku");
@@ -135,9 +167,8 @@ describe("effortToFlag (must mirror src-tauri assistant turn.rs mapping)", () =>
   it("suppresses effort entirely on haiku", () => {
     expect(effortToFlag("deep", "haiku")).toBeNull();
   });
-  it("maps none/quick/smart/deep/ultra to low/medium/medium/high/xhigh", () => {
+  it("maps none/smart/deep/ultra to low/medium/high/xhigh", () => {
     expect(effortToFlag("none", "opus")).toBe("low");
-    expect(effortToFlag("quick", "opus")).toBe("medium");
     expect(effortToFlag("smart", "opus")).toBe("medium"); // responsive default
     expect(effortToFlag("deep", "opus")).toBe("high");
     expect(effortToFlag("ultra", "claude-fable-5")).toBe("xhigh");
@@ -154,7 +185,7 @@ describe("clampEffort (model effort ceiling)", () => {
   it("leaves Sonnet 5/Opus/Fable at ultra (all reach xhigh)", () => {
     expect(clampEffort("ultra", "sonnet")).toBe("ultra"); // Sonnet 5 accepts xhigh
     expect(clampEffort("deep", "sonnet")).toBe("deep");  // in range
-    expect(clampEffort("quick", "sonnet")).toBe("quick"); // already in range
+    expect(clampEffort("smart", "sonnet")).toBe("smart"); // already in range
     expect(clampEffort("ultra", "opus")).toBe("ultra");
     expect(clampEffort("ultra", "claude-fable-5")).toBe("ultra");
   });
@@ -164,9 +195,8 @@ describe("clampEffort (model effort ceiling)", () => {
 });
 
 describe("effortToFlag — default tier maps to medium (responsive interactive default)", () => {
-  it("smart and quick both → medium; none → low", () => {
+  it("smart → medium; none → low", () => {
     expect(effortToFlag("smart", "opus")).toBe("medium");
-    expect(effortToFlag("quick", "opus")).toBe("medium");
     expect(effortToFlag("none", "opus")).toBe("low");
   });
   it("deep → high, ultra → xhigh on a model that reaches them", () => {

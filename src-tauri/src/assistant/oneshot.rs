@@ -716,19 +716,19 @@ Hard rules:\n\
 invent or assume usage you were not given. If the data is too thin to advise, say so honestly with fewer cards.\n\
 - Speak to a newcomer. No jargon without a one-line plain explanation. Frame advice as benefit (\"you'll get more \
 replies before hitting your limit\", or \"your replies will start ~3s sooner\"), not mechanism.\n\
-- Be specific and actionable. \"Switch chat-only turns to Quick effort\" beats \"optimize your settings\".\n\
+- Be specific and actionable. \"Switch chat-only turns to Low effort\" beats \"optimize your settings\".\n\
 - Do NOT recommend changes the snapshot shows are already in place. Do NOT pad — 2 strong cards beat 5 weak ones.\n\
 \n\
 Output ONLY a JSON object, no markdown fence, no preamble, matching exactly:\n\
 {\"summary\": \"one warm sentence on how their usage looks overall\", \"cards\": [{\"title\": \"short imperative \
 headline\", \"detail\": \"2-3 sentences: what to change, the number that motivates it, the benefit\", \"impact\": \
 \"high\"|\"medium\"|\"low\", \"apply\": null OR {\"kind\": \"effort\"|\"model\"|\"budget\", \"value\": <see below>, \
-\"label\": \"human phrase like 'Set default effort to Quick'\"}}]}\n\
+\"label\": \"human phrase like 'Set default effort to Low'\"}}]}\n\
 \n\
 The \"apply\" field is the heart of this feature — when the advice maps to a Rift setting the user can change in ONE \
 tap, fill it in with a CONCRETE machine value so Rift can apply it directly. Use null only for pure behavior tips \
 (e.g. \"batch your tool calls\") that no single setting captures.\n\
-- kind \"effort\": value is one of \"none\"|\"quick\"|\"smart\"|\"deep\"|\"ultra\" — the default reasoning tier. Lower \
+- kind \"effort\": value is one of \"none\"|\"smart\"|\"deep\"|\"ultra\" — the default reasoning tier. Lower \
 = cheaper/faster. Recommend lowering it only if the usage suggests over-spend on simple turns.\n\
 - kind \"model\": value is one of \"opus\"|\"sonnet\"|\"haiku\"|\"fable\" — the default model. Recommend a cheaper default \
 (sonnet/haiku) when an expensive model dominates spend on routine work. \"fable\" is Anthropic's most capable model \

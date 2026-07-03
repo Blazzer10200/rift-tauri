@@ -49,7 +49,7 @@ export function limitZone(u: number, severity: string | null = null): string {
   return u < 60 ? "ok" : u < 85 ? "warn" : "hot";
 }
 
-const EFFORT_VALUES = ["none", "quick", "smart", "deep", "ultra"] as const;
+const EFFORT_VALUES = ["none", "smart", "deep", "ultra"] as const;
 const MODEL_VALUES = ["opus", "sonnet", "haiku", "fable"] as const;
 
 /** Re-validate a model-emitted apply action into a known-safe shape, or drop it
@@ -62,8 +62,11 @@ function normalizeApply(raw: unknown, allowBudget: boolean): AdviceApply | null 
   if (!raw || typeof raw !== "object") return null;
   const a = raw as Record<string, unknown>;
   const label = typeof a.label === "string" ? a.label : "";
-  if (a.kind === "effort" && EFFORT_VALUES.includes(a.value as never)) {
-    return { kind: "effort", value: a.value as string, label };
+  // Legacy "quick" tier (retired — sent the same medium flag as smart) folds
+  // into "smart" so an older/stale advisor reply still applies cleanly.
+  const effortValue = a.value === "quick" ? "smart" : a.value;
+  if (a.kind === "effort" && EFFORT_VALUES.includes(effortValue as never)) {
+    return { kind: "effort", value: effortValue as string, label };
   }
   if (a.kind === "model" && MODEL_VALUES.includes(a.value as never)) {
     return { kind: "model", value: a.value as string, label };

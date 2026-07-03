@@ -22,7 +22,7 @@ type StubTurn = {
   cliSessionId: string;
   isFirstTurn: boolean;
   model: "sonnet" | "opus" | "haiku";
-  effort: "none" | "quick" | "deep";
+  effort: "none" | "smart" | "deep";
   effortFlag: "low" | "medium" | "high" | null;
   promptLen: number;
   promptPreview: string;
@@ -61,7 +61,7 @@ const stubTurn = (overrides: Partial<StubTurn>): StubTurn => ({
   cliSessionId: "sess-1",
   isFirstTurn: false,
   model: "sonnet",
-  effort: "quick",
+  effort: "smart",
   effortFlag: "medium",
   promptLen: 10,
   promptPreview: "hi",

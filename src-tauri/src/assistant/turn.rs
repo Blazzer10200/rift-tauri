@@ -26,7 +26,7 @@ use super::config::{
     fable_unavailable, haiku_unavailable, HAIKU_FALLBACK_MODEL, HAIKU_MODEL,
     is_valid_effort_tier,
     is_valid_local_model_name, is_valid_model_name, is_valid_permission_mode, load_config,
-    send_effort_flag, DEFAULT_MODEL, FABLE_FALLBACK_MODEL, FABLE_MODEL,
+    normalize_effort_tier, send_effort_flag, DEFAULT_MODEL, FABLE_FALLBACK_MODEL, FABLE_MODEL,
 };
 use super::convo_store::{
     is_valid_session_id, load_session_cwd, load_session_model, save_session_cwd,
@@ -744,10 +744,13 @@ async fn resolve_spawn(
         }
     }
     // Effort tier: per-turn override wins, else stored default, else "smart"
-    // (--effort high, the API default — mirrors the frontend's loadEffort()).
+    // (--effort medium, the responsive default — mirrors the frontend's
+    // loadEffort()). normalize_effort_tier folds the retired legacy "quick"
+    // (still possible in an old config.json thinking_effort) into "smart".
     let effort = thinking_effort
         .or_else(|| cfg.thinking_effort.clone())
         .unwrap_or_else(|| "smart".to_string());
+    let effort = normalize_effort_tier(&effort).to_string();
     // Extended-thinking master switch (per-send). When off on the cloud path we
     // route the CLI through the no-think shim — the CLI always sends a thinking
     // block and no flag disables it, so injecting `thinking:{disabled}` into
@@ -1198,13 +1201,13 @@ async fn resolve_spawn(
     // rejects effort on Haiku 4.5. Tier mapping (MUST mirror frontend
     // `effortToFlag` in src/lib/state/assistant/helpers.ts):
     //   none  → --effort low     (minimal reasoning, fastest TTFT)
-    //   quick → --effort medium  (light reasoning, leaner tool use)
     //   smart → --effort medium  (the responsive interactive default — Anthropic's
     //            recommended `medium`; the CLI default is `high` but their API
     //            guidance says to override it for interactive use to avoid the
     //            "UI appears frozen" long hidden pre-pass)
     //   deep  → --effort high    (the old API default — explicit heavy reasoning)
     //   ultra → --effort xhigh + the ultracode workflow settings key
+    // (legacy "quick", retired 2026-07-03, is folded into "smart" upstream)
     // `max` is deliberately not exposed — per Anthropic's guidance it shows
     // diminishing returns and is prone to overthinking vs xhigh.
     // Earlier impl set `MAX_THINKING_TOKENS` env, but the CLI doesn't honor

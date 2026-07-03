@@ -9,23 +9,22 @@ import type { ModelSel as ModelSelType } from "../../../state/assistant/types";
 
 export type EffortOpt = { id: ThinkingEffort; label: string; hint: string };
 // Effort ladder mapped to the CLI's `--effort` flag (low/medium/high/xhigh) by
-// effortToFlag (helpers.ts): none→low · quick→medium · smart→medium · deep→high
-// · ultra→xhigh. "smart" is Rift's default and maps to `medium` — Anthropic's
-// recommended responsive default for interactive use (the CLI default is `high`,
-// but their guidance is to override it: high makes the model think for a long
-// time before any visible text, which reads as a frozen UI). "deep" (high) is
-// explicit heavy reasoning; "ultra" rides xhigh + the ultracode workflow key.
-// Haiku rejects effort server-side, so the slider hides entirely there.
-// Labels track the real CLI `--effort` flag each tier sends (low/medium/high/
-// xhigh), per the user's "keep it vanilla" call — no marketing names. Two tiers
-// ("quick"/"smart") both send `medium`; "Medium" vs "Medium+" keeps them
-// distinguishable on the slider without inventing a flag the CLI doesn't have.
+// effortToFlag (helpers.ts): none→low · smart→medium · deep→high · ultra→xhigh.
+// "smart" is Rift's default and maps to `medium` — Anthropic's recommended
+// responsive default for interactive use (the CLI default is `high`, but their
+// guidance is to override it: high makes the model think for a long time before
+// any visible text, which reads as a frozen UI). "deep" (high) is explicit
+// heavy reasoning; "ultra" rides xhigh + the ultracode workflow key. Haiku
+// rejects effort server-side, so the slider hides entirely there. Labels track
+// the real CLI `--effort` flag each tier sends, per the user's "keep it
+// vanilla" call — no marketing names. (The legacy "quick" tier — a second
+// medium rung labeled "Medium" beside smart's "Medium+" — was retired
+// 2026-07-03; stored "quick" folds into "smart" at loadEffort.)
 export const EFFORT_OPTIONS: EffortOpt[] = [
-  { id: "none",  label: "Low",     hint: "Low — minimal reasoning. Fastest answers for quick lookups and small edits." },
-  { id: "quick", label: "Medium",  hint: "Medium — light reasoning with leaner tool use. Good for routine, well-defined tasks." },
-  { id: "smart", label: "Medium+", hint: "Medium+ — balanced reasoning + fast responses. The recommended default for everyday work." },
-  { id: "deep",  label: "High",    hint: "High — heavier reasoning and more thorough tool use, for complex tasks where quality matters more than speed." },
-  { id: "ultra", label: "X-High",  hint: "X-High — deepest reasoning + autonomous multi-agent workflows. Claude orchestrates fleets of subagents for the most exhaustive answer." },
+  { id: "none",  label: "Low",    hint: "Low — minimal reasoning. Fastest answers for quick lookups and small edits." },
+  { id: "smart", label: "Medium", hint: "Medium — balanced reasoning + fast responses. The recommended default for everyday work." },
+  { id: "deep",  label: "High",   hint: "High — heavier reasoning and more thorough tool use, for complex tasks where quality matters more than speed." },
+  { id: "ultra", label: "X-High", hint: "X-High — deepest reasoning + autonomous multi-agent workflows. Claude orchestrates fleets of subagents for the most exhaustive answer." },
 ];
 
 export type ModelOpt = {
@@ -97,8 +96,8 @@ export const legacyModels = MODEL_OPTIONS.filter((m) => m.legacy);
 // `--effort low`, rides the no-think shim on the API-key path) — so the fast
 // default and the effortToFlag 3-file lockstep are untouched. Rungs 1+ write
 // thinkingEnabled=true + their tier atomically (assistant.setThinkingDial).
-// `quick` (legacy Medium+) stays a valid stored tier for back-compat; it
-// projects onto the Medium rung.
+// (The legacy `quick` tier is coerced to `smart` at loadEffort — a rung here
+// never sees it.)
 export type DialId = "low" | "medium" | "high" | "xhigh";
 export type DialStop = {
   id: DialId;
@@ -131,13 +130,11 @@ export function dialStopsFor(m: ModelOpt | undefined): DialStop[] {
 
 /** Project the store pair (thinkingEnabled, thinkingEffort) onto a rung index.
  *  Off → the Low rung whatever tier is parked in storage — that IS the wire
- *  truth (thinking-off sends `--effort low`). On → the tier's rung; `quick`
- *  reads as Medium (both send the medium flag); a stale out-of-range tier
- *  falls back to Medium. */
+ *  truth (thinking-off sends `--effort low`). On → the tier's rung; a stale
+ *  out-of-range tier falls back to Medium. */
 export function dialIdxFor(stops: DialStop[], thinkingOn: boolean, effort: ThinkingEffort): number {
   if (!thinkingOn || effort === "none") return 0;
-  const tier = effort === "quick" ? "smart" : effort;
-  const i = stops.findIndex((s) => s.effort === tier);
+  const i = stops.findIndex((s) => s.effort === effort);
   if (i >= 0) return i;
   const med = stops.findIndex((s) => s.effort === "smart");
   return med >= 0 ? med : 0;

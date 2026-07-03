@@ -47,9 +47,10 @@ pub(super) struct AssistantConfig {
     #[serde(default)]
     pub(super) max_budget_usd: Option<f64>,
     /// Effort tier for extended thinking on non-Haiku models, mapped to the
-    /// CLI's `--effort` flag in turn.rs: `"none"`→low · `"quick"`→medium ·
-    /// `"smart"`→medium (responsive interactive default) · `"deep"`→high ·
-    /// `"ultra"`→xhigh + ultracode. Haiku rejects effort server-side and is skipped.
+    /// CLI's `--effort` flag in turn.rs: `"none"`→low · `"smart"`→medium
+    /// (responsive interactive default) · `"deep"`→high · `"ultra"`→xhigh +
+    /// ultracode. Legacy `"quick"` (retired) is folded into `"smart"` by
+    /// `normalize_effort_tier`. Haiku rejects effort server-side and is skipped.
     /// Per-turn override rides the `assistant_send` arg; this is the default.
     #[serde(default)]
     pub(super) thinking_effort: Option<String>,
@@ -160,7 +161,15 @@ pub(super) const DEFAULT_MODEL: &str = "sonnet";
 pub(super) const FABLE_FALLBACK_MODEL: &str = "opus";
 
 /// Effort tiers low→high. Mirrors `EFFORT_ORDER` in state/assistant/helpers.ts.
-pub(super) const EFFORT_ORDER: [&str; 5] = ["none", "quick", "smart", "deep", "ultra"];
+pub(super) const EFFORT_ORDER: [&str; 4] = ["none", "smart", "deep", "ultra"];
+
+/// Fold retired legacy tier ids into their modern equivalent BEFORE validation/
+/// clamping. `"quick"` (retired 2026-07-03 — sent the same medium flag as
+/// smart) can still arrive from an old `config.json` `thinking_effort` default.
+/// Mirrors the frontend's `loadEffort` coercion in state/assistant/helpers.ts.
+pub(super) fn normalize_effort_tier(s: &str) -> &str {
+    if s == "quick" { "smart" } else { s }
+}
 
 /// Reject an effort tier the ladder doesn't define (renderer-supplied).
 pub(super) fn is_valid_effort_tier(s: &str) -> bool {
@@ -197,7 +206,10 @@ pub(super) fn clamp_effort<'a>(effort: &'a str, model: &str) -> &'a str {
 pub(super) fn effort_tier_to_flag(tier: &str) -> &'static str {
     match tier {
         "none" => "low",
-        // "smart" = the responsive interactive default (Anthropic's recommended medium)
+        // "smart" = the responsive interactive default (Anthropic's recommended
+        // medium). "quick" is the retired legacy alias — normalize_effort_tier
+        // folds it first; the arm stays as defense in depth so a stray legacy
+        // value can never degrade to high.
         "quick" | "smart" => "medium",
         "ultra" => "xhigh",
         _ /* "deep" or unknown */ => "high",
@@ -615,7 +627,7 @@ mod tests {
     use super::{
         canonical_model_alias, clamp_effort, cli_model_arg, effort_tier_to_flag,
         is_valid_effort_tier, is_valid_local_base_url, is_valid_model_name, model_max_effort,
-        send_effort_flag, DEFAULT_MODEL, FABLE_FALLBACK_MODEL, SONNET_MODEL,
+        normalize_effort_tier, send_effort_flag, DEFAULT_MODEL, FABLE_FALLBACK_MODEL, SONNET_MODEL,
     };
 
     #[test]
@@ -655,7 +667,7 @@ mod tests {
         assert_eq!(clamp_effort("ultra", "haiku"), "none"); // floored
         assert_eq!(clamp_effort("ultra", "sonnet"), "ultra"); // Sonnet 5 in range
         assert_eq!(clamp_effort("deep", "sonnet"), "deep"); // in range
-        assert_eq!(clamp_effort("quick", "sonnet"), "quick"); // already in range
+        assert_eq!(clamp_effort("smart", "sonnet"), "smart"); // already in range
         assert_eq!(clamp_effort("ultra", "opus"), "ultra");
         assert_eq!(clamp_effort("ultra", "claude-fable-5"), "ultra");
     }
@@ -675,12 +687,28 @@ mod tests {
     #[test]
     fn effort_tier_maps_to_correct_cli_flag() {
         assert_eq!(effort_tier_to_flag("none"), "low");
+        // Retired legacy alias — normalize folds it first, but the arm must
+        // keep mapping to medium (never degrade a legacy value to high).
         assert_eq!(effort_tier_to_flag("quick"), "medium");
         assert_eq!(effort_tier_to_flag("smart"), "medium");
         assert_eq!(effort_tier_to_flag("deep"), "high");
         assert_eq!(effort_tier_to_flag("ultra"), "xhigh");
         // A stale/unknown tier (clamp passes it through) falls back to high(deep).
         assert_eq!(effort_tier_to_flag("bogus"), "high");
+    }
+
+    // Quick-tier retirement (2026-07-03): stored "quick" (old config.json
+    // default or per-turn arg from a stale renderer) must fold into "smart"
+    // BEFORE validation — it is no longer in EFFORT_ORDER.
+    #[test]
+    fn normalize_folds_retired_quick_into_smart() {
+        assert_eq!(normalize_effort_tier("quick"), "smart");
+        assert_eq!(normalize_effort_tier("smart"), "smart");
+        assert_eq!(normalize_effort_tier("none"), "none");
+        assert_eq!(normalize_effort_tier("ultra"), "ultra");
+        assert_eq!(normalize_effort_tier("bogus"), "bogus"); // unknowns untouched
+        assert!(!is_valid_effort_tier("quick")); // retired from the ladder
+        assert!(is_valid_effort_tier(normalize_effort_tier("quick"))); // but normalizes valid
     }
 
     // TC-002 (mega-audit cont.228): thinking-OFF MUST send `--effort low` (#68).

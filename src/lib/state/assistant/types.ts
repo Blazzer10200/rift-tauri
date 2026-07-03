@@ -244,11 +244,13 @@ export type StreamEnvelope =
   | { type: "result"; subtype?: string; result?: string; total_cost_usd?: number; [k: string]: unknown };
 
 /** Extended-thinking tier, mirroring the CLI's effort ladder: none→low ·
- *  quick→medium · smart→medium (interactive default) · deep→high · ultra =
- *  ultracode: xhigh effort + autonomous dynamic-workflow orchestration via the
- *  CLI's `ultracode` settings key (see assistant_send in turn.rs). Haiku rejects
- *  the effort flag server-side, so it gets none. */
-export type ThinkingEffort = "none" | "quick" | "smart" | "deep" | "ultra";
+ *  smart→medium (interactive default) · deep→high · ultra = ultracode: xhigh
+ *  effort + autonomous dynamic-workflow orchestration via the CLI's `ultracode`
+ *  settings key (see assistant_send in turn.rs). Haiku rejects the effort flag
+ *  server-side, so it gets none. The legacy "quick" tier (retired 2026-07-03,
+ *  also sent medium) is coerced to "smart" at every read boundary — loadEffort
+ *  (FE), normalize_effort_tier (BE), normalizeApply (AI Health). */
+export type ThinkingEffort = "none" | "smart" | "deep" | "ultra";
 
 /** Model selection — stored value IS the string handed to the CLI's `--model`,
  *  so it flows through `assistant_send` untouched. `opus` is the short alias

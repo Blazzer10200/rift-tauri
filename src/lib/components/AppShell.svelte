@@ -89,6 +89,29 @@
     untrack(() => cliUpdate.setMethod(m));
   });
 
+  // #42: a CLI updated in an external terminal (`npm i -g …` / `claude update`)
+  // left auth.installs/cliVersion stale until the next discrete probe (send,
+  // Settings visit). Re-probe when the window regains focus — the moment a user
+  // returns from that terminal — throttled to one probe per 60s so alt-tabbing
+  // can't spam the where.exe/version probes. Handler reads store state at event
+  // time (not effect body), so this effect registers once and never re-tracks.
+  $effect(() => {
+    const PROBE_MIN_GAP_MS = 60_000;
+    const onReturn = () => {
+      if (document.visibilityState !== "visible") return;
+      if (assistant.authChecking) return;
+      const last = assistant.authLastProbed;
+      if (last !== null && Date.now() - last < PROBE_MIN_GAP_MS) return;
+      void assistant.refreshAuth();
+    };
+    window.addEventListener("focus", onReturn);
+    document.addEventListener("visibilitychange", onReturn);
+    return () => {
+      window.removeEventListener("focus", onReturn);
+      document.removeEventListener("visibilitychange", onReturn);
+    };
+  });
+
   // HMR-safe global keydown — $effect cleanup runs on unmount AND when the
   // effect re-tracks during HMR replacement.
   $effect(() => {

@@ -344,7 +344,7 @@
   // the model rejects. (setModel already clamps on pick; this guards the case
   // where the model changed by another path, e.g. a tab's modelOverride.)
   // Clamps the tier directly — the ladder's rung 0 (effort:null) is not a tier,
-  // so a stops-membership check would false-positive on `none`/`quick`.
+  // so a stops-membership check would false-positive on `none`.
   $effect(() => {
     if (!dialApplies) return;
     const clamped = clampEffort(assistant.thinkingEffort, paneEffectiveModel);

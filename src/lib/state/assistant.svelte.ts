@@ -734,8 +734,8 @@ class AssistantStore {
   // to assistant_send so the CLI uses sonnet/opus/haiku per their choice.
   // Initialized from localStorage so the choice survives reloads.
   model = $state<ModelSel>(loadModel());
-  // Extended-thinking budget tier. "none" = no extended thinking (fastest);
-  // "quick" = 2K budget (default, balanced); "deep" = 10K (heavy reasoning).
+  // Extended-thinking effort tier (CLI `--effort` ladder): "none"→low ·
+  // "smart"→medium (default) · "deep"→high · "ultra"→xhigh + ultracode.
   // Haiku ignores this server-side. Persisted to localStorage.
   thinkingEffort = $state<ThinkingEffort>(clampEffort(loadEffort(), this.model));
   // Extended-thinking master switch. On (default) = current behavior; off routes

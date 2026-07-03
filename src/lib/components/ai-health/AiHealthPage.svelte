@@ -466,12 +466,12 @@
   // Pretty labels so newcomers see plain words, not "xhigh"/"sonnet".
   // Display labels match the composer's unified thinking dial (Off·Low·Medium·
   // High·Max). The advisor still operates on the underlying effort tier ids
-  // (none/quick/smart/deep/ultra — the JSON-contract allow-list, unchanged); this
-  // is presentation only. Labels track the composer's reasoning ladder (rung
-  // names = the CLI flag each tier sends). quick+smart both map to the medium
-  // CLI flag → both read "Medium".
+  // (none/smart/deep/ultra — the JSON-contract allow-list; legacy "quick" is
+  // coerced to "smart" by normalizeApply); this is presentation only. Labels
+  // track the composer's reasoning ladder (rung names = the CLI flag each tier
+  // sends).
   const EFFORT_LABEL: Record<string, string> = {
-    none: "Low", quick: "Medium", smart: "Medium", deep: "High", ultra: "X-High",
+    none: "Low", smart: "Medium", deep: "High", ultra: "X-High",
   };
   const MODEL_LABEL: Record<string, string> = {
     opus: "Opus", sonnet: "Sonnet", haiku: "Haiku",

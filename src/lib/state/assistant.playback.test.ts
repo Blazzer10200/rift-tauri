@@ -78,7 +78,7 @@ function beginTurn(tab: Tab, overrides: Partial<TurnRecord> = {}): TurnRecord {
     cliSessionId: tab.cliSessionId,
     isFirstTurn: false,
     model: "sonnet",
-    effort: "quick",
+    effort: "smart",
     effortFlag: "medium",
     promptLen: 4,
     promptPreview: "test",
