@@ -172,8 +172,11 @@
     if (ms < 1000) return "";
     const s = ms / 1000;
     if (s < 10) return `${s.toFixed(1)}s`;
-    if (s < 60) return `${Math.round(s)}s`;
-    const m = Math.floor(s / 60), rem = Math.round(s % 60);
+    // Round the total ONCE before splitting (fmtDur's approach) — rounding
+    // seconds and minutes independently emitted "60s"/"1m 60s" at :60 edges.
+    const t = Math.round(s);
+    if (t < 60) return `${t}s`;
+    const m = Math.floor(t / 60), rem = t % 60;
     return rem ? `${m}m ${rem}s` : `${m}m`;
   }
   const durationLabel = $derived.by<string | null>(() => {

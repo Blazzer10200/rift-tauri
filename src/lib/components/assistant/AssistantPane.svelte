@@ -506,8 +506,14 @@
           </div>
         </div>
         <!-- Pinned plan HUD — floats over the stream's top edge so the live
-             plan stays glanceable while the timeline scrolls past it. -->
-        <PlanHud {tab} {streaming} />
+             plan stays glanceable while the timeline scrolls past it. Keyed on
+             the tab: its sawLive/linger/open $state is per-plan, and the pane
+             reuses ONE instance across tab switches — unkeyed, a sawLive from
+             tab A let tab B's already-finished plan flash the stale green
+             "complete" linger the guard exists to prevent. -->
+        {#key tabId}
+          <PlanHud {tab} {streaming} />
+        {/key}
       {/if}
 
       {#if showError || showNotice}
