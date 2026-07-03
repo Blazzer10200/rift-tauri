@@ -2,13 +2,14 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — stream polish: pinned plan, calmer live line
+## v0.85.0 — Stream polish: pinned plan, calmer live line
 
 - **The plan never scrolls away anymore** — a pinned, glassy Plan HUD floats at the top of the conversation while a plan is active: current task, slim progress bar, done/total count. Click it to expand the full checklist; when everything completes it flashes green for a moment and retires itself. The inline plan card in the transcript stays as the historical record.
 - **The blinking green streaming caret is gone** — the flashing block at the tail of streaming text read as visual noise, not signal. The pulsing head dot + shimmer already say "live".
 - **The live status line grew up** — elapsed time reads `3m 56s` instead of `236s` (the ticking "Thinking…" header too), the seconds/tokens meta moved to a quiet right-aligned mono cluster instead of crowding the verb, each verb swap eases in instead of hard-cutting, and the rotating words were curated to a calmer set (Tracing, Distilling, Untangling… — Sussing and Noodling retired).
 - **Minute-aware durations everywhere** — "Thought for 236s" and long tool-chip durations now read `3m 56s` too.
 - **Reduced motion is actually reduced** — the stream's entrance slides and pulsing live-dots now honor the OS reduced-motion setting (shimmer and counters already did).
+- **Verified under the hood** — the warm-process stale-frame drain (#72) and the maximize-button state fix passed live end-to-end checks on a real dev run; the CDP dev tooling now reads stream-mode replies.
 
 ## v0.84.1 — Follow-up fixes from self-verification
 
@@ -42,9 +43,6 @@
 - **Settings full redesign** — each tab one scrolling page, texture-blended header, accent-is-just-a-color; three new textures (12 total) with live hover previews; Workspace is a real hub (project grid with chats · last-active · spend); 52px collapsed mini-rail.
 - **Fixes** — split panes truly isolate (retries/continues/queued sends stay in their pane); deleting a chat after a reply holds; errored turns keep their plain-English reason; ~250 lines of dead CSS/TS removed.
 
-## v0.83.0 — Sidebar redesign + Fable 5 always in the picker
-- **Project-first sidebar:** switcher (monogram + branch) on top, New chat + search, scope toggle, recent-day history, icon footer.
-- **Fable 5 always visible** — graceful "currently unavailable" while gated; fixed the thinking-off request that failed API-key Fable turns.
 
 *(`ProjectRail`→`ProjectSwitcher`; `FABLE_DISABLED=false` lockstep. cargo test 132/132, svelte-check 0/0, vitest 410/410.)*
 
