@@ -553,14 +553,19 @@ async function assistantState(target = 'main') {
             const bubbles = Array.from(document.querySelectorAll('.bubble, .sturn')).map(b => {
                 const role = b.getAttribute('data-role') || (b.classList.contains('sturn') ? 'assistant' : null);
                 const reasoning = b.querySelector('.reasoning');
+                // Bubble mode keeps prose in .body .content .text; STREAM mode
+                // (.sturn) renders it as one .snarr block per narration chunk —
+                // join those or stream-mode replies read as 0 chars.
                 const text = b.querySelector('.body .content .text');
+                const snarr = Array.from(b.querySelectorAll('.snarr')).map(n => n.textContent).join('\\n');
+                const txt = text?.textContent || snarr || '';
                 return {
                     role,
                     reasoningLabel: reasoning?.querySelector('.reasoning-head')?.textContent?.trim() || null,
                     reasoningExpanded: reasoning?.querySelector('.reasoning-head')?.getAttribute('aria-expanded') === 'true',
                     reasoningChars: reasoning?.querySelector('.reasoning-body')?.textContent?.length ?? reasoning?.querySelector('.reasoning-preview')?.textContent?.length ?? 0,
-                    textChars: text?.textContent?.length || 0,
-                    textPreview: text?.textContent?.slice(0, 200) || null,
+                    textChars: txt.length,
+                    textPreview: txt.slice(0, 200) || null,
                 };
             });
             // Composer active-model pill (.settings-pill .pill-label) preferred — but
