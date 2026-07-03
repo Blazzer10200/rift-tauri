@@ -28,6 +28,11 @@
   let sawLive = $state(false);
   let linger = $state(false);
   let lingerTimer: ReturnType<typeof setTimeout> | null = null;
+  // One linger per completion — latches when the timer arms, clears when the
+  // plan goes live again. Declared HERE, above the effects: $effect.pre runs
+  // its first pass eagerly during component init, so a later declaration is a
+  // TDZ ReferenceError that kills the whole mount (caught live, cont.269).
+  let lingered = false;
 
   // Per-tab reset — the pane reuses ONE HUD instance across tab switches (`tab`
   // swaps as a prop; deliberately NOT a {#key} remount at the mount site,
@@ -37,25 +42,38 @@
   // checklist carried over. Declared BEFORE the linger effect — effects run in
   // declaration order, so the reset settles before linger sees the new tasks.
   let seenTab: TabState | null | undefined;
-  $effect(() => {
+  $effect.pre(() => {
     if (tab === seenTab) return;
     seenTab = tab;
     sawLive = false;
     linger = false;
+    lingered = false;
     open = false;
     if (lingerTimer) { clearTimeout(lingerTimer); lingerTimer = null; }
   });
 
-  $effect(() => {
+  // `lingered`: without the latch, this effect re-runs when `streaming` flips
+  // false at turn end; lingerTimer (a plain untracked var) is null again
+  // post-expiry while allDone && sawLive still hold, so the green bar flashed
+  // a SECOND 4s time (observed live via MutationObserver, cont.269: two
+  // ADD/REMOVE cycles exactly 4.0s apart).
+  // $effect.pre (both this and the reset above): linger must settle BEFORE the
+  // render pass. As a plain post-render effect, the completion flush rendered
+  // once with visible=false (in-progress branch dead, linger not yet set) —
+  // unmounting + remounting .phud in the same flush (observed live: REMOVE+ADD
+  // at the same ms), replaying the entrance animation and bouncing focus.
+  $effect.pre(() => {
     // sawLive requires a LIVE stream frame, not just unfinished tasks —
     // tab.tasks persists to disk, so a reopened convo has total>0 without
     // ever having been live in this view.
     if (streaming && total > 0 && !allDone) {
       sawLive = true;
       linger = false;
+      lingered = false;
       if (lingerTimer) { clearTimeout(lingerTimer); lingerTimer = null; }
-    } else if (allDone && sawLive && !lingerTimer) {
+    } else if (allDone && sawLive && !lingerTimer && !lingered) {
       linger = true;
+      lingered = true;
       lingerTimer = setTimeout(() => { linger = false; lingerTimer = null; }, 4000);
     }
   });

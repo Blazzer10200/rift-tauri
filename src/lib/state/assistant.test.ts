@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { afterEach, describe, it, expect, beforeEach, vi } from "vitest";
 
 // Mock Tauri IPC before importing the store. assistant.svelte.ts wires
 // `invoke` + `listen` at construction time; the test only exercises pure
@@ -432,6 +432,45 @@ describe("tab switching never kills background streams (multi-tab regression)", 
     expect(invokeMock).not.toHaveBeenCalledWith("assistant_stop", expect.anything());
     expect(tabA.streaming).toBe(true);
     expect(tabA.messages.map((m: any) => m.id)).toEqual(liveMsgs.map((m) => m.id));
+  });
+});
+
+describe("loadConversation hydrates the persisted per-tab root (cont.269 regression)", () => {
+  const invokeMock = vi.mocked(invoke);
+
+  beforeEach(() => invokeMock.mockReset());
+  // loadConversation refreshes the sidebar cache — keep `conversations` an
+  // array so unmocked list calls can't leak undefined into later describes.
+  afterEach(() => { assistant.conversations = [] as any; });
+
+  it("restores workspaceRoot from the ConversationRecord (was write-only: saved, never read back)", async () => {
+    invokeMock.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "assistant_load_conversation") {
+        return {
+          id: args.id, title: "t", model: "sonnet", createdAt: 1, updatedAt: 1,
+          messages: [], cliSessionId: args.id, workspaceRoot: "C:/proj/rooted",
+        };
+      }
+      if (cmd === "assistant_session_cwd") return null;
+      if (cmd === "assistant_list_conversations") return [];
+      return undefined;
+    });
+    await assistant.loadConversation("root-restore-1");
+    expect((assistant.tabFor("root-restore-1") as any).workspaceRoot).toBe("C:/proj/rooted");
+  });
+
+  it("legacy record without workspaceRoot falls back to the pinned session cwd", async () => {
+    invokeMock.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "assistant_load_conversation") {
+        return { id: args.id, title: "t", model: "sonnet", createdAt: 1, updatedAt: 1, messages: [], cliSessionId: args.id };
+      }
+      if (cmd === "assistant_session_cwd") return "C:/proj/pinned-cwd";
+      if (cmd === "assistant_list_conversations") return [];
+      return undefined;
+    });
+    await assistant.loadConversation("root-restore-2");
+    await new Promise((r) => setTimeout(r, 0)); // session-cwd lookup resolves async
+    expect((assistant.tabFor("root-restore-2") as any).workspaceRoot).toBe("C:/proj/pinned-cwd");
   });
 });
 

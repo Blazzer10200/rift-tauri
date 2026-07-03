@@ -323,6 +323,13 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     // #32: hydrate the ctx meter from the saved final-turn usage — without
     // this a restored convo shows a blank gauge until the next turn lands.
     tab.lastTurnUsage = convo.lastTurnUsage ?? null;
+    // The record's workspaceRoot was SAVED (buildSaveRecord) but never read
+    // back — a restored convo silently lost its per-tab root, so turns ran
+    // root-less (no workspace MCP tools, builtin reads against the wrong cwd;
+    // found live cont.269 when a reload made Read return another project's
+    // README). Applied BEFORE the async session-cwd lookup below, whose
+    // `!tab.workspaceRoot` guard then only fills legacy records lacking it.
+    tab.workspaceRoot = convo.workspaceRoot ?? null;
     // #30: resumed sessions stay pinned to their original folder — fetch the
     // pin so the tabs bar can badge a cwd that differs from the workspace.
     tab.sessionCwd = null;
