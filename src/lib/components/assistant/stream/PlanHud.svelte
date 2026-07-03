@@ -73,15 +73,25 @@
   // Focus rescue — the HUD hides on events the user didn't initiate (linger
   // timeout, stream end); if the expand button held focus, the {#if} teardown
   // would silently drop focus to <body>, restarting keyboard Tab order at the
-  // top of the document. Pre-effect runs BEFORE the DOM update, while the node
-  // is still attached — hand focus to this pane's composer textarea instead.
+  // top of the document. Hand focus to this pane's composer textarea instead.
   let hudEl = $state<HTMLElement | null>(null);
-  $effect.pre(() => {
-    if (visible) return;
+  function rescueFocus() {
     const el = hudEl;
     if (!el || !el.contains(document.activeElement)) return;
     el.closest(".pane-shell")?.querySelector<HTMLElement>("textarea")?.focus();
+  }
+  // Pre-effect covers the in-place hide ({#if visible} flip): runs BEFORE the
+  // DOM update, while the node is still attached.
+  $effect.pre(() => {
+    if (!visible) rescueFocus();
   });
+  // Cleanup covers REAL unmounts the pre-effect never sees — the parent's
+  // {#if showEmpty} branch swap (switching to an empty tab), tab close, and
+  // /clear all destroy this component with `visible` still true. Effect
+  // teardown runs during destroy while the node is still attached; if it ever
+  // ran post-detach, contains() is false and this is a no-op (no worse than
+  // the unrescued path).
+  $effect(() => () => rescueFocus());
 </script>
 
 {#if visible}
