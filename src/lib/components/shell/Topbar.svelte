@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { invoke } from "@tauri-apps/api/core";
   import { X, SplitSquareHorizontal, AppWindow } from "lucide-svelte";
@@ -10,6 +11,16 @@
 
   const win = getCurrentWindow();
   const isChat = $derived(workspace.activeId === "chat");
+
+  // Reflect real window state on the maximize/restore control (icon + label).
+  let maximized = $state(false);
+  onMount(() => {
+    win.isMaximized().then((m) => { maximized = m; }).catch(console.error);
+    const unlisten = win.onResized(() => {
+      win.isMaximized().then((m) => { maximized = m; }).catch(console.error);
+    });
+    return () => { void unlisten.then((fn) => fn()); };
+  });
 
   // Chat surface titles consistently as "Chat" (empty or not) — a real
   // conversation shows its own title once it has one. (Previously an empty chat
@@ -48,7 +59,7 @@
 
     <div class="winctl">
       <button class="wc" type="button" onclick={() => win.minimize().catch(console.error)} use:tooltip={"Minimize"} aria-label="Minimize"><span class="wc-min"></span></button>
-      <button class="wc" type="button" onclick={() => win.toggleMaximize().catch(console.error)} use:tooltip={"Maximize"} aria-label="Maximize"><span class="wc-max"></span></button>
+      <button class="wc" type="button" onclick={() => win.toggleMaximize().catch(console.error)} use:tooltip={maximized ? "Restore" : "Maximize"} aria-label={maximized ? "Restore" : "Maximize"}><span class={maximized ? "wc-restore" : "wc-max"}></span></button>
       <button class="wc wc-x" type="button" onclick={() => win.close().catch(console.error)} use:tooltip={"Close"} aria-label="Close"><X size={12} /></button>
     </div>
   </div>
@@ -69,4 +80,8 @@
   .wc-x:hover { background: var(--danger); color: var(--danger-fg); }
   .wc-min { width: 10px; height: 1.5px; background: currentColor; }
   .wc-max { width: 9px; height: 9px; border: 1.5px solid currentColor; border-radius: 2px; }
+  /* Restore glyph: front square + a second square peeking out top-right. */
+  .wc-restore { position: relative; width: 9px; height: 9px; }
+  .wc-restore::before { content: ""; position: absolute; left: 0; bottom: 0; width: 7px; height: 7px; border: 1.5px solid currentColor; border-radius: 1.5px; background: var(--bg); }
+  .wc-restore::after { content: ""; position: absolute; right: 0; top: 0; width: 7px; height: 7px; border: 1.5px solid currentColor; border-radius: 1.5px; }
 </style>

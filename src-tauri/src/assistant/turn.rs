@@ -1898,14 +1898,17 @@ struct RunCtx {
 /// the turn channel closes (evict / signature drain — all senders dropped), a
 /// turn requested bg-evict (M3), or a fatal stdin write error.
 async fn run_turn_loop(mut ctx: RunCtx) {
-    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use std::sync::atomic::Ordering;
 
-    // Mirrors bridge.rs's MAX_BRIDGE_LINE — bound a single NDJSON line so a
-    // pathological unbounded line from the child can't OOM the reader.
-    const MAX_STDOUT_LINE: u64 = 8 * 1024 * 1024;
     let mut stdin = ctx.stdin;
-    let mut lines = BufReader::new(ctx.stdout.take(MAX_STDOUT_LINE)).lines();
+    // NOTE: intentionally UNBOUNDED (no `.take(N)` cap). Unlike bridge.rs's
+    // loopback socket (untrusted, one-line-per-conn → a per-conn `Take` is
+    // safe), this reader is reused across the warm child's whole lifetime, so a
+    // stream-wide `Take` would decrement one non-resetting limit and hit a false
+    // permanent EOF after N cumulative bytes → spurious cold respawns. The child
+    // is our own spawned `claude` CLI; its NDJSON lines are model-bounded.
+    let mut lines = BufReader::new(ctx.stdout).lines();
     let mut turn_rx = ctx.turn_rx;
 
     // Persistent stderr reader (M2): on the warm path `child.wait()` never
@@ -2205,7 +2208,7 @@ enum TurnOutcome {
 /// arg limit.
 struct StreamCtx<'a> {
     stdin: &'a mut tokio::process::ChildStdin,
-    lines: &'a mut tokio::io::Lines<BufReader<tokio::io::Take<tokio::process::ChildStdout>>>,
+    lines: &'a mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
     app_out: &'a AppHandle,
     win_label: &'a str,
     stream_sid: &'a str,

@@ -573,7 +573,10 @@ export async function closeOtherTabs(host: TabsHost, keepId: string) {
   // #144: tear down per-tab state for removed tabs so tabs Map +
   // tabDrafts/tabAttachments/tabScroll don't accumulate over long sessions.
   for (const id of others) {
-    const t = host.tabs.get(id) as { streaming?: boolean } | undefined;
+    const t = host.tabs.get(id) as { streaming?: boolean; queue?: unknown[] } | undefined;
+    // Clear the queue before stop() so its synchronous drainQueue can't fire a
+    // send into a tab about to be dropped (same race as closeTab, tabs.ts:402-408).
+    if (t?.queue?.length) t.queue = [];
     if (t?.streaming) await host.stop(id);
     host.dropTab(id);
     host.pruneTabUi(id);
@@ -594,7 +597,10 @@ export async function closeAllTabs(host: TabsHost) {
   // dropped while its CLI subprocess keeps running + burning tokens, its events
   // silently discarded. Mirrors closeOtherTabs/closeTabsToRight.
   for (const id of host.openTabs) {
-    const t = host.tabs.get(id) as { streaming?: boolean } | undefined;
+    const t = host.tabs.get(id) as { streaming?: boolean; queue?: unknown[] } | undefined;
+    // Clear the queue before stop() so its synchronous drainQueue can't fire a
+    // send into a tab about to be dropped (same race as closeTab, tabs.ts:402-408).
+    if (t?.queue?.length) t.queue = [];
     if (t?.streaming) await host.stop(id);
   }
   // RR10: flush EVERY tab with unsaved messages, not just the active one — a
@@ -629,7 +635,10 @@ export async function closeTabsToRight(host: TabsHost, anchorId: string) {
   const removedActive = host.currentConvoId && !kept.includes(host.currentConvoId);
   // #144
   for (const id of removed) {
-    const t = host.tabs.get(id) as { streaming?: boolean } | undefined;
+    const t = host.tabs.get(id) as { streaming?: boolean; queue?: unknown[] } | undefined;
+    // Clear the queue before stop() so its synchronous drainQueue can't fire a
+    // send into a tab about to be dropped (same race as closeTab, tabs.ts:402-408).
+    if (t?.queue?.length) t.queue = [];
     if (t?.streaming) await host.stop(id);
     host.dropTab(id);
     host.pruneTabUi(id);

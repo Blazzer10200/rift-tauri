@@ -2,6 +2,13 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.84.1 — Follow-up fixes from self-verification
+
+- **Warm sessions no longer respawn spuriously** — a v0.84.0 stdout line-cap change accidentally capped the *whole* stream instead of a single line, so a long session that streamed more than ~8 MB total would falsely look like a dead process and cold-restart. Reverted; the reader is unbounded again (it reads our own CLI, not an untrusted socket).
+- **The maximize button now shows its real state** on the normal-mode window chrome (v0.84.0 only fixed the onboarding titlebar, which isn't the one you see day-to-day) — the icon and tooltip switch to Restore when maximized.
+- **Three more tab-close paths** (close others / close all / close-to-the-right) now clear a tab's queued messages before stopping it, closing the same misfire race v0.84.0 fixed for single-tab close.
+- **Terminal copy button shows a failed state** on a clipboard error (the state was tracked but never rendered); a tiny edit to a CRLF file no longer defaults to collapsed.
+
 ## v0.84.0 — Built for your machine: adaptability & correctness pass, reasoning ladder, transcript detail, settings redesign
 
 ### Works on more than one machine

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Terminal, ChevronRight, Check, Copy } from "lucide-svelte";
+  import { Terminal, ChevronRight, Check, Copy, X } from "lucide-svelte";
   import { slide } from "svelte/transition";
   import { fmtDur, outputPeek, VERB_ING, VERB_PAST, type StreamTool } from "./streamModel";
   import { uiPrefs } from "$lib/state/ui-prefs.svelte";
@@ -76,13 +76,14 @@
       <span
         class="ssh-copy"
         class:copied
+        class:failed={copyFailed}
         role="button"
         tabindex="0"
-        aria-label="Copy command and output"
-        use:tooltip={"Copy command + output"}
+        aria-label={copyFailed ? "Copy failed" : "Copy command and output"}
+        use:tooltip={copyFailed ? "Copy failed" : "Copy command + output"}
         onclick={copyAll}
         onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); copyAll(e as unknown as MouseEvent); } }}
-      >{#if copied}<Check size={11} strokeWidth={2.5} />{:else}<Copy size={11} />{/if}</span>
+      >{#if copied}<Check size={11} strokeWidth={2.5} />{:else if copyFailed}<X size={11} strokeWidth={2.5} />{:else}<Copy size={11} />{/if}</span>
     {/if}
     {#if hasOut && mode !== "minimal"}
       <ChevronRight size={13} class={"ssh-chev" + (open ? " open" : "")} />
@@ -137,6 +138,7 @@
   .ssh-head:hover .ssh-copy, .ssh-copy:focus-visible { opacity: 1; }
   .ssh-copy:hover { color: var(--fg-2); background: var(--surface-hover); }
   .ssh-copy.copied { color: var(--ok); opacity: 1; }
+  .ssh-copy.failed { color: var(--danger); opacity: 1; }
   :global(.ssh-head .ssh-chev) { flex: none; color: var(--fg-faint); transition: transform var(--dur-fast); }
   :global(.ssh-head .ssh-chev.open) { transform: rotate(90deg); }
 

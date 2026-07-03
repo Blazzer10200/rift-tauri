@@ -215,7 +215,9 @@
       const newStr = isWrite ? (input.content as string) : (typeof input.new_string === "string" ? input.new_string : "");
       // Skip diffing huge blocks — default collapsed to avoid mount-time cost.
       if (oldStr.length + newStr.length > 200_000) return false;
-      const _chunks = diffArrays(oldStr.split("\n"), newStr.split("\n"));
+      // Normalize CRLF→LF (as in `pairs`) so a CRLF-old vs LF-new pair doesn't
+      // count as all-changed and wrongly keep a tiny edit collapsed.
+      const _chunks = diffArrays(oldStr.replace(/\r\n/g, "\n").split("\n"), newStr.replace(/\r\n/g, "\n").split("\n"));
       const changed = _chunks.reduce((n, c) => n + (c.added || c.removed ? c.value.length : 0), 0);
       return changed <= SMALL_DIFF;
     }),
