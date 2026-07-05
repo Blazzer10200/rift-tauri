@@ -920,7 +920,12 @@ export function onStreamLine(tab: TabState, raw: string) {
 }
 
 export function onStreamDone(tab: TabState) {
-  if (!tab.streaming) return;
+  if (!tab.streaming) {
+    // Terminal event for an already-settled turn (user Stop) — consume the
+    // post-stop gate so a deferred next send can start immediately.
+    tab.staleTerminalUntil = 0;
+    return;
+  }
   flushPendingText(tab);
   let envelopeFallback = false;
   let blankTurn = false;
@@ -1044,6 +1049,13 @@ export function finalizeInflightBlocks(tab: TabState) {
 }
 
 export function onStreamError(tab: TabState, msg: string) {
+  if (!tab.streaming) {
+    // Stale terminal for a turn the user already stopped (the stop marker can
+    // be consumed by a racing next send, remapping its DONE to ERROR) — a
+    // settled turn must not surface a late error banner. Consume the gate.
+    tab.staleTerminalUntil = 0;
+    return;
+  }
   tab.lastError = msg;
   tab.streaming = false;
   if (tab.drainHandle !== null) {

@@ -136,6 +136,10 @@ pub(super) struct SpawnKey {
     /// Cheap fingerprint of the system-prompt addendum variant (TOOLS / NO_WS /
     /// LOCAL) — a change here means a different `--append-system-prompt`.
     pub addendum_ptr: usize,
+    /// `--max-budget-usd` bit-pattern (None when unset/invalid). Baked into
+    /// argv at spawn like effort — without it in the key, a budget change kept
+    /// the warm child enforcing the stale cap until an unrelated respawn.
+    pub max_budget_bits: Option<u64>,
 }
 
 /// Cheap stable fingerprint for a secret/URL string, for `SpawnKey.cred_fp` /

@@ -174,6 +174,17 @@ describe("numberActions", () => {
     expect(out.map((u) => u.kind)).toEqual(["divider", "block", "divider"]);
     expect(out[2]).toMatchObject({ title: "Tail", key: "od_tail" });
   });
+  it("keeps BOTH dividers when two headers are back-to-back", () => {
+    const units: TimelineUnit[] = [
+      { kind: "divider", stepNum: 1, title: "Setup", key: "d0" },
+      { kind: "divider", stepNum: 2, title: "Build", key: "d1" },
+      unit(text("after"), "p"),
+    ];
+    const out = numberActions(units);
+    expect(out.map((u) => u.kind)).toEqual(["divider", "divider", "block"]);
+    expect(out[0]).toMatchObject({ title: "Setup" });
+    expect(out[1]).toMatchObject({ title: "Build" });
+  });
 });
 
 describe("status + kind", () => {

@@ -112,6 +112,16 @@ export async function send(store: AssistantStore, prompt: string, targetConvoId?
     store.openTabs = [...store.openTabs, convoId];
     store.persistTabs();
   }
+  // Post-stop gate (see TabState.staleTerminalUntil): starting the next turn
+  // before the stopped turn's terminal event lands would let that stale event
+  // finalize the new turn, and the new backend send would consume the old
+  // turn's stop marker (remapping its stale DONE to a spurious ERROR).
+  while (tab.staleTerminalUntil > Date.now()) {
+    await new Promise((r) => setTimeout(r, 50));
+    // Another send won the gate while we waited — re-enter from the top so
+    // this message takes the queue path instead of interleaving the session.
+    if (tab.streaming) return send(store, prompt, targetConvoId);
+  }
   tab.beginTurn();
   store.lastNotice = null;
   // #184: clear stale error banner so it doesn't bleed into the new turn.
@@ -348,6 +358,11 @@ export async function stop(store: AssistantStore, tabId?: string | null) {
   // status:"active" thinking chip + status:"pending" tool chips in history.
   finalizeInflightBlocks(tab);
   tab.streaming = false;
+  // Arm the post-stop gate: the killed turn's terminal done/error is still in
+  // flight from the backend. send() defers the next turn on this tab until the
+  // handler consumes it (clearing this) or the deadline passes — else that
+  // stale terminal would finalize the NEXT turn (same session id on the wire).
+  tab.staleTerminalUntil = Date.now() + 2000;
   tab.streamingMsgId = null;
   tab.streamingMsgIdx = null;
   tab.deltaCount = 0;

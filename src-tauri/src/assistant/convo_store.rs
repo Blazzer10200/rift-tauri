@@ -252,7 +252,12 @@ fn list_conversations_sync() -> Result<Vec<ConversationMeta>, String> {
         // shipped E5, ridden through serde_json::Value catch-all on save).
         let raw: serde_json::Value = match serde_json::from_slice(&bytes) {
             Ok(v) => v,
-            Err(_) => continue,
+            Err(e) => {
+                // Fail loud-ish: a convo silently vanishing from the list is
+                // indistinguishable from data loss — leave a trail.
+                log::warn!("convo list: skipping unparseable {} — {e}", p.display());
+                continue;
+            }
         };
         // Extract the Value-only field BEFORE the typed parse consumes `raw`,
         // so we deserialize once without cloning the whole Value per convo.
@@ -267,7 +272,10 @@ fn list_conversations_sync() -> Result<Vec<ConversationMeta>, String> {
             .unwrap_or_default();
         let convo: Conversation = match serde_json::from_value(raw) {
             Ok(c) => c,
-            Err(_) => continue,
+            Err(e) => {
+                log::warn!("convo list: skipping malformed {} — {e}", p.display());
+                continue;
+            }
         };
         let message_count = convo
             .messages
@@ -484,15 +492,22 @@ pub fn assistant_delete_conversation(id: String) -> Result<(), String> {
     // (post-S103 these can differ from the Rift convo id after a compaction).
     // Without this, the cwd sidecar under the cli session UUID never gets
     // cleaned up — orphan accumulation under `~/.rift/assistant/sessions/`.
-    let cli_session_id = std::fs::read_to_string(&p)
-        .ok()
-        .and_then(|s| serde_json::from_str::<Conversation>(&s).ok())
-        .and_then(|c| c.cli_session_id);
-    match std::fs::remove_file(&p) {
-        Ok(()) => {}
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-        Err(e) => return Err(format!("delete {}: {e}", p.display())),
-    }
+    // Hold CONVO_WRITE_LOCK across read+delete so an in-flight save's
+    // write-tmp→rename can't land between our remove and return, silently
+    // resurrecting the deleted convo on disk.
+    let cli_session_id = {
+        let _guard = CONVO_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let cli_session_id = std::fs::read_to_string(&p)
+            .ok()
+            .and_then(|s| serde_json::from_str::<Conversation>(&s).ok())
+            .and_then(|c| c.cli_session_id);
+        match std::fs::remove_file(&p) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("delete {}: {e}", p.display())),
+        }
+        cli_session_id
+    };
     // Delete sidecars only after the convo record is gone — a half-deleted
     // convo with intact sidecars is recoverable; a deleted sidecar with a
     // surviving convo would silently lose its pinned cwd.

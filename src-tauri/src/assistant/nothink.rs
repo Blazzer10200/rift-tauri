@@ -161,6 +161,15 @@ async fn read_request(stream: &mut TcpStream) -> Result<ParsedReq, String> {
         }
         body.extend_from_slice(&tmp[..n]);
     }
+    // A short body (peer closed mid-send) must be an error — truncate() is a
+    // no-op below content_length, so without this a truncated JSON body would
+    // be forwarded upstream as if complete.
+    if body.len() < content_length {
+        return Err(format!(
+            "client closed mid-body ({}/{content_length} bytes)",
+            body.len()
+        ));
+    }
     body.truncate(content_length);
 
     Ok(ParsedReq { method, path, headers, body })
@@ -171,7 +180,11 @@ fn find_header_end(buf: &[u8]) -> Option<usize> {
 }
 
 async fn handle_conn(mut stream: TcpStream) -> Result<(), String> {
-    let req = read_request(&mut stream).await?;
+    // Bound the request read — a stalled peer would otherwise park this
+    // spawned task forever (no socket timeouts anywhere on this path).
+    let req = tokio::time::timeout(Duration::from_secs(30), read_request(&mut stream))
+        .await
+        .map_err(|_| "request read timed out (30s)".to_string())??;
 
     // Resolve the upstream target fresh each request — the Base-URL setter can
     // change it mid-session. Two callers point the CLI here (turn.rs):
@@ -241,10 +254,16 @@ async fn handle_conn(mut stream: TcpStream) -> Result<(), String> {
     }
     rb = rb.body(body);
 
-    let upstream = match rb.send().await {
-        Ok(r) => r,
-        Err(e) => {
+    // send() resolves on response HEADERS (SSE body streams after) — 180s
+    // covers a queued/slow first response without letting the task leak.
+    let upstream = match tokio::time::timeout(Duration::from_secs(180), rb.send()).await {
+        Ok(Ok(r)) => r,
+        Ok(Err(e)) => {
             return write_plain(&mut stream, 502, &format!("nothink shim: upstream error: {e}"))
+                .await;
+        }
+        Err(_) => {
+            return write_plain(&mut stream, 504, "nothink shim: upstream response timed out (180s)")
                 .await;
         }
     };
@@ -275,9 +294,17 @@ async fn handle_conn(mut stream: TcpStream) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
 
-    // Stream the (decoded) body straight through, byte-for-byte.
+    // Stream the (decoded) body straight through, byte-for-byte. Per-chunk gap
+    // timeout (not total — a legit SSE turn runs for minutes) so a wedged
+    // upstream can't park this task forever.
     let mut bytes = upstream.bytes_stream();
-    while let Some(chunk) = bytes.next().await {
+    loop {
+        let Some(chunk) = tokio::time::timeout(Duration::from_secs(300), bytes.next())
+            .await
+            .map_err(|_| "upstream stream idle >300s".to_string())?
+        else {
+            break;
+        };
         let chunk = chunk.map_err(|e| format!("upstream stream: {e}"))?;
         stream
             .write_all(&chunk)

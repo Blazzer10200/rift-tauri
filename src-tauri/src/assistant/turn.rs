@@ -1407,6 +1407,12 @@ async fn resolve_spawn(
         effort_level: effort_level.to_string(),
         trust_level: trust_level.clone(),
         addendum_ptr: addendum.as_ptr() as usize,
+        // Mirror the arg-build filter (turn.rs ~1021) so a stored-but-invalid
+        // value can't churn respawns.
+        max_budget_bits: cfg
+            .max_budget_usd
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .map(f64::to_bits),
     };
 
     Ok(ResolvedSpawn { cmd, key, user_line, mcp_guard: _mcp_guard, model })
@@ -2430,6 +2436,11 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
     // parked on the human — so the watchdog must NOT fire while count > 0. Mirrors
     // the frontend's `liveTool != null` rule for the stall indicator.
     let mut tools_in_flight: i32 = 0;
+    // IDs of the tool_use blocks counted above (ExitPlanMode excluded). Only a
+    // tool_result whose tool_use_id is in here decrements — without this, an
+    // ExitPlanMode result (never counted on open) closed a SIBLING tool's
+    // in-flight slot, re-arming the no-progress stall under a live slow tool.
+    let mut inflight_tool_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
     // Consecutive watchdog fires survived purely because a tool was in flight.
     // Reset to 0 by ANY received line (real progress); when it exceeds the grace
     // cap with the pipe still dead, the "tool" is wedged → stall anyway.
@@ -2575,6 +2586,13 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                                 // 223s hang) instead of recovering as Stalled at the
                                 // no-progress ceiling. Don't let it disable the net.
                                 if block_ty == Some("tool_use") && block_name != Some("ExitPlanMode") {
+                                    // Track the id so only ITS result closes this slot
+                                    // (id-less block: count anyway, legacy behavior).
+                                    let tracked = match block.get("id").and_then(|i| i.as_str()) {
+                                        Some(id) => inflight_tool_ids.insert(id.to_string()),
+                                        None => true,
+                                    };
+                                    if tracked {
                                     // 0→positive edge: start the absolute in-flight
                                     // clock (the wedged-chatty-tool ceiling). Not
                                     // restarted while already positive, so a stream
@@ -2588,6 +2606,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                                     // gap to pre-text tool time (only matters pre-text).
                                     if !first_text_logged && tool_open_at.is_none() {
                                         tool_open_at = Some(std::time::Instant::now());
+                                    }
                                     }
                                 }
                                 if block_ty == Some("tool_use")
@@ -2608,6 +2627,17 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                         if let Some(content) = v.get("message").and_then(|m| m.get("content")).and_then(|c| c.as_array()) {
                             for block in content {
                                 if block.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
+                                    // Only a result matching a counted tool_use closes a
+                                    // slot: an ExitPlanMode result (never counted on open)
+                                    // must not zero a sibling tool's slot. Untagged
+                                    // results keep the legacy saturating behavior.
+                                    let counted = match block.get("tool_use_id").and_then(|i| i.as_str()) {
+                                        Some(id) => inflight_tool_ids.remove(id),
+                                        None => true,
+                                    };
+                                    if !counted {
+                                        continue;
+                                    }
                                     tools_in_flight = (tools_in_flight - 1).max(0);
                                     // →0 edge: the in-flight stretch ended, so clear
                                     // the absolute clock (the next tool restarts it).

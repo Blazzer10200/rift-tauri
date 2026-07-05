@@ -326,6 +326,13 @@ export class TabState {
 
   // Non-reactive per-stream internals.
   streamingMsgId: string | null = null;
+  /** Post-stop guard deadline. While Date.now() < this, the killed turn's
+   *  terminal done/error event may still be in flight from the backend (events
+   *  carry only session_id — no per-turn token), so send() defers the next
+   *  turn on this tab until the handlers consume the stale event (clearing
+   *  this) or the deadline passes. Prevents a stale terminal from finalizing
+   *  the NEXT turn on the same session. */
+  staleTerminalUntil = 0;
   // #146/#234: cached index of the streaming assistant msg so mutateStreaming
   // can index-replace instead of full-map. Set in send() right after the
   // placeholder push; cleared wherever streamingMsgId is cleared.
@@ -853,7 +860,10 @@ class AssistantStore {
 
   setModel(v: ModelSel) {
     const prev = this.effectiveModel;
-    if (prev === v && this.model === v) return;
+    // Re-picking the already-effective model is a no-op — falling through here
+    // when a tab override diverges from the global default would silently
+    // rewrite the global default on a same-model reselect.
+    if (prev === v) return;
     this.model = v;
     if (this.activeTab) this.activeTab.modelOverride = v;
     saveModel(v, this.workspace.current);

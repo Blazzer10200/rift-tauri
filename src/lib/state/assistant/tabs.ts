@@ -127,7 +127,15 @@ export function setFocusedPane(host: TabsHost, idx: number) {
   if (next) {
     const inMeta = host.conversations.some((c) => c.id === next);
     if (inMeta && !host.tabs.get(next)) {
-      void host.loadConversation(next);
+      // Async load: activeRoot still reflects the OLD pane when the sync check
+      // below runs, so re-check after the load resolves — else the @-mention +
+      // branch caches survive a cross-root pane switch as stale data.
+      void host.loadConversation(next).then(() => {
+        if (host.activeRoot !== prevRoot) {
+          host.workspaceFiles = [];
+          host.workspaceBranch = null;
+        }
+      });
     } else {
       host.currentConvoId = next;
     }
@@ -249,7 +257,13 @@ export function dropTabIntoPane(host: TabsHost, tabId: string, paneIdx: number) 
   if (tabId !== host.currentConvoId) {
     const inMeta = host.conversations.some((c) => c.id === tabId);
     if (inMeta && !host.tabs.get(tabId)) {
-      void host.loadConversation(tabId);
+      // Same stale-root-cache race as setFocusedPane — re-check post-load.
+      void host.loadConversation(tabId).then(() => {
+        if (host.activeRoot !== prevRoot) {
+          host.workspaceFiles = [];
+          host.workspaceBranch = null;
+        }
+      });
     } else {
       host.currentConvoId = tabId;
     }

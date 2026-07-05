@@ -380,6 +380,9 @@ async fn run_npm_update() -> Result<String, String> {
         cmd.args(["install", "-g", "@anthropic-ai/claude-code@latest"]);
     }
     cmd.env_remove("ANTHROPIC_API_KEY");
+    // Reap the child when the timeout drops the in-flight output() future —
+    // without this the orphaned npm/node tree keeps writing into node_modules.
+    cmd.kill_on_drop(true);
     // RR10: bound the npm spawn — a stalled registry/download would otherwise
     // hang the invoke forever (frontend `updating` spinner never clears).
     let fut = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).output();
@@ -401,6 +404,7 @@ async fn run_exe_update(exe: &str) -> Result<String, String> {
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     cmd.env_remove("ANTHROPIC_API_KEY");
+    cmd.kill_on_drop(true);
     // RR10: bound the native updater spawn (see run_npm_update).
     let fut = cmd.arg("update").stdout(Stdio::piped()).stderr(Stdio::piped()).output();
     let output = tokio::time::timeout(std::time::Duration::from_secs(120), fut)

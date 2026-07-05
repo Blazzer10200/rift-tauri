@@ -359,6 +359,9 @@ export function numberActions(units: TimelineUnit[]): TimelineUnit[] {
       pending = null;
       out.push({ ...u, stepNum: step, caption });
     } else if (u.kind === "divider") {
+      // Back-to-back headers: flush the earlier one as an orphan divider
+      // instead of silently discarding it.
+      if (pending) out.push({ kind: "divider", stepNum: pending.stepNum, title: pending.title, key: `od_${u.key}` });
       pending = { title: u.title, stepNum: u.stepNum };
     } else {
       if (pending) {
