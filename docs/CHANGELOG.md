@@ -2,15 +2,10 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.86.1 — Stability sweep: ten verified fixes from a deep adversarial audit
+## v0.86.2 — Clean exit: closing Rift stops everything Rift started
 
-- **Stopping a turn can no longer corrupt the next one** — the stopped turn's final signal could land after you'd already sent the next message in the same chat, silently freezing the new reply mid-stream (and sometimes flashing a bogus error banner for the turn you stopped). The next turn now waits the split-second it takes for that signal to settle.
-- **Long tools aren't falsely declared stalled in plan mode** — approving a plan while a slow web fetch ran could confuse the stall watchdog's bookkeeping and kill a healthy turn at the 3-minute mark.
-- **Deleting a conversation can't be undone by a racing autosave** — delete and save now share a lock, so a just-deleted chat can't quietly reappear on disk.
-- **Re-clicking the model a chat already uses no longer silently rewrites your global default model** (it only misfired when an old chat was pinned to a different model than your baseline).
-- **Timed-out CLI updates clean up after themselves** — a stalled `npm install` is killed instead of orphaned in the background, where it could lock files and break the retry.
-- **Changing the per-turn budget cap applies to the very next turn** — a warm CLI process previously kept enforcing the old cap until something else respawned it.
-- Smaller fixes: back-to-back "Step" headers no longer drop the first one · switching panes across different folders refreshes the @-mention/branch caches reliably · the thinking-off proxy rejects truncated requests and can't leak stalled connections · unreadable conversation files are logged instead of silently vanishing from the list.
+- **Closing the app now shuts down any in-flight AI turn with it.** Previously, closing Rift mid-turn left the Claude CLI process running headless in the background — still visible in Task Manager, still executing tools and burning API tokens, with no window left to stop it. Idle helper processes already exited on their own; now every CLI child (and its helper subprocess) is reaped the moment the app exits, so Task Manager is clean the instant Rift closes.
+- A background-footprint audit alongside the fix confirmed the rest is already tight: helper processes park at zero CPU between turns, all in-app clocks only tick while a turn is streaming, and update/usage checks stay at their slow cadences (6h / 5min).
 
 ## Known issues
 - **Voice profanity on Web Speech:** fully-masked words (`******`, no leading letter) can't be recovered from Azure's servers — the real fix is the on-device **Whisper** engine (built but not yet in the shipped binary). Planned.
@@ -18,6 +13,7 @@
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
 
+- **v0.86.1** — Stability sweep: ten adversarially-verified fixes (stopped-turn corruption, plan-mode stall watchdog, delete-vs-autosave race, model-reselect default rewrite, orphaned npm updates, stale budget cap).
 - **v0.86.0** — Diff word-level highlights; quiet update-detection states; registry-PATH CLI discovery; corrected CLI version gates.
 - **v0.85.x** — Pinned Plan HUD + stream polish (calmer live line, minute-aware durations, reduced-motion); plan-HUD hardening; resumed conversations restore their project folder; "quick" tier retired; fresher CLI status on window focus.
 - **v0.84.x** — Adaptability pass (CLI found via pnpm/Volta/Scoop/Bun; honest degradation on dead mic / stuck downloads / corrupt config; credential-keyed warm processes); reasoning ladder; transcript detail; Settings redesign + workspace hub; self-verification follow-ups (unbounded stdout reader revert, maximize state, queue races, copy-failed state).
