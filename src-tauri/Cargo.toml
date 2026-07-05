@@ -135,6 +135,13 @@ webrtc-vad = "0.4"
 # default `cargo build` works on machines without LLVM/Clang installed.
 whisper-rs = { version = "0.14", default-features = false, optional = true }
 
+[target.'cfg(windows)'.dependencies]
+# #61 GUI stale-PATH: CLI discovery reads the registry PATH (HKCU\Environment +
+# HKLM Session Manager\Environment) at resolve time — the GUI process inherits
+# explorer's login-frozen PATH, so a post-login `npm i -g` is invisible to
+# where.exe until re-login. Pinned to the version already in the lock tree.
+winreg = "0.55"
+
 [package.metadata.cargo-machete]
 # (rustls is now `use`d directly in lib.rs to install the ring provider, so it no
 # longer needs a machete ignore. Kept block for any future feature-only deps.)

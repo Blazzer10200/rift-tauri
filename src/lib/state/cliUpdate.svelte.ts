@@ -195,6 +195,29 @@ export class CliUpdate {
     return versions.some((v) => cmpSemver(this.latest as string, v) > 0);
   }
 
+  /** A CLI was found but the ACTIVE install's `--version` couldn't be read —
+   *  the backend gates it conservative-old (`cli_caps`), so advanced spawn
+   *  flags are silently off. Distinct from "no CLI at all" (empty installs —
+   *  onboarding/auth owns that surface). (#42) */
+  versionUnreadable(
+    installs: { version: string | null }[] | null | undefined,
+    activeVersion: string | null,
+  ): boolean {
+    return (installs?.length ?? 0) > 0 && !activeVersion;
+  }
+
+  /** True once the npm check failed AND the auto-retry backoff ladder is
+   *  exhausted — detection is genuinely dead, not a blip a scheduled retry may
+   *  still heal. Gates the quiet banner affordance (#42): outside Settings, a
+   *  check failure only surfaces when it's persistent. */
+  get checkFailedPersistently(): boolean {
+    return (
+      this.status === "error" &&
+      this._retryTimer == null &&
+      this._retries >= RETRY_DELAYS_MS.length
+    );
+  }
+
   /** Single source for the contextual "what's going on" line shown by every
    *  update surface (Home banner, tab-bar popover, Settings). Previously this
    *  5-way branch was hand-re-authored in three components and drifted; now they

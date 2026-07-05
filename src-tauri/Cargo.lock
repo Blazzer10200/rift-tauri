@@ -3641,6 +3641,7 @@ dependencies = [
  "walkdir",
  "webrtc-vad",
  "whisper-rs",
+ "winreg",
 ]
 
 [[package]]

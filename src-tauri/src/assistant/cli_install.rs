@@ -51,6 +51,84 @@ fn norm_path(s: &str) -> String {
     s.to_ascii_lowercase().replace('/', "\\")
 }
 
+/// Expand `%VAR%` tokens via `lookup`; unknown vars and unclosed `%` stay
+/// verbatim. Pure so it's unit-testable without touching the real environment.
+fn expand_env_refs_with(s: &str, lookup: impl Fn(&str) -> Option<String>) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        match after.find('%') {
+            Some(end) if end > 0 => {
+                let name = &after[..end];
+                match lookup(name) {
+                    Some(v) => out.push_str(&v),
+                    None => {
+                        out.push('%');
+                        out.push_str(name);
+                        out.push('%');
+                    }
+                }
+                rest = &after[end + 1..];
+            }
+            _ => {
+                out.push('%');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `%VAR%` expansion against the process environment (registry `Path` values
+/// are commonly REG_EXPAND_SZ; winreg decodes but does not expand them).
+#[cfg(windows)]
+fn expand_env_refs(s: &str) -> String {
+    expand_env_refs_with(s, |name| std::env::var(name).ok())
+}
+
+/// PATH directories read straight from the registry — `HKCU\Environment` +
+/// `HKLM\...\Session Manager\Environment`. This is the PATH source-of-truth
+/// `where.exe` can't see when the GUI process inherited explorer's login-frozen
+/// PATH snapshot (#61: a post-login `npm i -g` is invisible until re-login).
+/// Empty on any open/read failure; never panics.
+#[cfg(windows)]
+fn registry_path_dirs() -> Vec<PathBuf> {
+    use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+    use winreg::RegKey;
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    let mut collect = |hive, subkey: &str| {
+        let Ok(key) = RegKey::predef(hive).open_subkey(subkey) else {
+            return;
+        };
+        let Ok(raw) = key.get_value::<String, _>("Path") else {
+            return;
+        };
+        for part in expand_env_refs(&raw).split(';') {
+            let part = part.trim().trim_matches('"');
+            if part.is_empty() {
+                continue;
+            }
+            if !dirs.iter().any(|d| norm_path(&d.to_string_lossy()) == norm_path(part)) {
+                dirs.push(PathBuf::from(part));
+            }
+        }
+    };
+    collect(HKEY_CURRENT_USER, "Environment");
+    collect(
+        HKEY_LOCAL_MACHINE,
+        "SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment",
+    );
+    dirs
+}
+
+#[cfg(not(windows))]
+fn registry_path_dirs() -> Vec<PathBuf> {
+    Vec::new()
+}
+
 /// Run `where claude` (Windows) / `which -a claude` (unix) and return every
 /// non-blank line. Empty on failure (no CLI on PATH).
 fn where_claude_lines() -> Vec<String> {
@@ -208,6 +286,11 @@ pub(super) fn parse_semver(v: &str) -> Option<(u64, u64, u64)> {
 pub(super) fn enumerate_claude_installs() -> Vec<ClaudeInstall> {
     let where_lines = where_claude_lines();
     let where_norm: Vec<String> = where_lines.iter().map(|l| norm_path(l)).collect();
+    let reg_dirs = registry_path_dirs();
+    let reg_dirs_norm: Vec<String> = reg_dirs
+        .iter()
+        .map(|d| norm_path(&d.to_string_lossy()).trim_end_matches('\\').to_string())
+        .collect();
 
     let mut paths: Vec<PathBuf> = Vec::new();
     let add = |p: PathBuf, list: &mut Vec<PathBuf>| {
@@ -225,6 +308,21 @@ pub(super) fn enumerate_claude_installs() -> Vec<ClaudeInstall> {
             if l.to_ascii_lowercase().ends_with(".exe") {
                 add(PathBuf::from(l), &mut paths);
             }
+        }
+        // Registry PATH dirs (#61 GUI stale-PATH): dirs on the user's CONFIGURED
+        // PATH that the frozen process snapshot (and thus where.exe) may lack.
+        // Also probe each dir as a custom npm prefix — when npm.cmd itself is
+        // off the frozen PATH, `npm_global_prefix()` below can't ask npm for it.
+        for d in &reg_dirs {
+            add(d.join("claude.exe"), &mut paths);
+            add(
+                d.join("node_modules")
+                    .join("@anthropic-ai")
+                    .join("claude-code")
+                    .join("bin")
+                    .join("claude.exe"),
+                &mut paths,
+            );
         }
         // Native installer drop sites (not always wired into PATH).
         if let Some(lad) = std::env::var_os("LOCALAPPDATA") {
@@ -293,6 +391,11 @@ pub(super) fn enumerate_claude_installs() -> Vec<ClaudeInstall> {
                 add(PathBuf::from(l), &mut paths);
             }
         }
+        // Registry-PATH shims, same last-resort rank as the `where` shims above.
+        for d in &reg_dirs {
+            add(d.join("claude.cmd"), &mut paths);
+            add(d.join("claude.bat"), &mut paths);
+        }
     } else {
         for l in &where_lines {
             add(PathBuf::from(l), &mut paths);
@@ -308,9 +411,17 @@ pub(super) fn enumerate_claude_installs() -> Vec<ClaudeInstall> {
             let pstr = p.to_string_lossy().to_string();
             let pn = norm_path(&pstr);
             let method = classify_install_method(&p);
+            // A registry-PATH dir counts as on-PATH: it IS the user's configured
+            // PATH, just not yet visible to this process's frozen snapshot. The
+            // npm bundled-exe case inherits this via the shim dedup fold below.
+            let parent_on_reg = p
+                .parent()
+                .map(|d| norm_path(&d.to_string_lossy()).trim_end_matches('\\').to_string())
+                .is_some_and(|d| reg_dirs_norm.contains(&d));
             // on_path: the exe itself is a `where` hit, OR (npm) its prefix's
             // `.cmd` shim is — the bundled exe lives one dir deeper than PATH.
             let on_path = where_norm.contains(&pn)
+                || parent_on_reg
                 || (method == "npm"
                     && where_norm.iter().any(|w| {
                         w.contains("\\npm\\")
@@ -559,6 +670,23 @@ pub(super) fn active_cli_version() -> Option<(u64, u64, u64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expand_env_refs_expands_and_passes_through() {
+        let lookup = |name: &str| match name {
+            "SYSTEMROOT" => Some("C:\\Windows".to_string()),
+            _ => None,
+        };
+        assert_eq!(expand_env_refs_with("C:\\plain\\path", lookup), "C:\\plain\\path");
+        assert_eq!(
+            expand_env_refs_with("%SYSTEMROOT%\\system32", lookup),
+            "C:\\Windows\\system32"
+        );
+        // Unknown var stays verbatim; stray/unclosed `%` never loops or drops text.
+        assert_eq!(expand_env_refs_with("%NOPE%\\bin", lookup), "%NOPE%\\bin");
+        assert_eq!(expand_env_refs_with("50%% done", lookup), "50%% done");
+        assert_eq!(expand_env_refs_with("stray % percent", lookup), "stray % percent");
+    }
 
     #[test]
     fn semver_parses_and_tolerates_prefixes() {

@@ -43,22 +43,24 @@ mod mins {
     pub const STREAM_JSON_CONTROL: Version = (2, 1, 161); // confirmed: handshake @ SDK 0.3.161 / cli 2.1.161
 
     /// `--include-partial-messages` (partial assistant deltas on the stream).
-    /// SDK 0.2.108 adds `includePartialMessages`; SDK/CLI track NNN → cli 2.1.108.
-    pub const INCLUDE_PARTIAL_MESSAGES: Version = (2, 1, 108); // est (SDK 0.2.108 lockstep)
+    /// Changelog: "1.0.109 — SDK: Added partial message streaming support via
+    /// `--include-partial-messages` CLI flag" (verified vs raw CHANGELOG.md 2026-07-04).
+    pub const INCLUDE_PARTIAL_MESSAGES: Version = (1, 0, 109); // confirmed @ 1.0.109
 
     /// `--exclude-dynamic-system-prompt-sections` (moves per-machine prompt
     /// sections into the first user message; keeps the cached prefix stable).
-    /// SDK 0.2.119 adds `excludeDynamicSections` → cli 2.1.119.
-    pub const EXCLUDE_DYNAMIC_SECTIONS: Version = (2, 1, 119); // est (SDK 0.2.119 lockstep)
+    /// Changelog: added at v2.1.98 "for improved cross-user prompt caching"
+    /// (verified vs raw CHANGELOG.md 2026-07-04).
+    pub const EXCLUDE_DYNAMIC_SECTIONS: Version = (2, 1, 98); // confirmed @ 2.1.98
 
     /// `--permission-prompt-tool stdio` (routes per-action asks over the control
     /// channel). No direct introduction entry found; confirmed PRESENT ≤ v2.1.152
     /// (turn.rs inline note + scout). Use the confirmed-present bound as the floor.
     pub const PERMISSION_PROMPT_TOOL: Version = (2, 1, 152); // confirmed present @ 2.1.152
 
-    /// `--max-budget-usd` (per-turn spend cap). claude-code changelog entry at
-    /// v2.0.31 (ToC-confirmed; secondary sources point there).
-    pub const MAX_BUDGET_USD: Version = (2, 0, 31); // est (changelog 2.0.31)
+    /// `--max-budget-usd` (per-turn spend cap). Changelog: "2.0.28 — SDK: added
+    /// --max-budget-usd flag" (verified vs raw CHANGELOG.md 2026-07-04).
+    pub const MAX_BUDGET_USD: Version = (2, 0, 28); // confirmed @ 2.0.28
 
     /// `--effort` (low/medium/high/xhigh/max extended-thinking tier). Confirmed
     /// added at v2.1.142 (luongnv89/claude-howto CHANGELOG, v2.1.143 sync entry).
@@ -180,7 +182,7 @@ mod tests {
     #[test]
     fn below_hard_floor_is_unsupported() {
         // Below the 2.1.161 handshake floor → unsupported, even though some
-        // older flags (max-budget @ 2.0.31, partial @ 2.1.108) "exist" — a turn
+        // older flags (max-budget @ 2.0.28, partial @ 1.0.109) "exist" — a turn
         // can't run without the control handshake, so turn.rs bails before spawn.
         let c = CliCaps::from_version(Some((2, 1, 160)));
         assert!(!c.supported);
@@ -199,9 +201,9 @@ mod tests {
         // A 2.1.130 CLI: above the handshake floor's prerequisites for the older
         // flags but below the 2.1.142 effort/settings batch.
         let c = CliCaps::from_version(Some((2, 1, 130)));
-        assert!(c.exclude_dynamic_sections, "2.1.119 flag present at 2.1.130");
-        assert!(c.max_budget_usd, "2.0.31 flag present at 2.1.130");
-        assert!(c.include_partial_messages, "2.1.108 flag present at 2.1.130");
+        assert!(c.exclude_dynamic_sections, "2.1.98 flag present at 2.1.130");
+        assert!(c.max_budget_usd, "2.0.28 flag present at 2.1.130");
+        assert!(c.include_partial_messages, "1.0.109 flag present at 2.1.130");
         assert!(!c.effort, "2.1.142 flag not yet present at 2.1.130");
         assert!(!c.settings_flag, "2.1.142 flag not yet present at 2.1.130");
         assert!(!c.permission_prompt_tool, "2.1.152 flag not yet present at 2.1.130");

@@ -171,6 +171,44 @@ describe("summary — contextual line precedence", () => {
   });
 });
 
+describe("versionUnreadable — active version can't be read (#42)", () => {
+  it("true when installs exist but the active version is null", () => {
+    expect(cu.versionUnreadable([{ version: null }], null)).toBe(true);
+    expect(cu.versionUnreadable([{ version: "2.1.0" }, { version: null }], null)).toBe(true);
+  });
+  it("false when the active version reads fine", () => {
+    expect(cu.versionUnreadable([{ version: "2.1.0" }], "2.1.0 (Claude Code)")).toBe(false);
+  });
+  it("false with no detected installs — onboarding owns the no-CLI surface", () => {
+    expect(cu.versionUnreadable([], null)).toBe(false);
+    expect(cu.versionUnreadable(null, null)).toBe(false);
+  });
+});
+
+describe("checkFailedPersistently — quiet banner gate (#42)", () => {
+  type Internals = { _retries: number; _retryTimer: ReturnType<typeof setTimeout> | null };
+  it("false on a fresh failure — the retry ladder may still heal it", () => {
+    cu.status = "error";
+    expect(cu.checkFailedPersistently).toBe(false);
+  });
+  it("true only once retries are exhausted and none is pending", () => {
+    cu.status = "error";
+    (cu as unknown as Internals)._retries = 99;
+    expect(cu.checkFailedPersistently).toBe(true);
+  });
+  it("false while a retry is still scheduled, and false after recovery", () => {
+    cu.status = "error";
+    const internals = cu as unknown as Internals;
+    internals._retries = 99;
+    internals._retryTimer = setTimeout(() => {}, 60_000);
+    expect(cu.checkFailedPersistently).toBe(false);
+    clearTimeout(internals._retryTimer);
+    internals._retryTimer = null;
+    cu.status = "ok";
+    expect(cu.checkFailedPersistently).toBe(false);
+  });
+});
+
 describe("dismiss", () => {
   it("pins the dismissed marker to the current latest", () => {
     cu.latest = "2.1.5";

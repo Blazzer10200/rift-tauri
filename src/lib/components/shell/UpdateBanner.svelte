@@ -14,6 +14,7 @@
   import { updates } from "$lib/state/updates.svelte";
   import { cliUpdate } from "$lib/state/cliUpdate.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
+  import { workspace } from "$lib/state/workspace.svelte";
 
   const reducedMotion =
     typeof window !== "undefined" &&
@@ -26,6 +27,14 @@
   // `claude --version` returns "2.1.186 (Claude Code)" — strip the suffix so the
   // diff reads "v2.1.186 → v2.1.190", not the raw noisy string.
   const cliInstalledClean = $derived(cliInstalled?.match(/\d+\.\d+\.\d+/)?.[0] ?? null);
+  // #42 quiet states — a found-but-unreadable CLI version, and a persistently
+  // failing npm check. Session-only dismissals on purpose: persisting them
+  // would suppress a future, DIFFERENT failure (`dismissed` stays keyed to
+  // real update versions only).
+  const cliVersionUnreadable = $derived(cliUpdate.versionUnreadable(cliInstalls, cliInstalled));
+  const cliCheckFailed = $derived(cliUpdate.checkFailedPersistently);
+  let unreadableDismissed = $state(false);
+  let checkFailDismissed = $state(false);
 
   // ── App update ─────────────────────────────────────────────────────────
   // hasUpdate stays true through download/install; the bar shows live progress.
@@ -33,11 +42,15 @@
   const appBusy = $derived(updates.state === "downloading" || updates.state === "installing");
 
   type Row = {
-    key: "app" | "cli";
+    key: string;
+    /** Styling bucket — quiet CLI rows reuse the calmer "cli" info tone. */
+    kind: "app" | "cli";
     icon: typeof Sparkles;
     label: string;
-    from: string;
-    to: string;
+    from?: string;
+    to?: string;
+    /** Short plain line shown where the version diff would be (quiet rows). */
+    note?: string;
     busy: boolean;
     busyLabel: string;
     progress: number | null;
@@ -51,6 +64,7 @@
     if (appAvailable) {
       out.push({
         key: "app",
+        kind: "app",
         icon: Sparkles,
         label: "Rift update",
         from: `v${updates.currentVersion}`,
@@ -66,6 +80,7 @@
     if (cliAvailable) {
       out.push({
         key: "cli",
+        kind: "cli",
         icon: Terminal,
         label: "Claude CLI update",
         from: cliInstalledClean ? `v${cliInstalledClean}` : "installed",
@@ -80,6 +95,35 @@
         onAct: async () => { if (await cliUpdate.runUpdate()) await assistant.refreshAuth(); },
         onDismiss: () => cliUpdate.dismiss(),
       });
+    } else if (cliVersionUnreadable && !unreadableDismissed) {
+      // A real update row outranks the quiet states; at most ONE quiet CLI row.
+      out.push({
+        key: "cli-unreadable",
+        kind: "cli",
+        icon: Terminal,
+        label: "Claude CLI version unreadable",
+        note: "CLI found, but its version can't be read — some features are gated off.",
+        busy: false,
+        busyLabel: "",
+        progress: null,
+        cta: "Open Settings",
+        onAct: () => workspace.setActive("settings"),
+        onDismiss: () => (unreadableDismissed = true),
+      });
+    } else if (cliCheckFailed && !checkFailDismissed) {
+      out.push({
+        key: "cli-checkfail",
+        kind: "cli",
+        icon: Terminal,
+        label: "CLI update check failing",
+        note: "Couldn't reach npm to check for CLI updates.",
+        busy: false,
+        busyLabel: "",
+        progress: null,
+        cta: "Retry",
+        onAct: () => void cliUpdate.maybeCheck(true),
+        onDismiss: () => (checkFailDismissed = true),
+      });
     }
     return out;
   });
@@ -88,7 +132,7 @@
 {#if rows.length > 0}
   <div class="ub-host" transition:slide={{ duration: reducedMotion ? 0 : 200 }}>
     {#each rows as row (row.key)}
-      <div class="ub" data-kind={row.key} class:busy={row.busy}>
+      <div class="ub" data-kind={row.kind} class:busy={row.busy}>
         {#if row.busy && row.progress != null}
           <div class="ub-progress" style="width: {row.progress}%"></div>
         {/if}
@@ -102,9 +146,11 @@
         </span>
         <span class="ub-text">
           <span class="ub-label">{row.busy ? row.busyLabel : row.label}</span>
-          {#if !row.busy}
+          {#if !row.busy && row.from && row.to}
             <span class="ub-diff mono">{row.from}<ArrowRight size={11} class="ub-arr" />{row.to}</span>
-          {:else if row.progress != null}
+          {:else if !row.busy && row.note}
+            <span class="ub-note">{row.note}</span>
+          {:else if row.busy && row.progress != null}
             <span class="ub-diff mono">{row.progress}%</span>
           {/if}
         </span>
@@ -201,6 +247,15 @@
     white-space: nowrap;
   }
   .ub-diff :global(.ub-arr) { color: var(--fg-faint); margin: 0 1px; }
+
+  .ub-note {
+    font-size: var(--fs-xs);
+    color: var(--fg-subtle);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
 
   .ub-cta {
     display: inline-flex; align-items: center; gap: 4px;
