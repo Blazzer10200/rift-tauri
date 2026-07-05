@@ -154,9 +154,9 @@ pub fn run() {
                 // user clicks the taskbar when THEY want Rift. (2026-06-25)
                 let _ = main.show();
             }
-            // Diagnostics: stream bus events to the frontend (`diag://event`)
-            // and emit a periodic pipeline-state snapshot (`diag://state`)
-            // every 500ms. Both run for the life of the process.
+            // Diagnostics: stream bus events to the frontend (`diag://event`).
+            // Event-driven (parks on the bus, no polling); runs for the life
+            // of the process.
             let app_handle = app.handle().clone();
             diagnostics::spawn_frontend_pump(app_handle.clone());
             // Assistant UI bridge (ask_user / open_browser / notify): bind the
@@ -283,9 +283,20 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|_app_handle, event| {
-            // Scrub the on-disk bridge token from `~/.rift/assistant/mcp-config.json`
-            // on app exit. The token becomes stale the instant the process exits.
             if let tauri::RunEvent::Exit = event {
+                // Reap every live `claude` child (+ its `rift-tauri.exe` MCP
+                // grandchild) before the process dies. Idle children EOF-exit on
+                // their own once the stdin pipes close, but a MID-TURN child keeps
+                // executing its in-flight turn headless — lingering in Task
+                // Manager and burning CPU + API tokens with no window to stop it.
+                // Same primitives as the update-apply path; idempotent when that
+                // path re-enters here (registries already drained → no-op). The
+                // apply-only IMAGENAME sweep is deliberately NOT mirrored — on a
+                // normal exit it could hit a second running Rift instance.
+                assistant::warm_pool::drain_all_for_shutdown();
+                assistant::kill_all_session_children();
+                // Scrub the on-disk bridge token from
+                // `~/.rift/assistant/mcp-config.json` — stale the instant we exit.
                 assistant::cleanup_mcp_config_on_exit();
             }
         });
