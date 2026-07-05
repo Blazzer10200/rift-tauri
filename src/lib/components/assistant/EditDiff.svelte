@@ -12,6 +12,7 @@
   import { FileText, ChevronRight, CornerDownLeft, Copy, Check } from "lucide-svelte";
   import { highlightSync, whenReady } from "../../state/highlighter.svelte";
   import FilePathMenu from "./FilePathMenu.svelte";
+  import { emphasisIntervals, emphasizeHtml, type CharInterval } from "./diffEmphasis";
 
   const reducedMotion =
     typeof window !== "undefined" &&
@@ -229,8 +230,8 @@
   // offset); del lines carry no number. Blank-context runs (`gap`) still count
   // toward the line tally so subsequent numbers stay consistent.
   type UnifiedLine =
-    | { kind: "ctx" | "add"; num: number; text: string; html: string | null }
-    | { kind: "del"; num: null; text: string; html: string | null }
+    | { kind: "ctx" | "add"; num: number; text: string; html: string | null; em?: CharInterval[] }
+    | { kind: "del"; num: null; text: string; html: string | null; em?: CharInterval[] }
     | { kind: "meta"; text: string }
     | { kind: "gap"; lines: number };
   // D3: build the line STRUCTURE without highlighting (depends only on
@@ -245,18 +246,22 @@
       if (p.kind === "ctx") { ln++; out.push({ kind: "ctx", num: ln, text: p.left, html: null }); continue; }
       if (p.kind === "del") { out.push({ kind: "del", num: null, text: p.left, html: null }); continue; }
       if (p.kind === "add") { ln++; out.push({ kind: "add", num: ln, text: p.right, html: null }); continue; }
-      // mod — del then add.
-      out.push({ kind: "del", num: null, text: p.left, html: null });
-      ln++; out.push({ kind: "add", num: ln, text: p.right, html: null });
+      // mod — del then add, carrying word-level change intervals (#11).
+      const em = emphasisIntervals(p.left, p.right);
+      out.push({ kind: "del", num: null, text: p.left, html: null, em: em?.del });
+      ln++; out.push({ kind: "add", num: ln, text: p.right, html: null, em: em?.add });
     }
     return out;
   });
   const unifiedLines = $derived.by<UnifiedLine[]>(() =>
-    unifiedStruct.map((l) =>
-      l.kind === "ctx" || l.kind === "add" || l.kind === "del"
-        ? { ...l, html: hl(l.text) }
-        : l,
-    ),
+    unifiedStruct.map((l) => {
+      if (l.kind !== "ctx" && l.kind !== "add" && l.kind !== "del") return l;
+      const base = hl(l.text);
+      const html = l.em?.length
+        ? emphasizeHtml(l.text, l.em, l.kind === "add" ? "dem-add" : "dem-del", base)
+        : base;
+      return { ...l, html };
+    }),
   );
 
   // #34: line cap — render only the first `maxLines` rows until the user asks
@@ -556,6 +561,16 @@
   }
   .diff-line[data-kind="del"] .diff-gutter,
   .diff-line[data-kind="del"] .diff-code { color: oklch(0.86 0.06 22); }
+  /* #11: word-level change emphasis inside mod pairs — a stronger tint than
+     the line wash so the changed fragment pops (GitHub/VS Code convention). */
+  .diff-code :global(.dem-add) {
+    background: color-mix(in oklch, var(--ok) 24%, transparent);
+    border-radius: 3px;
+  }
+  .diff-code :global(.dem-del) {
+    background: color-mix(in oklab, var(--danger) 24%, transparent);
+    border-radius: 3px;
+  }
 
   .diff-meta {
     color: var(--fg-muted);
