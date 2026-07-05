@@ -2,12 +2,15 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.86.0 — Diff word-highlights, honest update states, sturdier CLI discovery
+## v0.86.1 — Stability sweep: ten verified fixes from a deep adversarial audit
 
-- **Edit diffs now highlight exactly what changed within a line** — modified lines get GitHub-style word-level emphasis layered over the existing syntax colors, so a one-word edit reads at a glance instead of spot-the-difference. Mostly-rewritten lines deliberately skip the confetti and keep the plain line tint.
-- **Silent update-detection failures now speak up (quietly)** — if Rift finds your Claude CLI but can't read its version (which silently gates advanced features off), a calm banner row says so with a one-click path to Settings. If the update check keeps failing after its automatic retries, a quiet row offers Retry. Real update banners always outrank these, and dismissing one lasts for the session only.
-- **The CLI is found even right after `npm i -g`** — Rift now also reads your user/system PATH straight from the Windows registry during discovery, so a CLI installed after login (invisible to the app's login-frozen PATH snapshot) is picked up without logging out or rebooting. Custom npm prefixes off the frozen PATH are covered too.
-- **Older CLIs get the features they're entitled to** — three internal version gates were confirmed against the official Claude Code changelog and corrected downward (partial streaming, prompt-cache stability, budget caps), so an older install is no longer needlessly degraded.
+- **Stopping a turn can no longer corrupt the next one** — the stopped turn's final signal could land after you'd already sent the next message in the same chat, silently freezing the new reply mid-stream (and sometimes flashing a bogus error banner for the turn you stopped). The next turn now waits the split-second it takes for that signal to settle.
+- **Long tools aren't falsely declared stalled in plan mode** — approving a plan while a slow web fetch ran could confuse the stall watchdog's bookkeeping and kill a healthy turn at the 3-minute mark.
+- **Deleting a conversation can't be undone by a racing autosave** — delete and save now share a lock, so a just-deleted chat can't quietly reappear on disk.
+- **Re-clicking the model a chat already uses no longer silently rewrites your global default model** (it only misfired when an old chat was pinned to a different model than your baseline).
+- **Timed-out CLI updates clean up after themselves** — a stalled `npm install` is killed instead of orphaned in the background, where it could lock files and break the retry.
+- **Changing the per-turn budget cap applies to the very next turn** — a warm CLI process previously kept enforcing the old cap until something else respawned it.
+- Smaller fixes: back-to-back "Step" headers no longer drop the first one · switching panes across different folders refreshes the @-mention/branch caches reliably · the thinking-off proxy rejects truncated requests and can't leak stalled connections · unreadable conversation files are logged instead of silently vanishing from the list.
 
 ## Known issues
 - **Voice profanity on Web Speech:** fully-masked words (`******`, no leading letter) can't be recovered from Azure's servers — the real fix is the on-device **Whisper** engine (built but not yet in the shipped binary). Planned.
@@ -15,6 +18,7 @@
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
 
+- **v0.86.0** — Diff word-level highlights; quiet update-detection states; registry-PATH CLI discovery; corrected CLI version gates.
 - **v0.85.x** — Pinned Plan HUD + stream polish (calmer live line, minute-aware durations, reduced-motion); plan-HUD hardening; resumed conversations restore their project folder; "quick" tier retired; fresher CLI status on window focus.
 - **v0.84.x** — Adaptability pass (CLI found via pnpm/Volta/Scoop/Bun; honest degradation on dead mic / stuck downloads / corrupt config; credential-keyed warm processes); reasoning ladder; transcript detail; Settings redesign + workspace hub; self-verification follow-ups (unbounded stdout reader revert, maximize state, queue races, copy-failed state).
 - **v0.82.x** — Warm-CLI process-leak fixes; stream density controls (Tool detail + presets).
