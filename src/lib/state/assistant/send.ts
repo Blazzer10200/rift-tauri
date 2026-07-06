@@ -17,14 +17,27 @@ import { invoke } from "@tauri-apps/api/core";
 import { accessibility } from "../accessibility.svelte";
 import { toast, notify } from "../toast.svelte";
 import type { AssistantStore, TabState } from "../assistant.svelte";
-import type { Block, ChatMessage, TurnRecord } from "./types";
-import { effortToFlag, FABLE_SUNSET_MS } from "./helpers";
+import type { Block, ChatMessage, ModelSel, QueueItem, TurnRecord } from "./types";
+import { effortToFlag, fableAvailable, haikuAvailable, FABLE_SUNSET_MS } from "./helpers";
 import { finalizeInflightBlocks } from "./streaming";
 
 // One-shot per app session — the sunset warning shouldn't nag on every send.
 let fableSunsetNoticed = false;
 
-export async function send(store: AssistantStore, prompt: string, targetConvoId?: string | null) {
+/** Attachments threaded explicitly through a send — queue drains pass the
+ *  drained item's snapshot here instead of restoring it onto tab state, so a
+ *  concurrent composer send can never read (or clobber) another message's files. */
+export type SendPayload = {
+  images: NonNullable<QueueItem["images"]>;
+  textFiles: NonNullable<QueueItem["textFiles"]>;
+};
+
+export async function send(
+  store: AssistantStore,
+  prompt: string,
+  targetConvoId?: string | null,
+  opts?: { payload?: SendPayload; requeueFront?: boolean },
+) {
   const trimmed = prompt.trim();
   // Explicit-target sends (queue drains, per-pane bubble actions) scope every
   // tab read/write below to THAT tab without retargeting pane focus. Omitted →
@@ -32,9 +45,15 @@ export async function send(store: AssistantStore, prompt: string, targetConvoId?
   const targetTab = targetConvoId ? store.tabFor(targetConvoId) : null;
   if (targetConvoId && !targetTab) return; // target retired mid-flight
   const liveTab = targetTab ?? store.activeTab;
+  // Attachment source: explicit payload (queue drain / gate re-entry) or the
+  // tab's composer staging. With a payload the composer is never read NOR
+  // cleared — its staged files belong to whatever the user is typing next.
+  const payload = opts?.payload ?? null;
   // Empty prompts are allowed when attachments are staged (paste-and-go).
   // Drop only if the prompt AND both attachment kinds are empty.
-  if (!trimmed && (liveTab?.attachments.length ?? 0) === 0 && (liveTab?.textAttachments.length ?? 0) === 0) return;
+  if (!trimmed && (payload
+    ? payload.images.length === 0 && payload.textFiles.length === 0
+    : (liveTab?.attachments.length ?? 0) === 0 && (liveTab?.textAttachments.length ?? 0) === 0)) return;
   // Try-handle as a slash command first; if it matched, we're done. (A KNOWN
   // slash command never reaches the queue — send() consumes it before the
   // queue-on-busy branch — so drain-path re-entry always falls through here.)
@@ -55,22 +74,27 @@ export async function send(store: AssistantStore, prompt: string, targetConvoId?
   // queued message that didn't capture them would drain with its image/files
   // silently dropped (the user's "I queued an image and it vanished" bug).
   if (liveTab?.streaming) {
-    const images = liveTab.attachments.map((a) => ({
+    const images = payload ? payload.images : liveTab.attachments.map((a) => ({
       id: a.id, mime: a.mime, dataBase64: a.dataBase64, sizeBytes: a.sizeBytes,
     }));
-    const textFiles = liveTab.textAttachments.map((t) => ({
+    const textFiles = payload ? payload.textFiles : liveTab.textAttachments.map((t) => ({
       id: t.id, name: t.name, text: t.text, sizeBytes: t.sizeBytes, truncated: t.truncated,
     }));
-    liveTab.queue = [...liveTab.queue, {
+    const item: QueueItem = {
       id: crypto.randomUUID(),
       text: trimmed,
       ...(images.length ? { images } : {}),
       ...(textFiles.length ? { textFiles } : {}),
-    }];
-    // Clear the composer so the snapshotted attachments don't ALSO ride the
-    // current turn / linger as a double-send. Mirrors send()'s own clear.
-    liveTab.attachments = [];
-    liveTab.textAttachments = [];
+    };
+    // A drained head that lost the post-stop gate race re-parks at the FRONT —
+    // it was next in line; appending would shuffle it behind newer messages.
+    liveTab.queue = opts?.requeueFront ? [item, ...liveTab.queue] : [...liveTab.queue, item];
+    if (!payload) {
+      // Clear the composer so the snapshotted attachments don't ALSO ride the
+      // current turn / linger as a double-send. Mirrors send()'s own clear.
+      liveTab.attachments = [];
+      liveTab.textAttachments = [];
+    }
     return;
   }
   // Phase 2 (S72): the CLI owns conversation state now. First turn mints a
@@ -112,6 +136,20 @@ export async function send(store: AssistantStore, prompt: string, targetConvoId?
     store.openTabs = [...store.openTabs, convoId];
     store.persistTabs();
   }
+  // Resolve this turn's attachments BEFORE the first await — explicit payload
+  // (queue drain) or a composer snapshot, composer cleared at snapshot time.
+  // Reading tab.attachments after the gate below let a send parked on it
+  // consume attachments that belonged to a different message.
+  const turnImages = payload ? payload.images : tab.attachments.map((a) => ({
+    id: a.id, mime: a.mime, dataBase64: a.dataBase64, sizeBytes: a.sizeBytes,
+  }));
+  const turnTextFiles = payload ? payload.textFiles : tab.textAttachments.map((t) => ({
+    id: t.id, name: t.name, text: t.text, sizeBytes: t.sizeBytes, truncated: t.truncated,
+  }));
+  if (!payload) {
+    tab.attachments = [];
+    tab.textAttachments = [];
+  }
   // Post-stop gate (see TabState.staleTerminalUntil): starting the next turn
   // before the stopped turn's terminal event lands would let that stale event
   // finalize the new turn, and the new backend send would consume the old
@@ -119,8 +157,14 @@ export async function send(store: AssistantStore, prompt: string, targetConvoId?
   while (tab.staleTerminalUntil > Date.now()) {
     await new Promise((r) => setTimeout(r, 50));
     // Another send won the gate while we waited — re-enter from the top so
-    // this message takes the queue path instead of interleaving the session.
-    if (tab.streaming) return send(store, prompt, targetConvoId);
+    // this message takes the queue path (attachments ride the payload; the
+    // composer was already snapshotted + cleared above).
+    if (tab.streaming) {
+      return send(store, prompt, targetConvoId, {
+        payload: { images: turnImages, textFiles: turnTextFiles },
+        requeueFront: opts?.requeueFront,
+      });
+    }
   }
   tab.beginTurn();
   store.lastNotice = null;
@@ -147,7 +191,7 @@ export async function send(store: AssistantStore, prompt: string, targetConvoId?
   }
   // Telemetry: build the turn record + attach to tab. TabState fills it as
   // envelopes arrive; finalized in onDone/onError.
-  const attachBytes = tab.attachments.reduce((s, a) => s + a.sizeBytes, 0);
+  const attachBytes = turnImages.reduce((s, a) => s + a.sizeBytes, 0);
   // The send tier IS the user's persisted tier — no per-turn auto-scaling.
   // (#244's autoScaleEffort is retired: the default tier now maps to `medium`,
   // so a trivial greeting is already light, AND any per-turn effort change forces
@@ -165,7 +209,7 @@ export async function send(store: AssistantStore, prompt: string, targetConvoId?
     effortFlag: effortToFlag(sendEffort, effModel),
     promptLen: trimmed.length,
     promptPreview: trimmed.length > 120 ? trimmed.slice(0, 120) + "…" : trimmed,
-    attachmentsCount: tab.attachments.length,
+    attachmentsCount: turnImages.length,
     attachmentsBytes: attachBytes,
     envelopeUsage: null,
     resultUsage: null,
@@ -193,8 +237,8 @@ export async function send(store: AssistantStore, prompt: string, targetConvoId?
   }
   // User bubble text: when paste-and-go with no text, show an attachment
   // marker so the bubble isn't blank. Counts both kinds.
-  const attachCount = tab.attachments.length;
-  const textCount = tab.textAttachments.length;
+  const attachCount = turnImages.length;
+  const textCount = turnTextFiles.length;
   const markerParts: string[] = [];
   if (attachCount > 0) markerParts.push(`📎 ${attachCount} image${attachCount === 1 ? "" : "s"}`);
   if (textCount > 0) markerParts.push(`📄 ${textCount} file${textCount === 1 ? "" : "s"}`);
@@ -203,7 +247,7 @@ export async function send(store: AssistantStore, prompt: string, targetConvoId?
   // then the text block. Order matches the visual stack (thumbs above text)
   // in MessageBubble's user-side render path.
   const userBlocks: Block[] = [];
-  for (const a of tab.attachments) {
+  for (const a of turnImages) {
     userBlocks.push({
       type: "image",
       mime: a.mime,
@@ -215,7 +259,7 @@ export async function send(store: AssistantStore, prompt: string, targetConvoId?
   // the visible bubble (the full contents are inlined into the prompt below, not
   // shown — they'd flood the transcript). One line per file so the user sees
   // what they sent.
-  for (const t of tab.textAttachments) {
+  for (const t of turnTextFiles) {
     userBlocks.push({ type: "text", text: `📄 ${t.name}${t.truncated ? " (truncated)" : ""}` });
   }
   userBlocks.push({ type: "text", text: bubbleText });
@@ -235,23 +279,21 @@ export async function send(store: AssistantStore, prompt: string, targetConvoId?
   // #146: asst placeholder is at the tail of messages; cache its index so
   // mutateStreaming can index-replace instead of scanning the full array.
   tab.streamingMsgIdx = tab.messages.length - 1;
-  // Snapshot attachments for this turn + clear the composer so a fast retype
-  // doesn't accidentally re-attach.
-  const turnAttachments = tab.attachments.map((a) => ({
+  // Wire shape for the backend: mime + data only (ids stay FE-side). The
+  // composer was already snapshotted + cleared before the post-stop gate.
+  const turnAttachments = turnImages.map((a) => ({
     mime: a.mime,
     dataBase64: a.dataBase64,
   }));
   // Inline text-file attachments into the prompt as fenced blocks before the
   // user's typed text. The backend pipes `prompt` to the CLI verbatim, so no
   // backend change is needed — the assistant simply sees the file contents.
-  const textBlocks = tab.textAttachments
+  const textBlocks = turnTextFiles
     .map((t) => `\`\`\`${t.name}\n${t.text}\n\`\`\``)
     .join("\n\n");
   const effectivePrompt = textBlocks
     ? (trimmed ? `${textBlocks}\n\n${trimmed}` : textBlocks)
     : trimmed;
-  tab.attachments = [];
-  tab.textAttachments = [];
   try {
     await invoke("assistant_send", {
       prompt: effectivePrompt,
@@ -324,21 +366,16 @@ export function drainQueue(store: AssistantStore, tab: TabState | null) {
     // to sending. If it's already gone (raced drain), bail.
     if (!tab.queue.some((q) => q.id === next.id)) return;
     tab.queue = tab.queue.filter((q) => q.id !== next.id);
-    // Restore the snapshotted attachments onto the DRAINING tab so send() picks
-    // them up — send(store, text, convoId) below reads THIS tab's staged
-    // attachments via its explicit target. Without this the queued image is
-    // lost on drain.
-    tab.attachments = next.images
-      ? next.images.map((a) => ({ id: a.id, mime: a.mime, dataBase64: a.dataBase64, sizeBytes: a.sizeBytes }))
-      : [];
-    tab.textAttachments = next.textFiles
-      ? next.textFiles.map((t) => ({ id: t.id, name: t.name, text: t.text, sizeBytes: t.sizeBytes, truncated: t.truncated }))
-      : [];
     // Fire the bare sendImpl with an explicit target — it scopes every tab
     // read/write to the draining tab itself, so a drain on a sibling-pane tab
     // no longer yanks the user's pane focus (the old store.send() retarget
-    // called setFocusedPane from this non-user-initiated path).
-    send(store, next.text, capturedTabConvoId).catch(e => tab.onError(String(e)));
+    // called setFocusedPane from this non-user-initiated path). The item's
+    // attachments ride the explicit payload — never staged on tab state, where
+    // a concurrent composer send could consume (or clobber) them.
+    send(store, next.text, capturedTabConvoId, {
+      payload: { images: next.images ?? [], textFiles: next.textFiles ?? [] },
+      requeueFront: true,
+    }).catch(e => tab.onError(String(e)));
   });
 }
 
@@ -419,11 +456,19 @@ function runSlash(store: AssistantStore, input: string): boolean {
       return true;
     case "model": {
       const v = arg.toLowerCase();
-      if (v === "sonnet" || v === "opus" || v === "haiku") {
-        store.setModel(v);
+      // Availability-gated like the picker: haiku only while enabled, fable
+      // maps to its full id. A disabled model reads as unknown — honest copy.
+      const id: ModelSel | null =
+        v === "sonnet" || v === "opus" ? v
+        : v === "fable" && fableAvailable() ? "claude-fable-5"
+        : v === "haiku" && haikuAvailable() ? "haiku"
+        : null;
+      if (id) {
+        store.setModel(id);
         notify.ok(`Model switched to ${v}.`);
       } else {
-        store.lastError = `Unknown model "${arg}". Use sonnet, opus, or haiku.`;
+        const names = ["sonnet", "opus", ...(fableAvailable() ? ["fable"] : []), ...(haikuAvailable() ? ["haiku"] : [])];
+        store.lastError = `Unknown model "${arg}". Use ${names.join(", ")}.`;
       }
       return true;
     }

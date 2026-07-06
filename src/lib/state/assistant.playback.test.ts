@@ -47,6 +47,7 @@ function pumpRaf() {
 }
 
 import { assistant } from "./assistant.svelte.js";
+import { send as sendDirect } from "./assistant/send.js";
 import { notify } from "./toast.svelte";
 import { invoke } from "@tauri-apps/api/core";
 import type { TurnRecord } from "./assistant/types.js";
@@ -766,6 +767,56 @@ describe("playback — queue while streaming, drain on completion", () => {
       type: "image", mime: "image/png", dataBase64: "QUJD", sizeBytes: 3,
     });
     expect(drainedUser?.blocks).toContainEqual({ type: "text", text: "with image" });
+  });
+
+  it("a drain leaves the composer's staged attachments alone (regression: drain restored onto shared tab state)", async () => {
+    const { tab } = readyStore();
+    await assistant.send("first");
+
+    // Queue an image-bearing message mid-stream…
+    tab.attachments = [{ id: "img-q", mime: "image/png", dataBase64: "UUVE", sizeBytes: 3 }];
+    await assistant.send("queued with image");
+    expect(tab.queue).toHaveLength(1);
+
+    // …then stage a NEW composer attachment for the next message the user is
+    // composing. The old drain restored the queued snapshot onto tab.attachments,
+    // clobbering this staging (and a concurrent send could steal the queued one).
+    tab.attachments = [{ id: "img-mine", mime: "image/jpeg", dataBase64: "TUlORQ==", sizeBytes: 4 }];
+
+    feed(tab, [textDelta("reply")]);
+    tab.onDone();
+    await settle();
+
+    // Drained turn carries the QUEUED image, not the composer's.
+    const drainedUser = tab.messages.findLast((m) => m.role === "user");
+    expect(drainedUser?.blocks).toContainEqual({
+      type: "image", mime: "image/png", dataBase64: "UUVE", sizeBytes: 3,
+    });
+    expect(drainedUser?.blocks).not.toContainEqual(
+      expect.objectContaining({ dataBase64: "TUlORQ==" }),
+    );
+    // The user's composer staging survives the drain untouched.
+    expect(tab.attachments).toEqual([
+      { id: "img-mine", mime: "image/jpeg", dataBase64: "TUlORQ==", sizeBytes: 4 },
+    ]);
+  });
+
+  it("a payload send that finds the tab busy re-parks at the queue FRONT (order preserved)", async () => {
+    const { tab, convoId } = readyStore();
+    await assistant.send("first");
+    expect(tab.streaming).toBe(true);
+    await assistant.send("second"); // parked normally → back of queue
+    expect(tab.queue.map((q) => q.text)).toEqual(["second"]);
+
+    // A drained-head re-entry (payload + requeueFront) must park AHEAD of it,
+    // its attachments riding the item — never staged on the composer.
+    await sendDirect(assistant, "head", convoId, {
+      payload: { images: [{ id: "i", mime: "image/png", dataBase64: "QQ==", sizeBytes: 1 }], textFiles: [] },
+      requeueFront: true,
+    });
+    expect(tab.queue.map((q) => q.text)).toEqual(["head", "second"]);
+    expect(tab.queue[0].images).toHaveLength(1);
+    expect(tab.attachments).toEqual([]);
   });
 });
 
