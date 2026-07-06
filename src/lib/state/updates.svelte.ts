@@ -153,7 +153,7 @@ class UpdateStore {
    *  can't claim "up to date" while the pill says an update is available.
    *  `label` is empty while idle — surfaces show just the version instead of
    *  asserting a freshness we haven't checked yet. */
-  get summary(): { kind: "ok" | "warn" | "busy" | "danger"; label: string } {
+  get summary(): { kind: "ok" | "warn" | "busy" | "danger" | "dev"; label: string } {
     switch (this.state) {
       case "available":
       case "downloading":
@@ -166,7 +166,7 @@ class UpdateStore {
       case "error":
         // Dev binary is never Velopack-installed — "reinstall needed" there is
         // noise, not a broken install. Real packaged installs keep the alarm.
-        if (this.installBroken && import.meta.env.DEV) return { kind: "busy", label: "dev build" };
+        if (this.installBroken && import.meta.env.DEV) return { kind: "dev", label: "dev" };
         return { kind: "danger", label: this.installBroken ? "reinstall needed" : "update check failed" };
       case "uptodate":
         return { kind: "ok", label: "up to date" };

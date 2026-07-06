@@ -359,6 +359,42 @@ export function outputPeek(result: string | null | undefined, n = 3): { lines: s
   return { lines: nonEmpty.slice(-n), more: nonEmpty.length - n };
 }
 
+// ── Progressive output reveal ────────────────────────────────────────────────
+// Long tool output (a 400-line `git log`, a full `cargo build`) shouldn't drop
+// the reader into a tiny inner-scroll box — that hides how much there is and
+// makes skimming a chore. Instead we cap the visible line count in TIERS and let
+// the user step the cap up: collapsed (a glanceable head), then "Show more" to a
+// taller expanded cap, and only PAST that does the block become a bounded scroll.
+// `revealTier` returns the full line list plus how many the current tier shows,
+// so the component can render `lines.slice(0, shown)` + a "+N more" affordance.
+//
+// The cap steps are line COUNTS, not pixels, so a wall of short lines and a few
+// long ones both cap predictably. Kept pure + exported for unit tests.
+export const REVEAL_COLLAPSED = 12; // first glance — a head tall enough to be useful
+export const REVEAL_EXPANDED = 40;  // after one "Show more" — most output fits here
+export type RevealTier = "collapsed" | "expanded" | "all";
+
+export function splitOutput(
+  result: string | null | undefined,
+  tier: RevealTier,
+): { lines: string[]; shown: number; hidden: number; total: number } {
+  if (!result) return { lines: [], shown: 0, hidden: 0, total: 0 };
+  const lines = result.replace(/\s+$/, "").split("\n");
+  const total = lines.length;
+  const cap = tier === "collapsed" ? REVEAL_COLLAPSED : tier === "expanded" ? REVEAL_EXPANDED : total;
+  const shown = Math.min(cap, total);
+  return { lines, shown, hidden: Math.max(0, total - shown), total };
+}
+
+// The next tier up from the current one, given how many lines the output has.
+// collapsed → expanded (if there's more past the collapsed cap) → all. Returns
+// null when nothing more can be revealed (already showing everything).
+export function nextRevealTier(tier: RevealTier, total: number): RevealTier | null {
+  if (tier === "collapsed") return total > REVEAL_COLLAPSED ? "expanded" : null;
+  if (tier === "expanded") return total > REVEAL_EXPANDED ? "all" : null;
+  return null;
+}
+
 // Map one live assistant ChatMessage → the StreamTurn render model.
 export function messageToTurn(m: ChatMessage): TurnModel {
   const blocks: StreamBlock[] = [];
@@ -434,11 +470,15 @@ export function groupBlocks(blocks: StreamBlock[]): Group[] {
 const isRichKind = (k: TKind) => k === "plan" || k === "web" || k === "fetch" || k === "test" || k === "lint" || k === "agent" || k === "ask";
 
 // A tool gets its own rich block when its KIND is inherently rich, OR it's a
-// shell command that produced output (so the live stream can show the in-and-
-// out). A bare command with no output stays in the lightweight WorkLine batch,
-// keeping quick `cd`-style steps calm. Pref-gating of the body happens at render.
+// shell command that (a) is still RUNNING — so it renders as a terminal block
+// the moment it starts, not as a WorkLine row that jumps into a block once
+// output lands (the flicker seen mid-stream) — or (b) produced output. A bare
+// FINISHED command with no output (a quick `cd`) stays in the lightweight
+// WorkLine batch, keeping trivial steps calm. Pref-gating of the body at render.
 const isRich = (t: StreamTool) =>
-  isRichKind(t.kind) || (t.kind === "shell" && typeof t.result === "string" && t.result.trim().length > 0);
+  isRichKind(t.kind) ||
+  (t.kind === "shell" &&
+    (t.status === "pending" || (typeof t.result === "string" && t.result.trim().length > 0)));
 
 // Split a work run: rich tools each get their own block; edits batch; the rest
 // collapse to one quiet WorkLine. Order preserved.

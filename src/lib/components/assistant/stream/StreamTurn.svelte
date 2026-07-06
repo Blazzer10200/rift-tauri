@@ -174,20 +174,15 @@
       : `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${time}`;
   });
 
-  // Live footer verb: a pending tool drives the real action word ("Reading X");
-  // with no tool in flight (e.g. the model is thinking before any tool call) we
-  // cycle a whimsical present-participle every ~2.4s so the turn reads as alive
-  // instead of frozen. Mirrors app/stream.jsx StreamFooter (the DS reference).
-  const WHIM_WORDS = [
-    "Thinking", "Pondering", "Tracing", "Weighing", "Mapping",
-    "Sketching", "Distilling", "Untangling", "Composing", "Sifting",
-  ];
-  let whimTick = $state(0);
-  $effect(() => {
-    if (!streaming || liveTool) return;
-    const id = setInterval(() => (whimTick = (whimTick + 1) % WHIM_WORDS.length), 2400);
-    return () => clearInterval(id);
-  });
+  // Live footer verb: a pending tool drives the real action word ("Reading X").
+  // With NO tool in flight (model reasoning before/between tool calls) we no
+  // longer invent a whimsical verb ("Mapping…", "Pondering…") — that claimed an
+  // action the model wasn't doing and read as the app fabricating status. Fall
+  // back to the honest turn state instead: "Thinking…" when a reasoning pass is
+  // live, else a plain "Working…". The head shows the same state word, so the
+  // two never contradict, and the footer only says something specific when a
+  // real tool is actually running.
+  const idleVerb = $derived(thinkingNow ? "Thinking" : "Working");
   // Stall watchdog: the turn is live but NOTHING has come back — no tool in
   // flight, no output tokens. A short wait is normal model latency (first token
   // ~4s); a long silence can be the model OR a wedged local Claude process. We
@@ -220,7 +215,16 @@
           ? "Still waiting for a response"
           : stallLevel === 1
             ? "Waiting on the model"
-            : `${WHIM_WORDS[whimTick]}…`,
+            : `${idleVerb}…`,
+  );
+  // The caption of the live tool ("composer.svelte", "git status …") rides next
+  // to the verb so the footer reads as one honest phrase — "Reading composer.svelte"
+  // — instead of a bare verb with the target stranded in a work row above. Dir
+  // prefix dropped here (the row above carries the full path); footer stays tight.
+  // Suppressed in the 'focused' (calm) narration density: that mode's whole point
+  // is a clean, minimal stream, so the footer stays a bare verb + meter there.
+  const footerCap = $derived(
+    liveTool && !awaitingInput && uiPrefs.narration !== "focused" ? (liveTool.cap ?? null) : null,
   );
 </script>
 
@@ -283,17 +287,19 @@
     {/if}
   {/each}
 
-  {#if streaming}
+  {#if streaming && !thinkingNow}
+    <!-- While a pure reasoning pass is live the HEAD already shows "Thinking… Xs"
+         — the footer would just duplicate it (and there's no action/tokens to
+         report yet), so it's suppressed until a tool or token lands. -->
     <div class="sfooter" class:stalled={stallLevel > 0} class:awaiting={awaitingInput}>
-      {#key footerVerb}<span class="sf-verb-wrap"><span class="sf-verb">{footerVerb}</span></span>{/key}
+      {#key footerVerb}<span class="sf-verb-wrap"><span class="sf-verb">{footerVerb}</span>{#if footerCap}<span class="sf-cap">{footerCap}</span>{/if}</span>{/key}
       {#if awaitingInput}
         <!-- Parked on the user: no climbing clock (it's human time, not the
              model's), no token meter. Just the calm verb + a nudge. -->
         <span class="sf-meta sf-await-hint">— choose an option above to continue</span>
       {:else if liveSecs != null || liveTokens != null}
-        <!-- The command/file caption is intentionally NOT repeated here — it
-             already shows in the active work row above (was a duplicate).
-             Meta reads as a quiet right-aligned mono cluster, not inline pips. -->
+        <!-- verb+caption read as one phrase on the left; elapsed·tokens sit as a
+             quiet mono cluster hugging the right edge. -->
         <span class="sf-fill" aria-hidden="true"></span>
         <span class="sf-cluster">
           {#if liveSecs != null}
@@ -318,7 +324,7 @@
         it'll stream as soon as a response starts. You can keep waiting or press Stop.
       </div>
     {/if}
-  {:else if turn.outcome !== "text"}
+  {:else if !streaming && turn.outcome !== "text"}
     <div class="sapplied" data-outcome={turn.outcome}>
       {#if turn.outcome === "applied"}
         <span class="ok"><Check size={13} strokeWidth={2.5} /> Applied</span>

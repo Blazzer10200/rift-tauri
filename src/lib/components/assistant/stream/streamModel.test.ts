@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { messageToTurn, parseAskUserResult, groupNames, workLineMode, isFillerSay, classifySay, outputPeek, groupBlocks, shellFlavor, resultMeta } from "./streamModel";
+import { messageToTurn, parseAskUserResult, groupNames, workLineMode, isFillerSay, classifySay, outputPeek, groupBlocks, shellFlavor, resultMeta, splitOutput, nextRevealTier, REVEAL_COLLAPSED, REVEAL_EXPANDED } from "./streamModel";
 import type { StreamTool } from "./streamModel";
 import type { ChatMessage } from "$lib/state/assistant.svelte";
 
@@ -357,6 +357,56 @@ describe("outputPeek — trailing-lines preview for command output", () => {
   });
 });
 
+describe("splitOutput — progressive reveal tiers", () => {
+  const lines = (n: number) => Array.from({ length: n }, (_, i) => `line ${i + 1}`).join("\n");
+
+  it("null / empty → nothing", () => {
+    expect(splitOutput(null, "collapsed")).toEqual({ lines: [], shown: 0, hidden: 0, total: 0 });
+    expect(splitOutput("", "all")).toEqual({ lines: [], shown: 0, hidden: 0, total: 0 });
+  });
+
+  it("output shorter than the collapsed cap shows fully, nothing hidden", () => {
+    const r = splitOutput(lines(5), "collapsed");
+    expect(r.total).toBe(5);
+    expect(r.shown).toBe(5);
+    expect(r.hidden).toBe(0);
+  });
+
+  it("collapsed caps at REVEAL_COLLAPSED, reports the remainder as hidden", () => {
+    const r = splitOutput(lines(100), "collapsed");
+    expect(r.shown).toBe(REVEAL_COLLAPSED);
+    expect(r.hidden).toBe(100 - REVEAL_COLLAPSED);
+  });
+
+  it("expanded caps at REVEAL_EXPANDED", () => {
+    const r = splitOutput(lines(100), "expanded");
+    expect(r.shown).toBe(REVEAL_EXPANDED);
+    expect(r.hidden).toBe(100 - REVEAL_EXPANDED);
+  });
+
+  it("all shows everything, nothing hidden", () => {
+    const r = splitOutput(lines(100), "all");
+    expect(r.shown).toBe(100);
+    expect(r.hidden).toBe(0);
+  });
+});
+
+describe("nextRevealTier — step the cap up", () => {
+  it("collapsed → expanded only when there's more than the collapsed cap", () => {
+    expect(nextRevealTier("collapsed", REVEAL_COLLAPSED + 1)).toBe("expanded");
+    expect(nextRevealTier("collapsed", REVEAL_COLLAPSED)).toBeNull();
+  });
+
+  it("expanded → all only when there's more than the expanded cap", () => {
+    expect(nextRevealTier("expanded", REVEAL_EXPANDED + 1)).toBe("all");
+    expect(nextRevealTier("expanded", REVEAL_EXPANDED)).toBeNull();
+  });
+
+  it("all is terminal", () => {
+    expect(nextRevealTier("all", 9999)).toBeNull();
+  });
+});
+
 describe("adaptTool — shell carries its stdout; rich only when it has output", () => {
   // Build a Bash tool block with a real result (the `tool` helper forces null).
   const bash = (result: string | null, status: "done" | "pending" = "done") =>
@@ -376,10 +426,16 @@ describe("adaptTool — shell carries its stdout; rich only when it has output",
     expect(work && work.type === "work" && work.segs.some((s) => s.seg === "rich" && s.tool.kind === "shell")).toBe(true);
   });
 
-  it("a bare command with NO output stays in the lightweight WorkLine batch", () => {
+  it("a bare FINISHED command with NO output stays in the lightweight WorkLine batch", () => {
     const groups = groupBlocks(messageToTurn(msg([bash(null)])).blocks);
     const work = groups.find((g) => g.type === "work");
     expect(work && work.type === "work" && work.segs.every((s) => s.seg !== "rich")).toBe(true);
+  });
+
+  it("a PENDING command (no output yet) is rich immediately — no WorkLine→block flicker", () => {
+    const groups = groupBlocks(messageToTurn(msg([bash(null, "pending")])).blocks);
+    const work = groups.find((g) => g.type === "work");
+    expect(work && work.type === "work" && work.segs.some((s) => s.seg === "rich" && s.tool.kind === "shell")).toBe(true);
   });
 });
 

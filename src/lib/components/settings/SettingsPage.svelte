@@ -286,21 +286,26 @@
   <!-- ── Hero + sticky tab bar ── -->
   <PageHero eyebrow="Settings" title={activeMeta.label} desc={activeMeta.sub} padBottom={false} maxWidth={820}>
     {#snippet chip()}
-      <span class="sb-chip"><span class="mono">local workspace</span></span>
+      <span class="sb-chip ghost"><span class="mono">local workspace</span></span>
       <button
         class="sb-chip {updates.summary.kind}"
         type="button"
         onclick={() => updates.open()}
-        use:tooltip={"Check for updates"}
+        use:tooltip={updates.summary.kind === "dev" ? "Running an unpackaged dev build — auto-update is off" : "Check for updates"}
       >
         {#if updates.summary.kind === "warn"}
           <ArrowUpCircle size={14} />
         {:else if updates.summary.kind === "busy"}
           <Loader2 size={14} class="spin" />
+        {:else if updates.summary.kind === "dev"}
+          <Cog size={13} />
+        {:else if updates.summary.kind === "danger"}
+          <RefreshCw size={13} />
         {:else}
           <CircleCheck size={14} />
         {/if}
-        {appVersion}{updates.summary.label ? ` · ${updates.summary.label}` : ""}
+        <span class="sb-chip-ver mono">{appVersion}</span>
+        {#if updates.summary.label}<span class="sb-chip-tag">{updates.summary.label}</span>{/if}
       </button>
     {/snippet}
     {#snippet children()}
@@ -806,7 +811,22 @@
           <div class="card">
             <div class="card-tt">Build</div>
             <div class="card-sub">This copy of Rift and the stack it's built on.</div>
-            {#each [["Rift", `${appVersion} · Tauri 2`], ["Engine", "SvelteKit · Svelte 5 (runes)"], ["Style", "Graphite Ink · Tailwind v4 · OKLCH"], ["License", "Proprietary · github.com/Blazzer10200/rift"]] as kv (kv[0])}
+            <div class="st-build">
+              <div class="st-build-mark"><Sparkles size={18} strokeWidth={2} /></div>
+              <div class="st-build-id">
+                <div class="st-build-name">Rift <span class="st-build-ver">{appVersion}</span></div>
+                <div class="st-build-chan">
+                  {#if updates.summary.kind === "dev"}
+                    <span class="st-build-tag dev">dev build</span> · not auto-updated
+                  {:else if updates.summary.kind === "warn"}
+                    <span class="st-build-tag warn">{updates.summary.label}</span>
+                  {:else}
+                    <span class="st-build-tag ok">{updates.summary.label || "installed"}</span>
+                  {/if}
+                </div>
+              </div>
+            </div>
+            {#each [["Engine", "SvelteKit · Svelte 5 (runes)"], ["Platform", "Tauri 2 · Rust"], ["Style", "Graphite Ink · Tailwind v4 · OKLCH"], ["License", "Proprietary · github.com/Blazzer10200/rift"]] as kv (kv[0])}
               <div class="st-kv"><span class="st-kv-k">{kv[0]}</span><span class="st-kv-v">{kv[1]}</span></div>
             {/each}
           </div>
@@ -991,10 +1011,17 @@
   /* background-texture picker */
   .bg-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
   .bg-opt { display: flex; flex-direction: column; gap: 8px; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
-  .bg-tile { position: relative; aspect-ratio: 1.75; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); background-color: oklch(0.135 0.004 258); transition: transform var(--dur-fast) var(--ease-page), border-color var(--dur-fast), box-shadow var(--dur-fast); }
+  /* Tile backdrop = the real window color so intensity reads exactly as it will
+     behind the workspace (was a hardcoded near-black that skewed the preview). */
+  .bg-tile { position: relative; aspect-ratio: 1.75; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); background-color: var(--bg); transition: transform var(--dur-fast) var(--ease-page), border-color var(--dur-fast), box-shadow var(--dur-fast); }
   .bg-opt:hover .bg-tile { transform: translateY(-2px); border-color: var(--border-strong); }
   .bg-opt.sel .bg-tile { border-color: transparent; box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
-  .bg-tile-pat { position: absolute; inset: 0; }
+  /* The tile patterns mirror the real texture's (very faint) ink 1:1. In a small
+     preview tile that's borderline invisible for the dot/grid family, so a
+     uniform brightness lift makes every pattern legible-to-pick WITHOUT changing
+     their relative intensities or the accent hues — the honest look, just
+     readable at tile scale. */
+  .bg-tile-pat { position: absolute; inset: 0; filter: brightness(1.75); }
   .bg-tile-none { position: absolute; inset: 0; display: grid; place-items: center; color: var(--fg-faint); font-size: 18px; }
   .bg-tile-ck { position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--accent-fg); opacity: 0; transform: scale(0.5); transition: opacity var(--dur-fast), transform var(--dur-fast) var(--ease-page); }
   .bg-opt.sel .bg-tile-ck { opacity: 1; transform: none; }
@@ -1018,6 +1045,16 @@
   .sb-chip.warn :global(svg) { color: var(--warn); }
   .sb-chip.danger { background: var(--danger-soft); border-color: color-mix(in oklch, var(--danger) 28%, transparent); color: var(--danger); }
   .sb-chip.danger :global(svg) { color: var(--danger); }
+  /* Dev build — calm neutral, not an alarm. A quiet mono tag, no colored fill. */
+  .sb-chip.dev { color: var(--fg-2); }
+  .sb-chip.dev :global(svg) { color: var(--fg-subtle); }
+  /* The static "local workspace" chip carries no state — recede it below the
+     interactive version pill so the eye lands on the actionable one. */
+  .sb-chip.ghost { background: transparent; border-color: color-mix(in oklch, var(--border) 70%, transparent); color: var(--fg-subtle); }
+  .sb-chip-ver { font-family: var(--font-mono); font-weight: 600; }
+  /* Version → tag separator: a mid-dot in the chip's own muted ink. */
+  .sb-chip-tag { position: relative; padding-left: 9px; margin-left: 2px; font-size: 11px; opacity: 0.9; }
+  .sb-chip-tag::before { content: ""; position: absolute; left: 0; top: 50%; width: 3px; height: 3px; margin-top: -1.5px; border-radius: 50%; background: currentColor; opacity: 0.55; }
   .sb-chip .mono { font-family: var(--font-mono); }
 
   /* ── Session status banner ── */
@@ -1088,6 +1125,18 @@
   .st-cli-warn { margin-top: 7px; font-size: var(--fs-xs); color: var(--warn); line-height: 1.4; }
   .st-cli-note { margin-top: 7px; font-size: var(--fs-xs); color: var(--fg-muted); line-height: 1.4; cursor: help; }
 
+  /* ── About: Build identity header ── */
+  .st-build { display: flex; align-items: center; gap: 14px; padding: 4px 0 14px; margin-bottom: 4px; border-bottom: 1px solid var(--border); }
+  .st-build-mark { width: 40px; height: 40px; border-radius: 11px; flex: none; display: grid; place-items: center; color: var(--accent); background: var(--accent-soft); border: 1px solid color-mix(in oklab, var(--accent) 26%, transparent); }
+  .st-build-id { min-width: 0; }
+  .st-build-name { font-size: 16px; font-weight: 680; letter-spacing: -0.01em; color: var(--fg); }
+  .st-build-ver { font-family: var(--font-mono); font-weight: 600; color: var(--fg-2); font-size: 14px; margin-left: 4px; }
+  .st-build-chan { font-size: 11.5px; color: var(--fg-muted); margin-top: 3px; display: flex; align-items: center; gap: 6px; }
+  .st-build-tag { font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; padding: 1.5px 7px; border-radius: 999px; border: 1px solid transparent; }
+  .st-build-tag.ok { color: var(--ok); background: var(--ok-soft); border-color: color-mix(in oklch, var(--ok) 26%, transparent); }
+  .st-build-tag.warn { color: var(--warn); background: var(--warn-soft); border-color: color-mix(in oklch, var(--warn) 26%, transparent); }
+  .st-build-tag.dev { color: var(--fg-2); background: color-mix(in oklab, var(--fg) 8%, transparent); border-color: color-mix(in oklab, var(--fg) 12%, transparent); }
+
   /* ── About: kv + resource rows ── */
   .st-kv { display: flex; align-items: center; gap: 16px; padding: 11px 0; }
   .st-kv + .st-kv { border-top: 1px solid var(--border); }
@@ -1101,18 +1150,24 @@
   .st-about-s { font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 2px; display: block; }
   .st-about-row:hover { background: var(--surface-hover); }
 
-  /* ── Appearance: background-texture preview tiles (live field on .app[data-dots]::before) ── */
-  .bg-tile-pat[data-dots="dots"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 24%, transparent) 1px, transparent 1.6px); background-size: 11px 11px; }
-  .bg-tile-pat[data-dots="dense"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 22%, transparent) 0.9px, transparent 1.4px); background-size: 7px 7px; }
-  .bg-tile-pat[data-dots="margins"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 28%, transparent) 1px, transparent 1.6px); background-size: 11px 11px; -webkit-mask-image: linear-gradient(to right, #000, transparent 30% 70%, #000), linear-gradient(to bottom, #000, transparent 34% 66%, #000); mask-image: linear-gradient(to right, #000, transparent 30% 70%, #000), linear-gradient(to bottom, #000, transparent 34% 66%, #000); }
-  .bg-tile-pat[data-dots="grid"] { background-image: linear-gradient(to right, color-mix(in oklab, var(--fg) 20%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--fg) 20%, transparent) 1px, transparent 1px); background-size: 12px 12px; }
-  .bg-tile-pat[data-dots="lines"] { background-image: linear-gradient(to bottom, color-mix(in oklab, var(--fg) 20%, transparent) 1px, transparent 1px); background-size: 100% 10px; }
-  .bg-tile-pat[data-dots="diagonal"] { background-image: repeating-linear-gradient(45deg, color-mix(in oklab, var(--fg) 18%, transparent) 0 1px, transparent 1px 9px); }
-  .bg-tile-pat[data-dots="crosshatch"] { background-image: repeating-linear-gradient(45deg, color-mix(in oklab, var(--fg) 22%, transparent) 0 1px, transparent 1px 10px), repeating-linear-gradient(-45deg, color-mix(in oklab, var(--fg) 22%, transparent) 0 1px, transparent 1px 10px); }
-  .bg-tile-pat[data-dots="glow"] { background-image: radial-gradient(120% 90% at 50% 0%, color-mix(in oklab, var(--accent) 22%, transparent), transparent 62%); }
-  .bg-tile-pat[data-dots="blueprint"] { background-image: linear-gradient(to right, color-mix(in oklab, var(--accent) 22%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--accent) 22%, transparent) 1px, transparent 1px), linear-gradient(to right, color-mix(in oklab, var(--accent) 11%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--accent) 11%, transparent) 1px, transparent 1px); background-size: 36px 36px, 36px 36px, 9px 9px, 9px 9px; }
-  .bg-tile-pat[data-dots="rings"] { background-image: repeating-radial-gradient(circle at 50% -20%, color-mix(in oklab, var(--fg) 24%, transparent) 0 1px, transparent 1px 13px); }
-  .bg-tile-pat[data-dots="grain"] { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); background-size: 160px 160px; opacity: 0.2; }
+  /* ── Appearance: background-texture preview tiles ──
+     TRUE preview — the exact ink/accent percentages and masks the real
+     `.app[data-dots]::before` uses (AppShell.svelte), so what you see in the
+     tile is what lands behind the workspace. Only the scale is condensed to fit
+     a ~135px tile (the app canvas is ~10× wider) so the pattern reads at all;
+     intensity and mask geometry are 1:1 with the live texture. Keep in lockstep
+     with AppShell — if a real texture's ink % changes, mirror it here. */
+  .bg-tile-pat[data-dots="dots"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 4.5%, transparent) 0.8px, transparent 1.5px); background-size: 13px 13px; -webkit-mask-image: radial-gradient(125% 105% at 50% 24%, #000 16%, transparent 80%); mask-image: radial-gradient(125% 105% at 50% 24%, #000 16%, transparent 80%); }
+  .bg-tile-pat[data-dots="dense"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 4%, transparent) 0.7px, transparent 1.3px); background-size: 8px 8px; -webkit-mask-image: radial-gradient(125% 105% at 50% 24%, #000 16%, transparent 80%); mask-image: radial-gradient(125% 105% at 50% 24%, #000 16%, transparent 80%); }
+  .bg-tile-pat[data-dots="margins"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 6.5%, transparent) 0.8px, transparent 1.5px); background-size: 13px 13px; -webkit-mask-image: linear-gradient(to right, #000, transparent 24% 76%, #000), linear-gradient(to bottom, #000, transparent 28% 72%, #000); mask-image: linear-gradient(to right, #000, transparent 24% 76%, #000), linear-gradient(to bottom, #000, transparent 28% 72%, #000); }
+  .bg-tile-pat[data-dots="grid"] { background-image: linear-gradient(to right, color-mix(in oklab, var(--fg) 4%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--fg) 4%, transparent) 1px, transparent 1px); background-size: 15px 15px; -webkit-mask-image: radial-gradient(125% 105% at 50% 24%, #000 14%, transparent 80%); mask-image: radial-gradient(125% 105% at 50% 24%, #000 14%, transparent 80%); }
+  .bg-tile-pat[data-dots="lines"] { background-image: linear-gradient(to bottom, color-mix(in oklab, var(--fg) 4%, transparent) 1px, transparent 1px); background-size: 100% 14px; }
+  .bg-tile-pat[data-dots="diagonal"] { background-image: repeating-linear-gradient(45deg, color-mix(in oklab, var(--fg) 3.5%, transparent) 0 1px, transparent 1px 12px); }
+  .bg-tile-pat[data-dots="crosshatch"] { background-image: repeating-linear-gradient(45deg, color-mix(in oklab, var(--fg) 5.5%, transparent) 0 1px, transparent 1px 13px), repeating-linear-gradient(-45deg, color-mix(in oklab, var(--fg) 5.5%, transparent) 0 1px, transparent 1px 13px); -webkit-mask-image: radial-gradient(128% 108% at 50% 26%, #000 22%, transparent 86%); mask-image: radial-gradient(128% 108% at 50% 26%, #000 22%, transparent 86%); }
+  .bg-tile-pat[data-dots="glow"] { background-image: radial-gradient(150% 100% at 50% -12%, color-mix(in oklab, var(--accent) 8%, transparent), transparent 60%), radial-gradient(120% 90% at 84% 4%, color-mix(in oklab, var(--accent) 8%, transparent), transparent 62%); }
+  .bg-tile-pat[data-dots="blueprint"] { background-image: linear-gradient(to right, color-mix(in oklab, var(--accent) 7%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--accent) 7%, transparent) 1px, transparent 1px), linear-gradient(to right, color-mix(in oklab, var(--accent) 3.5%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--accent) 3.5%, transparent) 1px, transparent 1px); background-size: 44px 44px, 44px 44px, 11px 11px, 11px 11px; -webkit-mask-image: radial-gradient(125% 105% at 50% 24%, #000 14%, transparent 80%); mask-image: radial-gradient(125% 105% at 50% 24%, #000 14%, transparent 80%); }
+  .bg-tile-pat[data-dots="rings"] { background-image: repeating-radial-gradient(circle at 50% -10%, color-mix(in oklab, var(--fg) 4.5%, transparent) 0 1px, transparent 1px 16px); -webkit-mask-image: radial-gradient(130% 115% at 50% 20%, #000 20%, transparent 85%); mask-image: radial-gradient(130% 115% at 50% 20%, #000 20%, transparent 85%); }
+  .bg-tile-pat[data-dots="grain"] { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); background-size: 120px 120px; opacity: 0.08; }
   .bg-tile-pat[data-dots="off"] { background-image: none; }
 
   /* ── Keyboard shortcut rows ── */

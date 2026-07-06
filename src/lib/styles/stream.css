@@ -75,7 +75,14 @@
 .sfooter { display: flex; align-items: center; gap: 7px; margin: 15px 0 2px; font-size: 12.5px;
   color: var(--fg-faint); font-variant-numeric: tabular-nums; animation: blockIn var(--dur-base) var(--ease-page) both; }
 .sfooter .sf-verb { color: var(--fg-muted); }
-.sfooter .sf-verb-wrap { display: inline-flex; animation: verbIn 320ms var(--ease-page) both; }
+/* The live target ("composer.svelte", "git status …") right after the verb, so
+   the footer reads as one honest phrase. Quiet mono, truncates before it can
+   shove the meter off the row. */
+.sfooter .sf-cap { margin-left: 7px; min-width: 0; font-family: var(--font-mono, monospace);
+  font-size: 11px; color: var(--fg-faint); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.sfooter .sf-verb-wrap { display: inline-flex; align-items: baseline; min-width: 0; max-width: 60%;
+  animation: verbIn 320ms var(--ease-page) both; }
 @keyframes verbIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .sfooter .sf-fill { flex: 1; min-width: 16px; }
 .sfooter .sf-cluster { display: inline-flex; align-items: baseline; gap: 7px; flex: none;
@@ -133,12 +140,12 @@
 .wline-row .wr-meta { color: var(--fg-faint); margin-left: 4px; }
 .wline-row .wr-meta.bad { color: var(--danger); }
 .wline-row .wr-dur { color: var(--fg-faint); margin-left: 6px; opacity: 0.75; }
-/* MCP response tail — the actual reply under a "Called X" row, so generic
-   tool calls stop being opaque stubs. Indented under the row, quiet mono. */
-.wr-out { margin: 2px 0 4px; padding: 5px 9px; border-left: 2px solid color-mix(in oklch, var(--border) 80%, transparent);
-  font-family: var(--font-mono); font-size: 11px; line-height: 1.55; color: var(--fg-faint); }
-.wr-out-line { white-space: pre-wrap; word-break: break-word; }
-.wr-out-more { margin-top: 2px; font-size: 10.5px; color: var(--fg-faint); opacity: 0.8; }
+/* MCP response — the actual reply under a "Called X" row, so generic tool calls
+   stop being opaque stubs. Indented under the row via a thin left rule; the
+   progressive line-cap + "Show more" lives in OutputBlock. */
+.wr-out { margin: 2px 0 6px; border-left: 2px solid color-mix(in oklch, var(--border) 80%, transparent); }
+.wr-out :global(.oblock-out) { padding: 4px 9px; color: var(--fg-faint); font-size: 11px; }
+.wr-out :global(.oblock-acts) { padding: 3px 9px 4px; border-top: 0; }
 /* Detailed tier: full path shown in place of dir+basename. Let the row wrap so
    the whole path is legible rather than ellipsised away. */
 .wline-row .wr-path { color: var(--fg-2); }

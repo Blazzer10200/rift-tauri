@@ -49,7 +49,7 @@
       {/if}
       <span class="wb-verb">{live ? VERB_ING[t.kind] : VERB_PAST[t.kind]}</span>
       <span class="wb-label" title={t.path ?? t.cap}>
-        {#if t.dir}<span class="wb-dir">{t.dir}</span>{/if}<span class="wb-name">{t.cap}</span>
+        {#if t.dir && t.dir.trim()}<span class="wb-dir">{t.dir}</span>{/if}<span class="wb-name">{t.cap}</span>
       </span>
       {#if t.add != null || t.del != null}
         <span class="wb-diff">
