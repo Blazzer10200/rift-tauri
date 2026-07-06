@@ -42,7 +42,7 @@
   </div>
 {:else}
   <div class="wline">
-    <button class="wline-head" onclick={() => (userOpen = !userOpen)} type="button">
+    <button class="wline-head" onclick={() => (userOpen = !userOpen)} type="button" title={summary}>
       <span class="wline-ic"><Icon size={12} strokeWidth={2} /></span>
       <span class="wline-label">{summary}</span>
       <ChevronDown class="wline-chev {open ? 'open' : ''}" size={13} strokeWidth={2} />

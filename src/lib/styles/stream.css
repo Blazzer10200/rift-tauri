@@ -111,13 +111,16 @@
 /* tool run — one quiet line */
 .wline { margin: 12px 0; }
 .wline-head { display: inline-flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--fg-subtle);
-  background: none; border: 0; cursor: pointer; padding: 0; transition: color var(--dur-fast); }
+  background: none; border: 0; cursor: pointer; padding: 0; transition: color var(--dur-fast);
+  max-width: 100%; min-width: 0; }
 .wline-head:hover { color: var(--fg-2); }
 .wline-head:hover .wline-ic { border-color: var(--border-strong); color: var(--fg-2); }
 .wline-ic { display: grid; place-items: center; width: 18px; height: 18px; border: 1px solid var(--border); border-radius: 5px;
   color: var(--fg-muted); flex: none; transition: color var(--dur-fast), border-color var(--dur-fast); }
-.wline-label { white-space: nowrap; }
-.wline-chev { color: var(--fg-faint); transition: transform var(--dur-fast); }
+/* Long summaries (regex patterns, absolute paths) truncate instead of running
+   off the right edge of the message column — full text via the head's title. */
+.wline-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.wline-chev { color: var(--fg-faint); flex: none; transition: transform var(--dur-fast); }
 .wline-chev.open { transform: rotate(180deg); }
 .wline-list { margin: 8px 0 2px; padding-left: 27px; display: flex; flex-direction: column; gap: 5px;
   animation: workOpen 0.3s var(--ease-page) both; }
@@ -143,9 +146,12 @@
 .wline-row b { color: var(--fg-2); font-weight: 600; }
 /* in-flight tool — single active line, no box */
 .wline-active { display: inline-flex; align-items: center; gap: 8px; margin: 12px 0; font-size: 12.5px; color: var(--fg-muted);
+  max-width: 100%; min-width: 0;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
 .wline-active .wa-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; animation: streamLivePulse var(--pulse-live) ease-out infinite; }
-.wline-active .wa-cap { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-faint); }
+.wline-active .wa-text { flex: none; }
+.wline-active .wa-cap { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .wline-active .wa-cap .wa-dir { color: var(--fg-faint); opacity: 0.65; }
 .wline-active .wa-cap b { color: var(--fg-2); font-weight: 600; }
 
