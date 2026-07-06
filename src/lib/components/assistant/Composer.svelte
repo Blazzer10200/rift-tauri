@@ -210,6 +210,8 @@
       recallOffset = -1;
       settingsOpen = false;
       permOpen = false;
+      // The attach banner describes the PREVIOUS tab's paste/drop outcome.
+      attachError = null;
       // Cancel + clear any enhance bound to the tab we're leaving so its async
       // result can't land in this tab (the seq bump invalidates pending callbacks).
       if (enhancing && enhanceRequestId) assistant.cancelEnhance(enhanceRequestId);
@@ -787,8 +789,12 @@
       .filter((f): f is File => f != null);
     if (imageFiles.length === 0) return;
     e.preventDefault();
-    const res = await attachImageFiles(imageFiles, (a) => assistant.addAttachment(a, tabId));
-    attachError = summarizeAttach(res);
+    // Snapshot the paste target: base64-encoding a multi-MB image is async and
+    // `tabId` is reactive — a tab switch mid-encode would land the attachment
+    // on the NEW tab. Same pattern as AppShell's window-drop capture.
+    const targetTabId = tabId;
+    const res = await attachImageFiles(imageFiles, (a) => assistant.addAttachment(a, targetTabId));
+    if (tabId === targetTabId) attachError = summarizeAttach(res);
   }
 
   // Up-arrow recall offset (0 = newest). Reset whenever the user types or
@@ -1029,9 +1035,13 @@
   // else → inlined text attachments. Each helper skips the other's files, so
   // running both over the same set partitions cleanly. Merges both notices.
   async function stageFiles(files: Iterable<File>) {
-    const imgRes = await attachImageFiles(files, (a) => assistant.addAttachment(a, tabId));
-    const txtRes = await attachTextFiles(files, (a) => assistant.addTextAttachment(a, tabId));
-    attachError = [summarizeAttach(imgRes), summarizeTextAttach(txtRes)].filter(Boolean).join(" · ") || null;
+    // Same snapshot as onPaste — the encode awaits below outlive a tab switch.
+    const targetTabId = tabId;
+    const imgRes = await attachImageFiles(files, (a) => assistant.addAttachment(a, targetTabId));
+    const txtRes = await attachTextFiles(files, (a) => assistant.addTextAttachment(a, targetTabId));
+    if (tabId === targetTabId) {
+      attachError = [summarizeAttach(imgRes), summarizeTextAttach(txtRes)].filter(Boolean).join(" · ") || null;
+    }
   }
   async function onDrop(e: DragEvent) {
     if (!isFileDrag(e)) return;

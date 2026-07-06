@@ -314,8 +314,15 @@ fn open_browser_op(app: &AppHandle, req: Request) -> Response {
     if let Err(e) = crate::browser::parse_url(&url) {
         return err(format!("open_browser: {e}"));
     }
+    let window = window_of(&req);
+    // Same reason as ask_user's pre-check: emit_to returns Ok(()) for a
+    // missing/closed label, so without this the tool reports "opened" for a
+    // dock nobody saw.
+    if app.get_webview_window(&window).is_none() {
+        return err("open_browser: target window is not available");
+    }
     let _ = app.emit_to(
-        window_of(&req),
+        window,
         "assistant://open-browser",
         serde_json::json!({
             "url": url,
@@ -344,8 +351,13 @@ fn notify_op(app: &AppHandle, req: Request) -> Response {
         Some("danger") => "danger",
         _ => "info",
     };
+    let window = window_of(&req);
+    // Mirror open_browser: don't report "shown" for a toast no window rendered.
+    if app.get_webview_window(&window).is_none() {
+        return err("notify: target window is not available");
+    }
     let _ = app.emit_to(
-        window_of(&req),
+        window,
         "assistant://notify",
         serde_json::json!({
             "title": title,

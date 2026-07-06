@@ -162,18 +162,45 @@ fn where_claude_lines() -> Vec<String> {
 /// npm isn't runnable; the caller falls back to the default site.
 #[cfg(windows)]
 fn npm_global_prefix() -> Option<PathBuf> {
+    use std::io::Read;
     use std::os::windows::process::CommandExt;
+    use std::time::{Duration, Instant};
     const CREATE_NO_WINDOW: u32 = 0x08000000;
-    let out = std::process::Command::new("npm.cmd")
+    // Bounded like probe_version_at: a hung npm (AV first-run scan, broken
+    // config prompting) otherwise blocks forever — and this sits on the
+    // turn-send cache-miss path, presenting as "Send spins forever".
+    let mut child = std::process::Command::new("npm.cmd")
         .args(["config", "get", "prefix"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .creation_flags(CREATE_NO_WINDOW)
-        .output()
+        .spawn()
         .ok()?;
-    if !out.status.success() {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                log::warn!("npm config get prefix timed out after 5s");
+                return None;
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    };
+    if !status.success() {
         return None;
     }
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let mut s = String::new();
+    child.stdout.take()?.read_to_string(&mut s).ok()?;
+    let s = s.trim().to_string();
     if s.is_empty() || s == "undefined" {
         return None;
     }

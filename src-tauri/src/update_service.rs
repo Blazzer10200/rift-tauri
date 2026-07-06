@@ -471,50 +471,115 @@ impl UpdateService {
         {
             use std::os::windows::process::CommandExt;
             const CREATE_NO_WINDOW: u32 = 0x08000000;
+            // /T so the kill also reaps grandchildren (e.g. a git subprocess of
+            // an orphaned MCP child) — they aren't named rift-tauri.exe but hold
+            // inherited handles into current/ that block the Velopack rename.
+            fn kill_pid_tree(pid: u32) {
+                const CREATE_NO_WINDOW: u32 = 0x08000000;
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/F", "/T", "/PID", &pid.to_string()])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .status();
+            }
             let me = std::process::id();
             // Image name derived from the running exe — a hardcoded name breaks
             // the sweep (and silently blocks the swap) if the binary is renamed.
-            let image = std::env::current_exe()
-                .ok()
+            let exe_path = std::env::current_exe().ok();
+            let image = exe_path
+                .as_ref()
                 .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
                 .unwrap_or_else(|| "rift-tauri.exe".to_string());
-            match std::process::Command::new("taskkill")
-                .args([
-                    "/F",
-                    // RR9: /T so the sweep also kills grandchildren (e.g. a git
-                    // subprocess spawned by an orphaned MCP child). Those aren't
-                    // named rift-tauri.exe so the IMAGENAME filter misses them,
-                    // but they can hold inherited handles into current/ and
-                    // silently block the Velopack rename — the same root cause as
-                    // the original child-reap bug. Mirrors kill_all_session_children.
-                    "/T",
-                    "/FI",
-                    &format!("IMAGENAME eq {image}"),
-                    "/FI",
-                    &format!("PID ne {me}"),
-                ])
-                .creation_flags(CREATE_NO_WINDOW)
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-            {
-                Err(e) => {
-                    log::warn!(
-                        "update apply: taskkill sweep failed to run ({e}) — a live MCP child may block the swap"
-                    );
-                    crate::diagnostics::emit_with_fields(
-                        crate::diagnostics::DiagStage::System,
-                        crate::diagnostics::DiagLevel::Error,
-                        Some("update"),
-                        Some(file!()),
-                        "apply sweep failed",
-                        serde_json::json!({"stage": "apply_sweep", "ok": false}),
-                    );
+            // Scope the sweep to processes running THIS exe file. The dev binary
+            // and the installed app share the image NAME (Velopack per-user
+            // install), so the old blanket `IMAGENAME eq` + `PID ne me` sweep
+            // could kill an unrelated live Rift (a dev-build apply() murdering
+            // the real app mid-session). Orphaned MCP children — the current/
+            // lock-holders this backstop exists for — always run MY exe, so
+            // full-path equality keeps the swap-unblocking guarantee. A second
+            // instance of the SAME install still dies, which is required anyway:
+            // it holds current/ locked and would block the rename regardless.
+            let my_exe_lower = exe_path
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_ascii_lowercase());
+            let swept: Option<usize> = my_exe_lower.as_ref().and_then(|my_exe| {
+                let script = format!(
+                    "Get-CimInstance Win32_Process -Filter \"Name='{}'\" | ForEach-Object {{ \"$($_.ProcessId)|$($_.ExecutablePath)\" }}",
+                    image.replace('\'', "''")
+                );
+                let out = std::process::Command::new("powershell")
+                    .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .stdin(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .output()
+                    .ok()?;
+                if !out.status.success() {
+                    return None;
                 }
-                Ok(s) if !s.success() => log::info!(
-                    "update apply: taskkill sweep exited {s} (no matching children is benign)"
-                ),
-                Ok(_) => {}
+                let mut killed = 0usize;
+                for line in String::from_utf8_lossy(&out.stdout).lines() {
+                    let Some((pid_s, path)) = line.trim().split_once('|') else { continue };
+                    let Ok(pid) = pid_s.trim().parse::<u32>() else { continue };
+                    if pid == me {
+                        continue;
+                    }
+                    // Null/inaccessible ExecutablePath → can't prove it's ours →
+                    // don't kill (a foreign instance is worse than a retried swap).
+                    if path.trim().to_ascii_lowercase() != *my_exe {
+                        continue;
+                    }
+                    kill_pid_tree(pid);
+                    killed += 1;
+                }
+                Some(killed)
+            });
+            match swept {
+                Some(n) => {
+                    log::info!("update apply: path-scoped sweep reaped {n} same-install process(es)");
+                }
+                None => {
+                    // Enumeration unavailable (powershell/CIM broken) — fall back
+                    // to the old image-name sweep: on a box that degraded, an
+                    // unswept lock-holder silently no-ops the swap (the original
+                    // "can't update from the app" bug), which is the worse evil.
+                    log::warn!(
+                        "update apply: process enumeration failed — falling back to image-name taskkill sweep"
+                    );
+                    match std::process::Command::new("taskkill")
+                        .args([
+                            "/F",
+                            "/T",
+                            "/FI",
+                            &format!("IMAGENAME eq {image}"),
+                            "/FI",
+                            &format!("PID ne {me}"),
+                        ])
+                        .creation_flags(CREATE_NO_WINDOW)
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::null())
+                        .status()
+                    {
+                        Err(e) => {
+                            log::warn!(
+                                "update apply: taskkill sweep failed to run ({e}) — a live MCP child may block the swap"
+                            );
+                            crate::diagnostics::emit_with_fields(
+                                crate::diagnostics::DiagStage::System,
+                                crate::diagnostics::DiagLevel::Error,
+                                Some("update"),
+                                Some(file!()),
+                                "apply sweep failed",
+                                serde_json::json!({"stage": "apply_sweep", "ok": false}),
+                            );
+                        }
+                        Ok(s) if !s.success() => log::info!(
+                            "update apply: taskkill sweep exited {s} (no matching children is benign)"
+                        ),
+                        Ok(_) => {}
+                    }
+                }
             }
         }
 

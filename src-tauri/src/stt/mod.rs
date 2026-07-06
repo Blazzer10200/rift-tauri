@@ -196,6 +196,10 @@ pub struct ActiveSession {
     initial_prompt: String,
     language: Option<String>,
     beam_size: Option<u8>,
+    /// Label of the window that started this session — all stt:// events
+    /// emit_to it only, so a second window's mic UI never mirrors a recording
+    /// it doesn't own (multi-window rule, same as turn events).
+    window_label: String,
     /// Workspace-context string (project/branch/files) reused for the Haiku
     /// cleanup pass at stop-time so it shares Whisper's domain vocabulary.
     workspace_ctx: String,
@@ -262,12 +266,13 @@ struct StatePayload {
     message: Option<String>,
 }
 
-fn emit_state(app: &AppHandle, state: &'static str, msg: Option<String>) {
-    let _ = app.emit("stt://state", StatePayload { state, message: msg });
+fn emit_state(app: &AppHandle, win: &str, state: &'static str, msg: Option<String>) {
+    let _ = app.emit_to(win, "stt://state", StatePayload { state, message: msg });
 }
 
-fn emit_error(app: &AppHandle, code: &str, message: &str) {
-    let _ = app.emit(
+fn emit_error(app: &AppHandle, win: &str, code: &str, message: &str) {
+    let _ = app.emit_to(
+        win,
         "stt://error",
         json!({ "code": code, "message": message }),
     );
@@ -329,10 +334,12 @@ fn workspace_context() -> String {
 #[tauri::command]
 pub async fn stt_start_recording(
     app: AppHandle,
+    window: tauri::Window,
     cache: tauri::State<'_, WhisperCache>,
     session: tauri::State<'_, WhisperSession>,
     model: Option<String>,
 ) -> Result<(), String> {
+    let win = window.label().to_string();
     let cfg = load_config();
     let model_id = model.unwrap_or(cfg.whisper_model.clone());
 
@@ -372,7 +379,7 @@ pub async fn stt_start_recording(
         match cached {
             Some(e) => e,
             None => {
-                emit_state(&app, "loading_model", Some(model_id.clone()));
+                emit_state(&app, &win, "loading_model", Some(model_id.clone()));
                 let model_id_owned = model_id.clone();
                 let loaded = tokio::task::spawn_blocking(move || {
                     whisper::WhisperEngine::load(&model_path, &model_id_owned)
@@ -462,6 +469,7 @@ pub async fn stt_start_recording(
             initial_prompt: initial_prompt.clone(),
             language: language.clone(),
             beam_size,
+            window_label: win.clone(),
             workspace_ctx,
             cleanup_enabled,
             rolling_cancel,
@@ -474,16 +482,18 @@ pub async fn stt_start_recording(
     // ring is moved into the rolling loop below.
     {
         let level_app = app.clone();
+        let level_win = win.clone();
         let level_ring = ring.clone();
         let level_cancel = task_cancel.clone();
         tokio::spawn(async move {
-            level_loop(level_app, level_ring, level_cancel).await;
+            level_loop(level_app, level_win, level_ring, level_cancel).await;
         });
     }
 
     // Spawn rolling-window transcribe task after session is visible.
     if cfg.show_interim {
         let task_app = app.clone();
+        let task_win = win.clone();
         let task_ring = ring;
         let task_engine = engine.clone();
         let task_prompt = initial_prompt.clone();
@@ -491,6 +501,7 @@ pub async fn stt_start_recording(
         tokio::spawn(async move {
             rolling_window_loop(
                 task_app,
+                task_win,
                 task_ring,
                 task_engine,
                 task_prompt,
@@ -502,7 +513,7 @@ pub async fn stt_start_recording(
         });
     }
 
-    emit_state(&app, "recording", None);
+    emit_state(&app, &win, "recording", None);
     Ok(())
 }
 
@@ -518,11 +529,12 @@ pub async fn stt_stop_recording(
     }
     .ok_or_else(|| "no stt session active".to_string())?;
 
+    let win = active.window_label.clone();
     // Join the capture thread off the Tokio runtime to avoid blocking a worker.
     if let Some(h) = active.shutdown_capture() {
         tokio::task::spawn_blocking(move || { let _ = h.join(); }).await.ok();
     }
-    emit_state(&app, "transcribing", None);
+    emit_state(&app, &win, "transcribing", None);
 
     // Drain final buffer, transcribe.
     let samples = audio::drain_all(&active.ring);
@@ -550,7 +562,7 @@ pub async fn stt_stop_recording(
                 log::warn!("[stt] cleanup hop failed, returning raw: {e}");
                 // Surface the failure so the user knows the transcript is the
                 // unpolished raw text (token expiry / network), not silent.
-                emit_error(&app, "cleanup_failed", &e);
+                emit_error(&app, &win, "cleanup_failed", &e);
                 scrubbed.clone()
             }
         }
@@ -558,7 +570,8 @@ pub async fn stt_stop_recording(
         scrubbed.clone()
     };
 
-    let _ = app.emit(
+    let _ = app.emit_to(
+        &win,
         "stt://final",
         FinalPayload {
             text: final_text.clone(),
@@ -566,7 +579,7 @@ pub async fn stt_stop_recording(
             cleaned: active.cleanup_enabled,
         },
     );
-    emit_state(&app, "idle", None);
+    emit_state(&app, &win, "idle", None);
     Ok(final_text)
 }
 
@@ -576,6 +589,7 @@ pub async fn stt_stop_recording(
 /// flooding the frontend w/ identical text).
 async fn rolling_window_loop(
     app: AppHandle,
+    win: String,
     ring: audio::AudioRing,
     engine: whisper::WhisperEngine,
     initial_prompt: String,
@@ -616,11 +630,11 @@ async fn rolling_window_loop(
             res = infer => match res {
                 Ok(Ok(t)) => t,
                 Ok(Err(e)) => {
-                    emit_error(&app, "transcribe_failed", &e);
+                    emit_error(&app, &win, "transcribe_failed", &e);
                     continue;
                 }
                 Err(e) => {
-                    emit_error(&app, "task_join_failed", &e.to_string());
+                    emit_error(&app, &win, "task_join_failed", &e.to_string());
                     continue;
                 }
             }
@@ -633,7 +647,7 @@ async fn rolling_window_loop(
             continue;
         }
         last_emitted = scrubbed.clone();
-        let _ = app.emit("stt://partial", PartialPayload { text: scrubbed });
+        let _ = app.emit_to(&win, "stt://partial", PartialPayload { text: scrubbed });
     }
 }
 
@@ -642,7 +656,7 @@ async fn rolling_window_loop(
 /// (1s, inference-bound) partial loop and of `show_interim` — the meter is
 /// useful even with interim text off. Cheap (one short ring peek per tick), so
 /// the fast cadence costs nothing on the inference hot path.
-async fn level_loop(app: AppHandle, ring: audio::AudioRing, cancel: CancellationToken) {
+async fn level_loop(app: AppHandle, win: String, ring: audio::AudioRing, cancel: CancellationToken) {
     const TICK_MS: u64 = 80;
     const WINDOW_SECS: f32 = 0.05;
     let mut ticker = tokio::time::interval(std::time::Duration::from_millis(TICK_MS));
@@ -653,7 +667,7 @@ async fn level_loop(app: AppHandle, ring: audio::AudioRing, cancel: Cancellation
             _ = ticker.tick() => {}
         }
         let rms = audio::peek_level(&ring, WINDOW_SECS);
-        let _ = app.emit("stt://level", LevelPayload { rms });
+        let _ = app.emit_to(&win, "stt://level", LevelPayload { rms });
     }
 }
 

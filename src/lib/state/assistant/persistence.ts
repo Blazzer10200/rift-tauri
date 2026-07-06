@@ -92,6 +92,33 @@ const loadGeneration = new WeakMap<PersistenceHost, number>();
 // sidebar. Every save path checks this before writing.
 const deletedIds = new Set<string>();
 
+// cont.275 hunt: the tombstone stops saves that CHECK after the delete, but a
+// save already past its check races the delete on the Rust blocking pool
+// (spawn_blocking tasks have no FIFO order) — its rename can land AFTER the
+// remove and resurrect the file as an undeletable ghost that reappears next
+// launch (deletedIds is per-session). Track in-flight writes per convo so the
+// delete paths can drain them before removing the file.
+const inflightSaves = new Map<string, Promise<unknown>>();
+
+/** Register a save IPC as in-flight for `convoId` until it settles. Chains on
+ *  any prior in-flight write so a drain awaits ALL of them. Returns `write`
+ *  unchanged so callers keep their own error handling. */
+function trackSave(convoId: string, write: Promise<unknown>): Promise<unknown> {
+  const prev = inflightSaves.get(convoId);
+  const entry = prev ? Promise.allSettled([prev, write]) : write.catch(() => {});
+  inflightSaves.set(convoId, entry);
+  void entry.then(() => {
+    if (inflightSaves.get(convoId) === entry) inflightSaves.delete(convoId);
+  });
+  return write;
+}
+
+/** Await every tracked in-flight save for `id` (no-op when none). */
+async function drainInflightSaves(id: string): Promise<void> {
+  const pending = inflightSaves.get(id);
+  if (pending) await pending.then(() => {}, () => {});
+}
+
 export async function refreshConversations(host: PersistenceHost): Promise<void> {
   try {
     host.conversations = await invoke<ConversationMeta[]>("assistant_list_conversations");
@@ -203,7 +230,7 @@ export function scheduleSave(host: PersistenceHost, flush = false, forConvoId?: 
     tab.convoTitle = record.title;
     tab.convoCreatedAt = record.createdAt;
     try {
-      await invoke("assistant_save_conversation", { convo: record });
+      await trackSave(convoId, invoke("assistant_save_conversation", { convo: record }));
       await refreshConversations(host);
       broadcastConvosChanged(); // #37: other windows pick up the new/updated chat
       // Fire-and-forget: once the first real exchange is on disk, replace the
@@ -245,7 +272,7 @@ async function maybeGenerateTitle(
     tab.convoTitle = title;
     // Re-persist with the new title + refresh so tiles/History pick it up.
     const record = buildSaveRecord(host, convoId, tab);
-    await invoke("assistant_save_conversation", { convo: record });
+    await trackSave(convoId, invoke("assistant_save_conversation", { convo: record }));
     await refreshConversations(host);
   } catch (e) {
     // A failed model call shouldn't retry-spam every subsequent save — the
@@ -277,7 +304,7 @@ export async function renameConversation(
     const convo = await invoke<ConversationRecord>("assistant_load_conversation", { id });
     convo.title = newTitle;
     convo.updatedAt = Date.now();
-    await invoke("assistant_save_conversation", { convo });
+    await trackSave(id, invoke("assistant_save_conversation", { convo }));
     if (host.currentConvoId === id) host.convoTitle = convo.title;
     await refreshConversations(host);
     broadcastConvosChanged(); // #37: propagate the rename to other windows
@@ -379,6 +406,9 @@ export async function deleteConversation(host: PersistenceHost, id: string): Pro
   // Tombstone FIRST so a debounced save / title-gen landing mid-delete can't
   // re-create the file. Rolled back only on a failed delete.
   deletedIds.add(id);
+  // Then drain any write that already passed its tombstone check — without
+  // this its rename can land after the remove and resurrect the file.
+  await drainInflightSaves(id);
   try {
     await invoke("assistant_delete_conversation", { id });
     if (host.openTabs.includes(id)) {
@@ -423,6 +453,11 @@ export async function deleteAllConversations(host: PersistenceHost): Promise<voi
   // the tabs whose convo WAS deleted — Promise.all rejects on the first failure
   // and skips teardown, leaving tabs that point at deleted sessions (a later send
   // then --resumes a dead JSONL).
+  // Drain in-flight writes for every id first — same resurrect race as the
+  // single-delete path (a write past its tombstone check outliving the remove).
+  await Promise.allSettled(
+    ids.flatMap((id) => { const p = inflightSaves.get(id); return p ? [p] : []; }),
+  );
   const results = await Promise.allSettled(
     ids.map((id) => invoke("assistant_delete_conversation", { id })),
   );
