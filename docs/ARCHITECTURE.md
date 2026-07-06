@@ -26,11 +26,11 @@ Composer (Svelte)
             └─ commands/assistant.rs → assistant::turn::assistant_send
                  └─ spawn `claude` subprocess   turn.rs
                       • --mcp-config <rift mcp>  (Rift's own stdio MCP server)
-                      • --allowed-tools mcp__rift__*
+                      • --allowed-tools <CLI builtins + mcp__rift__*> (see turn.rs S91/S107)
                       • --session-id (1st) / --resume (subsequent)
                       • --model / --permission-mode / effort flag
                       • prompt delivered on STDIN as a stream-json envelope
-                      • cwd = workspace root (else temp_dir — never the install dir)
+                      • cwd = workspace root (else LOCALAPPDATA — never the install dir)
                  ⇅ stdio JSON-RPC
             ┌─ Claude calls tools → Rift's MCP server (mcp_server.rs)
             │    read_file / list_dir / grep / git_* / ask_user / open_browser / notify
