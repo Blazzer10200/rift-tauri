@@ -176,6 +176,19 @@ export function summarizeAttach(r: AttachResult): string | null {
   return parts.length ? parts.join(" · ") : null;
 }
 
+/** Display text for a queued-message chip: the message text, else an
+ *  attachment marker ("2 images · 1 file") so an attachment-only item never
+ *  renders as a blank chip. */
+export function queueChipLabel(q: { text: string; images?: unknown[]; textFiles?: unknown[] }): string {
+  if (q.text) return q.text;
+  const parts: string[] = [];
+  const img = q.images?.length ?? 0;
+  const txt = q.textFiles?.length ?? 0;
+  if (img) parts.push(`${img} image${img === 1 ? "" : "s"}`);
+  if (txt) parts.push(`${txt} file${txt === 1 ? "" : "s"}`);
+  return parts.join(" · ") || "(empty)";
+}
+
 /** One-line summary of a text-attach attempt — null when all clean. */
 export function summarizeTextAttach(r: TextAttachResult): string | null {
   const parts: string[] = [];

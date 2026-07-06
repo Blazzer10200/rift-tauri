@@ -1,5 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { attachImageFiles, bytesToBase64, fmtClock, fmtSize, fuzzyScore, isFileDrag, summarizeAttach, summarizeTextAttach } from "./helpers";
+import { attachImageFiles, bytesToBase64, fmtClock, fmtSize, fuzzyScore, isFileDrag, queueChipLabel, summarizeAttach, summarizeTextAttach } from "./helpers";
+
+describe("queueChipLabel", () => {
+  it("returns the message text when present", () => {
+    expect(queueChipLabel({ text: "hello", images: [{}] })).toBe("hello");
+  });
+  it("falls back to an attachment marker for attachment-only items", () => {
+    expect(queueChipLabel({ text: "", images: [{}, {}] })).toBe("2 images");
+    expect(queueChipLabel({ text: "", textFiles: [{}] })).toBe("1 file");
+    expect(queueChipLabel({ text: "", images: [{}], textFiles: [{}, {}] })).toBe("1 image · 2 files");
+  });
+  it("never renders blank — degenerate empty item gets a placeholder", () => {
+    expect(queueChipLabel({ text: "" })).toBe("(empty)");
+  });
+});
 
 describe("fmtClock", () => {
   it("formats zero and sub-second values", () => {

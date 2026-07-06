@@ -4,13 +4,13 @@
   // a turn is streaming is queued (send.ts) and fires automatically when the turn
   // finishes — the chips here let you edit, reorder, or drop a queued message
   // before it sends.
-  import { X, Clock, Pencil } from "lucide-svelte";
+  import { X, Clock, Paperclip, Pencil } from "lucide-svelte";
   import { fly } from "svelte/transition";
   import { quintOut } from "svelte/easing";
   import { tick } from "svelte";
   import { tooltip } from "$lib/actions/tooltip";
-
-  type QueueItem = { id: string; text: string };
+  import { queueChipLabel } from "./helpers";
+  import type { QueueItem } from "$lib/state/assistant/types";
 
   let {
     tab,
@@ -41,7 +41,17 @@
     const next = editText.trim();
     const id = editingId;
     editingId = null;
-    if (!next) { tab.queue = tab.queue.filter((it) => it.id !== id); return; }
+    if (!next) {
+      // Blanking the text only deletes a text-only item — one that carries
+      // attachments survives as an attachment-only chip (X removes it whole).
+      const it = tab.queue.find((q) => q.id === id);
+      if ((it?.images?.length ?? 0) + (it?.textFiles?.length ?? 0) === 0) {
+        tab.queue = tab.queue.filter((q) => q.id !== id);
+        return;
+      }
+      tab.queue = tab.queue.map((q) => (q.id === id ? { ...q, text: "" } : q));
+      return;
+    }
     tab.queue = tab.queue.map((it) => (it.id === id ? { ...it, text: next } : it));
   }
   function onEditKey(e: KeyboardEvent) {
@@ -50,6 +60,13 @@
   }
   function removeQueued(id: string) {
     if (tab) tab.queue = tab.queue.filter((it) => it.id !== id);
+  }
+  const nAttach = (q: QueueItem) => (q.images?.length ?? 0) + (q.textFiles?.length ?? 0);
+  function attachTip(q: QueueItem): string {
+    const parts: string[] = [];
+    if (q.images?.length) parts.push(`${q.images.length} image${q.images.length === 1 ? "" : "s"}`);
+    if (q.textFiles?.length) parts.push(`${q.textFiles.length} file${q.textFiles.length === 1 ? "" : "s"}`);
+    return `${parts.join(" · ")} attached`;
   }
   const caption = $derived.by(() => (queue.length === 1 ? "Sends when ready" : `${queue.length} queued`));
   // Drag-to-reorder queued chips — the queue order IS the send order. Reorder
@@ -101,7 +118,12 @@
             aria-label="Edit queued message"
           />
         {:else}
-          <span class="pchip-text" class:grab={queue.length > 1} use:tooltip={q.text}>{q.text}</span>
+          <span class="pchip-text" class:grab={queue.length > 1} use:tooltip={queueChipLabel(q)}>{queueChipLabel(q)}</span>
+          {#if nAttach(q) > 0}
+            <span class="pchip-attach" use:tooltip={attachTip(q)}>
+              <Paperclip size={10} />{nAttach(q)}
+            </span>
+          {/if}
           <button class="pchip-btn" type="button" onclick={() => startEditQueued(q)} aria-label="Edit queued message" use:tooltip={"Edit"}>
             <Pencil size={11} />
           </button>
@@ -174,6 +196,15 @@
   }
   .pchip-text.grab { cursor: grab; }
   .pchip.dragging .pchip-text.grab { cursor: grabbing; }
+  .pchip-attach {
+    display: inline-flex; align-items: center; gap: 2px; flex: none;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: color-mix(in oklch, var(--accent) 14%, transparent);
+    color: color-mix(in oklch, var(--accent) 80%, var(--fg-muted));
+    font-size: 9.5px; font-weight: 650;
+    font-variant-numeric: tabular-nums;
+  }
   .pchip-edit {
     min-width: 120px; max-width: 240px;
     padding: 1px 4px;

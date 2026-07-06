@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Pin, PinOff, MoreHorizontal, Pencil, Trash2, ChevronDown } from "lucide-svelte";
+  import { Pin, PinOff, MoreHorizontal, Pencil, Trash2, ChevronDown, Clock } from "lucide-svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { shell } from "$lib/state/shell.svelte";
   import { workspace } from "$lib/state/workspace.svelte";
@@ -110,6 +110,9 @@
   // ── row state ────────────────────────────────────────────────────────
   // Convos with an in-flight turn — drives the per-row workdots shimmer.
   const workingIds = $derived(new Set(assistant.liveTabs.map((t) => t.convoId)));
+  // Convos with parked queued messages — a backgrounded tab defers its drain
+  // until re-activated, so the badge is the only signal one is waiting.
+  const queuedCounts = $derived(assistant.queuedCounts);
   // Live-turn elapsed timer — beginTurn stamps activity.turnStartedAt; a 1s
   // tick (running only while something streams) drives the readout.
   const liveStarts = $derived(new Map(assistant.liveTabs.map((t) => [t.convoId, t.tab.activity.turnStartedAt])));
@@ -235,6 +238,12 @@
       />
     {:else}
       <span class="crow-title">{c.title || "Untitled"}</span>
+      {#if queuedCounts.get(c.id)}
+        {@const qn = queuedCounts.get(c.id)}
+        <span class="crow-queued" use:tooltip={`${qn} queued message${qn === 1 ? "" : "s"} — sends when this chat is active and idle`}>
+          <Clock size={9} />{qn}
+        </span>
+      {/if}
       {#if shell.allProjects}
         <span class="crow-proj" title={c.workspaceRoot ?? "Unfiled"}>{projLabel(c.workspaceRoot)}</span>
       {/if}
@@ -331,6 +340,12 @@
     transition: color var(--dur-fast); }
   .showmore:hover .sm-ct { color: var(--fg-2); }
   @media (prefers-reduced-motion: reduce) { .showmore :global(.sm-ch) { transition: transform 0s; } }
+
+  /* per-row queued-messages badge — stays visible on hover (load-bearing) */
+  .crow-queued { display: inline-flex; align-items: center; gap: 3px; flex: none; padding: 1px 6px; border-radius: 999px;
+    font-size: 9.5px; font-weight: 650; font-variant-numeric: tabular-nums;
+    color: color-mix(in oklab, var(--accent) 80%, var(--fg-muted));
+    background: color-mix(in oklab, var(--accent) 12%, transparent); }
 
   /* per-row project label (All-projects mode only) */
   .crow-proj { flex: none; max-width: 84px; padding: 1px 6px; border-radius: 5px;

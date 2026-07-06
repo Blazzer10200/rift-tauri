@@ -471,6 +471,17 @@ class AssistantStore {
     return out;
   }
 
+  /** Queued-message counts by convoId — sidebar rows badge parked messages
+   *  (a backgrounded tab defers its drain until re-activated, so without a
+   *  badge a queued send is invisible until the user happens to return). */
+  get queuedCounts(): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const [convoId, tab] of this.tabs) {
+      if (tab.queue.length > 0) out.set(convoId, tab.queue.length);
+    }
+    return out;
+  }
+
   // ── Per-tab UI surface — delegated getters so components read
   //    `assistant.messages` etc. exactly like before. Sentinel defaults
   //    keep empty-state renders safe when no tab is active.
