@@ -2,17 +2,14 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.87.0 — Per-turn epoch + final-day deep-hunt fixes
+## v0.88.0 — Terminal-style tool blocks + calmer live stream
 
-- **Stopped turns can never bleed into the next one (#80 structural fix).** Every event a turn emits — stream frames, done, error, session-lost — now carries the turn's own epoch, and the app discards anything from a stopped or superseded turn no matter how late it arrives. Closes the residual window where a straggling terminal (watchdog kill, slow EOF) could silently finalize or corrupt the *next* message on the same chat. Live-verified: stop mid-stream + instant re-send runs clean, no spurious error banner.
-- **Self-update can no longer kill another running Rift.** The update's process sweep matched by image *name*, so a dev build applying an update could force-kill the real installed app mid-session. It now kills only processes running the same executable file.
-- **Deleting a chat sticks.** An autosave already in flight could land *after* the delete and resurrect the conversation as an undeletable ghost that returned next launch. Deletes now drain in-flight saves first.
-- **Pasted/dropped images land in the right chat.** Attaching is async (base64 encode); switching tabs mid-encode used to drop the image into the *new* tab. The target is now locked at paste/drop time; the stale attach-error banner no longer leaks across tabs either.
-- **A hung npm can't freeze Send.** The npm-prefix probe on the CLI-discovery path had no timeout (siblings did) — now bounded at 5s.
-- **Dictation is window-scoped.** In a second window, the mic UI no longer mirrors a recording the other window owns (all `stt://` events now target the owning window).
-- **Assistant honesty:** `notify`/`open_browser` MCP tools now report failure when the target window is gone instead of claiming success for a toast nobody saw.
-- **CI hygiene:** advisory scans (cargo/npm audit) moved to a daily scheduled workflow — pushes only fail when code actually breaks, ending the failure-email spam; the `quick-xml` advisory itself fixed via `plist 1.10`.
-- **Projects:** active-project highlight now derives purely from the open folder (stale stored id removed); switcher dropdown no longer floats at stale coords after a window resize.
+- **Commands now read like a real terminal.** Every bash / PowerShell / cmd block shows what was run as an **input line** — a shell-colored prompt (`$` · `PS>` · `>`) followed by the command — and the result underneath as a clearly-labeled **output** section. Before, the command and its output blurred together in one gray slab; now the in-and-out is obvious at a glance, and a failed command reads `exit 1` with its error called out in red.
+- **Long output no longer traps you in a tiny scroll box.** A big `git log`, a full build, or a chatty tool response now shows a readable chunk with a **"Show N more lines"** control that steps the view open — collapsed → more → all — and only a genuinely huge, fully-expanded block ever becomes a bounded scroll. Applies to shell output and tool responses alike.
+- **The live "working" line stopped making things up.** Between tool calls it used to cycle invented words ("Mapping…", "Pondering…") that implied actions the model wasn't taking. It now shows the real action when a tool is running (e.g. *Running npm run build*) or an honest "Thinking…/Working…" otherwise — and the thinking indicator no longer double-prints in two places.
+- **A running command shows up as its terminal block right away** instead of briefly appearing as a plain row and then jumping into a block once output arrived.
+- **Appearance settings look right.** The background-texture picker previews now match what actually lands behind the workspace — Blueprint and Glow no longer render as an over-bright green wash — and each tile is legible enough to pick. The build badge for an in-development copy reads as a calm "dev" tag instead of an alarm-colored spinner, and the About → Build panel leads with a clear version identity.
+- **Under the hood:** the live stream/done/error event handling was extracted and covered by tests (no behavior change); Markdown rendering now caps parse input so a multi-megabyte pasted file can't stall the UI; a first-run onboarding edge case no longer throws an unhandled rejection.
 
 ## Known issues
 - **Voice profanity on Web Speech:** fully-masked words (`******`, no leading letter) can't be recovered from Azure's servers — the real fix is the on-device **Whisper** engine (built but not yet in the shipped binary). Planned.
@@ -20,6 +17,7 @@
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
 
+- **v0.87.0** — Per-turn epoch on the full event wire (stopped turns can't bleed into the next); self-update kills by exe-path not image-name; delete-vs-autosave resurrect fixed; paste/drop image target-locked; npm probe 5s-bounded; window-scoped dictation; honest MCP notify/open_browser; advisory scans → daily CI; project-highlight + switcher-coords fixes.
 - **v0.86.4** — Queued-message hardening: attachments ride the send (no composer cross-contamination), requeue-front ordering, chip attachment badges, sidebar queued-count badge, `/model` de-staled.
 - **v0.86.3** — Project switching actually switches (stale per-tab folder override); mic no longer stuck red after dictation; tool-summary overflow truncation.
 - **v0.86.2** — Clean exit: closing Rift mid-turn reaps every CLI child (no more headless token-burning orphans); background-footprint audit confirmed idle is tight.
