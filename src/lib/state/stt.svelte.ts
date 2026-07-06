@@ -709,6 +709,10 @@ class SttStore {
     }
     this.recording = false;
     this.transcribing = false;
+    // Same stale-error rule as the Web Speech onEnd: a non-empty final means
+    // the whisper session succeeded — clear any transient error so the mic
+    // doesn't stay red.
+    if (t) this.lastError = null;
     if (send) this.sendRequested = true;
   }
 
@@ -873,6 +877,11 @@ class SttStore {
   }
 
   private onError(e: SpeechRecognitionErrorEvent) {
+    // "aborted" only ever results from our own abort() calls (consume on send,
+    // cancel, engine-switch restart) — not a failure. Surfacing it left the mic
+    // permanently red ("Recording cancelled.") after every dictated send, since
+    // lastError is only cleared on the next start().
+    if (e.error === "aborted") return;
     // Friendly message already surfaced via `lastError`; the raw code is
     // dropped to avoid the #22 / #250 console-noise regression.
     this.lastError = errorMessage(e.error, e.message);
@@ -887,6 +896,11 @@ class SttStore {
       // whole phrase back in at stop.
       const composed = this.composeDraft(this.finalText, "");
       if (this.readDraft() !== composed) this.writeDraft(composed);
+      // Session ended normally with text committed → any mid-session transient
+      // (e.g. a no-speech during a pause) is stale; don't leave the mic red
+      // after a successful dictation. Hard failures (permission, no mic)
+      // produce no committed text and keep their error.
+      if (this.finalText.trim()) this.lastError = null;
     }
     this.recording = false;
     this.transcribing = false;
