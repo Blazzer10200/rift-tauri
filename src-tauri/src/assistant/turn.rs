@@ -505,11 +505,12 @@ pub async fn assistant_send(
     permission_mode: Option<String>,
     prior_context_summary: Option<String>,
     root: Option<String>,
+    turn_epoch: Option<u64>,
 ) -> Result<(), String> {
     run_or_prewarm(
         app, window, prompt, session_id, is_first_turn, model, attachments,
         dyslexia_mode, thinking_effort, thinking_enabled, permission_mode,
-        prior_context_summary, root, false,
+        prior_context_summary, root, turn_epoch.unwrap_or(0), false,
     ).await
 }
 
@@ -566,7 +567,7 @@ pub async fn assistant_prewarm(
     run_or_prewarm(
         app, window, String::new(), session_id, is_first_turn.unwrap_or(true), model,
         /*attachments*/ None, /*dyslexia*/ None, thinking_effort, thinking_enabled,
-        permission_mode, /*prior_context_summary*/ None, root, true,
+        permission_mode, /*prior_context_summary*/ None, root, /*turn_epoch*/ 0, true,
     ).await
 }
 
@@ -599,6 +600,7 @@ async fn run_or_prewarm(
     permission_mode: Option<String>,
     prior_context_summary: Option<String>,
     root: Option<String>,
+    turn_epoch: u64,
     prewarm: bool,
 ) -> Result<(), String> {
     // #220: validate session_id is a canonical UUID (8-4-4-4-12 lowercase hex)
@@ -656,6 +658,7 @@ async fn run_or_prewarm(
         mcp_guard,
         is_first_turn,
         model,
+        turn_epoch,
     )
     .await
 }
@@ -1435,6 +1438,7 @@ async fn dispatch_turn(
     mcp_guard: Option<McpConfigGuard>,
     is_first_turn: bool,
     model: String,
+    turn_epoch: u64,
 ) -> Result<(), String> {
     use std::sync::atomic::Ordering;
 
@@ -1491,6 +1495,7 @@ async fn dispatch_turn(
                     window_label: window_label.clone(),
                     done: done_tx,
                     bg_evict,
+                    turn_epoch,
                 };
                 match turn_tx.send(cmd_msg) {
                     Ok(()) => {
@@ -1512,6 +1517,7 @@ async fn dispatch_turn(
                                 let _ = app.emit_to(&window_label, ERROR_EVENT, serde_json::json!({
                                     "session_id": session_id,
                                     "message": "the warm CLI process ended unexpectedly — retry the turn",
+                                    "turn_epoch": turn_epoch,
                                 }));
                                 return Err("warm child reader ended before result".into());
                             }
@@ -1548,12 +1554,12 @@ async fn dispatch_turn(
         };
 
         // 2) Cold path (warm child existed but couldn't be reused).
-        return cold_spawn_and_run(app, window_label, session_id, key, cmd, user_line, mcp_guard, is_first_turn, model).await;
+        return cold_spawn_and_run(app, window_label, session_id, key, cmd, user_line, mcp_guard, is_first_turn, model, turn_epoch).await;
     }
 
     // 2) Cold path: no warm child at all — spawn one, register it, run turn 1.
     emit_dispatch(&session_id, "cold", &model, &key);
-    cold_spawn_and_run(app, window_label, session_id, key, cmd, user_line, mcp_guard, is_first_turn, model).await
+    cold_spawn_and_run(app, window_label, session_id, key, cmd, user_line, mcp_guard, is_first_turn, model, turn_epoch).await
 }
 
 /// Emit a structured warm-pool dispatch event (Phase 2a). `outcome` ∈
@@ -1602,6 +1608,7 @@ async fn cold_spawn_and_run(
     mcp_guard: Option<McpConfigGuard>,
     is_first_turn: bool,
     model: String,
+    turn_epoch: u64,
 ) -> Result<(), String> {
     use std::sync::atomic::Ordering;
 
@@ -1634,7 +1641,7 @@ async fn cold_spawn_and_run(
         }
         if let Some(p) = turn_pid { clear_session_pid_if(&session_id, p); }
         let _ = app.emit_to(&window_label, DONE_EVENT, serde_json::json!({
-            "session_id": session_id, "exit_code": -1,
+            "session_id": session_id, "exit_code": -1, "turn_epoch": turn_epoch,
         }));
         return Ok(());
     }
@@ -1707,6 +1714,7 @@ async fn cold_spawn_and_run(
         window_label: window_label.clone(),
         done: done_tx,
         bg_evict: first_bg_evict,
+        turn_epoch,
     };
 
     // Spawn the long-lived reader loop. It owns child/stdin/stdout/stderr, the
@@ -1741,6 +1749,7 @@ async fn cold_spawn_and_run(
             let _ = app.emit_to(&window_label, ERROR_EVENT, serde_json::json!({
                 "session_id": session_id,
                 "message": "the CLI process ended before producing a result — retry the turn",
+                "turn_epoch": turn_epoch,
             }));
             Err("warm child reader ended before first result".into())
         }
@@ -1974,6 +1983,7 @@ async fn run_turn_loop(mut ctx: RunCtx) {
         };
         let _ = app_err.emit_to(win_err, ERROR_EVENT, serde_json::json!({
             "session_id": ctx.session_id, "message": msg.clone(),
+            "turn_epoch": current.as_ref().map(|t| t.turn_epoch).unwrap_or(0),
         }));
         if let Some(t) = current.take() {
             let _ = t.done.send(Err(msg));
@@ -2018,6 +2028,7 @@ async fn run_turn_loop(mut ctx: RunCtx) {
         let bg_evict = turn.bg_evict.clone();
         let done = turn.done;
         let user_line = turn.user_line;
+        let turn_epoch = turn.turn_epoch;
 
         let turn_start = if first_turn_flag { ctx.turn_start } else { std::time::Instant::now() };
 
@@ -2048,6 +2059,7 @@ async fn run_turn_loop(mut ctx: RunCtx) {
             handshake_done: &mut handshake_done,
             bg_evict: &bg_evict,
             turn_start,
+            turn_epoch,
         }).await;
 
         // Clear in-progress the instant the turn ends (M6: reader-side).
@@ -2068,7 +2080,7 @@ async fn run_turn_loop(mut ctx: RunCtx) {
             }
             TurnOutcome::Fatal(msg) => {
                 let _ = app_out.emit_to(&win_label, ERROR_EVENT, serde_json::json!({
-                    "session_id": stream_sid, "message": msg.clone(),
+                    "session_id": stream_sid, "message": msg.clone(), "turn_epoch": turn_epoch,
                 }));
                 let _ = done.send(Err(msg));
                 break 'turns;
@@ -2113,7 +2125,7 @@ async fn run_turn_loop(mut ctx: RunCtx) {
                     reg.cancel_all_for_session(&ctx.session_id);
                 }
                 let _ = app_out.emit_to(&win_label, ERROR_EVENT, serde_json::json!({
-                    "session_id": stream_sid, "message": msg.clone(),
+                    "session_id": stream_sid, "message": msg.clone(), "turn_epoch": turn_epoch,
                 }));
                 let _ = done.send(Err(msg));
                 break 'turns;
@@ -2142,7 +2154,7 @@ async fn run_turn_loop(mut ctx: RunCtx) {
                 }
                 let status = ctx.child.wait().await.ok();
                 emit_turn_end_error(
-                    &app_out, &win_label, &stream_sid, cold_first, status, &stderr_buf, done,
+                    &app_out, &win_label, &stream_sid, cold_first, status, &stderr_buf, done, turn_epoch,
                 ).await;
                 break 'turns;
             }
@@ -2240,6 +2252,8 @@ struct StreamCtx<'a> {
     /// turn would otherwise read interleaved junk from the bg process).
     bg_evict: &'a std::sync::atomic::AtomicBool,
     turn_start: std::time::Instant,
+    /// #80: FE-minted epoch for THIS turn — stamped on every event it emits.
+    turn_epoch: u64,
 }
 
 /// No-progress watchdog ceiling: max time the reader will park on `next_line()`
@@ -2373,7 +2387,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
 
     let StreamCtx {
         stdin, lines, app_out, win_label, stream_sid, model, effort, thinking_on,
-        user_line, handshake_done, bg_evict, turn_start,
+        user_line, handshake_done, bg_evict, turn_start, turn_epoch,
     } = ctx;
 
     // A reused turn entered with the handshake already done. If such a turn sees
@@ -2545,6 +2559,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                         if res_is_err && is_auth_rejection(res_text) {
                             let _ = app_out.emit_to(win_label, ERROR_EVENT, serde_json::json!({
                                 "session_id": stream_sid, "message": auth_rejection_message(),
+                                "turn_epoch": turn_epoch,
                             }));
                         }
                         // B2: harvest the result frame's token / cache / cost data
@@ -2556,10 +2571,10 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                             perf_first_line_ms, perf_pre_text_tool_ms, !was_reused,
                         );
                         let _ = app_out.emit_to(win_label, STREAM_EVENT, serde_json::json!({
-                            "session_id": stream_sid, "line": trimmed,
+                            "session_id": stream_sid, "line": trimmed, "turn_epoch": turn_epoch,
                         }));
                         let _ = app_out.emit_to(win_label, DONE_EVENT, serde_json::json!({
-                            "session_id": stream_sid, "exit_code": 0,
+                            "session_id": stream_sid, "exit_code": 0, "turn_epoch": turn_epoch,
                             // B: a turn that backgrounded a Bash task ends with no way
                             // to auto-report its result (headless -p kills the shell ~5s
                             // after the turn). Flag it so the FE can warn the user once.
@@ -2685,7 +2700,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                     log::info!("warm_pool: TTFT {} ms (turn-start→first-line) session={}", turn_start.elapsed().as_millis(), stream_sid);
                 }
                 let _ = app_out.emit_to(win_label, STREAM_EVENT,
-                    serde_json::json!({ "session_id": stream_sid, "line": trimmed }));
+                    serde_json::json!({ "session_id": stream_sid, "line": trimmed, "turn_epoch": turn_epoch }));
             }
             Ok(None) => {
                 // Reused turn, stdout closed with no result → child died while
@@ -2695,6 +2710,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
             Err(e) => {
                 let _ = app_out.emit_to(win_label, ERROR_EVENT, serde_json::json!({
                     "session_id": stream_sid, "message": format!("stdout read error: {e}"),
+                    "turn_epoch": turn_epoch,
                 }));
                 return TurnOutcome::Fatal(format!("stdout read error: {e}"));
             }
@@ -2709,6 +2725,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
 /// or an actionable error. Mirrors the old post-wait failure branch. `done`
 /// signals `cold_spawn_and_run`'s awaiter; we send `Ok(())` for the recoverable
 /// session-lost/stop cases (the UI already got its event) and `Err` otherwise.
+#[allow(clippy::too_many_arguments)]
 async fn emit_turn_end_error(
     app: &AppHandle,
     window_label: &str,
@@ -2717,12 +2734,14 @@ async fn emit_turn_end_error(
     status: Option<std::process::ExitStatus>,
     stderr_buf: &str,
     done: oneshot::Sender<Result<(), String>>,
+    turn_epoch: u64,
 ) {
     // User clicked Stop → emit done (not error) so the UI clears + pops queue.
     if take_session_stopped(session_id) {
         let _ = app.emit_to(window_label, DONE_EVENT, serde_json::json!({
             "session_id": session_id,
             "exit_code": status.and_then(|s| s.code()).unwrap_or(-1),
+            "turn_epoch": turn_epoch,
         }));
         let _ = done.send(Ok(()));
         return;
@@ -2731,7 +2750,7 @@ async fn emit_turn_end_error(
     if !is_first_turn && stderr_buf.contains("No conversation found with session ID:") {
         log::warn!("warm_pool: --resume {session_id} failed (no conversation) — emitting session-lost");
         let _ = app.emit_to(window_label, SESSION_LOST_EVENT, serde_json::json!({
-            "session_id": session_id,
+            "session_id": session_id, "turn_epoch": turn_epoch,
         }));
         let _ = done.send(Ok(()));
         return;
@@ -2756,7 +2775,7 @@ async fn emit_turn_end_error(
         )
     };
     let _ = app.emit_to(window_label, ERROR_EVENT, serde_json::json!({
-        "session_id": session_id, "message": msg.clone(),
+        "session_id": session_id, "message": msg.clone(), "turn_epoch": turn_epoch,
     }));
     let _ = done.send(Err(msg));
 }

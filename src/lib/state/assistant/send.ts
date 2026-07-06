@@ -166,6 +166,9 @@ export async function send(
       });
     }
   }
+  // #80: mint this turn's epoch — the backend stamps it on every event the
+  // turn emits, so the listeners can tell a stale event from the live turn.
+  tab.turnEpoch += 1;
   tab.beginTurn();
   store.lastNotice = null;
   // #184: clear stale error banner so it doesn't bleed into the new turn.
@@ -298,6 +301,7 @@ export async function send(
     await invoke("assistant_send", {
       prompt: effectivePrompt,
       sessionId: tab.cliSessionId,
+      turnEpoch: tab.turnEpoch,
       isFirstTurn,
       model: effModel,
       attachments: turnAttachments.length > 0 ? turnAttachments : null,

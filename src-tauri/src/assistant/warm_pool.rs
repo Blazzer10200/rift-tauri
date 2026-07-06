@@ -95,6 +95,10 @@ pub(super) struct TurnCmd {
     /// The reader loop reads `bg_evict` after the turn and, if set, exits its
     /// loop (dropping stdin → the child EOFs and is reaped by the watchdog).
     pub bg_evict: Arc<AtomicBool>,
+    /// #80: frontend-minted per-tab turn counter, stamped on every stream/done/
+    /// error event this turn emits so the FE can discard a stale terminal from a
+    /// stopped/superseded turn. 0 = unknown (prewarm/legacy) — FE accepts it.
+    pub turn_epoch: u64,
 }
 
 /// The spawn "signature": the set of per-turn inputs that, if changed, REQUIRE

@@ -389,3 +389,15 @@ export function effortToFlag(
   if (e === "ultra") return "xhigh";
   return "high"; // "deep"
 }
+
+/** #80: stale-event discrimination. The backend stamps every stream/done/error
+ *  event with the `turn_epoch` the frontend minted for that turn (TabState.
+ *  turnEpoch, bumped per send). A positive payload epoch that differs from the
+ *  tab's current one belongs to a stopped/superseded turn — the listener drops
+ *  it instead of letting it finalize (or paint into) the next turn. A missing/
+ *  zero epoch on EITHER side means "no epoch info" (prewarm, legacy event, dev
+ *  hot-reload) → accept, preserving pre-epoch behavior. Pure. */
+export function isStaleTurnEpoch(tabEpoch: number, payloadEpoch: unknown): boolean {
+  return typeof payloadEpoch === "number" && payloadEpoch > 0
+    && tabEpoch > 0 && payloadEpoch !== tabEpoch;
+}

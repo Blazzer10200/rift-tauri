@@ -78,6 +78,7 @@ import {
   messagesHaveContextSignals,
   migrateThinkingPins,
   ctxWindowForModelId,
+  isStaleTurnEpoch,
 } from "./assistant/helpers";
 export { messagesHaveContextSignals } from "./assistant/helpers";
 
@@ -333,6 +334,12 @@ export class TabState {
    *  this) or the deadline passes. Prevents a stale terminal from finalizing
    *  the NEXT turn on the same session. */
   staleTerminalUntil = 0;
+  /** #80: monotonic per-tab turn counter. send() bumps it before dispatch; the
+   *  backend stamps it on every stream/done/error event of that turn, so the
+   *  listeners can discard a stale event from a stopped/superseded turn even
+   *  past the staleTerminalUntil deadline. 0 = no turn sent yet this app-life
+   *  (deliberately NOT persisted — epochs only disambiguate live processes). */
+  turnEpoch = 0;
   // #146/#234: cached index of the streaming assistant msg so mutateStreaming
   // can index-replace instead of full-map. Set in send() right after the
   // placeholder push; cleared wherever streamingMsgId is cleared.
@@ -1008,25 +1015,40 @@ class AssistantStore {
     // Legacy payload shape (bare string) routes to activeTab for forward-
     // compat during dev hot-reload.
     this.unlistens.push(
-      await listen<{ session_id?: string; line?: string } | string>(
+      await listen<{ session_id?: string; line?: string; turn_epoch?: number } | string>(
         "assistant://stream",
         (e) => {
           if (typeof e.payload === "string") {
             this.activeTab?.onStream(e.payload);
             return;
           }
-          const { session_id, line } = e.payload ?? {};
+          const { session_id, line, turn_epoch } = e.payload ?? {};
           const tab = session_id ? this.tabByCliSession(session_id) : this.activeTab;
-          if (tab && typeof line === "string") tab.onStream(line);
+          if (!tab || typeof line !== "string") return;
+          // #80: a frame from a stopped/superseded turn must not paint into the
+          // NEXT turn's bubble — drop it. (Terminals also consume the stop gate;
+          // a mere frame doesn't — the stale turn's terminal is still inbound.)
+          if (isStaleTurnEpoch(tab.turnEpoch, turn_epoch)) return;
+          tab.onStream(line);
         },
       ),
-      await listen<{ session_id?: string; exit_code?: number; bg_task?: boolean }>(
+      await listen<{ session_id?: string; exit_code?: number; bg_task?: boolean; turn_epoch?: number }>(
         "assistant://done",
         (e) => {
           const p = e.payload;
           const sid = p?.session_id;
           const tab = sid ? this.tabByCliSession(sid) : this.activeTab;
-          tab?.onDone();
+          // #80: a terminal from a stopped/superseded turn must not finalize the
+          // LIVE turn (the old same-session race: stale DONE nulled the next
+          // turn's streamingMsgId + dropped its currentTurnRecord) — consume the
+          // post-stop gate so a deferred send proceeds, and skip ONLY onDone.
+          // The bg_task warning below still runs: the superseded turn really did
+          // background a task that won't auto-report.
+          if (tab && isStaleTurnEpoch(tab.turnEpoch, p?.turn_epoch)) {
+            tab.staleTerminalUntil = 0;
+          } else {
+            tab?.onDone();
+          }
           // B: the turn backgrounded a Bash task. In headless -p mode the CLI
           // kills that shell ~5s after the turn and never re-invokes the model,
           // so a "I'll report when it lands" promise can't be kept. Warn once per
@@ -1050,16 +1072,24 @@ class AssistantStore {
           }
         },
       ),
-      await listen<{ session_id?: string; message?: string } | string>(
+      await listen<{ session_id?: string; message?: string; turn_epoch?: number } | string>(
         "assistant://error",
         (e) => {
           if (typeof e.payload === "string") {
             this.activeTab?.onError(e.payload);
             return;
           }
-          const { session_id, message } = e.payload ?? {};
+          const { session_id, message, turn_epoch } = e.payload ?? {};
           const tab = session_id ? this.tabByCliSession(session_id) : this.activeTab;
-          if (tab && typeof message === "string") tab.onError(message);
+          if (!tab || typeof message !== "string") return;
+          // #80: mirror the done listener — a stale turn's error (e.g. its stop
+          // marker was eaten and the DONE remapped to ERROR) must not banner the
+          // live turn; consume the gate and drop it.
+          if (isStaleTurnEpoch(tab.turnEpoch, turn_epoch)) {
+            tab.staleTerminalUntil = 0;
+            return;
+          }
+          tab.onError(message);
         },
       ),
     );
@@ -1087,7 +1117,7 @@ class AssistantStore {
       console.warn("assistant_get_trust_level failed", e);
     }
     this.unlistens.push(
-      await listen<{ session_id: string; prompt: string }>(
+      await listen<{ session_id: string; prompt: string; turn_epoch?: number }>(
         "assistant://session-lost",
         (e) => this.onSessionLost(e.payload),
       ),
@@ -1194,12 +1224,19 @@ class AssistantStore {
    *  next send uses --session-id, surface a friendly notice, then re-send
    *  the prompt. Tab-aware: ignore if the lost session isn't current
    *  (user switched tabs while the error was in flight). */
-  private onSessionLost(payload: { session_id: string; prompt?: string }) {
+  private onSessionLost(payload: { session_id: string; prompt?: string; turn_epoch?: number }) {
     // Find the tab whose CLI session failed (may not be the active tab if the
     // user switched mid-recovery). After S103 decoupling cliSessionId may
     // differ from convoId (post-compaction).
     const tab = this.tabByCliSession(payload.session_id);
     if (!tab) return;
+    // #80: a session-lost for a stopped/superseded turn must not pop the LIVE
+    // turn's tail messages or double-send its prompt — consume the stop gate
+    // (this EOF is that turn's terminal) and drop it, mirroring done/error.
+    if (isStaleTurnEpoch(tab.turnEpoch, payload.turn_epoch)) {
+      tab.staleTerminalUntil = 0;
+      return;
+    }
     // The backend SESSION_LOST_EVENT carries only { session_id }; recover the
     // prompt to retry from the last user message (still present pre-pop) so the
     // auto-retry re-sends the real turn instead of `undefined`.

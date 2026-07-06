@@ -2,8 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage, ToolBlock } from "./types";
 import {
   FABLE_DISABLED, FABLE_SUNSET_MS, clampEffort, effortToFlag, fableAvailable,
-  flattenToolResult, loadEffort, messagesHaveContextSignals, migrateThinkingPins,
-  modelFamily, previewToolInput, ctxWindowForModelId, modelNativeWindow, planContextCap,
+  flattenToolResult, isStaleTurnEpoch, loadEffort, messagesHaveContextSignals,
+  migrateThinkingPins, modelFamily, previewToolInput, ctxWindowForModelId,
+  modelNativeWindow, planContextCap,
 } from "./helpers";
 
 const tool = (name: string, status: ToolBlock["status"], extra: Partial<ToolBlock> = {}): ToolBlock =>
@@ -233,6 +234,25 @@ describe("messagesHaveContextSignals", () => {
     expect(messagesHaveContextSignals([msg([tool("Read", "done")])])).toBe(false);
     expect(messagesHaveContextSignals([msg([tool("Edit", "done")])])).toBe(true);
     expect(messagesHaveContextSignals([])).toBe(false);
+  });
+});
+
+describe("isStaleTurnEpoch (#80 stale-event discrimination)", () => {
+  it("flags a mismatched positive epoch as stale — both directions", () => {
+    expect(isStaleTurnEpoch(3, 2)).toBe(true); // old turn's terminal after a new send
+    expect(isStaleTurnEpoch(2, 3)).toBe(true); // defensive: future epoch is equally not-ours
+  });
+  it("accepts the live turn's own epoch", () => {
+    expect(isStaleTurnEpoch(3, 3)).toBe(false);
+  });
+  it("accepts epoch-less payloads (prewarm/legacy/dev hot-reload)", () => {
+    expect(isStaleTurnEpoch(3, undefined)).toBe(false);
+    expect(isStaleTurnEpoch(3, null)).toBe(false);
+    expect(isStaleTurnEpoch(3, 0)).toBe(false);
+    expect(isStaleTurnEpoch(3, "2")).toBe(false);
+  });
+  it("accepts anything while the tab has no epoch yet (fresh store, no send this app-life)", () => {
+    expect(isStaleTurnEpoch(0, 5)).toBe(false);
   });
 });
 
