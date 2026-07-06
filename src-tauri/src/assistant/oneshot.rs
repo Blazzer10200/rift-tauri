@@ -242,6 +242,8 @@ names), then output the rewritten prompt. Keep lookups minimal."
                     .arg("--allowed-tools")
                     .arg("mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep")
                     // Bound the agentic pass so a rewrite can't spiral.
+                    // (--max-turns is hidden from `--help` at CLI 2.1.201 but
+                    // still parses — verified 2026-07-06; don't "fix" it away.)
                     .arg("--max-turns").arg("6")
                     .current_dir(&root);
                 Some(McpConfigGuard(p))

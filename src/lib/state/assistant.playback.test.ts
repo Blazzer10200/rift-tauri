@@ -48,7 +48,7 @@ function pumpRaf() {
 
 import { assistant } from "./assistant.svelte.js";
 import { send as sendDirect } from "./assistant/send.js";
-import { notify } from "./toast.svelte";
+import { notify, toast } from "./toast.svelte";
 import { invoke } from "@tauri-apps/api/core";
 import type { TurnRecord } from "./assistant/types.js";
 
@@ -509,6 +509,43 @@ describe("playback — usage, cost, model attribution", () => {
     beginTurn(tab);
     feed(tab, [resultEnv({ subtype: "some_benign_marker" })]);
     expect(tab.lastError).toBeNull();
+  });
+
+  it("toasts once (latched) when the init frame reports a failed rift MCP server", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    const pushMock = vi.mocked(toast.push);
+    pushMock.mockClear();
+    const initEnv = {
+      type: "system",
+      subtype: "init",
+      mcp_servers: [{ name: "rift", status: "failed" }],
+    };
+    feed(tab, [initEnv]);
+    expect(pushMock).toHaveBeenCalledTimes(1);
+    expect(pushMock).toHaveBeenCalledWith(
+      expect.objectContaining({ severity: "danger", title: expect.stringContaining("Rift workspace tools") }),
+    );
+    // Latched once per app session — a repeat failure doesn't re-toast.
+    feed(tab, [initEnv]);
+    expect(pushMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores healthy/pending/disabled MCP statuses on init", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    const pushMock = vi.mocked(toast.push);
+    pushMock.mockClear();
+    feed(tab, [{
+      type: "system",
+      subtype: "init",
+      mcp_servers: [
+        { name: "rift", status: "connected" },
+        { name: "user-server", status: "pending" },
+        { name: "other", status: "disabled" },
+      ],
+    }]);
+    expect(pushMock).not.toHaveBeenCalled();
   });
 
   it("flags a max_tokens stop_reason on the streaming message", () => {

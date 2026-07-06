@@ -18,6 +18,7 @@
 import type { TabState } from "../assistant.svelte";
 import type { Block, ChatMessage, StreamEnvelope, ThinkingBlock, ToolBlock } from "./types";
 import { ctxWindowForModelId, flattenToolResult, previewToolInput } from "./helpers";
+import { checkMcpInitHealth } from "./healthAlerts";
 import { browserDock } from "../browserDock.svelte";
 
 // S124: agentSpawns appends per Task/Agent/Skill and is never reset within a
@@ -923,6 +924,9 @@ export function onStreamLine(tab: TabState, raw: string) {
       // (microcompact_boundary — the lighter tool-output trim — is intentionally
       // not surfaced; it fires often and would clutter the transcript.)
       if (env.subtype === "compact_boundary") appendCliCompaction(tab, env);
+      // First frame of every turn lists MCP server health — a failed rift
+      // server means dead workspace tools; toast instead of staying silent.
+      if (env.subtype === "init") checkMcpInitHealth(env as { mcp_servers?: unknown });
       break;
     }
     default:
