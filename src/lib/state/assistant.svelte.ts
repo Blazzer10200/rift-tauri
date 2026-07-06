@@ -82,6 +82,18 @@ import {
 } from "./assistant/helpers";
 export { messagesHaveContextSignals } from "./assistant/helpers";
 
+// cont.276: stream/done/error listener bodies extracted for testability —
+// init() registers 1-line thunks onto these (see listeners.ts header).
+import {
+  handleStreamEvent,
+  handleDoneEvent,
+  handleErrorEvent,
+  type ListenerHost,
+  type StreamPayload,
+  type DonePayload,
+  type ErrorPayload,
+} from "./assistant/listeners";
+
 // Run before any per-workspace thinking pin is read (field init below +
 // applyWorkspacePrefs). Clears stale pre-v0.65.0 `thinkingEnabled::<root>=on`
 // pins so every folder falls back to the off-by-default baseline. One-time,
@@ -1012,85 +1024,26 @@ class AssistantStore {
     // Backend tags every stream/done/error event w/ the originating CLI
     // session_id (S104). We route by session_id to the right TabState so
     // background tabs can keep painting concurrently with the foreground.
-    // Legacy payload shape (bare string) routes to activeTab for forward-
-    // compat during dev hot-reload.
+    // Bodies live in ./assistant/listeners (cont.276 — epoch gates + bg_task
+    // dedup + payload unions are vitest'd there); these stay 1-line thunks.
+    const store = this;
+    const listenerHost: ListenerHost = {
+      get activeTab() { return store.activeTab; },
+      tabBySession: (sid) => store.tabByCliSession(sid),
+      bgTaskWarnedSessions: this.bgTaskWarnedSessions,
+    };
     this.unlistens.push(
-      await listen<{ session_id?: string; line?: string; turn_epoch?: number } | string>(
+      await listen<StreamPayload>(
         "assistant://stream",
-        (e) => {
-          if (typeof e.payload === "string") {
-            this.activeTab?.onStream(e.payload);
-            return;
-          }
-          const { session_id, line, turn_epoch } = e.payload ?? {};
-          const tab = session_id ? this.tabByCliSession(session_id) : this.activeTab;
-          if (!tab || typeof line !== "string") return;
-          // #80: a frame from a stopped/superseded turn must not paint into the
-          // NEXT turn's bubble — drop it. (Terminals also consume the stop gate;
-          // a mere frame doesn't — the stale turn's terminal is still inbound.)
-          if (isStaleTurnEpoch(tab.turnEpoch, turn_epoch)) return;
-          tab.onStream(line);
-        },
+        (e) => handleStreamEvent(listenerHost, e.payload),
       ),
-      await listen<{ session_id?: string; exit_code?: number; bg_task?: boolean; turn_epoch?: number }>(
+      await listen<DonePayload>(
         "assistant://done",
-        (e) => {
-          const p = e.payload;
-          const sid = p?.session_id;
-          const tab = sid ? this.tabByCliSession(sid) : this.activeTab;
-          // #80: a terminal from a stopped/superseded turn must not finalize the
-          // LIVE turn (the old same-session race: stale DONE nulled the next
-          // turn's streamingMsgId + dropped its currentTurnRecord) — consume the
-          // post-stop gate so a deferred send proceeds, and skip ONLY onDone.
-          // The bg_task warning below still runs: the superseded turn really did
-          // background a task that won't auto-report.
-          if (tab && isStaleTurnEpoch(tab.turnEpoch, p?.turn_epoch)) {
-            tab.staleTerminalUntil = 0;
-          } else {
-            tab?.onDone();
-          }
-          // B: the turn backgrounded a Bash task. In headless -p mode the CLI
-          // kills that shell ~5s after the turn and never re-invokes the model,
-          // so a "I'll report when it lands" promise can't be kept. Warn once per
-          // session (not per turn) so a model that repeatedly backgrounds work
-          // doesn't spam a 9s toast every turn.
-          if (p?.bg_task) {
-            const key = sid ?? "__active__";
-            if (!this.bgTaskWarnedSessions.has(key)) {
-              // Cap unbounded growth over a long-running session — evict the
-              // oldest entry (Set preserves insertion order) once at the bound.
-              if (this.bgTaskWarnedSessions.size >= 200) {
-                const oldest = this.bgTaskWarnedSessions.values().next().value;
-                if (oldest !== undefined) this.bgTaskWarnedSessions.delete(oldest);
-              }
-              this.bgTaskWarnedSessions.add(key);
-              notify.warn("Background task won't auto-report", {
-                detail: "This turn started a task in the background, but Rift can't notify you when it finishes. Send a message to ask how it went.",
-                timeoutMs: 9000,
-              });
-            }
-          }
-        },
+        (e) => handleDoneEvent(listenerHost, e.payload),
       ),
-      await listen<{ session_id?: string; message?: string; turn_epoch?: number } | string>(
+      await listen<ErrorPayload>(
         "assistant://error",
-        (e) => {
-          if (typeof e.payload === "string") {
-            this.activeTab?.onError(e.payload);
-            return;
-          }
-          const { session_id, message, turn_epoch } = e.payload ?? {};
-          const tab = session_id ? this.tabByCliSession(session_id) : this.activeTab;
-          if (!tab || typeof message !== "string") return;
-          // #80: mirror the done listener — a stale turn's error (e.g. its stop
-          // marker was eaten and the DONE remapped to ERROR) must not banner the
-          // live turn; consume the gate and drop it.
-          if (isStaleTurnEpoch(tab.turnEpoch, turn_epoch)) {
-            tab.staleTerminalUntil = 0;
-            return;
-          }
-          tab.onError(message);
-        },
+        (e) => handleErrorEvent(listenerHost, e.payload),
       ),
     );
     await this.refreshAuth();
