@@ -2,13 +2,17 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.86.4 — Queued-message hardening + queue visibility
+## v0.87.0 — Per-turn epoch + final-day deep-hunt fixes
 
-- **Queued messages now own their attachments end-to-end.** A message queued mid-turn used to hand its snapshotted image/files back through shared composer state when it fired — a concurrently-typed send could steal them (that turn got the queued files, the queued message went out bare), and the hand-off overwrote anything newly staged in the composer. Attachments now ride the send itself; the queue and the composer can no longer cross-contaminate.
-- **Queue order survives races.** A queued message that lost the brief post-stop window to another send re-parks at the *front* of the queue instead of shuffling behind newer messages.
-- **Queue chips show what they carry.** A chip with attachments gets a paperclip count badge; an image-only message no longer renders as a blank chip ("2 images" marker instead); and blanking a chip's text while editing no longer silently discards its attachments — the ✕ removes the whole item, editing only changes the text.
-- **Parked messages are visible from the sidebar.** A chat with queued messages shows a count badge in the conversation list — background chats hold their queued sends until you return, and the badge is the reminder something is waiting.
-- **`/model` caught up with the picker:** accepts `fable`, and no longer offers models that were removed.
+- **Stopped turns can never bleed into the next one (#80 structural fix).** Every event a turn emits — stream frames, done, error, session-lost — now carries the turn's own epoch, and the app discards anything from a stopped or superseded turn no matter how late it arrives. Closes the residual window where a straggling terminal (watchdog kill, slow EOF) could silently finalize or corrupt the *next* message on the same chat. Live-verified: stop mid-stream + instant re-send runs clean, no spurious error banner.
+- **Self-update can no longer kill another running Rift.** The update's process sweep matched by image *name*, so a dev build applying an update could force-kill the real installed app mid-session. It now kills only processes running the same executable file.
+- **Deleting a chat sticks.** An autosave already in flight could land *after* the delete and resurrect the conversation as an undeletable ghost that returned next launch. Deletes now drain in-flight saves first.
+- **Pasted/dropped images land in the right chat.** Attaching is async (base64 encode); switching tabs mid-encode used to drop the image into the *new* tab. The target is now locked at paste/drop time; the stale attach-error banner no longer leaks across tabs either.
+- **A hung npm can't freeze Send.** The npm-prefix probe on the CLI-discovery path had no timeout (siblings did) — now bounded at 5s.
+- **Dictation is window-scoped.** In a second window, the mic UI no longer mirrors a recording the other window owns (all `stt://` events now target the owning window).
+- **Assistant honesty:** `notify`/`open_browser` MCP tools now report failure when the target window is gone instead of claiming success for a toast nobody saw.
+- **CI hygiene:** advisory scans (cargo/npm audit) moved to a daily scheduled workflow — pushes only fail when code actually breaks, ending the failure-email spam; the `quick-xml` advisory itself fixed via `plist 1.10`.
+- **Projects:** active-project highlight now derives purely from the open folder (stale stored id removed); switcher dropdown no longer floats at stale coords after a window resize.
 
 ## Known issues
 - **Voice profanity on Web Speech:** fully-masked words (`******`, no leading letter) can't be recovered from Azure's servers — the real fix is the on-device **Whisper** engine (built but not yet in the shipped binary). Planned.
@@ -16,6 +20,7 @@
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
 
+- **v0.86.4** — Queued-message hardening: attachments ride the send (no composer cross-contamination), requeue-front ordering, chip attachment badges, sidebar queued-count badge, `/model` de-staled.
 - **v0.86.3** — Project switching actually switches (stale per-tab folder override); mic no longer stuck red after dictation; tool-summary overflow truncation.
 - **v0.86.2** — Clean exit: closing Rift mid-turn reaps every CLI child (no more headless token-burning orphans); background-footprint audit confirmed idle is tight.
 - **v0.86.1** — Stability sweep: ten adversarially-verified fixes (stopped-turn corruption, plan-mode stall watchdog, delete-vs-autosave race, model-reselect default rewrite, orphaned npm updates, stale budget cap).
