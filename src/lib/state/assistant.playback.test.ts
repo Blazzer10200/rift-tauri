@@ -488,6 +488,29 @@ describe("playback — usage, cost, model attribution", () => {
     expect(tab.lastError).toContain("fresh chat");
   });
 
+  it("surfaces error_max_budget_usd (Rift's own --max-budget-usd cap) as lastError", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    feed(tab, [resultEnv({ subtype: "error_max_budget_usd", is_error: true })]);
+    expect(tab.lastError).toContain("spend cap");
+  });
+
+  it("falls back to the CLI's errors[] text on an unknown error subtype", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    feed(tab, [
+      resultEnv({ subtype: "error_totally_new", is_error: true, errors: ["Something specific broke"] }),
+    ]);
+    expect(tab.lastError).toBe("Something specific broke");
+  });
+
+  it("keeps a non-error unknown subtype silent (no false alarm)", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    feed(tab, [resultEnv({ subtype: "some_benign_marker" })]);
+    expect(tab.lastError).toBeNull();
+  });
+
   it("flags a max_tokens stop_reason on the streaming message", () => {
     const tab = freshTab();
     beginTurn(tab);

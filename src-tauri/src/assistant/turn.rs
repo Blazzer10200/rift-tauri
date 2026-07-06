@@ -331,6 +331,27 @@ async fn write_control_response(
     stdin.flush().await
 }
 
+/// Reply to a `control_request` subtype Rift doesn't implement. The CLI blocks
+/// on a `control_response` for every request it emits, so leaving a future
+/// subtype unanswered would park the turn until the stall watchdog kills the
+/// child — an error reply fails that ONE request cleanly and the stream keeps
+/// moving (same shape the Agent SDK sends for unsupported requests).
+async fn write_control_error(
+    stdin: &mut tokio::process::ChildStdin,
+    request_id: &str,
+    error: &str,
+) -> std::io::Result<()> {
+    use tokio::io::AsyncWriteExt;
+    let env = serde_json::json!({
+        "type": "control_response",
+        "response": { "subtype": "error", "request_id": request_id, "error": error },
+    });
+    let mut line = serde_json::to_vec(&env).map_err(std::io::Error::other)?;
+    line.push(b'\n');
+    stdin.write_all(&line).await?;
+    stdin.flush().await
+}
+
 /// Handle a `can_use_tool` control_request: register a oneshot, surface the ask
 /// to the frontend (`assistant://permission-request`), await the user's
 /// Allow/Deny via `assistant_answer_permission`, then write the decision back
@@ -1069,13 +1090,29 @@ async fn resolve_spawn(
         // card. Omitting Task* silently killed the Tasks panel on current CLI: the
         // model has the tools but the allowlist gated them out, so it fell back to
         // describing the plan in plain text. (Found in the 2026-06-25 stress test.)
-        const BUILTINS: &str = "Agent,Bash,BashOutput,DesignSync,Edit,ExitPlanMode,Glob,Grep,KillBash,KillShell,MultiEdit,NotebookEdit,Read,Skill,SlashCommand,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskStop,TaskOutput,TodoWrite,WebFetch,WebSearch,Write";
+        //
+        // S107 (2026-07-06, verified vs CLI 2.1.201 sdk-tools.d.ts + exe strings):
+        // the 2.1.19x/2.1.20x tool set added EnterPlanMode, ToolSearch (deferred-
+        // tool schema fetch), ReportFindings (code-review output), Workflow
+        // (multi-agent orchestration), Monitor (background watch), Artifact
+        // (claude.ai page publish), REPL (JS scratchpad), SendMessage (agent-to-
+        // agent), ScheduleWakeup, Cron*, RemoteTrigger, PushNotification,
+        // EnterWorktree/ExitWorktree, and the MCP-resource readers. All listed so
+        // a current CLI's tools aren't denial-popped; unknown names are harmless
+        // on older CLIs (allowlist entries that never match). SlashCommand/
+        // MultiEdit/KillBash/KillShell/BashOutput are GONE from 2.1.201 but stay
+        // listed for older installs. AskUserQuestion stays excluded (see above).
+        const BUILTINS: &str = "Agent,Artifact,Bash,BashOutput,CronCreate,CronDelete,CronList,DesignSync,Edit,EnterPlanMode,EnterWorktree,ExitPlanMode,ExitWorktree,Glob,Grep,KillBash,KillShell,ListMcpResources,Monitor,MultiEdit,NotebookEdit,PushNotification,Read,ReadMcpResource,ReadMcpResourceDir,REPL,RemoteTrigger,ReportFindings,ScheduleWakeup,SendMessage,Skill,SlashCommand,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,TodoWrite,ToolSearch,WebFetch,WebSearch,Workflow,Write";
         // Read-only / non-mutating subset always auto-approved even in a
         // prompting mode — these shouldn't interrupt the user. Everything
-        // omitted (Bash, Edit, Write, MultiEdit, NotebookEdit, Agent, Skill,
-        // SlashCommand, ExitPlanMode, and the mutating mcp__rift__* tools)
-        // falls through to the `can_use_tool` prompt.
-        const SAFE_BUILTINS: &str = "BashOutput,Glob,Grep,KillBash,KillShell,Read,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskStop,TaskOutput,TodoWrite,WebFetch,WebSearch";
+        // omitted (Bash, Edit, Write, Agent, Skill, Workflow, Monitor/REPL
+        // (both execute code), Artifact (cloud publish), worktree/Cron/Remote
+        // mutations, and the mutating mcp__rift__* tools) falls through to the
+        // `can_use_tool` prompt. New no-op additions: ToolSearch (schema fetch),
+        // EnterPlanMode (mode flip), ScheduleWakeup (self-timer), ReportFindings
+        // (display-only), CronList (read), PushNotification (user-directed toast,
+        // parallel to mcp__rift__notify below).
+        const SAFE_BUILTINS: &str = "BashOutput,CronList,EnterPlanMode,Glob,Grep,KillBash,KillShell,PushNotification,Read,ReportFindings,ScheduleWakeup,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,TodoWrite,ToolSearch,WebFetch,WebSearch";
         // UI-presentation tools (ask_user / open_browser / notify) are safe to
         // auto-approve: scheme-allowlisted, length-capped, no workspace writes.
         const SAFE_MCP: &str = "mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__ask_user,mcp__rift__open_browser,mcp__rift__notify";
@@ -1128,7 +1165,7 @@ async fn resolve_spawn(
         // omitted too (no Rift MCP server is spawned without a root). This makes
         // a no-folder chat behave like `claude` in an empty dir rather than a
         // tools-disabled sandbox.
-        const NO_WS_TOOLS: &str = "Agent,ExitPlanMode,Skill,SlashCommand,TaskCreate,TaskUpdate,TaskList,TaskGet,TaskStop,TaskOutput,TodoWrite,WebFetch,WebSearch";
+        const NO_WS_TOOLS: &str = "Agent,EnterPlanMode,ExitPlanMode,PushNotification,ScheduleWakeup,SendMessage,Skill,SlashCommand,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,TodoWrite,ToolSearch,WebFetch,WebSearch,Workflow";
         cmd.arg("--allowed-tools").arg(NO_WS_TOOLS);
     } else {
         // No MCP config + sandboxed/prompting (or api-key/local-LLM, which force
@@ -2548,6 +2585,29 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                         watchdog.as_mut().reset(
                             tokio::time::Instant::now() + std::time::Duration::from_secs(STREAM_NO_PROGRESS_SECS),
                         );
+                        continue;
+                    }
+                    // Any OTHER control_request subtype is a newer-CLI feature
+                    // Rift doesn't serve (can_use_tool above is the only one; the
+                    // init handshake's `hooks:{}` means no hook_callback traffic
+                    // arrives today). The CLI blocks on a reply, so answer with a
+                    // protocol error instead of letting the turn wedge until the
+                    // stall watchdog tree-kills a healthy child.
+                    if ty == Some("control_request") {
+                        let req_id = v.get("request_id").and_then(|x| x.as_str()).unwrap_or_default();
+                        let subtype = v
+                            .get("request")
+                            .and_then(|r| r.get("subtype"))
+                            .and_then(|s| s.as_str())
+                            .unwrap_or("unknown");
+                        log::warn!(
+                            "unsupported control_request subtype `{subtype}` (session={stream_sid}) — replying with a protocol error"
+                        );
+                        if let Err(e) = write_control_error(stdin, req_id, &format!(
+                            "Rift does not support the `{subtype}` control request"
+                        )).await {
+                            return TurnOutcome::Fatal(format!("write control error response: {e}"));
+                        }
                         continue;
                     }
                     // `result` is the last frame — forward it, emit DONE, and

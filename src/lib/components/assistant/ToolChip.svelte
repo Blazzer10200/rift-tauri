@@ -10,7 +10,7 @@
   import {
     FileText, FolderTree, Search, FilePen, FilePlus, Terminal, Globe,
     Wrench, Loader2, CheckCircle2, AlertCircle, ChevronRight, ListChecks,
-    Bot, HelpCircle, FlagOff, BookOpen, Sparkles, Slash, Square, SkipForward,
+    Bot, HelpCircle, FlagOff, Flag, BookOpen, Sparkles, Slash, Square, SkipForward,
     GitBranch, GitCommitHorizontal, ExternalLink, Bell,
   } from "lucide-svelte";
   import { assistant, type ToolBlock } from "../../state/assistant.svelte";
@@ -97,8 +97,17 @@
       return `${qs} question${qs === 1 ? "" : "s"}`;
     }
     if (n === "ExitPlanMode") return "exit plan mode";
+    if (n === "EnterPlanMode") return "enter plan mode";
     if (n === "SlashCommand") return typeof inp.command === "string" ? (inp.command as string) : "slash command";
     if (n === "Skill") return typeof inp.skill === "string" ? (inp.skill as string) : "skill";
+    if (n === "Workflow") return typeof inp.name === "string" ? (inp.name as string) : "workflow";
+    if (n === "Monitor" || n === "REPL")
+      return typeof inp.description === "string" ? trim(inp.description as string, 50) : n === "REPL" ? "javascript" : "watch";
+    if (n === "Artifact") return typeof inp.file_path === "string" ? basename(inp.file_path as string) : "artifact";
+    if (n === "ReportFindings") {
+      const f = Array.isArray(inp.findings) ? (inp.findings as unknown[]).length : 0;
+      return `${f} finding${f === 1 ? "" : "s"}`;
+    }
     if (n === "TodoWrite") {
       const todos = Array.isArray(inp.todos) ? (inp.todos as Array<{content?: string}>).length : 0;
       return `${todos} task${todos === 1 ? "" : "s"}`;
@@ -129,9 +138,11 @@
   const category = $derived.by<Category>(() => {
     const n = shortName(tool.name);
     if (n === "Edit" || n === "MultiEdit" || n === "Write" || n === "NotebookEdit") return "write";
-    if (n === "Bash" || n === "remote_bash" || n === "BashOutput" || n === "KillBash" || n === "KillShell") return "shell";
-    if (n === "Agent" || n === "Task" || n === "Skill" || n === "SlashCommand") return "agent";
-    if (n === "TodoWrite" || n === "TaskCreate" || n === "TaskUpdate" || n === "AskUserQuestion" || n === "ask_user" || n === "ExitPlanMode") return "meta";
+    if (n === "Bash" || n === "remote_bash" || n === "BashOutput" || n === "KillBash" || n === "KillShell" || n === "Monitor" || n === "REPL") return "shell";
+    if (n === "Agent" || n === "Task" || n === "Skill" || n === "SlashCommand" || n === "Workflow" || n === "SendMessage") return "agent";
+    if (n === "TodoWrite" || n === "TaskCreate" || n === "TaskUpdate" || n === "AskUserQuestion" || n === "ask_user" || n === "ExitPlanMode" || n === "EnterPlanMode" || n === "ReportFindings") return "meta";
+    // Cloud publish + repo/worktree mutation read as consequential.
+    if (n === "Artifact" || n === "EnterWorktree" || n === "ExitWorktree") return "write";
     // Local git: mutating ops read as consequential (write tint); read-only
     // status/diff/log stay cheap (read).
     if (n === "git_commit" || n === "git_push" || n === "git_pull") return "write";
@@ -207,12 +218,15 @@
     if (sn === "git_commit") return GitCommitHorizontal;
     if (sn.startsWith("git_")) return GitBranch;
     // Agentic / planning / meta.
-    if (sn === "Agent" || sn === "Task") return Bot;
+    if (sn === "Agent" || sn === "Task" || sn === "Workflow" || sn === "SendMessage") return Bot;
     if (sn === "AskUserQuestion") return HelpCircle;
     if (sn === "ExitPlanMode") return FlagOff;
+    if (sn === "EnterPlanMode") return Flag;
     if (sn === "SlashCommand") return Slash;
     if (sn === "Skill") return Sparkles;
-    if (sn === "TodoWrite" || sn === "TaskCreate" || sn === "TaskUpdate") return ListChecks;
+    if (sn === "Monitor" || sn === "REPL") return Terminal;
+    if (sn === "Artifact") return Globe;
+    if (sn === "TodoWrite" || sn === "TaskCreate" || sn === "TaskUpdate" || sn === "ReportFindings") return ListChecks;
     return Wrench;
   });
 

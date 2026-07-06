@@ -887,12 +887,23 @@ export function onStreamLine(tab: TabState, raw: string) {
           error_max_turns: "The run hit its maximum number of turns and stopped.",
           error_during_execution: "The run stopped on an execution error.",
           error_max_thinking_tokens: "The run hit its thinking-token budget and stopped.",
+          error_max_budget_usd:
+            "The run hit your per-turn spend cap and stopped. Raise or remove it in Settings → CLI session.",
           model_context_window_exceeded:
             "The context window filled up and couldn't be compacted further. Start a fresh chat to keep going.",
         };
         const msg = ERROR_MESSAGES[env.subtype];
         if (msg) {
           tab.lastError = msg;
+        } else if ((env as { is_error?: boolean }).is_error === true) {
+          // Unknown error subtype from a newer CLI: surface the CLI's own
+          // errors[] text instead of ending the turn with no explanation.
+          const errs = (env as { errors?: unknown[] }).errors;
+          const cliMsg = Array.isArray(errs)
+            ? errs.find((e): e is string => typeof e === "string" && e.length > 0)
+            : undefined;
+          tab.lastError =
+            cliMsg ?? `The run stopped early (${env.subtype.replace(/^error_/, "").replace(/_/g, " ")}).`;
         } else {
           console.warn("[assistant] unrecognized result.subtype", env.subtype, env);
         }

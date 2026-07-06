@@ -29,6 +29,10 @@ pub type Version = (u64, u64, u64);
 /// Minimum CLI versions each gated capability landed in. Sourced from the
 /// `@anthropic-ai/claude-code` release history; confidence noted per const.
 /// When a value is confirmed against the changelog, drop the `// est` note.
+/// All gated flags re-confirmed present in `claude --help` at v2.1.201
+/// (2026-07-06). `--permission-mode default` also still parses there — the
+/// mode was renamed "Manual" display-side at 2.1.200 with `manual` accepted
+/// as an alias, but `default` remains valid (official permission-modes docs).
 mod mins {
     use super::Version;
 
