@@ -27,6 +27,7 @@ type WorkspaceHost = {
   // chosen folder onto the tab rather than the global default.
   activeRoot: string | null;
   tabFor: (id: string | null) => { workspaceRoot: string | null } | null;
+  activeTab: { workspaceRoot: string | null } | null;
 };
 
 export async function refreshWorkspace(host: WorkspaceHost): Promise<void> {
@@ -107,6 +108,14 @@ export async function setTabRoot(host: WorkspaceHost, tabId: string | null, path
 export async function setRoot(host: WorkspaceHost, path: string): Promise<void> {
   try {
     host.workspace = await invoke<WorkspaceState>("assistant_set_root", { path });
+    // A global switch must win on the FOCUSED pane: drop its per-tab override so
+    // effectiveRoot follows the new workspace.current. Without this, a tab that
+    // inherited/hydrated a concrete workspaceRoot keeps resolving activeRoot to
+    // the OLD project after "switch project" (sidebar header, branch pill,
+    // chat-scope filter, and the root sent to the CLI all stay stale). Other
+    // panes' per-tab roots are intentionally untouched.
+    const focused = host.activeTab;
+    if (focused) focused.workspaceRoot = null;
     host.workspaceFiles = [];
     host.workspaceBranch = null;
     host.applyWorkspacePrefs();
@@ -127,6 +136,10 @@ export async function setRoot(host: WorkspaceHost, path: string): Promise<void> 
 export async function clearRoot(host: WorkspaceHost): Promise<void> {
   try {
     host.workspace = await invoke<WorkspaceState>("assistant_clear_root");
+    // Same focused-pane rule as setRoot: clearing the global folder must also
+    // clear the focused tab's override, else the clear is invisible.
+    const focused = host.activeTab;
+    if (focused) focused.workspaceRoot = null;
     host.workspaceFiles = [];
     host.workspaceBranch = null;
     host.applyWorkspacePrefs();

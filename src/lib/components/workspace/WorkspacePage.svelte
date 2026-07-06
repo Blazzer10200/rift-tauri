@@ -272,9 +272,9 @@
   });
 
   // Keyed off paneRoot (the GLOBAL workspace root) — same source as the
-  // greeting/band/save-prompt. assistant.activeRoot follows the focused TAB's
-  // per-tab root, which can lag the page after a project switch (stale
-  // "Active" highlight when the old chat tab keeps focus).
+  // greeting/band/save-prompt, so this page's "Active" highlight always agrees
+  // with its own copy. (assistant.activeRoot follows the focused TAB, which
+  // diverges only when a split pane is scoped to another project.)
   const activeKey = $derived(projectRootKey(paneRoot));
   function isActive(p: Project): boolean {
     return !!activeKey && projectRootKey(p.root) === activeKey;
