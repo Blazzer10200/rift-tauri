@@ -35,8 +35,8 @@ describe("shortPath", () => {
 });
 
 describe("rootKey", () => {
-  it("strips a trailing separator and lowercases for case-insensitive compare", () => {
-    expect(rootKey("C:\\AI Workflow\\Projects\\Rift\\")).toBe("c:\\ai workflow\\projects\\rift");
+  it("normalizes separators, strips a trailing one, and lowercases", () => {
+    expect(rootKey("C:\\AI Workflow\\Projects\\Rift\\")).toBe("c:/ai workflow/projects/rift");
     expect(rootKey("/Home/User/Proj/")).toBe("/home/user/proj");
   });
   it("treats null/undefined as empty", () => {
@@ -45,5 +45,8 @@ describe("rootKey", () => {
   });
   it("matches the same folder regardless of trailing slash + casing", () => {
     expect(rootKey("C:/Proj/Rift")).toBe(rootKey("C:/proj/rift/"));
+  });
+  it("matches the same folder across mixed separators", () => {
+    expect(rootKey("C:\\Proj\\Rift")).toBe(rootKey("C:/Proj/Rift"));
   });
 });

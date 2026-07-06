@@ -43,12 +43,9 @@
     shell.allProjects
       ? assistant.conversations.length
       : assistant.conversations.filter(
-          (c) => !assistant.activeRoot || rk(c.workspaceRoot) === rk(assistant.activeRoot),
+          (c) => !assistant.activeRoot || rootKey(c.workspaceRoot) === rootKey(assistant.activeRoot),
         ).length,
   );
-  function rk(r: string | null | undefined): string {
-    return (r ?? "").replace(/[/\\]+$/, "").replace(/[/\\]/g, "/").toLowerCase();
-  }
 
   // Sliding thumb under the active scope button — measured (labels differ in
   // width), re-measured on every scope flip.

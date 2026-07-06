@@ -37,8 +37,8 @@ describe("projectRootKey", () => {
     expect(projectRootKey("c:/workspace/proj/")).toBe("c:/workspace/proj");
   });
 
-  it("strips trailing backslash", () => {
-    expect(projectRootKey("c:\\workspace\\proj\\")).toBe("c:\\workspace\\proj");
+  it("strips trailing backslash and normalizes separators", () => {
+    expect(projectRootKey("c:\\workspace\\proj\\")).toBe("c:/workspace/proj");
   });
 
   it("strips multiple trailing slashes", () => {
