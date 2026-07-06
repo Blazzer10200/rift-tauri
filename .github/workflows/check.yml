@@ -17,8 +17,11 @@ concurrency:
 
 jobs:
   rust:
-    name: rust (cargo check + test + audit + machete)
+    name: rust (cargo check + test + machete)
     # Self-hosted WS2022 runner (Proxmox blazzer-labs); persistent warm target/.
+    # Advisory scanning (cargo audit) lives in audit.yml on a DAILY schedule —
+    # a fresh RUSTSEC advisory is not a property of the pushed commit, and
+    # per-push audit failed every push (+1 email each) until someone intervened.
     runs-on: [self-hosted, windows, tauri-build]
     defaults:
       run:
@@ -29,9 +32,6 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install cargo-audit
-        run: cargo install cargo-audit --locked || true
-
       - name: Install cargo-machete
         run: cargo install cargo-machete --locked || true
 
@@ -41,21 +41,14 @@ jobs:
       - name: cargo test
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
-      # Ignored advisories live in the lockfile but not in Rift's compiled graph:
-      #   RUSTSEC-2023-0071 — rsa Marvin timing attack (transitive, no RSA path used).
-      #   RUSTSEC-2026-0185 — quinn-proto QUIC mem-exhaustion; pulled only by reqwest's
-      #     http3 feature, which we DON'T enable (features = rustls/http2/… , no http3),
-      #     so quinn is never compiled in (`cargo tree -i quinn-proto` is empty).
-      - name: cargo audit
-        run: cargo audit --file src-tauri/Cargo.lock --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0185
-
       - name: cargo machete
         run: cargo machete src-tauri
 
   frontend:
-    name: frontend (svelte-check + vitest + npm audit)
+    name: frontend (svelte-check + vitest)
     # Also self-hosted: GitHub-hosted minutes are exhausted (free tier), so an
     # ubuntu-latest job would insta-fail. The WS2022 runner has Node (choco).
+    # npm audit moved to audit.yml (daily) — same reasoning as cargo audit.
     runs-on: [self-hosted, windows, tauri-build]
     steps:
       - uses: actions/checkout@v6
@@ -74,6 +67,3 @@ jobs:
 
       - name: vitest
         run: npm test
-
-      - name: npm audit (prod only)
-        run: npm audit --omit=dev

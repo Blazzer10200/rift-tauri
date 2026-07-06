@@ -1,0 +1,45 @@
+name: audit
+
+# Advisory scanning is time-based, not commit-based: a new RUSTSEC/npm advisory
+# lands on the world's clock and would otherwise fail EVERY push until handled
+# (the July 2026 quick-xml pair emailed a red X per push for three days). Daily
+# here = at most one actionable signal per day, and `check` stays green unless
+# the code itself broke.
+on:
+  schedule:
+    - cron: '0 10 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: audit
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: cargo audit + npm audit
+    runs-on: [self-hosted, windows, tauri-build]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked || true
+
+      # Ignored advisories live in the lockfile but not in Rift's compiled graph:
+      #   RUSTSEC-2023-0071 — rsa Marvin timing attack (transitive, no RSA path used).
+      #   RUSTSEC-2026-0185 — quinn-proto QUIC mem-exhaustion; pulled only by reqwest's
+      #     http3 feature, which we DON'T enable (features = rustls/http2/… , no http3),
+      #     so quinn is never compiled in (`cargo tree -i quinn-proto` is empty).
+      #   RUSTSEC-2026-0194 / RUSTSEC-2026-0195 — quick-xml DoS pair, fixed >=0.41.
+      #     The reachable consumer (plist <- tauri-utils) rides 0.41.0 since v0.86.5;
+      #     the only remaining 0.39.4 consumer is wayland-scanner, a LINUX-target-only
+      #     proc-macro that never compiles for Windows-only Rift (`cargo tree -i
+      #     quick-xml@0.39.4` is empty without --target all). Drop both ignores once
+      #     wayland-scanner requires ^0.41.
+      - name: cargo audit
+        run: cargo audit --file src-tauri/Cargo.lock --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0185 --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
+
+      - name: npm audit (prod only)
+        run: npm audit --omit=dev
