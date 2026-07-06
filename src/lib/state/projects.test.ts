@@ -24,7 +24,6 @@ beforeEach(() => {
   projects.items = [];
   projects.lastError = null;
   projects.loaded = false;
-  projects.activeId = null;
   mockedInvoke.mockReset();
 });
 
@@ -224,23 +223,6 @@ describe("remove()", () => {
     expect(projects.lastError).toBe("Error: not found");
   });
 
-  it("clears activeId when the active project is removed", async () => {
-    projects.activeId = "active-id";
-    mockedInvoke.mockResolvedValueOnce([]);
-
-    await projects.remove("active-id");
-
-    expect(projects.activeId).toBe(null);
-  });
-
-  it("does not clear activeId when a different project is removed", async () => {
-    projects.activeId = "active-id";
-    mockedInvoke.mockResolvedValueOnce([]);
-
-    await projects.remove("other-id");
-
-    expect(projects.activeId).toBe("active-id");
-  });
 });
 
 describe("byId()", () => {

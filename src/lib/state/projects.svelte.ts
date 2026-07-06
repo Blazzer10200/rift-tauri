@@ -9,21 +9,18 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Project } from "./assistant/types";
 import { rootKey } from "$lib/utils/path";
 
-/** localStorage key for the id of the last-active project, so a relaunch can
- *  highlight it in the sidebar. The active ROOT itself is owned by the backend
- *  workspace state; this is purely the UI's "which project chip is lit". */
-const ACTIVE_PROJECT_KEY = "rift.projects.activeId.v1";
-
 /** Canonicalize a root for comparison — the canonical `rootKey` (utils/path.ts),
  *  re-exported under the existing name so this module's callers stay unchanged. */
 export const projectRootKey = rootKey;
 
+// #81: the old stored `activeId` (+ its localStorage key "rift.projects.
+// activeId.v1") was write-only state — every surface highlights the active
+// project by ROOT match (`byRoot`/`projectRootKey` against the live root), so
+// the stored id silently diverged (e.g. "open in split" set it to a project
+// whose root never became global). Dropped; byRoot IS the active-project truth.
+
 class ProjectRegistry {
   items = $state<Project[]>([]);
-  /** Id of the project whose root is currently active, or null. Derived against
-   *  the live active root rather than stored blindly, so it stays correct even
-   *  if the root was changed by the plain folder picker. */
-  activeId = $state<string | null>(null);
   loaded = $state(false);
   lastError = $state<string | null>(null);
   /** Transient one-shot: set by an "+ New project" affordance OUTSIDE the
@@ -36,11 +33,6 @@ class ProjectRegistry {
     if (!this.newProjectIntent) return false;
     this.newProjectIntent = false;
     return true;
-  }
-
-  init() {
-    if (typeof window === "undefined") return;
-    this.activeId = localStorage.getItem(ACTIVE_PROJECT_KEY);
   }
 
   /** Sorted view for display — newest first, falling back to name. */
@@ -105,18 +97,10 @@ class ProjectRegistry {
   async remove(id: string): Promise<void> {
     try {
       this.items = await invoke<Project[]>("assistant_delete_project", { id });
-      if (this.activeId === id) this.setActiveId(null);
       this.lastError = null;
     } catch (e) {
       this.lastError = String(e);
     }
-  }
-
-  setActiveId(id: string | null) {
-    this.activeId = id;
-    if (typeof window === "undefined") return;
-    if (id) localStorage.setItem(ACTIVE_PROJECT_KEY, id);
-    else localStorage.removeItem(ACTIVE_PROJECT_KEY);
   }
 }
 

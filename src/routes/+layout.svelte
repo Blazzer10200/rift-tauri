@@ -25,7 +25,6 @@
   onMount(() => {
     uiPrefs.init();
     workspace.init();
-    projects.init();
     void projects.refresh();
     accessibility.init();
   });

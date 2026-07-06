@@ -55,23 +55,28 @@
     if (!menuOpen) return;
     const onDoc = () => closeMenu();
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeMenu(); };
+    // #81: menuPos is captured once at open — a window resize while open would
+    // leave the portaled menu floating at stale coords, so close it instead.
     window.addEventListener("click", onDoc);
     window.addEventListener("keydown", onKey);
-    return () => { window.removeEventListener("click", onDoc); window.removeEventListener("keydown", onKey); };
+    window.addEventListener("resize", onDoc);
+    return () => {
+      window.removeEventListener("click", onDoc);
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("resize", onDoc);
+    };
   });
 
   // ── open actions (lifted verbatim from ProjectRail) ──────────────────────
   async function openFocused(p: Project) {
     closeMenu();
     shell.setAllProjects(false);
-    projects.setActiveId(p.id);
     await assistant.setRoot(p.root);
     goHome();
   }
   async function openInSplit(p: Project) {
     closeMenu();
     workspace.setActive("chat");
-    projects.setActiveId(p.id);
     await assistant.openProjectInPane(p.root, { splitNew: true });
   }
   function chooseAll() {

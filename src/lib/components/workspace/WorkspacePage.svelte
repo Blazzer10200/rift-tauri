@@ -287,7 +287,6 @@
       notify.warn("Couldn't open project", { detail: assistant.lastError });
       return;
     }
-    projects.setActiveId(p.id);
     goHome();
   }
 
@@ -296,7 +295,6 @@
   // panes are visible. Same primitive the sidebar rail + pane drop use.
   async function openInSplit(p: Project) {
     workspace.setActive("chat");
-    projects.setActiveId(p.id);
     await assistant.openProjectInPane(p.root, { splitNew: true });
   }
 
