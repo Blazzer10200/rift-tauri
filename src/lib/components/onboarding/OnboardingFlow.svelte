@@ -124,7 +124,10 @@
   function pickPreset(p: Preset) {
     assistant.setPermissionMode(p.perm);
     assistant.setThinkingDial(p.thinking.on, p.thinking.effort);
-    void assistant.setTrustLevel(p.trust);
+    // setTrustLevel rethrows after its own danger toast; swallow the rejection
+    // so a failed backend invoke doesn't surface as an unhandled promise (the
+    // user already saw the toast, and activePreset reflects the partial apply).
+    assistant.setTrustLevel(p.trust).catch(() => {});
   }
 </script>
 

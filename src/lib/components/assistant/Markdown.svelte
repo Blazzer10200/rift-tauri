@@ -107,6 +107,11 @@
 
   let { text, streaming = false }: { text: string; streaming?: boolean } = $props();
 
+  // Upper bound on characters fed to marked/DOMPurify per render (see `parsed`).
+  // ~500k chars ≈ 125k tokens — larger than any single real message, so it only
+  // ever trips on pathological/echoed-file content, never normal chat.
+  const MARKDOWN_PARSE_CAP = 500_000;
+
   const prefersReducedMotion =
     typeof window !== "undefined" &&
     window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
@@ -467,7 +472,17 @@
   // flips so code blocks upgrade to syntax-highlighted in place.
   const parsed = $derived.by(() => {
     void shikiReady;
-    const raw = marked.parse(renderText, { async: false }) as string;
+    // Robustness cap: a pathologically huge message (e.g. a multi-MB file
+    // echoed into the transcript) would re-run marked + DOMPurify + three DOM
+    // walks on the FULL string every rAF-coalesced delta, janking the render
+    // thread for hundreds of ms per frame. Slice at a ceiling no normal message
+    // reaches (Markdown is the primary content surface, so it sits far above
+    // ToolChip's 20k secondary-result cap); the tail is dropped with a visible
+    // notice rather than silently, and the slice is byte-safe for marked/DOMPurify.
+    const src = renderText.length > MARKDOWN_PARSE_CAP
+      ? `${renderText.slice(0, MARKDOWN_PARSE_CAP)}\n\n_… ${renderText.length - MARKDOWN_PARSE_CAP} more characters truncated for display._`
+      : renderText;
+    const raw = marked.parse(src, { async: false }) as string;
     const clean = DOMPurify.sanitize(raw, {
       ALLOWED_TAGS: [
         "p", "br", "strong", "em", "del", "code", "pre",
