@@ -149,14 +149,23 @@ pub fn assistant_local_scratch_path() -> Option<String> {
 /// Resolve a per-tab root override (validated dir) or fall back to the global
 /// `current_root`. Lets the `@`-mention walk + branch probe scope to whichever
 /// pane the user is interacting with instead of always the global default.
+///
+/// Stale-override guard: an explicit per-tab root that's SUPPLIED BUT NO LONGER A
+/// DIR (folder deleted/renamed, USB/network drive disconnected — none of which
+/// route through setRoot's "not a directory" self-heal, since that only fires on
+/// a fresh pick) must NOT silently fall through to the global root. Doing so ran
+/// this pane's `@`-mention walk / branch probe against a DIFFERENT project while
+/// the pane header still showed the stale one (cross-contamination). A stale
+/// override → `None` (honest empty result); only a genuinely ABSENT override
+/// falls back to the global default.
 fn resolve_root(override_path: Option<String>) -> Option<PathBuf> {
-    override_path
-        .as_deref()
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .filter(|p| p.is_dir())
-        .or_else(|| load_config().current_root)
+    match override_path.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(p) => {
+            let path = PathBuf::from(p);
+            path.is_dir().then_some(path)
+        }
+        None => load_config().current_root,
+    }
 }
 
 /// Enumerate file paths under the active workspace root, relative to the root,

@@ -93,13 +93,16 @@ pub fn snapshot() -> MetricsSnapshot {
 /// Backing fn for `timed!` — records the histogram sample AND emits a live
 /// event so the span shows in the console. Separate from `record_ms` so the
 /// macro stays a thin wrapper and tests can hit the registry without the bus.
-pub fn record_span(name: &str, ms: u64) {
+/// `site` is the caller's `file!()` — passed in from the macro expansion, NOT
+/// `file!()` here, which would always resolve to metrics.rs and misattribute
+/// every span to this file regardless of where it was timed.
+pub fn record_span(name: &str, ms: u64, site: &str) {
     record_ms(name, ms);
     super::emit_with_fields(
         super::DiagStage::Log,
         super::DiagLevel::Debug,
         Some("metric"),
-        Some(file!()),
+        Some(site),
         name,
         serde_json::json!({ "metric": name, "dur_ms": ms }),
     );
@@ -128,7 +131,9 @@ macro_rules! timed {
         let __timed_t0 = ::std::time::Instant::now();
         let __timed_out = $body;
         let __timed_ms = __timed_t0.elapsed().as_millis() as u64;
-        $crate::diagnostics::metrics::record_span($name, __timed_ms);
+        // `file!()` here expands at the CALL SITE, so the span attributes to the
+        // instrumented code, not metrics.rs.
+        $crate::diagnostics::metrics::record_span($name, __timed_ms, file!());
         __timed_out
     }};
 }

@@ -193,6 +193,12 @@ pub struct WhisperSession(pub AsyncMutex<Option<ActiveSession>>);
 
 pub struct ActiveSession {
     ring: audio::AudioRing,
+    /// The engine THIS session loaded/resolved at start. Stored so the final
+    /// transcribe uses the session's own model, not whatever is in the shared
+    /// cache at stop-time — a second start racing during this session's model
+    /// load can overwrite that cache with a DIFFERENT model/quantization, and
+    /// re-reading it at stop would silently finalize with the wrong engine.
+    engine: whisper::WhisperEngine,
     initial_prompt: String,
     language: Option<String>,
     beam_size: Option<u8>,
@@ -466,6 +472,7 @@ pub async fn stt_start_recording(
         }
         *slot = Some(ActiveSession {
             ring: ring.clone(),
+            engine: engine.clone(),
             initial_prompt: initial_prompt.clone(),
             language: language.clone(),
             beam_size,
@@ -520,7 +527,9 @@ pub async fn stt_start_recording(
 #[tauri::command]
 pub async fn stt_stop_recording(
     app: AppHandle,
-    cache: tauri::State<'_, WhisperCache>,
+    // Retained for the command's DI signature but no longer read: the final
+    // transcribe uses the session's own stored engine, not the shared cache.
+    _cache: tauri::State<'_, WhisperCache>,
     session: tauri::State<'_, WhisperSession>,
 ) -> Result<String, String> {
     let mut active = {
@@ -536,14 +545,12 @@ pub async fn stt_stop_recording(
     }
     emit_state(&app, &win, "transcribing", None);
 
-    // Drain final buffer, transcribe.
+    // Drain final buffer, transcribe with the SESSION'S OWN engine (stored at
+    // start), NOT the shared cache — a start racing during this session's model
+    // load could have overwritten the cache with a different model, and the
+    // rolling partials all ran on this engine, so the final block must match.
     let samples = audio::drain_all(&active.ring);
-    let engine = {
-        let slot = cache.0.lock().await;
-        slot.as_ref()
-            .cloned()
-            .ok_or_else(|| "whisper engine missing — model unloaded mid-session".to_string())?
-    };
+    let engine = active.engine.clone();
     let prompt = active.initial_prompt.clone();
     let language = active.language.clone();
     let beam_size = active.beam_size;

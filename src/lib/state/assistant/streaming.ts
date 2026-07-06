@@ -183,6 +183,18 @@ function markThinkingSignature(tab: TabState, index: number) {
   mutateThinking(tab, index, (b) => (b.hasSignature ? b : { ...b, hasSignature: true }));
 }
 
+/** Stamp the turn's first visible-output moment ONCE, snapshotting how much
+ *  thinking had accrued up to that point. healthAlerts' deadWait subtracts this
+ *  pre-paint snapshot (not the full-turn cumulative thinkingTotalMs) so a long
+ *  post-paint thinking round can't drive deadWait negative and hide a real
+ *  slow-start. No-op after the first call. */
+function markFirstPaint(tab: TabState) {
+  const rec = tab.currentTurnRecord;
+  if (!rec || rec.firstPaintAt != null) return;
+  rec.firstPaintAt = Date.now();
+  rec.thinkingMsBeforeFirstPaint = rec.thinkingTotalMs;
+}
+
 function endThinking(tab: TabState, index: number) {
   const entry = tab.thinkingByIndex.get(index);
   if (!entry) return;
@@ -763,9 +775,7 @@ export function onStreamLine(tab: TabState, raw: string) {
       tab.deltaCount++;
       if (tab.currentTurnRecord) {
         tab.currentTurnRecord.deltaCount = tab.deltaCount;
-        if (tab.currentTurnRecord.firstPaintAt == null) {
-          tab.currentTurnRecord.firstPaintAt = Date.now();
-        }
+        markFirstPaint(tab);
       }
       enqueueText(tab, prefix + raw);
     } else if (raw.length > 0 && import.meta.env.DEV) {
@@ -821,9 +831,7 @@ export function onStreamLine(tab: TabState, raw: string) {
           tab.deltaCount++;
           if (tab.currentTurnRecord) {
             tab.currentTurnRecord.deltaCount = tab.deltaCount;
-            if (tab.currentTurnRecord.firstPaintAt == null) {
-              tab.currentTurnRecord.firstPaintAt = Date.now();
-            }
+            markFirstPaint(tab);
           }
           enqueueText(tab, d.text);
         } else if (d?.type === "thinking_delta" && typeof d.thinking === "string" && idx !== null) {

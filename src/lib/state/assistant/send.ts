@@ -158,9 +158,14 @@ export async function send(
     await new Promise((r) => setTimeout(r, 50));
     // Another send won the gate while we waited — re-enter from the top so
     // this message takes the queue path (attachments ride the payload; the
-    // composer was already snapshotted + cleared above).
+    // composer was already snapshotted + cleared above). Re-enter with the
+    // RESOLVED `convoId`, NOT the original `targetConvoId`: a no-tabId retry
+    // (retryLast / /retry) has targetConvoId=undefined, so re-passing it would
+    // re-resolve `liveTab = store.activeTab` — and if the user switched panes
+    // during the 50ms wait, the retried message would land in the wrong tab.
+    // `convoId` pins it to the tab this gate was actually waiting on.
     if (tab.streaming) {
-      return send(store, prompt, targetConvoId, {
+      return send(store, prompt, convoId, {
         payload: { images: turnImages, textFiles: turnTextFiles },
         requeueFront: opts?.requeueFront,
       });
@@ -229,6 +234,7 @@ export async function send(
     envelopeFallback: false,
     blankTurn: false,
     firstPaintAt: null,
+    thinkingMsBeforeFirstPaint: null,
     doneAt: null,
     endKind: null,
   };

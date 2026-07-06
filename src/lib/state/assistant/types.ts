@@ -345,6 +345,11 @@ export type TurnRecord = {
   blankTurn: boolean;
   // Timing
   firstPaintAt: number | null;
+  // thinkingTotalMs as of firstPaintAt (snapshot). deadWait (healthAlerts) must
+  // subtract only PRE-paint thinking, not the full-turn cumulative — else a long
+  // post-paint thinking round drives deadWait negative and masks a real slow
+  // start. Null until first paint (mirrors firstPaintAt).
+  thinkingMsBeforeFirstPaint: number | null;
   doneAt: number | null;
   endKind: "success" | "user-stop" | "session-lost" | "error" | null;
   errorMsg?: string;

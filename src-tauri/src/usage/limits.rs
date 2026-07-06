@@ -17,32 +17,84 @@ const CACHE_TTL: Duration = Duration::from_secs(60);
 /// One rolling rate-limit window. `utilization` is 0–100.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct LimitWindow {
+    // Lenient like ScopedLimit.percent below: this undocumented endpoint has
+    // been observed returning `null` for a utilization field, and a present-but-
+    // wrong-typed value would otherwise fail the WHOLE RateLimits parse — not
+    // just this window. That's the higher-consequence case here: `five_hour`/
+    // `seven_day` utilization drives turn.rs's 90/95% plan-usage hot-gate every
+    // turn, so a blanked parse silently masks a near-limit user. Coerce to 0.0.
+    #[serde(default, deserialize_with = "de_percent_lenient")]
     pub utilization: f64,
     #[serde(rename = "resetsAt", alias = "resets_at")]
     pub resets_at: Option<String>,
 }
 
+/// All fields lenient (see `de_*_lenient` below): the endpoint is undocumented,
+/// and `ExtraUsage` rides inside the same `RateLimits` deserialize as the
+/// rate-limit windows — so a single wrong-typed extra-usage sub-field would
+/// otherwise fail the WHOLE parse and blank five_hour/seven_day/limits[] too,
+/// not just this widget. Each bad value degrades to a benign default instead.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ExtraUsage {
-    #[serde(rename = "isEnabled", alias = "is_enabled", default)]
+    #[serde(rename = "isEnabled", alias = "is_enabled", default, deserialize_with = "de_bool_lenient")]
     pub is_enabled: bool,
     /// Spend cap + spend-to-date in MINOR currency units (e.g. cents). The
     /// endpoint returns integers scaled by `decimal_places` — 8000 w/ dp=2 is
     /// $80.00, NOT $8000. The frontend divides by 10^decimal_places to format.
-    #[serde(rename = "monthlyLimit", alias = "monthly_limit")]
+    #[serde(rename = "monthlyLimit", alias = "monthly_limit", default, deserialize_with = "de_opt_f64_lenient")]
     pub monthly_limit: Option<f64>,
-    #[serde(rename = "usedCredits", alias = "used_credits")]
+    #[serde(rename = "usedCredits", alias = "used_credits", default, deserialize_with = "de_opt_f64_lenient")]
     pub used_credits: Option<f64>,
+    #[serde(default, deserialize_with = "de_opt_f64_lenient")]
     pub utilization: Option<f64>,
+    #[serde(default, deserialize_with = "de_opt_string_lenient")]
     pub currency: Option<String>,
     /// Minor-unit exponent for monthly_limit/used_credits (2 ⇒ divide by 100).
     /// Defaults to 2 when the endpoint omits it (the observed USD default).
-    #[serde(rename = "decimalPlaces", alias = "decimal_places", default = "default_decimal_places")]
+    #[serde(rename = "decimalPlaces", alias = "decimal_places", default = "default_decimal_places", deserialize_with = "de_decimal_places_lenient")]
     pub decimal_places: u32,
 }
 
 fn default_decimal_places() -> u32 {
     2
+}
+
+/// Coerce a wrong-typed optional number to `None` instead of failing the parse.
+fn de_opt_f64_lenient<'de, D>(deserializer: D) -> Result<Option<f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(serde_json::Value::deserialize(deserializer)?.as_f64())
+}
+
+/// Coerce a wrong-typed optional string to `None` (keeps a real string).
+fn de_opt_string_lenient<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(match serde_json::Value::deserialize(deserializer)? {
+        serde_json::Value::String(s) => Some(s),
+        _ => None,
+    })
+}
+
+/// Coerce a wrong-typed bool to `false` instead of failing the parse.
+fn de_bool_lenient<'de, D>(deserializer: D) -> Result<bool, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(serde_json::Value::deserialize(deserializer)?.as_bool().unwrap_or(false))
+}
+
+/// Coerce a wrong-typed / out-of-range `decimal_places` to the USD default (2).
+fn de_decimal_places_lenient<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(serde_json::Value::deserialize(deserializer)?
+        .as_u64()
+        .and_then(|n| u32::try_from(n).ok())
+        .unwrap_or_else(default_decimal_places))
 }
 
 /// One entry of the endpoint's newer generic `limits[]` array — the legacy
@@ -226,6 +278,17 @@ fn now_ms() -> i64 {
         .unwrap_or(i64::MAX)
 }
 
+/// Real-or-zero epoch ms for stamping (NOT expiry checks). now_ms()'s
+/// fail-EXPIRED `i64::MAX` sentinel is correct for the token check but wrong as
+/// a `fetched_at` timestamp — it would render an "as of year 292-million" label
+/// on a broken clock. 0 is a recognizable "unknown" the FE can treat as such.
+fn stamp_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 fn read_oauth_token() -> Result<String, String> {
     let home = crate::state::paths::dirs_home().map_err(|e| e.to_string())?;
     let path = home.join(".claude").join(".credentials.json");
@@ -294,7 +357,7 @@ pub async fn usage_rate_limits(cli_version: Option<String>, force: Option<bool>)
         .json()
         .await
         .map_err(|e| format!("unexpected usage response shape: {e}"))?;
-    limits.fetched_at = now_ms();
+    limits.fetched_at = stamp_ms();
     *CACHE.lock().unwrap_or_else(|p| p.into_inner()) = Some((Instant::now(), limits.clone()));
     Ok(limits)
 }
@@ -359,5 +422,40 @@ mod tests {
             serde_json::from_str(r#"{"five_hour": {"utilization": 5, "resets_at": null}}"#).expect("minimal body parses");
         assert!(l.limits.is_empty());
         assert!((l.five_hour.expect("five_hour").utilization - 5.0).abs() < f64::EPSILON);
+    }
+
+    /// r4 regression: a wrong-typed window `utilization` (this undocumented
+    /// endpoint has returned null; a string is equally possible) must NOT fail
+    /// the WHOLE parse — that would blank seven_day + the limits[] array and
+    /// silently disable turn.rs's plan-usage hot-gate. It coerces to 0.0 and the
+    /// rest of the response survives.
+    #[test]
+    fn wrong_typed_window_utilization_does_not_blank_response() {
+        let body = r#"{
+          "five_hour": {"utilization": null, "resets_at": "x"},
+          "seven_day": {"utilization": "42", "resets_at": "y"},
+          "limits": [{"kind": "session", "percent": 30, "is_active": true}]
+        }"#;
+        let l: RateLimits = serde_json::from_str(body).expect("wrong-typed utilization must not fail the parse");
+        assert_eq!(l.five_hour.expect("five_hour present").utilization, 0.0);
+        assert_eq!(l.seven_day.expect("seven_day present").utilization, 0.0);
+        assert_eq!(l.limits.len(), 1, "limits[] survives a bad sibling window");
+    }
+
+    /// r4 regression: a wrong-typed extra_usage sub-field must degrade that
+    /// widget only, not fail the whole RateLimits deserialize.
+    #[test]
+    fn wrong_typed_extra_usage_field_does_not_blank_response() {
+        let body = r#"{
+          "five_hour": {"utilization": 12, "resets_at": "x"},
+          "extra_usage": {"is_enabled": "yes", "monthly_limit": "8000", "decimal_places": "2", "currency": 5}
+        }"#;
+        let l: RateLimits = serde_json::from_str(body).expect("bad extra_usage must not fail the parse");
+        assert!((l.five_hour.expect("five_hour").utilization - 12.0).abs() < f64::EPSILON);
+        let x = l.extra_usage.expect("extra_usage still present");
+        assert!(!x.is_enabled, "non-bool is_enabled → false");
+        assert_eq!(x.monthly_limit, None, "string monthly_limit → None");
+        assert_eq!(x.decimal_places, 2, "string decimal_places → USD default");
+        assert_eq!(x.currency, None, "numeric currency → None");
     }
 }

@@ -100,6 +100,7 @@ function beginTurn(tab: Tab, overrides: Partial<TurnRecord> = {}): TurnRecord {
     envelopeFallback: false,
     blankTurn: false,
     firstPaintAt: null,
+    thinkingMsBeforeFirstPaint: null,
     doneAt: null,
     endKind: null,
     ...overrides,

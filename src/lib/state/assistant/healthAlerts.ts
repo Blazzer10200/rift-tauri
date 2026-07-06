@@ -120,7 +120,12 @@ export function checkTurnHealth(store: AssistantStore, tab: TabState, convoId: s
   // in the session. Verified 2026-06-22: Rift's own TTFT is ~1s median, model
   // first-token ~4s median; a >30s deadWait is an API-side stall, worth saying.
   if (rec.firstPaintAt != null) {
-    const deadWait = rec.firstPaintAt - rec.ts - rec.thinkingTotalMs;
+    // Subtract only the thinking that happened BEFORE first paint — the snapshot,
+    // not rec.thinkingTotalMs (which accumulates every thinking round for the
+    // whole turn). Using the cumulative total let a long post-paint thinking
+    // round drive deadWait negative and silently mask a genuinely slow start.
+    const preThinking = rec.thinkingMsBeforeFirstPaint ?? rec.thinkingTotalMs;
+    const deadWait = rec.firstPaintAt - rec.ts - preThinking;
     const egregious = deadWait > 30000;
     if (deadWait > 8000 && (egregious || !warned.has("deadWait"))) {
       warned.add("deadWait");
