@@ -171,13 +171,22 @@ async fn handle_conn(
         let req: Request = match serde_json::from_str(&line) {
             Ok(r) => r,
             Err(e) => {
+                // One request per connection: report the parse error, then close.
+                // `continue`ing here let an unauthenticated local process hold the
+                // Tokio task open forever by streaming malformed lines (the flood
+                // never reaches the wrong-token gate that shuts down). Breaking
+                // aligns behavior with the one-request-per-connection protocol
+                // below — a real client (bridge_call) sends exactly one line.
                 let _ = write_line(&mut write_half, &err(format!("invalid request: {e}"))).await;
-                continue;
+                let _ = write_half.shutdown().await;
+                break;
             }
         };
-        if req.token != token {
+        if !ct_eq(&req.token, &token) {
             // Write+flush the error, then orderly-shutdown so the client sees
-            // "unauthorized" instead of a connection reset.
+            // "unauthorized" instead of a connection reset. Constant-time compare
+            // so the (loopback, 192-bit) token can't be recovered byte-by-byte
+            // via response-timing — defense-in-depth over the network boundary.
             write_line(&mut write_half, &err("unauthorized")).await?;
             let _ = write_half.shutdown().await;
             return Err("unauthorized".into());
@@ -185,14 +194,26 @@ async fn handle_conn(
         let resp = dispatch(&app, req).await;
         write_line(&mut write_half, &resp).await?;
         // RR10: the protocol is one request per connection (bridge_call opens a
-        // fresh TCP stream per call). Close after the first authed dispatch so an
-        // unauthenticated local process can't hold a Tokio task open by streaming
-        // malformed lines (parse errors get a response + continue, but the next
-        // valid-JSON line with a wrong token still hits the gate above and shuts
-        // down the connection immediately).
+        // fresh TCP stream per call). Close after the first authed dispatch.
         break;
     }
     Ok(())
+}
+
+/// Constant-time string equality — no early-out on the first mismatched byte,
+/// so response timing can't reveal how many leading bytes of the bridge token
+/// were guessed correctly. Length mismatch short-circuits (the token is a
+/// fixed-length random hex string, so its length is not a secret).
+fn ct_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 async fn write_line(

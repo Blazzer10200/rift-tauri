@@ -149,7 +149,12 @@ pub(super) fn is_valid_session_id(s: &str) -> bool {
 pub(super) fn save_session_cwd(id: &str, cwd: &Path) {
     if let Ok(p) = session_cwd_path(id) {
         let s = cwd.to_string_lossy();
-        let tmp = p.with_extension("cwd.tmp");
+        // Per-writer tmp name so two windows pinning the SAME session id
+        // concurrently (turns aren't serialized ACROSS windows) can't truncate
+        // each other's in-flight write and rename a torn/wrong cwd into place —
+        // the sidecar drives --resume, so a garbled value silently loses the
+        // session. Mirrors save_conversation_sync's pid-tagged tmp.
+        let tmp = p.with_extension(format!("cwd.{}.tmp", std::process::id()));
         if let Err(e) = std::fs::write(&tmp, s.as_bytes()) {
             log::warn!("assistant: save session cwd {}: {e}", p.display());
             return;
@@ -193,7 +198,10 @@ fn session_model_path(id: &str) -> Result<PathBuf, String> {
 
 pub(super) fn save_session_model(id: &str, model: &str) {
     if let Ok(p) = session_model_path(id) {
-        let tmp = p.with_extension("model.tmp");
+        // Per-writer tmp name — same cross-window race as save_session_cwd; a
+        // torn model pin risks the documented resume-wedge (model-bound thinking
+        // signatures). Atomic rename after a whole-value write.
+        let tmp = p.with_extension(format!("model.{}.tmp", std::process::id()));
         if let Err(e) = std::fs::write(&tmp, model.as_bytes()) {
             log::warn!("assistant: save session model {}: {e}", p.display());
             return;

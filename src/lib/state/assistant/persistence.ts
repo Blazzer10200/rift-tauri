@@ -74,6 +74,11 @@ type PersistenceHost = {
   // Effective folder of the focused tab — fallback scope for a save whose tab
   // has no explicit per-pane root (matches AssistantStore.activeRoot).
   activeRoot: string | null;
+  // The GLOBAL workspace default root (AssistantStore.workspace.current). The
+  // correct fallback when saving a tab that has no per-tab root: `activeRoot`
+  // is scoped to the FOCUSED pane, so using it would stamp a background/unfiled
+  // tab with an unrelated project's folder.
+  workspaceCurrent: string | null;
   ensureTab(convoId: string, cliSessionId: string): LoadableTab;
   closeTab(id: string): Promise<void>;
   dropTab(id: string): void;
@@ -181,9 +186,12 @@ export function buildSaveRecord(
     messages: tab.messages,
     cliSessionId: tab.cliSessionId || convoId,
     lastTurnUsage: tab.lastTurnUsage ?? undefined,
-    // Scope the convo to the tab's folder (or the focused root as fallback) so
-    // the sidebar shows it only under its project. null = unfiled.
-    workspaceRoot: tab.workspaceRoot ?? host.activeRoot ?? null,
+    // Scope the convo to the tab's OWN folder, else the GLOBAL workspace
+    // default — never `host.activeRoot`, which is the focused pane's root and
+    // would misfile a background/unfiled tab under an unrelated project (a
+    // background-tab save while another pane is focused elsewhere). null =
+    // unfiled, and a genuinely-unfiled tab stays unfiled.
+    workspaceRoot: tab.workspaceRoot ?? host.workspaceCurrent ?? null,
   };
 }
 

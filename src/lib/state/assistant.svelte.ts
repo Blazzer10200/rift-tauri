@@ -578,6 +578,14 @@ class AssistantStore {
     return this.effectiveRoot(this.activeTab);
   }
 
+  /** The global workspace default root (independent of which pane is focused).
+   *  Persistence uses this — not `activeRoot` — as the fallback scope when
+   *  saving a tab with no per-tab root, so a background save never inherits the
+   *  focused pane's project. */
+  get workspaceCurrent(): string | null {
+    return this.workspace.current ?? null;
+  }
+
   /** No project folder open, but the backend scratch workspace is available →
    *  turns silently run in `%LOCALAPPDATA%\Rift\local` with the full tool set.
    *  Drives the "Local" badge + welcome card. `effectiveRoot` stays null in this

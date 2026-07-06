@@ -141,7 +141,14 @@ async fn read_request(stream: &mut TcpStream) -> Result<ParsedReq, String> {
             let name = name.trim().to_string();
             let value = value.trim().to_string();
             if name.eq_ignore_ascii_case("content-length") {
-                content_length = value.parse().unwrap_or(0);
+                // Fail loud on an unparseable value instead of silently coercing
+                // to 0 — a 0 would truncate the forwarded body to empty and POST
+                // an incomplete /v1/messages upstream, bypassing the short-body
+                // guard below (which only runs once content_length is trusted).
+                // Matches the >64 MiB arm's error treatment.
+                content_length = value.parse().map_err(|_| {
+                    format!("invalid Content-Length header: {value:?}")
+                })?;
                 // RR10: bound the body alloc — a misbehaving/garbled CLI sending a
                 // huge Content-Length would otherwise pre-grow `body` unbounded.
                 if content_length > 64 * 1024 * 1024 {

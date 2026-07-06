@@ -113,6 +113,16 @@ impl UpdateService {
     /// newer is available. Velopack's `check_for_updates` is blocking I/O —
     /// call from a `spawn_blocking` context.
     pub fn check(&self) -> Result<Option<UpdateInfoDto>, String> {
+        // Don't touch the plan while an apply is scheduled/in-flight. apply()
+        // captures its package locally then releases the lock before the blocking
+        // swap; a check completing in that window would replace `pending`, and if
+        // the apply then FAILS the service is left armed with a plan the user
+        // never reviewed. Treat `applying` as a full state lock, not just apply()'s
+        // own re-entry guard. (An apply exits the process on success, so this only
+        // bites the failed-apply / background-poll edge — harmless to reject.)
+        if self.lock().applying {
+            return Err("an update is currently being applied".to_string());
+        }
         // Clone the manager out under a SHORT lock, then release it before the
         // blocking GitHub call. Holding the mutex across the network roundtrip
         // (which has no timeout) wedges every later command behind a single hung
@@ -180,6 +190,14 @@ impl UpdateService {
                 }
             }
         };
+        // Snapshot the epoch as of check-start. The command layer wraps check()
+        // in a 30s timeout but leaves an orphaned call running on stall; without
+        // this guard that zombie's late completion would unconditionally bump the
+        // epoch + reset pending/downloaded, invalidating a newer check's in-flight
+        // download (which then discards its own good package as a "zombie"). If the
+        // epoch moved while we were blocked, a newer check/download/repair already
+        // owns the plan — skip our writes. (download() already self-guards this way.)
+        let epoch_at_entry = self.lock().download_epoch;
         match mgr.check_for_updates() {
             // UpdateAvailable wraps a Box<UpdateInfo>; the full target release
             // asset is `TargetFullRelease`.
@@ -201,6 +219,13 @@ impl UpdateService {
                     notes_markdown: asset.NotesMarkdown.clone(),
                 };
                 let mut g = self.lock();
+                // Stale-check guard: a newer check/download/repair superseded us
+                // while we were blocked — return the (discarded) result without
+                // clobbering the current plan or invalidating its download.
+                if g.download_epoch != epoch_at_entry {
+                    log::debug!("update check: result superseded (epoch {} != {epoch_at_entry}), not applying", g.download_epoch);
+                    return Ok(Some(dto));
+                }
                 // Bump the epoch so any download still in flight against a prior
                 // plan can't later flip `downloaded=true` against THIS pending —
                 // same race arm_repair guards (RR2). Replacing `pending` while an
@@ -214,6 +239,12 @@ impl UpdateService {
             Ok(_) => {
                 log::info!("update check: up to date");
                 let mut g = self.lock();
+                // Stale-check guard (see UpdateAvailable arm) — an orphaned check
+                // completing late must not wipe a newer plan/download.
+                if g.download_epoch != epoch_at_entry {
+                    log::debug!("update check: up-to-date result superseded (epoch {} != {epoch_at_entry}), not applying", g.download_epoch);
+                    return Ok(None);
+                }
                 // RR8: bump the epoch here too (third arm — mirrors UpdateAvailable
                 // + arm_repair). If a download is in flight when the feed flips to
                 // "up to date" (yanked version), an un-bumped epoch lets the zombie
@@ -261,6 +292,10 @@ impl UpdateService {
     /// through `progress`. Call `check` first to populate the pending plan.
     /// Blocking I/O — must run on `spawn_blocking`.
     pub fn download(&self, progress: Sender<i16>) -> Result<(), String> {
+        // Reject while an apply is scheduled/in-flight — see check()'s guard.
+        if self.lock().applying {
+            return Err("an update is currently being applied".to_string());
+        }
         // Self-heal: if there's no pending plan (cleared/never set), re-check
         // before giving up — the user sees an "available" UI, so a missing
         // pending should resolve transparently, not dead-end the download.
@@ -332,6 +367,12 @@ impl UpdateService {
     /// `UpdateInfo` for it via serde (the public ctor is crate-private). After
     /// this, the regular `download()` → `apply()` chain reinstalls it.
     pub fn arm_repair(&self) -> Result<UpdateInfoDto, String> {
+        // Reject while an apply is scheduled/in-flight — see check()'s guard.
+        // Repair replaces `pending` with an IsDowngrade plan; doing that mid-apply
+        // is the worst case (a failed apply would leave a silent downgrade armed).
+        if self.lock().applying {
+            return Err("an update is currently being applied".to_string());
+        }
         let mgr = {
             let g = self.lock();
             match g.mgr.as_ref() {
