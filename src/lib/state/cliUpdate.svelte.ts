@@ -2,18 +2,24 @@
 //
 // Rift spawns the local `claude` CLI and already reads its installed version
 // (assistant.auth.cliVersion ← `claude --version`). This store supplies the
-// other half: the newest version published to npm. It hits the npm registry's
-// lightweight dist-tag manifest directly from the webview —
-//   GET https://registry.npmjs.org/@anthropic-ai/claude-code/latest → { version }
-// — which the CSP `connect-src` allowlist grants. Result + last-check time +
-// the version the user dismissed all persist to localStorage, so the check is
-// throttled (≤ once / 6h) and a dismissed version stops nagging until the next
-// one ships.
+// other half: the newest version on each RELEASE FEED. Two feeds, on purpose:
+//   * npm installs track the npm registry's dist-tag manifest —
+//     GET https://registry.npmjs.org/@anthropic-ai/claude-code/latest →
+//     { version } — fetched from the webview (CSP `connect-src` grants it).
+//   * native installs track the native installer channel (what `claude update`
+//     and install.ps1/sh actually serve) — fetched via the `cli_native_latest`
+//     backend command. npm routinely runs a few patches AHEAD of this channel,
+//     so judging a native install against npm produced an unfixable nag: a
+//     perpetual "Update available" whose update correctly reported up-to-date
+//     and whose reinstall served the same version.
+// Results + last-check time + the version the user dismissed all persist to
+// localStorage, so the check is throttled (≤ once / 6h) and a dismissed
+// version stops nagging until the next one ships.
 //
 // Staleness is judged against EVERY detected install (`assistant.auth.installs`
-// — a box can carry both an npm-global and a native copy that drift apart), so
-// `availableAny`/`isAnyStale` flag an update if any one is behind, not just the
-// active one Rift spawns.
+// — a box can carry both an npm-global and a native copy that drift apart),
+// each compared against ITS OWN feed, so `availableAny`/`isAnyStale` flag an
+// update if any one is behind, not just the active one Rift spawns.
 //
 // `runUpdate()` then applies the update IN-APP via the `assistant_update_cli`
 // backend command, which updates ALL installs at once — npm once (`npm install
@@ -36,7 +42,16 @@ const FETCH_TIMEOUT_MS = 10_000;
 // silently absent. Auto-retry a few times with backoff before giving up.
 const RETRY_DELAYS_MS = [30_000, 120_000, 300_000];
 
-type Persisted = { latest: string | null; checkedAt: number; dismissed: string | null };
+type Persisted = {
+  latest: string | null;
+  nativeLatest?: string | null;
+  checkedAt: number;
+  dismissed: string | null;
+};
+
+/** The slice of a detected install the staleness logic needs. `method` decides
+ *  which feed the install is judged against (absent = legacy caller → npm). */
+type InstallRef = { version: string | null; method?: string | null };
 
 /** Pull a `major.minor.patch` triple out of a version string, tolerating a
  *  leading `v` and trailing noise like `"2.1.111 (Claude Code)"`. */
@@ -71,6 +86,8 @@ export function cmpSemver(a: string, b: string): number {
 export class CliUpdate {
   /** Newest version on npm (null until a successful check). */
   latest = $state<string | null>(null);
+  /** Newest version on the native installer channel (null until read). */
+  nativeLatest = $state<string | null>(null);
   /** Epoch ms of the last successful check. */
   checkedAt = $state<number | null>(null);
   status = $state<"idle" | "checking" | "ok" | "error">("idle");
@@ -145,6 +162,7 @@ export class CliUpdate {
       if (raw) {
         const p = JSON.parse(raw) as Persisted;
         this.latest    = typeof p.latest    === "string" ? p.latest    : null;
+        this.nativeLatest = typeof p.nativeLatest === "string" ? p.nativeLatest : null;
         this.checkedAt = typeof p.checkedAt === "number" ? p.checkedAt : null;
         this.dismissed = typeof p.dismissed === "string" ? p.dismissed : null;
       }
@@ -157,6 +175,7 @@ export class CliUpdate {
     try {
       const p: Persisted = {
         latest: this.latest,
+        nativeLatest: this.nativeLatest,
         checkedAt: this.checkedAt ?? 0,
         dismissed: this.dismissed,
       };
@@ -166,10 +185,21 @@ export class CliUpdate {
     }
   }
 
-  /** npm's latest is strictly newer than the installed CLI. */
-  isNewer(installed: string | null): boolean {
-    if (!installed || !this.latest) return false;
-    return cmpSemver(this.latest, installed) > 0;
+  /** The newest version on the feed THIS install method actually updates from.
+   *  Only "native" reads the native channel; npm/unknown/absent read npm (the
+   *  update command shown for those is `npm install -g …@latest`). A null feed
+   *  fails quiet — better to under-report briefly than mis-compare a native
+   *  install against npm and nag about a version its updater can't install. */
+  latestFor(method: string | null | undefined): string | null {
+    return method === "native" ? this.nativeLatest : this.latest;
+  }
+
+  /** The applicable feed's latest is strictly newer than the installed CLI.
+   *  `method` picks the feed (absent = npm, the legacy behavior). */
+  isNewer(installed: string | null, method?: string | null): boolean {
+    const target = this.latestFor(method);
+    if (!installed || !target) return false;
+    return cmpSemver(target, installed) > 0;
   }
 
   /** An update exists AND the user hasn't dismissed this exact version. */
@@ -177,22 +207,39 @@ export class CliUpdate {
     return this.isNewer(installed) && this.latest !== this.dismissed;
   }
 
-  /** npm's latest is strictly newer than AT LEAST ONE detected install. A box
-   *  can carry both an npm and a native copy that drift apart; if either is
-   *  behind, an update is warranted. Falls back to the single active version
-   *  when the backend hasn't reported an installs list yet. */
+  /** The version an update would take the stale install(s) TO — the newest
+   *  applicable feed version among installs behind their OWN feed. Null when
+   *  everything is current (or no feed data yet). This is what every update
+   *  surface displays and what dismissals pin. Falls back to the single active
+   *  version + synced method when the backend hasn't reported installs yet. */
+  targetFor(
+    installs: InstallRef[] | null | undefined,
+    fallback: string | null,
+  ): string | null {
+    const list: InstallRef[] =
+      installs && installs.length
+        ? installs
+        : fallback
+          ? [{ version: fallback, method: this.method }]
+          : [];
+    let best: string | null = null;
+    for (const inst of list) {
+      if (!inst.version) continue;
+      const target = this.latestFor(inst.method ?? this.method);
+      if (!target || cmpSemver(target, inst.version) <= 0) continue;
+      if (!best || cmpSemver(target, best) > 0) best = target;
+    }
+    return best;
+  }
+
+  /** AT LEAST ONE detected install is behind its own feed. A box can carry
+   *  both an npm and a native copy that drift apart; if either is behind, an
+   *  update is warranted. */
   isAnyStale(
-    installs: { version: string | null }[] | null | undefined,
+    installs: InstallRef[] | null | undefined,
     fallback: string | null,
   ): boolean {
-    if (!this.latest) return false;
-    const versions =
-      installs && installs.length
-        ? installs.map((i) => i.version).filter((v): v is string => !!v)
-        : fallback
-          ? [fallback]
-          : [];
-    return versions.some((v) => cmpSemver(this.latest as string, v) > 0);
+    return this.targetFor(installs, fallback) != null;
   }
 
   /** A CLI was found but the ACTIVE install's `--version` couldn't be read —
@@ -200,7 +247,7 @@ export class CliUpdate {
    *  flags are silently off. Distinct from "no CLI at all" (empty installs —
    *  onboarding/auth owns that surface). (#42) */
   versionUnreadable(
-    installs: { version: string | null }[] | null | undefined,
+    installs: InstallRef[] | null | undefined,
     activeVersion: string | null,
   ): boolean {
     return (installs?.length ?? 0) > 0 && !activeVersion;
@@ -223,7 +270,7 @@ export class CliUpdate {
    *  5-way branch was hand-re-authored in three components and drifted; now they
    *  all read one tone + headline + detail. */
   summary(
-    installs: { version: string | null }[] | null | undefined,
+    installs: InstallRef[] | null | undefined,
   ): { tone: "accent" | "warn" | "danger"; headline: string; detail: string } {
     const count = installs?.length ?? 0;
     if (this.updateError)
@@ -232,19 +279,19 @@ export class CliUpdate {
     // from a prior result — surfaces that poll summary() mid-check showed the old
     // headline for a beat. (#42)
     if (this.status === "checking" && !this.updating)
-      return { tone: "accent", headline: "Checking for updates…", detail: "Contacting npm for the latest claude CLI version." };
+      return { tone: "accent", headline: "Checking for updates…", detail: "Contacting the release feeds for the latest claude CLI version." };
     if (this.updateStuck) {
-      // A native update applies on the NEXT launch — so an unchanged version
-      // right after `claude update` is almost always "staged, pending restart,"
-      // not "broken." Say so, and only escalate to reinstall if a restart
-      // doesn't clear it. npm/unknown apply immediately, so for those an
-      // unchanged version really is a failed update.
+      // Post-update, each install is judged against its OWN feed — so a stuck
+      // native here means the updater genuinely didn't move the version, not
+      // "npm is ahead of the native channel" (that no longer flags). The swap
+      // may still be settling (staged, applies when the CLI next starts) —
+      // suggest a re-probe before escalating to reinstall.
       if (this.method === "native")
         return {
           tone: "warn",
-          headline: "Restart to finish updating",
+          headline: "Update staged — not applied yet",
           detail:
-            "The native CLI update was staged — it applies the next time Claude Code starts. Restart, then re-check. Still behind afterward? Reinstall with the command below.",
+            "The updater ran but this install still reports the old version. Give it a moment, then Re-probe — a staged update lands when the CLI next starts. If it stays behind, reinstall with the command below.",
         };
       return {
         tone: "warn",
@@ -272,12 +319,14 @@ export class CliUpdate {
     };
   }
 
-  /** Multi-install variant of available(): any install behind AND not dismissed. */
+  /** Multi-install variant of available(): any install behind its own feed AND
+   *  the version it would update TO not dismissed. */
   availableAny(
-    installs: { version: string | null }[] | null | undefined,
+    installs: InstallRef[] | null | undefined,
     fallback: string | null,
   ): boolean {
-    return this.isAnyStale(installs, fallback) && this.latest !== this.dismissed;
+    const target = this.targetFor(installs, fallback);
+    return target != null && target !== this.dismissed;
   }
 
   /** Fetch latest from npm. Skips if checked within STALE_MS unless `force`. */
@@ -286,6 +335,13 @@ export class CliUpdate {
     if (!force && this.checkedAt && Date.now() - this.checkedAt < STALE_MS) return;
     this.status = "checking";
     this.error = null;
+    // Native channel poll, concurrent with the npm fetch. Backend-side on
+    // purpose (CSP stays npm-only); failure is non-fatal — the last persisted
+    // value keeps serving, and with none native staleness fails quiet.
+    const nativeFut: Promise<string | null> = invoke<string>("cli_native_latest").catch((e) => {
+      console.warn(`cliUpdate: native channel check failed (${e instanceof Error ? e.message : e})`);
+      return null;
+    });
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
     try {
@@ -333,6 +389,17 @@ export class CliUpdate {
       }
     } finally {
       clearTimeout(timer);
+      // Land the native channel result regardless of how the npm fetch went.
+      const nv = (await nativeFut)?.trim() || null;
+      if (nv) {
+        if (nv !== this.nativeLatest) {
+          // A new native release: drop stale run-state, same as the npm path.
+          this.updateError = null;
+          this.updateOutput = null;
+          this.nativeLatest = nv;
+        }
+        this.persist();
+      }
     }
   }
 
@@ -367,10 +434,12 @@ export class CliUpdate {
     }
   }
 
-  /** Stop surfacing the badge for the current latest version. */
-  dismiss() {
-    if (this.latest) {
-      this.dismissed = this.latest;
+  /** Stop surfacing the badge for `version` (the target the surface showed —
+   *  defaults to npm's latest for legacy callers). */
+  dismiss(version?: string | null) {
+    const v = version ?? this.latest;
+    if (v) {
+      this.dismissed = v;
       this.persist();
     }
   }

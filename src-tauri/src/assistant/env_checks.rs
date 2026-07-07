@@ -2,9 +2,57 @@
 //! optional host-tool PATH checks. Lifted verbatim from `assistant/mod.rs`
 //! 2026-06-09. Config load/save stays on the parent (R2) — reached via `super::`.
 
+use std::path::PathBuf;
 use std::process::Stdio;
 
 use serde::Serialize;
+
+/// Append `extra` dirs missing from the `;`-separated `current` PATH value
+/// (case/trailing-slash-insensitive). Returns the merged value, or None when
+/// nothing was missing. Pure so it's unit-testable.
+fn merged_path(current: &str, extra: &[PathBuf]) -> Option<String> {
+    use super::cli_install::norm_path;
+    let have: Vec<String> = current
+        .split(';')
+        .map(|p| norm_path(p.trim().trim_matches('"')).trim_end_matches('\\').to_string())
+        .filter(|p| !p.is_empty())
+        .collect();
+    let mut out = current.trim_end_matches(';').to_string();
+    let mut added = false;
+    for d in extra {
+        let raw = d.to_string_lossy();
+        let n = norm_path(&raw).trim_end_matches('\\').to_string();
+        if n.is_empty() || have.contains(&n) {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push(';');
+        }
+        out.push_str(&raw);
+        added = true;
+    }
+    added.then_some(out)
+}
+
+/// A GUI process inherits explorer's login-frozen PATH snapshot, so a tool
+/// installed mid-session (rustup writing `%USERPROFILE%\.cargo\bin` to
+/// `HKCU\Environment`) stays invisible to `where.exe` — and to every child
+/// Rift spawns — until re-login. Same #61 class `cli_install::registry_path_dirs`
+/// already solves for claude discovery. Merging the registry PATH into the
+/// process PATH fixes both at once: the probes below see the tool, and later
+/// CLI child spawns inherit a PATH that can actually run it.
+#[cfg(windows)]
+fn refresh_process_path() {
+    let extra = super::cli_install::registry_path_dirs();
+    if extra.is_empty() {
+        return;
+    }
+    let current = std::env::var("PATH").unwrap_or_default();
+    if let Some(merged) = merged_path(&current, &extra) {
+        std::env::set_var("PATH", &merged);
+        log::info!("environment_check: merged registry PATH dirs into process PATH");
+    }
+}
 
 /// `true` if `program` resolves via `where`/`which` (PATHEXT-aware on Windows).
 fn which_on_path(program: &str) -> bool {
@@ -43,12 +91,19 @@ pub struct EnvironmentInfo {
 /// the UI thread never stalls on a slow PATH scan.
 #[tauri::command]
 pub async fn environment_check() -> EnvironmentInfo {
-    tokio::task::spawn_blocking(|| EnvironmentInfo {
-        git: which_on_path("git"),
-        node: which_on_path("node"),
-        npm: which_on_path("npm"),
-        cargo: which_on_path("cargo"),
-        code: which_on_path("code"),
+    tokio::task::spawn_blocking(|| {
+        // Pick up PATH entries registered since launch (fresh installs) before
+        // asking `where` — else a just-installed tool reads "missing" until the
+        // app restarts, even though its installer finished cleanly.
+        #[cfg(windows)]
+        refresh_process_path();
+        EnvironmentInfo {
+            git: which_on_path("git"),
+            node: which_on_path("node"),
+            npm: which_on_path("npm"),
+            cargo: which_on_path("cargo"),
+            code: which_on_path("code"),
+        }
     })
     .await
     .unwrap_or(EnvironmentInfo { git: false, node: false, npm: false, cargo: false, code: false })
@@ -109,5 +164,27 @@ pub async fn install_local_tool(key: String) -> Result<(), String> {
     {
         let _ = key;
         Err("Automatic install is only supported on Windows.".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn merged_path_appends_only_missing_dirs() {
+        let extra = [PathBuf::from("C:\\Users\\x\\.cargo\\bin"), PathBuf::from("C:\\Windows")];
+        assert_eq!(
+            merged_path("C:\\Windows;C:\\node", &extra).as_deref(),
+            Some("C:\\Windows;C:\\node;C:\\Users\\x\\.cargo\\bin")
+        );
+        // Case + trailing-slash insensitive: everything already present → None.
+        assert!(merged_path("c:/users/X/.CARGO/bin/;C:\\WINDOWS", &extra).is_none());
+        assert!(merged_path("C:\\Windows", &[]).is_none());
+        // Empty current PATH gets no leading separator.
+        assert_eq!(
+            merged_path("", &[PathBuf::from("C:\\tools")]).as_deref(),
+            Some("C:\\tools")
+        );
     }
 }

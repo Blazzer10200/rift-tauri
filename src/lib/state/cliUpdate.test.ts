@@ -100,6 +100,46 @@ describe("availableAny — stale AND not dismissed", () => {
   });
 });
 
+describe("per-feed staleness — native channel vs npm (the buddy-box bug)", () => {
+  beforeEach(() => {
+    cu.latest = "2.1.202";       // npm dist-tag, runs ahead
+    cu.nativeLatest = "2.1.195"; // native installer channel
+  });
+  it("a native install current on ITS channel is not stale, even with npm ahead", () => {
+    expect(cu.isAnyStale([{ version: "2.1.195", method: "native" }], null)).toBe(false);
+    expect(cu.availableAny([{ version: "2.1.195", method: "native" }], null)).toBe(false);
+  });
+  it("a native install behind the native channel targets the CHANNEL version", () => {
+    expect(cu.isAnyStale([{ version: "2.1.190", method: "native" }], null)).toBe(true);
+    expect(cu.targetFor([{ version: "2.1.190", method: "native" }], null)).toBe("2.1.195");
+  });
+  it("npm installs still compare against npm latest", () => {
+    expect(cu.targetFor([{ version: "2.1.195", method: "npm" }], null)).toBe("2.1.202");
+  });
+  it("mixed box: target is the newest applicable among stale installs", () => {
+    const installs = [
+      { version: "2.1.190", method: "native" },
+      { version: "2.1.195", method: "npm" },
+    ];
+    expect(cu.targetFor(installs, null)).toBe("2.1.202");
+  });
+  it("native staleness fails quiet when the native feed is unknown", () => {
+    cu.nativeLatest = null;
+    expect(cu.isAnyStale([{ version: "2.1.190", method: "native" }], null)).toBe(false);
+  });
+  it("fallback single-version path uses the synced active method's feed", () => {
+    cu.setMethod("native");
+    expect(cu.isAnyStale(null, "2.1.195")).toBe(false); // current on native channel
+    expect(cu.isAnyStale(null, "2.1.190")).toBe(true);
+  });
+  it("dismissing the shown target suppresses it; a newer target re-surfaces", () => {
+    cu.dismiss("2.1.195");
+    expect(cu.availableAny([{ version: "2.1.190", method: "native" }], null)).toBe(false);
+    cu.nativeLatest = "2.1.196";
+    expect(cu.availableAny([{ version: "2.1.190", method: "native" }], null)).toBe(true);
+  });
+});
+
 describe("commandFor / updateCommand", () => {
   it("native installs self-update; everything else uses npm @latest", () => {
     expect(cu.commandFor("native")).toBe("claude update");
@@ -146,13 +186,13 @@ describe("summary — contextual line precedence", () => {
     expect(cu.summary(null).tone).toBe("warn");
     expect(cu.summary(null).headline).toBe("Still behind after update");
   });
-  it("stuck native reframes as restart-to-apply, not broken", () => {
+  it("stuck native reframes as staged-pending, not broken", () => {
     cu.setMethod("native");
     cu.updateStuck = true;
     const s = cu.summary(null);
     expect(s.tone).toBe("warn");
-    expect(s.headline).toBe("Restart to finish updating");
-    expect(s.detail).toContain("next time Claude Code starts");
+    expect(s.headline).toBe("Update staged — not applied yet");
+    expect(s.detail).toContain("Re-probe");
   });
   it("multi-install reports the count", () => {
     const s = cu.summary([{ version: "1" }, { version: "2" }]);

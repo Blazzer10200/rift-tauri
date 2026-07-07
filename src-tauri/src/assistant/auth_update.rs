@@ -9,8 +9,8 @@ use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
 use super::cli_install::{
-    claude_command, clear_version_cache, enumerate_claude_installs, resolve_claude_exe,
-    select_active_index, ClaudeInstall, CLAUDE_EXE,
+    claude_command, clear_version_cache, enumerate_claude_installs, parse_semver,
+    resolve_claude_exe, select_active_index, ClaudeInstall, CLAUDE_EXE,
 };
 use super::{current_api_key, load_config, AuthStatus};
 
@@ -227,6 +227,36 @@ pub fn assistant_open_login(console: bool) -> Result<(), String> {
     cmd.spawn()
         .map(|_| ())
         .map_err(|e| format!("failed to start sign-in: {e}"))
+}
+
+/// Version pointer for the NATIVE installer's release channel — the feed
+/// `claude update` and install.ps1/install.sh actually track. npm's `latest`
+/// dist-tag routinely runs a few patches AHEAD of this channel, so judging a
+/// native install against npm produces an unfixable "update available" nag:
+/// `claude update` correctly reports up-to-date and a reinstall serves the
+/// same channel version. The frontend compares each install against ITS feed.
+const NATIVE_CHANNEL_URL: &str = "https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases/stable";
+
+/// Latest version on the native installer channel (plain-text body, e.g.
+/// "2.1.195"). Fetched backend-side on purpose: keeps storage.googleapis.com
+/// out of the webview CSP and reuses the corp-TLS-aware shared client.
+#[tauri::command]
+pub async fn cli_native_latest() -> Result<String, String> {
+    let resp = crate::certs::usage_client()
+        .get(NATIVE_CHANNEL_URL)
+        .send()
+        .await
+        .map_err(|e| format!("native channel unreachable: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("native channel returned HTTP {}", resp.status()));
+    }
+    let body = resp.text().await.map_err(|e| format!("native channel read failed: {e}"))?;
+    let v = body.trim();
+    // Only ever hand the UI a version string — never an error/HTML page body.
+    if v.len() > 64 || parse_semver(v).is_none() {
+        return Err("native channel returned an unexpected body".into());
+    }
+    Ok(v.to_string())
 }
 
 /// Result of an in-app Claude CLI update attempt.

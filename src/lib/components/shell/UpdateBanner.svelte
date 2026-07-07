@@ -24,6 +24,9 @@
   const cliInstalls = $derived(assistant.auth?.installs ?? null);
   const cliInstalled = $derived(assistant.auth?.cliVersion ?? null);
   const cliAvailable = $derived(cliUpdate.availableAny(cliInstalls, cliInstalled));
+  // The version the update takes the stale install(s) TO — per-feed (a native
+  // install targets the native channel's latest, not npm's).
+  const cliTarget = $derived(cliUpdate.targetFor(cliInstalls, cliInstalled));
   // `claude --version` returns "2.1.186 (Claude Code)" — strip the suffix so the
   // diff reads "v2.1.186 → v2.1.190", not the raw noisy string.
   const cliInstalledClean = $derived(cliInstalled?.match(/\d+\.\d+\.\d+/)?.[0] ?? null);
@@ -84,7 +87,7 @@
         icon: Terminal,
         label: "Claude CLI update",
         from: cliInstalledClean ? `v${cliInstalledClean}` : "installed",
-        to: cliUpdate.latest ? `v${cliUpdate.latest}` : "latest",
+        to: cliTarget ? `v${cliTarget}` : "latest",
         busy: cliUpdate.updating,
         busyLabel: "Updating…",
         progress: null,
@@ -93,7 +96,7 @@
         // it the banner reads the stale pre-update version and re-appears even on
         // a clean update ("says updating, goes right back to the notification").
         onAct: async () => { if (await cliUpdate.runUpdate()) await assistant.refreshAuth(); },
-        onDismiss: () => cliUpdate.dismiss(),
+        onDismiss: () => cliUpdate.dismiss(cliTarget),
       });
     } else if (cliVersionUnreadable && !unreadableDismissed) {
       // A real update row outranks the quiet states; at most ONE quiet CLI row.

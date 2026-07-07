@@ -263,6 +263,10 @@ export class TabState {
    *  mid-chat; the picker surfaces the divergence + offers "New chat in <model>".
    *  null = first turn hasn't run yet (no pin), so a switch still takes effect. */
   pinnedModel = $state<ModelSel | null>(null);
+  /** open_browser landing on a backgrounded tab parks its URL here instead of
+   *  hijacking the focused pane's dock; AssistantPage consumes it when this tab
+   *  regains focus. In-memory only — a stale preview URL isn't worth persisting. */
+  pendingBrowserUrl = $state<string | null>(null);
   /** #30: cwd the CLI session is pinned to (resumed convos keep their original
    *  folder). Hydrated on disk-load; null = no pin known / fresh tab. The tabs
    *  bar badges the active tab when this differs from workspace.current. */

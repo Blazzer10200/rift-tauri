@@ -47,7 +47,7 @@ pub struct ClaudeInstall {
 /// Lowercase + backslash-normalize a path string for case-insensitive compares
 /// (Windows paths are case-insensitive; `where.exe` and our probes can differ
 /// in case/separator for the same file).
-fn norm_path(s: &str) -> String {
+pub(super) fn norm_path(s: &str) -> String {
     s.to_ascii_lowercase().replace('/', "\\")
 }
 
@@ -95,7 +95,7 @@ fn expand_env_refs(s: &str) -> String {
 /// PATH snapshot (#61: a post-login `npm i -g` is invisible until re-login).
 /// Empty on any open/read failure; never panics.
 #[cfg(windows)]
-fn registry_path_dirs() -> Vec<PathBuf> {
+pub(super) fn registry_path_dirs() -> Vec<PathBuf> {
     use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
     use winreg::RegKey;
     let mut dirs: Vec<PathBuf> = Vec::new();
@@ -125,7 +125,7 @@ fn registry_path_dirs() -> Vec<PathBuf> {
 }
 
 #[cfg(not(windows))]
-fn registry_path_dirs() -> Vec<PathBuf> {
+pub(super) fn registry_path_dirs() -> Vec<PathBuf> {
     Vec::new()
 }
 

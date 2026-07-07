@@ -175,6 +175,9 @@
       cmpSemver(assistantStore.auth.cliVersion, CLI_RECOMMENDED_VERSION) < 0,
   );
   const cliNewer = $derived(cliUpdate.isAnyStale(assistantStore.auth?.installs, cliInstalled));
+  // Per-feed update target — what the pill/banner advertises. A native install
+  // targets the native channel's latest, not npm's (which routinely runs ahead).
+  const cliTarget = $derived(cliUpdate.targetFor(assistantStore.auth?.installs, cliInstalled));
   const cliSummary = $derived(cliUpdate.summary(assistantStore.auth?.installs));
   const cliIsNative = $derived((assistantStore.auth?.installMethod ?? null) === "native");
   $effect(() => { cliUpdate.setMethod(assistantStore.auth?.installMethod ?? null); });
@@ -436,7 +439,7 @@
             {#if cliUpdate.status === "checking"}
               <span class="st-pill"><span class="dot"></span>Checking…</span>
             {:else if cliNewer}
-              <span class="st-pill accent"><span class="dot"></span>Update → {cliUpdate.latest}</span>
+              <span class="st-pill accent"><span class="dot"></span>Update → {cliTarget ?? cliUpdate.latest}</span>
             {:else if cliUpdate.status === "error"}
               <span class="st-pill warn" use:tooltip={cliUpdate.error ?? "Check failed"}><span class="dot"></span>Check failed</span>
             {:else if cliUpdate.latest}
@@ -880,7 +883,7 @@
             {#if environment.installError}
               <div class="st-note">⚠ {environment.installError}</div>
             {:else if Object.values(environment.installing).some(Boolean)}
-              <div class="st-note">An install console opened — finish there, then <button class="link-btn" type="button" onclick={() => void environment.refresh()}>re-probe</button> to refresh status.</div>
+              <div class="st-note">An install console opened — finish there; Rift re-checks every few seconds. Impatient? <button class="link-btn" type="button" onclick={() => void environment.refresh()}>Re-probe now</button>.</div>
             {/if}
           </div>
 
