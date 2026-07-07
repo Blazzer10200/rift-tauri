@@ -73,7 +73,19 @@ pub fn query_metrics() -> crate::diagnostics::metrics::MetricsSnapshot {
 pub async fn open_new_window(app: tauri::AppHandle) -> Result<(), String> {
     use std::sync::atomic::{AtomicU32, Ordering};
     static WINDOW_SEQ: AtomicU32 = AtomicU32::new(1);
-    let label = format!("window-{}", WINDOW_SEQ.fetch_add(1, Ordering::Relaxed));
+    // #37: launch-scoped nonce. A plain `window-<seq>` reset every launch, so
+    // launch 2's first secondary window re-used launch 1's label and inherited
+    // its persisted pane/split layout (labels namespace localStorage keys —
+    // see persistence.ts). Secondary windows are ephemeral by design; the
+    // nonce guarantees a fresh key, and the FE prunes orphaned keys at boot.
+    static LAUNCH_NONCE: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    let nonce = LAUNCH_NONCE.get_or_init(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    });
+    let label = format!("window-{nonce:x}-{}", WINDOW_SEQ.fetch_add(1, Ordering::Relaxed));
     let w = tauri::WebviewWindowBuilder::new(&app, &label, tauri::WebviewUrl::App("/".into()))
         .title("Rift")
         .decorations(false)

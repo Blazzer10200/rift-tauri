@@ -1147,6 +1147,38 @@
       <!-- WELL: attachments + input + inline send arrow (Claude-Code style).
            All chrome (border/glass/focus-ring/streaming edge) lives here now. -->
       <div class="composer-box" class:multiline={multiline}>
+      {#if tab?.promptSuggestion && !hasDraft && !streaming}
+        <!-- #87: ghost suggestion from the CLI's --prompt-suggestions — one
+             predicted next prompt per turn. Click inserts it into the draft;
+             typing anything hides it (hasDraft gate); beginTurn clears it. -->
+        <div class="ps-row">
+          <button
+            type="button"
+            class="ps-chip"
+            onclick={() => {
+              if (!tab?.promptSuggestion) return;
+              const s = tab.promptSuggestion;
+              tab.promptSuggestion = null;
+              setDraft(s);
+              requestAnimationFrame(() => { ta?.focus(); autosize(); });
+            }}
+            use:tooltip={"Suggested next prompt — click to insert"}
+            aria-label="Insert suggested prompt"
+          >
+            <Sparkles size={12} />
+            <span class="ps-text">{tab.promptSuggestion}</span>
+          </button>
+          <button
+            type="button"
+            class="ps-dismiss"
+            onclick={() => { if (tab) tab.promptSuggestion = null; }}
+            use:tooltip={"Dismiss suggestion"}
+            aria-label="Dismiss suggestion"
+          >
+            <X size={11} />
+          </button>
+        </div>
+      {/if}
       <AttachmentsRow
         {attachments}
         {textAttachments}
@@ -2145,6 +2177,40 @@
     font-size: 11px; font-weight: 600; line-height: 1; letter-spacing: 0.01em;
     max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
+
+  /* #87: ghost prompt-suggestion chip (CLI --prompt-suggestions). Quiet by
+     default — faint text + dashed hairline on the well fill; accent on hover. */
+  .ps-row {
+    display: flex; align-items: center; gap: 4px;
+    padding: 7px 10px 0;
+    min-width: 0;
+  }
+  .ps-chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    min-width: 0;
+    padding: 4px 10px;
+    background: color-mix(in oklch, var(--bg-elev-2) 55%, transparent);
+    border: 1px dashed color-mix(in oklch, var(--border) 70%, transparent);
+    border-radius: 999px;
+    color: var(--fg-muted);
+    cursor: pointer; font: inherit; font-size: 11.5px; line-height: 1.2;
+    transition: color 140ms ease-out, border-color 140ms ease-out, background 140ms ease-out;
+  }
+  .ps-chip:hover {
+    color: var(--accent);
+    border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+    background: var(--accent-soft);
+  }
+  .ps-chip :global(svg) { flex-shrink: 0; opacity: 0.85; }
+  .ps-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ps-dismiss {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 18px; height: 18px; flex-shrink: 0;
+    background: transparent; border: none; border-radius: 6px;
+    color: var(--fg-faint); cursor: pointer;
+    transition: color 140ms ease-out, background 140ms ease-out;
+  }
+  .ps-dismiss:hover { color: var(--fg); background: color-mix(in oklch, var(--bg-elev-2) 80%, transparent); }
 
   /* Perm-menu popover styles moved to composer/PermMenu.svelte (C7).
      The flat perm button itself = .cbtn.cperm (see flat control bar above). */

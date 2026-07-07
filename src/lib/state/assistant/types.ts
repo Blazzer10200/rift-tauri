@@ -241,7 +241,11 @@ export type StreamEnvelope =
   // sub-agent live dock — see applySubAgentFrame in streaming.ts.
   | { type: "assistant"; message: { content: ContentBlock[]; usage?: Record<string, unknown> }; parent_tool_use_id?: string | null }
   | { type: "user"; message: { content: ContentBlock[] }; parent_tool_use_id?: string | null }
-  | { type: "result"; subtype?: string; result?: string; total_cost_usd?: number; [k: string]: unknown };
+  | { type: "result"; subtype?: string; result?: string; total_cost_usd?: number; [k: string]: unknown }
+  // `--prompt-suggestions` (CLI 2.1.201+): one predicted next user prompt,
+  // emitted after the turn's result. Shape confirmed against the 2.1.201 exe:
+  // { type, suggestion, uuid, session_id }.
+  | { type: "prompt_suggestion"; suggestion?: unknown; [k: string]: unknown };
 
 /** Extended-thinking tier, mirroring the CLI's effort ladder: none→low ·
  *  smart→medium (interactive default) · deep→high · ultra = ultracode: xhigh

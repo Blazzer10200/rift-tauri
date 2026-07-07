@@ -1012,6 +1012,13 @@ async fn resolve_spawn(
     if caps.include_partial_messages {
         cmd.arg("--include-partial-messages");
     }
+    // #87: one predicted next user prompt per turn, emitted as a terminal
+    // `prompt_suggestion` stream-json message (FE renders it as a composer
+    // ghost chip). Gated: an older CLI rejects the unknown flag; without it
+    // the chip simply never appears.
+    if caps.prompt_suggestions {
+        cmd.arg("--prompt-suggestions");
+    }
     // Piece 2: route per-action permission asks over the stream-json control
     // channel. `stdio` makes the CLI emit a `can_use_tool` `control_request` on
     // stdout (instead of headless auto-deny) and block on a `control_response`

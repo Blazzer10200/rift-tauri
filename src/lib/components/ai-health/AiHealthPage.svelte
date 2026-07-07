@@ -524,8 +524,11 @@
   // set). Holds the prior value for one-tap undo + a transient "applied" flag.
   type ApplyState = { prev: string | number | null; appliedAt: number };
   let applied = $state<Record<string, ApplyState>>({});
-  // Clear stale applied badges when a new advice set arrives.
-  $effect(() => { if (usage.advice) applied = {}; });
+  // #86: `applied` deliberately SURVIVES a Re-analyze — wiping it on every new
+  // advice set orphaned a live apply (the Undo button + its pre-apply snapshot
+  // vanished, and isNoop could then hide the card entirely once the config
+  // matched). The render gate below keeps an applied card visible via
+  // `applied[c.title]` even when isNoop would hide it. Page unmount resets it.
 
   async function applyAction(title: string, a: AdviceApply) {
     // Snapshot the prior value so undo can restore it exactly.

@@ -503,18 +503,36 @@ pub fn assistant_delete_conversation(id: String) -> Result<(), String> {
     // Hold CONVO_WRITE_LOCK across read+delete so an in-flight save's
     // write-tmp→rename can't land between our remove and return, silently
     // resurrecting the deleted convo on disk.
-    let cli_session_id = {
+    let (cli_session_id, retired) = {
         let _guard = CONVO_WRITE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let cli_session_id = std::fs::read_to_string(&p)
-            .ok()
-            .and_then(|s| serde_json::from_str::<Conversation>(&s).ok())
+        let raw = std::fs::read_to_string(&p).ok();
+        let cli_session_id = raw
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<Conversation>(s).ok())
             .and_then(|c| c.cli_session_id);
+        // #46: collect this convo's compaction-retired session ids BEFORE the
+        // record is gone — cleanup_retired_jsonls rebuilds its retired-set from
+        // SURVIVING convos only, so after this delete it could never learn these
+        // ids again and their CLI JSONLs would leak forever.
+        let retired: std::collections::HashSet<String> = raw
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+            .and_then(|v| {
+                v.get("compactionHistory").and_then(|a| a.as_array()).map(|arr| {
+                    arr.iter()
+                        .filter_map(|e| e.get("priorSessionId").and_then(|s| s.as_str()))
+                        .filter(|sid| is_valid_session_id(sid))
+                        .map(str::to_string)
+                        .collect()
+                })
+            })
+            .unwrap_or_default();
         match std::fs::remove_file(&p) {
             Ok(()) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(format!("delete {}: {e}", p.display())),
         }
-        cli_session_id
+        (cli_session_id, retired)
     };
     // Delete sidecars only after the convo record is gone — a half-deleted
     // convo with intact sidecars is recoverable; a deleted sidecar with a
@@ -525,6 +543,17 @@ pub fn assistant_delete_conversation(id: String) -> Result<(), String> {
         if cli_id != id {
             delete_session_cwd(&cli_id);
             delete_session_model(&cli_id);
+        }
+    }
+    // #46: sweep the compaction-retired CLI JSONLs now — an explicit user
+    // delete needs no 30-day grace (unlike the conservative startup sweep).
+    // The convo's own LIVE session JSONL is deliberately left alone: it's the
+    // only remaining artifact a user could still `claude --resume` for
+    // recovery, and the retired-set sweep never touches non-Rift sessions.
+    if !retired.is_empty() {
+        let n = delete_project_jsonls(&retired, None);
+        if n > 0 {
+            log::info!("assistant: convo delete swept {n} retired JSONL(s)");
         }
     }
     Ok(())
@@ -574,11 +603,29 @@ pub fn cleanup_retired_jsonls() -> usize {
         return 0;
     }
 
-    // Step 2: walk ~/.claude/projects/<cwd-hash>/*.jsonl and delete matches.
+    // Step 2: walk ~/.claude/projects/<cwd-hash>/*.jsonl and delete matches
+    // older than 30 days. (checked_sub underflow ⇒ no cutoff ⇒ delete nothing,
+    // preserving the sweep's conservative bias.)
+    let Some(cutoff) = std::time::SystemTime::now()
+        .checked_sub(std::time::Duration::from_secs(30 * 24 * 60 * 60))
+    else {
+        return 0;
+    };
+    delete_project_jsonls(&retired, Some(cutoff))
+}
+
+/// Walk `~/.claude/projects/<cwd-hash>/*.jsonl` and delete files whose stem is
+/// in `retired`. `cutoff`: only delete files modified BEFORE it; `None` = no
+/// age guard (the explicit convo-delete sweep, #46 — the user just deleted the
+/// convo, so its retired JSONLs need no grace window). Best-effort; errors are
+/// logged + swallowed. Returns the number of files deleted.
+fn delete_project_jsonls(
+    retired: &std::collections::HashSet<String>,
+    cutoff: Option<std::time::SystemTime>,
+) -> usize {
+    let Ok(home) = dirs_home() else { return 0 };
     let projects = home.join(".claude").join("projects");
     let Ok(project_dirs) = std::fs::read_dir(&projects) else { return 0 };
-    let cutoff = std::time::SystemTime::now()
-        .checked_sub(std::time::Duration::from_secs(30 * 24 * 60 * 60));
     let mut deleted = 0usize;
     for cwd_dir in project_dirs.flatten() {
         let path = cwd_dir.path();
@@ -595,16 +642,16 @@ pub fn cleanup_retired_jsonls() -> usize {
             if !retired.contains(stem) {
                 continue;
             }
-            // mtime guard — only delete files older than 30 days.
-            let aged = f
-                .metadata()
-                .and_then(|m| m.modified())
-                .ok()
-                .zip(cutoff)
-                .map(|(mt, c)| mt < c)
-                .unwrap_or(false);
-            if !aged {
-                continue;
+            if let Some(c) = cutoff {
+                let aged = f
+                    .metadata()
+                    .and_then(|m| m.modified())
+                    .ok()
+                    .map(|mt| mt < c)
+                    .unwrap_or(false);
+                if !aged {
+                    continue;
+                }
             }
             match std::fs::remove_file(&fp) {
                 Ok(()) => {

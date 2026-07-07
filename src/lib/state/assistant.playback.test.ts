@@ -1023,3 +1023,32 @@ describe("split-pane — background-pane isolation", () => {
   });
 
 });
+
+// ── prompt_suggestion (#87) ──────────────────────────────────────────────────
+// Wire shape confirmed against the 2.1.201 exe:
+// { type: "prompt_suggestion", suggestion, uuid, session_id }.
+describe("playback — prompt_suggestion ghost chip", () => {
+  it("stores the trimmed suggestion on the tab; the next beginTurn clears it", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    feed(tab, [
+      { type: "prompt_suggestion", suggestion: "  run the tests  ", uuid: "u1", session_id: tab.cliSessionId },
+    ]);
+    expect(tab.promptSuggestion).toBe("run the tests");
+
+    // A new turn invalidates the stale suggestion.
+    beginTurn(tab);
+    expect(tab.promptSuggestion).toBeNull();
+  });
+
+  it("ignores blank / non-string suggestions", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    feed(tab, [
+      { type: "prompt_suggestion", suggestion: "   " },
+      { type: "prompt_suggestion", suggestion: 42 },
+      { type: "prompt_suggestion" },
+    ]);
+    expect(tab.promptSuggestion).toBeNull();
+  });
+});

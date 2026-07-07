@@ -141,6 +141,20 @@ const _tabsStorageKey = _windowLabel === "main"
   ? "rift.ui.tabs.v1"
   : `rift.ui.tabs.${_windowLabel}.v1`;
 
+// #37: secondary windows are ephemeral by design — their per-label tab state
+// must not resurrect in a later launch (labels now carry a launch nonce, so a
+// fresh launch can't collide into an old key anyway). Sweep leftovers once per
+// main-window boot so orphaned window-* keys don't accumulate in localStorage.
+if (_windowLabel === "main") {
+  try {
+    for (const k of Object.keys(localStorage)) {
+      if (k.startsWith("rift.ui.tabs.window-") && k.endsWith(".v1")) localStorage.removeItem(k);
+    }
+  } catch {
+    // storage unavailable — nothing to prune
+  }
+}
+
 // #37 cross-window sync: after THIS window mutates the shared conversation store
 // (save / delete / rename), tell every other window to re-pull its list so a
 // chat created or removed here shows up there without a reload. Fire-and-forget

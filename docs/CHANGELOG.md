@@ -2,18 +2,14 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.89.0 — Claude Code 2.1.201 compatibility + reliability hardening
+## v0.90.0 — Quality-of-life fixes + prompt-suggestion groundwork
 
-- **Keeps up with the latest Claude Code.** Rift now recognizes the full tool set from recent Claude Code releases (2.1.19x–2.1.20x) — the new planning, review, workflow, and background-task tools no longer trigger stray "allow this tool?" prompts, and older CLIs keep working unchanged. If a turn stops because it hit your per-turn spend cap, Rift now says so plainly instead of ending in silence, and any unexpected stop reason from a newer CLI surfaces its real message rather than a blank finish.
-- **Dead workspace tools are no longer invisible.** If Rift's file/search/git helper fails to start for a chat, you now get a clear notice up front — before, the only symptom was tools quietly failing one by one.
-- **The usage gauge is far harder to break.** A single unexpected value from the (undocumented) usage endpoint used to blank the entire usage panel *and* silently switch off the near-limit warning. It now tolerates odd values field-by-field, so the gauge and the limit warnings keep working.
-- **Fixes for edge cases in multi-window and multi-pane use:**
-  - Retrying a message no longer risks landing it in a different chat if you switch tabs while it's waiting to send.
-  - A pane whose folder was deleted, renamed, or disconnected no longer silently starts reading files and git status from a *different* project — it now shows nothing for that pane instead of the wrong thing.
-  - Two windows working the same conversation can no longer corrupt each other's saved "which folder / which model" markers.
-  - Dictation always finishes transcribing with the same model it recorded with, even if you changed the model mid-recording.
-- **Self-update is steadier.** A slow update check that timed out can no longer clobber a newer check's download, and update/repair actions won't quietly swap the pending update out from under an apply that's already running.
-- **Under the hood:** the local request shim and loopback bridge got hardening (fail-loud on malformed input, constant-time token check); the "slow turn start" notice now measures pre-first-output wait correctly instead of being masked by later thinking; internal timing spans attribute to the right source file.
+- **Prompt suggestions (groundwork, dormant for now).** Rift now asks Claude Code for a predicted "next prompt" after each turn and shows it as a quiet chip above the message box — click to insert it into the draft, × to dismiss, and it hides the moment you start typing. Anthropic currently has generation switched off server-side, so the chip stays hidden until they enable it; everything on Rift's side is wired, tested, and verified harmless to normal turns.
+- **Voice input failures now speak up.** Microphone permission denied, no microphone, or a dictation session that can't start pops an auto-expiring notice — before, the only clue was the mic button quietly turning red.
+- **Assistant-opened pages pull you to Chat.** When the assistant opens a link in Rift's built-in browser while you're on Settings or AI Health, Rift now switches to the chat workspace so the page actually appears (it used to queue invisibly until you wandered back).
+- **AI Health: Undo survives Re-analyze.** Applying a recommendation and then re-analyzing no longer throws away the Undo button — you always keep a path back to the setting you had before.
+- **Deleting a chat cleans up fully.** Conversations that had been auto-compacted left dead CLI session files on disk when deleted; those are now swept as part of the delete.
+- **Second windows always start fresh.** A newly opened secondary window could inherit the pane/split layout from a window you had open in a *previous* app launch; window identities are now unique per launch and stale layouts are cleaned up at startup.
 
 ## Known issues
 - **Voice profanity on Web Speech:** fully-masked words (`******`, no leading letter) can't be recovered from Azure's servers — the real fix is the on-device **Whisper** engine (built but not yet in the shipped binary). Planned.
@@ -21,6 +17,7 @@
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
 
+- **v0.89.0** — Claude Code 2.1.201 compatibility (full 2.1.19x–2.1.20x tool set, spend-cap + unknown-error surfacing); dead-workspace-tools notice; usage gauge tolerates odd values field-by-field; multi-window/multi-pane edge fixes (retry tab-identity, stale-folder honesty, sidecar cross-talk, dictation model pinning); steadier self-update; bridge/shim hardening.
 - **v0.88.0** — Terminal-style tool blocks (input line + labeled output, `exit N` on failure); progressive "Show N more lines" for long output; the live "working" line stopped inventing actions; WYSIWYG texture previews + calm "dev" badge; stream event handling extracted + tested, Markdown parse cap, onboarding rejection fix.
 - **v0.87.0** — Per-turn epoch on the full event wire (stopped turns can't bleed into the next); self-update kills by exe-path not image-name; delete-vs-autosave resurrect fixed; paste/drop image target-locked; npm probe 5s-bounded; window-scoped dictation; honest MCP notify/open_browser; advisory scans → daily CI; project-highlight + switcher-coords fixes.
 - **v0.86.4** — Queued-message hardening: attachments ride the send (no composer cross-contamination), requeue-front ordering, chip attachment badges, sidebar queued-count badge, `/model` de-staled.

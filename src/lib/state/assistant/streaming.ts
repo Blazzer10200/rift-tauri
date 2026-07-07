@@ -42,6 +42,7 @@ const SUPPRESSED_TOOL_NAMES = new Set(["ToolSearch", "TaskList", "TaskGet", "Tas
  *  / dedupe state and flips streaming on. */
 export function beginTurn(tab: TabState) {
   tab.lastError = null;
+  tab.promptSuggestion = null;
   tab.seenToolUseIds.clear();
   tab.deltaCount = 0;
   tab.envelopeTextBuffer = "";
@@ -935,6 +936,13 @@ export function onStreamLine(tab: TabState, raw: string) {
       // First frame of every turn lists MCP server health — a failed rift
       // server means dead workspace tools; toast instead of staying silent.
       if (env.subtype === "init") checkMcpInitHealth(env as { mcp_servers?: unknown });
+      break;
+    }
+    case "prompt_suggestion": {
+      // #87: composer ghost chip — shown while the draft is empty, consumed on
+      // click, cleared at the next beginTurn. Never rendered into the transcript.
+      const s = env.suggestion;
+      if (typeof s === "string" && s.trim().length > 0) tab.promptSuggestion = s.trim();
       break;
     }
     default:

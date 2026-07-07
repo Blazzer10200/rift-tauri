@@ -84,6 +84,12 @@ mod mins {
     /// `--disable-slash-commands`. Confirmed added at v2.1.170 (zebbern CHANGELOG:
     /// "Update to version 2.1.170 for access"). Also api-key / local-llm only.
     pub const DISABLE_SLASH_COMMANDS: Version = (2, 1, 170); // confirmed @ 2.1.170
+
+    /// `--prompt-suggestions` (emit one `prompt_suggestion` message per turn
+    /// with a predicted next user prompt; requires `-p` + stream-json output —
+    /// exactly Rift's spawn shape). Absent from the changelog; confirmed
+    /// present @2.1.201 via `--help` + exe strings. Confirmed-present bound.
+    pub const PROMPT_SUGGESTIONS: Version = (2, 1, 201); // confirmed present @ 2.1.201
 }
 
 /// The hard minimum CLI version Rift can drive at all. Below this, no turn can
@@ -107,6 +113,7 @@ pub struct CliCaps {
     pub settings_flag: bool,
     pub strict_mcp_config: bool,
     pub disable_slash_commands: bool,
+    pub prompt_suggestions: bool,
 }
 
 /// `a >= b` on version triples.
@@ -130,6 +137,7 @@ impl CliCaps {
                 settings_flag: false,
                 strict_mcp_config: false,
                 disable_slash_commands: false,
+                prompt_suggestions: false,
             },
             Some(ver) => Self {
                 version: Some(ver),
@@ -142,6 +150,7 @@ impl CliCaps {
                 settings_flag: at_least(ver, mins::SETTINGS_FLAG),
                 strict_mcp_config: at_least(ver, mins::STRICT_MCP_CONFIG),
                 disable_slash_commands: at_least(ver, mins::DISABLE_SLASH_COMMANDS),
+                prompt_suggestions: at_least(ver, mins::PROMPT_SUGGESTIONS),
             },
         }
     }
@@ -220,6 +229,14 @@ mod tests {
         let at = CliCaps::from_version(Some((2, 1, 142)));
         assert!(at.effort);
         assert!(at.settings_flag);
+    }
+
+    #[test]
+    fn prompt_suggestions_gate_boundary() {
+        // 2.1.201 confirmed-present bound (--help + exe strings; not in changelog).
+        assert!(!CliCaps::from_version(Some((2, 1, 200))).prompt_suggestions);
+        assert!(CliCaps::from_version(Some((2, 1, 201))).prompt_suggestions);
+        assert!(!CliCaps::from_version(None).prompt_suggestions);
     }
 
     #[test]

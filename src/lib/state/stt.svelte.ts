@@ -21,6 +21,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { assistant } from "./assistant.svelte";
+import { notify } from "./toast.svelte";
 
 export type SttEngine = "web_speech" | "whisper";
 
@@ -388,6 +389,7 @@ class SttStore {
   async start(tabId?: string | null): Promise<boolean> {
     if (!this.config.enabled) {
       this.lastError = "Speech-to-text is disabled. Enable it in Settings → Speech.";
+      this.failToast();
       return false;
     }
     if (this.recording) return true;
@@ -408,6 +410,7 @@ class SttStore {
       if (!this.backendAvailable) {
         this.lastError =
           "Whisper backend not built. Install LLVM + rebuild with --features whisper-rs (see Settings → Speech for details).";
+        this.failToast();
         return false;
       }
       try {
@@ -418,6 +421,7 @@ class SttStore {
         return true;
       } catch (e) {
         this.lastError = `Could not start whisper recording: ${e}`;
+        this.failToast();
         return false;
       }
     }
@@ -425,6 +429,7 @@ class SttStore {
     // --- Web Speech path (unchanged) ---
     if (!this.supported) {
       this.lastError = "Speech recognition is not available in this WebView.";
+      this.failToast();
       return false;
     }
     const Ctor = getSRCtor();
@@ -450,6 +455,7 @@ class SttStore {
       return true;
     } catch (e) {
       this.lastError = `Could not start recognition: ${e}`;
+      this.failToast();
       this.recognition = null;
       this.recording = false;
       return false;
@@ -885,6 +891,18 @@ class SttStore {
     // Friendly message already surfaced via `lastError`; the raw code is
     // dropped to avoid the #22 / #250 console-noise regression.
     this.lastError = errorMessage(e.error, e.message);
+    // #81: permission / no-mic are hard session failures — toast them.
+    // Transients (no-speech, network blips) stay outline-only.
+    if (e.error === "not-allowed" || e.error === "service-not-allowed" || e.error === "audio-capture") {
+      this.failToast();
+    }
+  }
+
+  /** #81: a session that fails to start (or dies on a hard error) only turned
+   *  the mic red — easy to miss mid-conversation. Auto-expiring danger toast
+   *  (8s default) carrying the same friendly message as the tooltip. */
+  private failToast() {
+    if (this.lastError) notify.danger("Voice input failed", { detail: this.lastError });
   }
 
   private onEnd() {

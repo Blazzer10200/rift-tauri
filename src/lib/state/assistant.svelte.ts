@@ -8,6 +8,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { toast, notify } from "./toast.svelte";
+import { workspace } from "./workspace.svelte";
 import { humanizeError } from "../utils/humanizeError";
 import { browserDock } from "./browserDock.svelte";
 
@@ -288,6 +289,11 @@ export class TabState {
    *  focus-change stash/restore dance dropping characters under fast typing.
    *  Composer binds via `bind:value={tab.draft}`. */
   draft = $state<string>("");
+  /** Predicted next user prompt from the CLI (`--prompt-suggestions`,
+   *  2.1.201+). One per turn, landing right after the result envelope. Shown
+   *  as a ghost chip in the composer while the draft is empty; consumed on
+   *  click, cleared at the next beginTurn. In-memory only — never persisted. */
+  promptSuggestion = $state<string | null>(null);
   /** Per-tab staged attachments. Same rationale as `draft`. send() snapshots
    *  + clears on dispatch. 20MiB cumulative cap enforced by addAttachment. */
   attachments = $state<{ id: string; mime: string; dataBase64: string; sizeBytes: number }[]>([]);
@@ -1098,7 +1104,14 @@ class AssistantStore {
         "assistant://open-browser",
         (e) => {
           const tab = this.tabByCliSession(e.payload.session_id);
-          if (tab && tab === this.activeTab) browserDock.openUrl(e.payload.url);
+          if (tab && tab === this.activeTab) {
+            // #85: the dock only mounts on the chat workspace (WebBrowserPage
+            // consumes pendingUrl on mount) — an open_browser landing while the
+            // user sits on Settings/AI Health would otherwise queue invisibly
+            // until they wander back. Route to chat first, then open.
+            workspace.setActive("chat");
+            browserDock.openUrl(e.payload.url);
+          }
         },
       ),
       // mcp__rift__notify: severity is allowlisted bridge-side, lengths capped.
