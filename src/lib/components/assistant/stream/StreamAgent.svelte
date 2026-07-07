@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Bot, Loader2, CheckCircle2, AlertCircle, ChevronDown, ArrowRight, Brain,
-    FileSearch, FilePen, FilePlus, Search, FolderTree, Terminal, Globe, GitBranch, ListChecks, Wrench } from "lucide-svelte";
+    FileSearch, FilePen, FilePlus, Search, FolderTree, Terminal, Globe, AppWindow, GitBranch, ListChecks, Wrench } from "lucide-svelte";
   import { fmtDur, type StreamTool } from "./streamModel";
   import { captionForTool } from "../toolCaption";
   import type { Block, TabState } from "$lib/state/assistant.svelte";
@@ -24,7 +24,8 @@
     if (n === "Grep" || n === "grep" || n === "Glob") return Search;
     if (n === "list_dir") return FolderTree;
     if (n === "Bash" || n === "remote_bash" || n === "BashOutput") return Terminal;
-    if (n === "WebFetch" || n === "WebSearch" || n === "open_browser") return Globe;
+    if (n === "WebFetch" || n === "WebSearch") return Globe;
+    if (n === "open_browser") return AppWindow;
     if (n.startsWith("git_")) return GitBranch;
     if (n === "TaskCreate" || n === "TaskUpdate" || n === "TodoWrite") return ListChecks;
     return Wrench;

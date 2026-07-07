@@ -6,6 +6,7 @@
 
 const OPEN_KEY = "rift.assistant.browserDock.open.v1";
 const WIDTH_KEY = "rift.assistant.browserDock.width.v1";
+const LAST_URL_KEY = "rift.assistant.browserDock.lastUrl.v1";
 
 const MIN_W = 360;
 const MAX_W = 1200;
@@ -22,12 +23,17 @@ class BrowserDock {
   // WebBrowserPage consumes it once its stage element exists (the dock may
   // need a mount cycle first when this call also opens it).
   pendingUrl = $state<string | null>(null);
+  // Last successfully loaded page — closing the dock destroys the native
+  // webview, so this powers the empty-state "Reopen <host>" affordance.
+  lastUrl = $state<string | null>(null);
 
   init() {
     if (typeof window === "undefined") return;
     this.open = localStorage.getItem(OPEN_KEY) === "1";
     const w = Number(localStorage.getItem(WIDTH_KEY));
     if (Number.isFinite(w) && w >= MIN_W && w <= MAX_W) this.width = w;
+    const last = localStorage.getItem(LAST_URL_KEY);
+    if (last && /^https?:\/\//i.test(last)) this.lastUrl = last;
   }
 
   toggle() {
@@ -45,6 +51,12 @@ class BrowserDock {
   openUrl(url: string) {
     this.pendingUrl = url;
     if (!this.open) this.toggle();
+  }
+
+  setLastUrl(url: string) {
+    if (!/^https?:\/\//i.test(url)) return; // never persist about:blank etc.
+    this.lastUrl = url;
+    try { localStorage.setItem(LAST_URL_KEY, url); } catch { /* noop */ }
   }
 
   setWidth(w: number) {

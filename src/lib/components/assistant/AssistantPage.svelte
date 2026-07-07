@@ -146,6 +146,18 @@
     }
   }
 
+  // A backgrounded tab's open_browser parked its URL on the tab (listener in
+  // assistant.svelte.ts) — open it in the dock when that tab regains focus.
+  $effect(() => {
+    const tab = assistant.activeTab;
+    const url = tab?.pendingBrowserUrl;
+    if (!tab || !url) return;
+    untrack(() => {
+      tab.pendingBrowserUrl = null;
+      browserDock.openUrl(url);
+    });
+  });
+
   // ── Browser dock resize ───────────────────────────────────────────────────
   // The dock sits on the right at browserDock.width; dragging its divider left
   // widens the browser. Width is measured from the workbench's right edge.

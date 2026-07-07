@@ -3,9 +3,11 @@
   import markedAlert from "marked-alert";
   import DOMPurify from "dompurify";
   import { untrack } from "svelte";
+  import { invoke } from "@tauri-apps/api/core";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { assistant } from "../../state/assistant.svelte";
   import { browserDock } from "../../state/browserDock.svelte";
+  import { notify } from "../../state/toast.svelte";
   import { highlightSync, normalizeLang, whenReady } from "../../state/highlighter.svelte";
 
   marked.setOptions({ gfm: true, breaks: true });
@@ -102,8 +104,32 @@
         const lineCount = text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
         return `<div class="shiki-block" data-lang="${esc(norm)}"><div class="shiki-head"><span class="shiki-lang">${esc(norm)}</span><span class="shiki-sep">·</span><span class="shiki-lines">${lineCount} line${lineCount === 1 ? "" : "s"}</span><span class="code-copy" role="button" tabindex="0" aria-label="Copy code">Copy</span></div>${html}</div>`;
       },
+      codespan({ text }: { text: string }) {
+        // Clickable file path — a code span that LOOKS like a workspace path
+        // becomes a glowing link; click resolves + opens it in the editor
+        // (workspace_open_path validates against the workspace root, so
+        // render-time is regex-only). marked's tokenizer already HTML-escaped
+        // `text`, and pathish() only admits entity-free strings — a hit is
+        // safe to embed raw in both the attribute and the body.
+        if (pathish(text)) {
+          return `<code class="md-path" data-path="${text}" role="link" tabindex="0" title="Open ${text}">${text}</code>`;
+        }
+        return false as unknown as string;
+      },
     },
   });
+
+  // Path-shaped code span: multi-segment (src/lib/x.ts, src-tauri\src\y.rs,
+  // C:\abs\p.rs, ./a/b.sh) or a bare dotted filename with a code-ish extension
+  // (turn.rs, package.json) — optional trailing :line[:col]. Existence is
+  // verified on click, so a false positive costs one polite toast, never a
+  // navigation.
+  function pathish(s: string): boolean {
+    if (s.length < 3 || s.length > 260 || /\s/.test(s)) return false;
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(s)) return false; // URL, not a path
+    if (/^(?:[A-Za-z]:[\\/])?[\w.@~-]+(?:[\\/][\w.@~-]+)+(?::\d+(?::\d+)?)?$/.test(s)) return true;
+    return /^[\w.@-]+\.(?:rs|ts|tsx|js|jsx|mjs|cjs|svelte|vue|py|rb|go|java|kt|cs|c|h|cpp|hpp|lua|json|jsonc|toml|yml|yaml|md|css|scss|html|htm|txt|sh|ps1|bat|sql|lock|conf|ini|env)(?::\d+(?::\d+)?)?$/i.test(s);
+  }
 
   let { text, streaming = false }: { text: string; streaming?: boolean } = $props();
 
@@ -330,6 +356,13 @@
       }
       return;
     }
+    // Clickable file path — resolve + open in the editor (backend-validated).
+    const pathEl = target?.closest("code.md-path") as HTMLElement | null;
+    if (pathEl) {
+      e.preventDefault();
+      void openWorkspacePath(pathEl.getAttribute("data-path") ?? "");
+      return;
+    }
     const a = target?.closest("a") as HTMLAnchorElement | null;
     if (!a) return;
     const href = a.getAttribute("href");
@@ -350,11 +383,36 @@
     void openUrl(href).catch((err) => console.warn("openUrl failed", err));
   }
 
+  // Split a trailing `:line[:col]` editor hint off a clicked path, then hand it
+  // to the backend: resolves against the workspace root, rejects escapes, opens
+  // the editor at the line (OS default opener as the no-`code`-CLI fallback).
+  async function openWorkspacePath(raw: string) {
+    if (!raw) return;
+    let path = raw;
+    let line: number | null = null;
+    const m = /^(.+?):(\d+)(?::\d+)?$/.exec(raw);
+    if (m && m[1].length > 1) { // length guard: don't split a bare drive letter
+      path = m[1];
+      line = parseInt(m[2], 10);
+    }
+    try {
+      await invoke("workspace_open_path", { root: assistant.activeRoot, path, line });
+    } catch (err) {
+      notify.warn("Couldn't open file", { detail: String(err) });
+    }
+  }
+
   function onKey(e: KeyboardEvent) {
     // Keyboard activation for the .code-copy <span role="button"> injected
-    // into legacy + shiki code blocks. (#209)
+    // into legacy + shiki code blocks (#209) and for clickable file paths.
     if (e.key !== "Enter" && e.key !== " ") return;
     const target = e.target as HTMLElement | null;
+    const pathEl = target?.closest("code.md-path") as HTMLElement | null;
+    if (pathEl) {
+      e.preventDefault();
+      void openWorkspacePath(pathEl.getAttribute("data-path") ?? "");
+      return;
+    }
     const copyBtn = target?.closest(".code-copy") as HTMLElement | null;
     if (!copyBtn) return;
     e.preventDefault();
@@ -499,7 +557,7 @@
       // `style` allowed for Shiki's inline span colors. Safe because the
       // upstream `text` already went through marked + we only render
       // highlighter output we generated ourselves.
-      ALLOWED_ATTR: ["href", "title", "src", "alt", "target", "rel", "class", "type", "checked", "disabled", "open", "style", "tabindex", "role", "aria-label", "data-lang"],
+      ALLOWED_ATTR: ["href", "title", "src", "alt", "target", "rel", "class", "type", "checked", "disabled", "open", "style", "tabindex", "role", "aria-label", "data-lang", "data-path"],
     });
     const extracted = extractAndStripChecklists(clean);
     return { html: annotateCodeBlocks(tagFlatShortLists(extracted.html)), items: extracted.items };
@@ -1367,5 +1425,20 @@
     color: var(--fg);
     padding: 0 3px;
     border-radius: 3px;
+  }
+
+  /* Clickable file path (codespan renderer) — accent glow, editor on click. */
+  .md :global(code.md-path) {
+    color: var(--accent);
+    cursor: pointer;
+    text-decoration: underline dotted color-mix(in oklab, var(--accent) 55%, transparent);
+    text-underline-offset: 3px;
+    transition: text-shadow 0.15s ease, border-color 0.15s ease;
+  }
+  .md :global(code.md-path:hover),
+  .md :global(code.md-path:focus-visible) {
+    text-shadow: 0 0 10px color-mix(in oklab, var(--accent) 65%, transparent);
+    text-decoration-style: solid;
+    outline: none;
   }
 </style>

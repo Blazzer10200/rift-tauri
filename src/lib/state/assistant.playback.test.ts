@@ -1052,3 +1052,67 @@ describe("playback — prompt_suggestion ghost chip", () => {
     expect(tab.promptSuggestion).toBeNull();
   });
 });
+
+// ── CLI-initiated continuation turns (turn.rs idle-drain) ──────────────────
+// A background agent finishing between turns makes the CLI re-invoke the model
+// on its own; the backend forwards those frames with NO send() having scaffolded
+// streaming state. maybeBeginContinuation must scaffold exactly once, and ONLY
+// on a contentful top-level assistant frame — anything weaker painting a bubble
+// would turn post-done dribble into phantom messages.
+describe("playback — continuation turn (background agent finished)", () => {
+  it("scaffolds on the turn-opening init, then paints the streamed deltas live", () => {
+    const tab = freshTab();
+    const before = tab.messages.length;
+    expect(tab.streaming).toBe(false);
+    // Real continuation wire order (idle-drain forwards): init → deltas →
+    // complete assistant envelope → result.
+    feed(tab, [sysModel("claude-opus-4-8")]);
+    expect(tab.streaming).toBe(true);
+    expect(tab.messages.length).toBe(before + 1);
+    expect(tab.activity.currentLabel).toBe("Background agent finished — responding");
+    feed(tab, [
+      textDelta("Agent finished — "),
+      textDelta("result: 4"),
+      { type: "assistant", message: { content: [{ type: "text", text: "Agent finished — result: 4" }] } },
+      resultEnv(),
+    ]);
+    const msg = tab.messages[tab.messages.length - 1];
+    expect(msg.role).toBe("assistant");
+    expect(JSON.stringify(textBlocks(tab, msg.id))).toContain("result: 4");
+    tab.onDone();
+    expect(tab.streaming).toBe(false);
+  });
+
+  it("scaffolds on a contentful assistant frame when no init preceded it", () => {
+    const tab = freshTab();
+    const before = tab.messages.length;
+    feed(tab, [
+      { type: "assistant", message: { content: [{ type: "text", text: "late follow-up" }] } },
+    ]);
+    expect(tab.streaming).toBe(true);
+    expect(tab.messages.length).toBe(before + 1);
+    tab.onDone();
+  });
+
+  it("does NOT scaffold on contentless / nested / non-JSON idle frames", () => {
+    const tab = freshTab();
+    const before = tab.messages.length;
+    feed(tab, [
+      { type: "assistant", message: { content: [] } },
+      { type: "assistant", parent_tool_use_id: "t1", message: { content: [{ type: "text", text: "nested" }] } },
+      "post-done non-json dribble",
+    ]);
+    expect(tab.streaming).toBe(false);
+    expect(tab.messages.length).toBe(before);
+  });
+
+  it("never double-scaffolds while a turn is already streaming", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    const before = tab.messages.length;
+    feed(tab, [
+      { type: "assistant", message: { content: [{ type: "text", text: "mid-turn text" }] } },
+    ]);
+    expect(tab.messages.length).toBe(before); // painted into the live bubble
+  });
+});

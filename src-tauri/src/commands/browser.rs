@@ -18,7 +18,7 @@ pub async fn browser_open(
     w: f64,
     h: f64,
 ) -> Result<(), String> {
-    crate::browser::open(&app, &url, x, y, w, h)
+    crate::browser::open_probed(&app, &url, x, y, w, h).await
 }
 
 #[tauri::command]

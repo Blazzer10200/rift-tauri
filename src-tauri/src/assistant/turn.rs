@@ -2049,20 +2049,76 @@ async fn run_turn_loop(mut ctx: RunCtx) {
     let cold_first = ctx.is_first_turn && has_inhand_first;
     let mut first_turn_flag = ctx.is_first_turn && has_inhand_first;
 
+    // Idle-drain plumbing: where to route a CLI-initiated continuation turn
+    // (app/window/epoch of the LAST real turn), and the first line the park
+    // read before recognizing one (fed to stream_one_turn as `preread`).
+    let mut last_turn_ctx: Option<(AppHandle, String, u64)> = None;
+    let mut preread: Option<String> = None;
+
     'turns: loop {
         // Park for a turn if we don't have one in hand.
         let turn = match current.take() {
             Some(t) => t,
             None => {
                 ctx.turn_in_progress.store(false, Ordering::Release);
-                match turn_rx.recv().await {
+                // Park — but once the handshake is done, keep DRAINING stdout.
+                // On CLI 2.1.2xx a background agent finishing after `result`
+                // makes the CLI re-invoke the model on its own (a full
+                // continuation turn on this same pipe). Parking blind stranded
+                // that follow-up: nobody read it while parked, and the next
+                // turn's stale-drain DELETED it — the model said "I'll wait for
+                // the agent" and the user never heard back.
+                let parked = 'park: loop {
+                    if !handshake_done {
+                        // Pre-handshake spare: its init ack must be consumed by
+                        // the first real turn, not the idle-drain.
+                        break 'park turn_rx.recv().await;
+                    }
+                    tokio::select! {
+                        biased;
+                        line = lines.next_line() => match line {
+                            Ok(Some(l)) => {
+                                if let Some(kind) = continuation_frame_kind(&l) {
+                                    log::info!("warm_pool: CLI-initiated continuation turn ({kind}) session={}", ctx.session_id);
+                                    let (app, window_label, turn_epoch) = match last_turn_ctx.as_ref() {
+                                        Some((a, w, e)) => (a.clone(), w.clone(), *e),
+                                        None => (ctx.app.clone(), ctx.window_label.clone(), 0),
+                                    };
+                                    preread = Some(l);
+                                    // Dummy done channel: no dispatcher awaits a
+                                    // CLI-initiated turn (send() is ignored).
+                                    let (done_tx, _done_rx) = oneshot::channel();
+                                    break 'park Some(warm_pool::TurnCmd {
+                                        user_line: Vec::new(),
+                                        app,
+                                        window_label,
+                                        done: done_tx,
+                                        bg_evict: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                                        turn_epoch,
+                                    });
+                                }
+                                // Idle noise (Stop-hook frames, rate_limit_event,
+                                // task bookkeeping) — drop it like the old
+                                // stale-drain did, keep parking.
+                                continue 'park;
+                            }
+                            // EOF / read error while parked: the child died.
+                            // Exit now — cleanup drops the registry entry so the
+                            // next send cold-spawns instead of paying the
+                            // DeadOnReuse retry.
+                            _ => break 'park None,
+                        },
+                        cmd = turn_rx.recv() => break 'park cmd,
+                    }
+                };
+                match parked {
                     Some(t) => {
                         // dispatch_turn already set turn_in_progress = true before
                         // sending; re-assert for safety on the loop side.
                         ctx.turn_in_progress.store(true, Ordering::Release);
                         t
                     }
-                    None => break 'turns, // all senders dropped → evict/drain → exit
+                    None => break 'turns, // all senders dropped / child died → evict/drain → exit
                 }
             }
         };
@@ -2073,6 +2129,9 @@ async fn run_turn_loop(mut ctx: RunCtx) {
         let done = turn.done;
         let user_line = turn.user_line;
         let turn_epoch = turn.turn_epoch;
+        // Route a continuation turn that may arrive while parked AFTER this
+        // turn to the same window/epoch (see the idle-drain park above).
+        last_turn_ctx = Some((app_out.clone(), win_label.clone(), turn_epoch));
 
         let turn_start = if first_turn_flag { ctx.turn_start } else { std::time::Instant::now() };
 
@@ -2100,6 +2159,7 @@ async fn run_turn_loop(mut ctx: RunCtx) {
             effort: &ctx.effort,
             thinking_on: ctx.thinking_on,
             user_line: &user_line,
+            preread: preread.take(),
             handshake_done: &mut handshake_done,
             bg_evict: &bg_evict,
             turn_start,
@@ -2285,6 +2345,12 @@ struct StreamCtx<'a> {
     /// record can log the ACTUAL `--effort` sent (thinking-off floors to "low").
     thinking_on: bool,
     user_line: &'a [u8],
+    /// A line the idle-drain park already read off stdout before deciding this
+    /// is a CLI-initiated continuation turn — processed as the turn's first
+    /// frame. Paired with an EMPTY `user_line` (continuation turns write
+    /// nothing to stdin and must NOT stale-drain: the buffered lines ARE the
+    /// turn).
+    preread: Option<String>,
     /// True once the per-process `initialize` handshake has been acked. The
     /// FIRST turn waits for the first `control_response` (the init ack) before
     /// sending its user envelope; every reused turn writes the envelope up front
@@ -2420,6 +2486,48 @@ where
     dropped
 }
 
+/// Yield the park's pre-read line first, then fall through to the real stream.
+/// Cancel-safe: the preread is only taken when polled, and take+return happen
+/// in a single poll (no await between them).
+async fn next_line_or_preread(
+    lines: &mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+    preread: &mut Option<String>,
+) -> std::io::Result<Option<String>> {
+    match preread.take() {
+        Some(l) => Ok(Some(l)),
+        None => lines.next_line().await,
+    }
+}
+
+/// Classify a line read while PARKED between turns. `Some(kind)` = the CLI
+/// started a model turn on its own (a background agent/task finished → the CLI
+/// auto-re-invokes the model: task_notification → init → assistant → a second
+/// `result`) — run a continuation turn so the user actually sees the follow-up.
+/// `None` = idle noise (Stop-hook frames, rate_limit_event, task bookkeeping) —
+/// dropped, exactly like the old stale-drain did. Trigger ONLY on frames that
+/// guarantee a following `result` (a top-level `assistant` message or a
+/// turn-opening `system/init`): anything weaker could open a turn that never
+/// closes and trip the stall watchdog.
+fn continuation_frame_kind(line: &str) -> Option<&'static str> {
+    let v: Value = serde_json::from_str(line.trim()).ok()?;
+    match v.get("type").and_then(|t| t.as_str()) {
+        Some("assistant") => {
+            // Nested sub-agent frames (parent_tool_use_id set) never open a
+            // main-loop turn — no `result` would follow.
+            let nested = v
+                .get("parent_tool_use_id")
+                .and_then(|p| p.as_str())
+                .map(|s| !s.is_empty())
+                .unwrap_or(false);
+            if nested { None } else { Some("assistant frame") }
+        }
+        Some("system") if v.get("subtype").and_then(|s| s.as_str()) == Some("init") => {
+            Some("turn init")
+        }
+        _ => None,
+    }
+}
+
 /// Stream ONE turn: write the user envelope, forward NDJSON, handle the control
 /// channel (init ack, `can_use_tool` permission asks), and return when `result`
 /// lands / stdout EOFs / a fatal write fails. Ported
@@ -2431,8 +2539,9 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
 
     let StreamCtx {
         stdin, lines, app_out, win_label, stream_sid, model, effort, thinking_on,
-        user_line, handshake_done, bg_evict, turn_start, turn_epoch,
+        user_line, preread, handshake_done, bg_evict, turn_start, turn_epoch,
     } = ctx;
+    let mut preread = preread;
 
     // A reused turn entered with the handshake already done. If such a turn sees
     // stdout EOF before any `result`, the warm child died while parked (a write
@@ -2443,6 +2552,12 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
     // Reused turns: the handshake already happened at process start, so write
     // the user envelope immediately. First turn: wait for the init ack below.
     let mut user_sent = if *handshake_done {
+        if user_line.is_empty() {
+            // CLI-initiated continuation turn (idle-drain park): the CLI began
+            // this turn on its own after a background agent finished. Nothing
+            // to write, and NO stale-drain — the buffered lines ARE the turn.
+            true
+        } else {
         // Drop any stdout the child buffered after the PREVIOUS turn's `result`
         // (post-result dribble, late ask_user/MCP-bridge control frames). Left in
         // the pipe, that stale frame would be read as THIS turn's first output at
@@ -2463,6 +2578,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
             return TurnOutcome::DeadOnReuse;
         }
         true
+        }
     } else {
         false
     };
@@ -2540,7 +2656,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
             );
             return TurnOutcome::Stalled;
         }
-        read = lines.next_line() => {
+        read = next_line_or_preread(lines, &mut preread) => {
             // Any line (even an ignored control frame) = the child is alive and
             // making progress — push the no-progress deadline forward and clear
             // the tool-grace counter (a working tool just proved itself).

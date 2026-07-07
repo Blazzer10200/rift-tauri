@@ -78,6 +78,31 @@ export function beginTurn(tab: TabState) {
   tab.streaming = true;
 }
 
+/** CLI-initiated continuation turn: a background agent/task finished after the
+ *  previous turn's DONE and the CLI re-invoked the model on its own (turn.rs
+ *  idle-drain forwards those frames). No send() scaffolded streaming state, so
+ *  scaffold on the turn-opening `system/init` (so the partial-message deltas
+ *  that follow paint live, not all-at-once at done) or on a contentful
+ *  top-level assistant frame (init dropped/reordered). Anything weaker (task
+ *  bookkeeping, usage-only envelopes) never scaffolds. Nested sub-agent frames
+ *  can't reach this — onStreamLine's parent_tool_use_id branch returns first.
+ *  The backend idle-drain is the real gate: an idle tab only sees these frames
+ *  when a genuine continuation turn is running. */
+export function maybeBeginContinuation(tab: TabState, env: StreamEnvelope): boolean {
+  if (tab.streaming) return false;
+  const isInit = env.type === "system" && (env as { subtype?: string }).subtype === "init";
+  const isContentfulAssistant =
+    env.type === "assistant" && Array.isArray(env.message?.content) && env.message.content.length > 0;
+  if (!isInit && !isContentfulAssistant) return false;
+  beginTurn(tab);
+  const asst: ChatMessage = { id: crypto.randomUUID(), role: "assistant", blocks: [], ts: Date.now() };
+  tab.messages = [...tab.messages, asst];
+  tab.streamingMsgId = asst.id;
+  tab.streamingMsgIdx = tab.messages.length - 1;
+  tab.activity = { currentLabel: "Background agent finished — responding", turnStartedAt: Date.now() };
+  return true;
+}
+
 // ── streaming pipeline ────────────────────────────────────────────────────
 
 function mutateStreaming(tab: TabState, fn: (m: ChatMessage) => ChatMessage) {
@@ -807,6 +832,10 @@ export function onStreamLine(tab: TabState, raw: string) {
     }
     return;
   }
+  // Idle tab + a real assistant frame = a CLI-initiated continuation turn
+  // (background agent finished). Scaffold it so the switch below streams into
+  // a fresh bubble instead of no-op'ing against a null streamingMsgId.
+  if (!tab.streaming) maybeBeginContinuation(tab, env);
   switch (env.type) {
     case "stream_event": {
       if (tab.currentTurnRecord) {

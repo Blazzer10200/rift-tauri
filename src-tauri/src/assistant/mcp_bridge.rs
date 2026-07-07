@@ -199,7 +199,8 @@ pub(super) fn tool_open_browser(args: &Value) -> Result<String, String> {
         .ok_or("missing `url`")?;
     bridge_call("open_browser", json!({ "url": url }), Duration::from_secs(10))?;
     Ok(format!(
-        "Opened {url} in Rift's in-app browser dock — the page is now visible to the user next to the chat."
+        "Opened {url} in Rift's in-app browser dock next to the chat. If the user is viewing a \
+         different chat tab right now, the page opens the moment they switch back to this one."
     ))
 }
 

@@ -11,6 +11,7 @@
 //! `hide` it whenever the dock isn't actually visible (dock closed, or a
 //! different workspace is active).
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -35,6 +36,59 @@ pub(crate) fn parse_url(raw: &str) -> Result<Url, String> {
         "about" if u.as_str() == "about:blank" => Ok(u),
         other => Err(format!("blocked URL scheme '{other}:' — only http/https are allowed")),
     }
+}
+
+/// The (host, port) to TCP-probe when `u` targets a loopback host; None for
+/// anything else (remote hosts are never probed — extra latency + an extra
+/// pre-connection for no benefit).
+fn loopback_target(u: &Url) -> Option<(String, u16)> {
+    let raw = u.host_str()?;
+    // `host_str` keeps IPv6 brackets ("[::1]") — strip for parse/connect.
+    let host = raw.trim_start_matches('[').trim_end_matches(']');
+    let is_loopback = host.eq_ignore_ascii_case("localhost")
+        || host.parse::<std::net::IpAddr>().map(|ip| ip.is_loopback()).unwrap_or(false);
+    if !is_loopback {
+        return None;
+    }
+    Some((host.to_string(), u.port_or_known_default()?))
+}
+
+/// Monotonic navigation generation — a newer `open_probed` supersedes any
+/// older one still parked in its loopback probe, so a stale probed URL can't
+/// clobber a navigation the user issued in the meantime.
+static OPEN_GEN: AtomicU64 = AtomicU64::new(0);
+
+/// Dev-server race: the assistant opens http://localhost:5173 moments after
+/// spawning the dev server — navigating immediately lands on WebView2's
+/// connection-refused page. For loopback targets, wait (bounded, ~8s) for the
+/// port to accept a TCP connection before navigating. Fail-open: when the
+/// window expires, navigation proceeds and the error page is the honest
+/// outcome.
+pub async fn open_probed(app: &AppHandle, url: &str, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
+    let u = parse_url(url)?;
+    let generation = OPEN_GEN.fetch_add(1, Ordering::AcqRel) + 1;
+    if let Some((host, port)) = loopback_target(&u) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(8);
+        loop {
+            match tokio::time::timeout(
+                Duration::from_millis(600),
+                tokio::net::TcpStream::connect((host.as_str(), port)),
+            )
+            .await
+            {
+                Ok(Ok(_)) => break,
+                _ => {}
+            }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(300)).await;
+        }
+    }
+    if OPEN_GEN.load(Ordering::Acquire) != generation {
+        return Ok(()); // superseded by a newer navigation while probing
+    }
+    open(app, url, x, y, w, h)
 }
 
 /// Create the child webview at the given window-relative rect (or, if it
@@ -278,6 +332,17 @@ mod tests {
         assert!(parse_url("https://example.com").is_ok());
         assert!(parse_url("http://example.com/path?q=1").is_ok());
         assert!(parse_url("about:blank").is_ok());
+    }
+
+    #[test]
+    fn loopback_target_detects_dev_hosts() {
+        let t = |s: &str| loopback_target(&Url::parse(s).unwrap());
+        assert_eq!(t("http://localhost:5173/x"), Some(("localhost".into(), 5173)));
+        assert_eq!(t("http://127.0.0.1:3000"), Some(("127.0.0.1".into(), 3000)));
+        assert_eq!(t("http://[::1]:8080"), Some(("::1".into(), 8080)));
+        assert_eq!(t("http://localhost"), Some(("localhost".into(), 80)));
+        assert_eq!(t("https://example.com"), None);
+        assert_eq!(t("http://192.168.1.10:3000"), None);
     }
 
     #[test]

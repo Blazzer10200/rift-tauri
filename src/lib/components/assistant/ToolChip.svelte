@@ -11,7 +11,7 @@
     FileText, FolderTree, Search, FilePen, FilePlus, Terminal, Globe,
     Wrench, Loader2, CheckCircle2, AlertCircle, ChevronRight, ListChecks,
     Bot, HelpCircle, FlagOff, Flag, BookOpen, Sparkles, Slash, Square, SkipForward,
-    GitBranch, GitCommitHorizontal, ExternalLink, Bell,
+    GitBranch, GitCommitHorizontal, AppWindow, Bell,
   } from "lucide-svelte";
   import { assistant, type ToolBlock } from "../../state/assistant.svelte";
   import { slide } from "svelte/transition";
@@ -212,7 +212,8 @@
     if (sn === "Grep" || sn === "grep") return Search;
     // Web.
     if (sn === "WebFetch" || sn === "WebSearch") return Globe;
-    if (sn === "open_browser") return ExternalLink;
+    // In-app browser dock — not an external link (the page opens INSIDE Rift).
+    if (sn === "open_browser") return AppWindow;
     if (sn === "notify") return Bell;
     // Local git (mcp__rift__git_*).
     if (sn === "git_commit") return GitCommitHorizontal;

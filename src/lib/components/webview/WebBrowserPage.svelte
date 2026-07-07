@@ -69,6 +69,11 @@
     return `https://duckduckgo.com/?q=${encodeURIComponent(t)}`;
   }
 
+  function hostLabel(u: string | null): string {
+    if (!u) return "";
+    try { return new URL(u).host || u; } catch { return u; }
+  }
+
   function rect(): { x: number; y: number; w: number; h: number } | null {
     if (!stageEl) return null;
     const r = stageEl.getBoundingClientRect();
@@ -263,6 +268,7 @@
       } else {
         loading = false;
         if (loadWatchdog) { clearTimeout(loadWatchdog); loadWatchdog = null; }
+        if (url) browserDock.setLastUrl(url);
       }
       if (!inputFocused && url) address = url;
     });
@@ -351,6 +357,17 @@
       <div class="wb-empty">
         <Globe size={40} />
         <p>Browse inside Rift — then <strong>Add to chat</strong> to let the assistant read the page you're on.</p>
+        {#if browserDock.lastUrl}
+          <button
+            class="wb-resume"
+            type="button"
+            onclick={() => { address = browserDock.lastUrl ?? ""; void go(); }}
+            title={browserDock.lastUrl}
+          >
+            <RotateCw size={13} />
+            <span>Reopen {hostLabel(browserDock.lastUrl)}</span>
+          </button>
+        {/if}
       </div>
     {/if}
   </div>
@@ -451,4 +468,15 @@
     text-align: center;
   }
   .wb-error { color: var(--danger); max-width: 480px; word-break: break-word; }
+  .wb-resume {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 28px; padding: 0 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg);
+    color: var(--fg-muted);
+    font: inherit; font-size: 12px;
+    cursor: pointer;
+  }
+  .wb-resume:hover { color: var(--fg); border-color: var(--accent); }
 </style>

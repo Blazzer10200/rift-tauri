@@ -1108,13 +1108,20 @@ class AssistantStore {
         "assistant://open-browser",
         (e) => {
           const tab = this.tabByCliSession(e.payload.session_id);
-          if (tab && tab === this.activeTab) {
+          if (!tab) return; // unknown session — drop
+          if (tab === this.activeTab) {
             // #85: the dock only mounts on the chat workspace (WebBrowserPage
             // consumes pendingUrl on mount) — an open_browser landing while the
             // user sits on Settings/AI Health would otherwise queue invisibly
             // until they wander back. Route to chat first, then open.
             workspace.setActive("chat");
             browserDock.openUrl(e.payload.url);
+          } else {
+            // A background pane must not hijack the dock out from under the
+            // focused pane — park the URL on ITS tab; opened when that tab
+            // regains focus (was: silently dropped, so the model reported
+            // "opened" for a page nobody ever saw).
+            tab.pendingBrowserUrl = e.payload.url;
           }
         },
       ),

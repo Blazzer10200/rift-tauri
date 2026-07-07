@@ -42,6 +42,128 @@ pub fn open_in_vscode(path: String) -> Result<(), String> {
         .map_err(|e| format!("Couldn't launch VS Code (is `code` on PATH?): {e}"))
 }
 
+/// Clickable file paths in chat (Markdown `.md-path` spans). Resolve `path`
+/// against the focused tab's workspace `root`, refuse anything that escapes
+/// it, then open it in the editor at the optional line. A bare filename (no
+/// separator) gets a bounded workspace search so `turn.rs` in prose still
+/// lands on the file. Directories open in the system file manager.
+#[tauri::command]
+pub async fn workspace_open_path(
+    app: tauri::AppHandle,
+    root: Option<String>,
+    path: String,
+    line: Option<u32>,
+) -> Result<(), String> {
+    let raw = path.trim().to_string();
+    if raw.is_empty() {
+        return Err("empty path".into());
+    }
+    let root = root
+        .filter(|r| !r.trim().is_empty())
+        .ok_or("No workspace folder is open")?;
+
+    // Filesystem walk + canonicalize off the async worker.
+    let raw_for_resolve = raw.clone();
+    let resolved = tokio::task::spawn_blocking(move || -> Result<std::path::PathBuf, String> {
+        let root = std::path::PathBuf::from(&root)
+            .canonicalize()
+            .map_err(|_| "workspace root not found".to_string())?;
+        let p = std::path::Path::new(&raw_for_resolve);
+        let candidate = if p.is_absolute() { p.to_path_buf() } else { root.join(p) };
+        let has_sep = raw_for_resolve.contains('/') || raw_for_resolve.contains('\\');
+        let resolved = match candidate.canonicalize() {
+            Ok(c) => Some(c),
+            // Bare filename that doesn't sit at the root — bounded search.
+            Err(_) if !has_sep => find_by_name(&root, &raw_for_resolve),
+            Err(_) => None,
+        };
+        let resolved =
+            resolved.ok_or_else(|| format!("Not found in this workspace: {raw_for_resolve}"))?;
+        // Containment AFTER canonicalize so a symlink can't escape the root.
+        if !resolved.starts_with(&root) {
+            return Err("path is outside the open workspace".into());
+        }
+        Ok(resolved)
+    })
+    .await
+    .map_err(|e| format!("resolve: {e}"))??;
+
+    if resolved.is_dir() {
+        use tauri_plugin_opener::OpenerExt;
+        return app
+            .opener()
+            .open_path(resolved.display().to_string(), None::<&str>)
+            .map_err(|e| format!("open folder: {e}"));
+    }
+    open_in_editor(&app, &resolved, line).await
+}
+
+/// Bounded workspace search for a bare filename — first match wins, heavy
+/// build/dep dirs skipped, hard entry cap so a giant tree can't stall the click.
+fn find_by_name(root: &std::path::Path, name: &str) -> Option<std::path::PathBuf> {
+    const SKIP: [&str; 8] =
+        ["node_modules", ".git", "target", ".svelte-kit", "build", "dist", ".next", ".venv"];
+    let mut seen = 0usize;
+    for entry in walkdir::WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| {
+            !(e.file_type().is_dir()
+                && e.file_name().to_str().map(|n| SKIP.contains(&n)).unwrap_or(false))
+        })
+    {
+        let Ok(e) = entry else { continue };
+        seen += 1;
+        if seen > 20_000 {
+            return None;
+        }
+        if e.file_type().is_file()
+            && e.file_name().to_str().map(|n| n.eq_ignore_ascii_case(name)).unwrap_or(false)
+        {
+            return e.path().canonicalize().ok();
+        }
+    }
+    None
+}
+
+/// `code -g path:line` (same cmd.exe metachar guard as `open_in_vscode` — F19),
+/// falling back to the OS default opener when the `code` CLI isn't available.
+/// Line hints only work through an editor CLI; the fallback ignores them.
+async fn open_in_editor(
+    app: &tauri::AppHandle,
+    path: &std::path::Path,
+    line: Option<u32>,
+) -> Result<(), String> {
+    let target = match line {
+        Some(l) if l > 0 => format!("{}:{l}", path.display()),
+        _ => path.display().to_string(),
+    };
+    let unsafe_for_cmd = cfg!(windows)
+        && target
+            .bytes()
+            .any(|b| matches!(b, b'&' | b'|' | b'<' | b'>' | b'^' | b'%' | b'"') || b < 0x20);
+    if !unsafe_for_cmd {
+        #[cfg(windows)]
+        let status = {
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            tokio::process::Command::new("cmd")
+                .args(["/C", "code", "-g", &target])
+                .creation_flags(CREATE_NO_WINDOW)
+                .status()
+                .await
+        };
+        #[cfg(not(windows))]
+        let status = tokio::process::Command::new("code").args(["-g", &target]).status().await;
+        if matches!(status, Ok(s) if s.success()) {
+            return Ok(());
+        }
+    }
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_path(path.display().to_string(), None::<&str>)
+        .map_err(|e| format!("open: {e}"))
+}
+
 /// B2 — AI Health turn-performance aggregate. Reads the persisted `turns.ndjson`
 /// (p50/p90 latency, cache-hit rate, cost-by-day) off the async executor so the
 /// file parse never stalls a Tauri worker. Returns a zero-filled aggregate when
