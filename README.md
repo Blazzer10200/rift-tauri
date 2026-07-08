@@ -1,36 +1,73 @@
-# Rift
+<p align="center">
+  <img src="design-system/assets/rift-logo.png" width="96" alt="Rift logo" />
+</p>
 
-A local-workspace coding assistant for Windows. Rift wraps the Claude CLI in a native Tauri shell: pick a workspace folder, chat with Claude, and let it read, search, edit, and run git against that folder — all on your machine, no remote connections.
+<h1 align="center">Rift</h1>
 
-Tauri 2 (Rust backend) + SvelteKit 2 / Svelte 5 (runes) + Tailwind 4. The backend spawns the Claude CLI as a subprocess and hosts a local stdio MCP server exposing workspace-scoped `read_file` / `list_dir` / `grep` plus local-git tools. Velopack installer (per-user, installs as `rift-tauri.exe`, no admin) for first install; thereafter self-updates via Velopack (background download + apply-on-restart, no mandatory signing key).
+<p align="center">
+  A local-first coding assistant for Windows, built on Claude.<br/>
+  Point it at a folder — chat, edit, search, and run git against it.<br/>
+  <strong>No server, no telemetry — everything runs on your machine.</strong>
+</p>
 
-## Status
+<p align="center">
+  <a href="https://github.com/Blazzer10200/rift/releases"><img src="https://img.shields.io/github/v/release/Blazzer10200/rift?label=download&color=10b981" alt="Latest release" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license" /></a>
+  <img src="https://img.shields.io/badge/platform-Windows%2011-0078d4" alt="Windows 11" />
+  <img src="https://img.shields.io/badge/Tauri%202-Rust%20%2B%20Svelte%205-f74c00" alt="Tauri 2" />
+</p>
 
-Pre-1.0 (`-alpha`). Pure-assistant — the former SFTP/sync/server/RCON half was fully removed (2026-06-03). See [`docs/HANDOFF.md`](docs/HANDOFF.md) for the current in-flight state.
+<!-- hero screenshot: docs/screenshot.png -->
 
-## Quick links
+## Install
 
-- **Download (end users):** latest `Rift-win-Setup.exe` on the [releases page](https://github.com/Blazzer10200/rift/releases). Per-user install, no admin — see [`docs/DEVELOPING.md` §1](docs/DEVELOPING.md#1-end-user-install-onboarding).
-- **How it fits together:** [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-- **Install, build, contribute:** [`docs/DEVELOPING.md`](docs/DEVELOPING.md)
-- **Release history:** [`docs/CHANGELOG.md`](docs/CHANGELOG.md)
-- **Issue tracker:** [`docs/ISSUES.md`](docs/ISSUES.md)
-- **Accepted security advisories:** [`docs/SECURITY.md`](docs/SECURITY.md)
+1. Download the latest `Rift-win-Setup.exe` from the **[releases page](https://github.com/Blazzer10200/rift/releases)** and run it.
+2. Per-user install, no admin needed. Rift self-updates from then on (background download, apply on restart, one-click consent).
+3. On first launch, connect your Claude account (Claude CLI login or an API key — stored in the Windows Credential Manager, never on disk).
+
+**Requirements:** Windows 11 x64 and a [Claude](https://claude.com) subscription or API key. macOS / Linux build from source but aren't packaged or tested yet.
 
 ## What it does
 
-- **Workspace chat** — point Rift at a folder; Claude works scoped to it via a local MCP server (`read_file` / `list_dir` / `grep`).
-- **Local git** — `git_status` / `diff` / `log` / `pull` / `commit` / `push` exposed as assistant tools.
-- **Per-tab sessions** — multiple concurrent chats/panes, each with its own model, permission mode, and thinking-effort.
-- **Permission modes** — ask-before-edits, edit-automatically, plan, auto, or bypass — switchable per turn.
-- **Voice dictation** — push-to-talk speech-to-text (Web Speech or local Whisper) plus a prompt-enhance wand.
-- **Browser dock** — Claude can open docs or a local dev server in an in-app browser pane beside the chat.
-- **Self-update** — Velopack checks on launch + every 6h, downloads in the background, and applies on restart (one click to consent, then unattended).
+- **Workspace chat** — pick a folder; Claude works scoped to it through a local MCP server (`read_file` / `list_dir` / `grep`). Nothing outside the workspace is reachable.
+- **Local git built in** — `status` / `diff` / `log` / `commit` / `push` / `pull` exposed as assistant tools.
+- **Live streaming UI** — watch tool calls form in real time: shell commands render as terminal IN/OUT blocks, edits as diffs, plans as task cards, sub-agents as live inline cards with a pinned HUD.
+- **Per-tab sessions** — multiple concurrent chats, each with its own model, permission mode, and thinking-effort dial. Mid-chat model switching included.
+- **Permission modes** — ask-before-edits, auto-edit, plan-first, or bypass — switchable per turn.
+- **Voice dictation** — push-to-talk speech-to-text plus a prompt-enhance wand.
+- **Browser dock** — the assistant can open docs or your local dev server in an in-app pane beside the chat.
+- **Local LLM (experimental)** — point Rift at an Ollama / LiteLLM endpoint instead of the cloud.
+- **Self-update** — Velopack checks on launch and every 6 hours; updates apply on restart.
 
-## Platforms
+## How it works
 
-Windows 11 (primary). macOS / Linux are buildable from source but not packaged or tested.
+Tauri 2 (Rust) shell around a SvelteKit 2 / Svelte 5 frontend. The backend spawns the Claude CLI as a per-turn subprocess (with a warm pool so turns start fast) and hosts a local stdio MCP server that exposes the workspace-scoped file, search, and git tools plus a small UI bridge (`ask_user` / `open_browser` / `notify`) over a loopback socket. There is no remote component: your code, your prompts, and your keys never leave the machine except for the model API call itself.
+
+Full picture in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+## Building from source
+
+```
+npm install
+npm run tauri dev     # dev shell with hot reload
+npm run tauri build   # release bundle
+```
+
+Prereqs, the release pipeline, and the contributor map live in [`docs/DEVELOPING.md`](docs/DEVELOPING.md).
+
+## Project docs
+
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — how the pieces fit together
+- [`docs/DEVELOPING.md`](docs/DEVELOPING.md) — install, build, contribute
+- [`docs/CHANGELOG.md`](docs/CHANGELOG.md) — release history
+- [`docs/ISSUES.md`](docs/ISSUES.md) — the live issue tracker
+- [`docs/SECURITY.md`](docs/SECURITY.md) — security model + accepted advisories
+- [`docs/HANDOFF.md`](docs/HANDOFF.md) — in-flight engineering state (kept current every session)
+
+## Status
+
+Pre-1.0, moving fast — releases ship continuously via tag-driven CI to the [`rift`](https://github.com/Blazzer10200/rift) feed repo. See the [changelog](docs/CHANGELOG.md) for what's landing.
 
 ## License
 
-**Proprietary — © 2026 Blazzer10200. All rights reserved.** This source is private and not licensed for use, modification, or redistribution. The distributed binaries (via [`rift`](https://github.com/Blazzer10200/rift)) are provided for use as-is; the source carries no open-source grant.
+[MIT](LICENSE) © 2026 Braison Swilling (Blazzer10200)
