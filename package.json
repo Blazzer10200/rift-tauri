@@ -14,7 +14,8 @@
     "test": "vitest run",
     "cdp:serve": "node scripts/cdp/serve.cjs",
     "cdp:dev": "pwsh -NoProfile -File scripts/run-dev-deelevated.ps1 -WaitForCdp",
-    "cdp:doctor": "bash scripts/cdp/c.sh doctor"
+    "cdp:doctor": "bash scripts/cdp/c.sh doctor",
+    "cdp:clean": "bash scripts/cdp/c.sh reap --all"
   },
   "license": "UNLICENSED",
   "private": true,

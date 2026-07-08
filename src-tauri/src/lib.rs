@@ -18,6 +18,7 @@ pub mod browser;
 pub mod certs;
 pub mod commands;
 pub mod diagnostics;
+pub mod job_object;
 pub mod secrets;
 pub mod state;
 pub mod stt;
@@ -119,6 +120,17 @@ pub fn run() {
         assistant::mcp_server::run_stdio();
         return;
     }
+
+    // NOTE: a Windows Job Object (KILL_ON_JOB_CLOSE) was prototyped here to
+    // structurally reap all children on abnormal exit — but it's UNSAFE with
+    // Velopack self-update: Velopack spawns `Update.exe` via CreateProcessW with
+    // NO CREATE_BREAKAWAY_FROM_JOB (verified in velopack 1.2.0 process_win.rs),
+    // so it would inherit the kill-on-close job and be terminated the instant the
+    // old Rift exits — bricking the swap+relaunch. Simple job flags can't keep
+    // WebView2/claude children IN the job while letting Update.exe OUT. See
+    // src/job_object.rs (kept, not called) + docs for the safe designs
+    // (JobObjectAssociateCompletionPort watcher process, or CREATE_BREAKAWAY on
+    // our own Update.exe wrapper). Flagged for owner — do NOT wire in blindly.
 
     // Velopack: install/update/uninstall hooks run FIRST on normal launches
     // (the installer passes `--veloapp-*` args). In all other cases this is a

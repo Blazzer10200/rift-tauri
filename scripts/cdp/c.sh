@@ -26,6 +26,8 @@
 #   bash scripts/cdp/c.sh nav settings                   # jump to a workspace (chat/home/settings/ai-health/local-llm) + look
 #   bash scripts/cdp/c.sh ready                          # block until app mounted + idle (no settle guessing)
 #   bash scripts/cdp/c.sh doctor                         # diagnose WHY CDP is down (wrapper/port/ELEVATION) + print the fix
+#   bash scripts/cdp/c.sh reap                           # kill ORPHANED dev procs (webview/MCP leak), keep the live instance
+#   bash scripts/cdp/c.sh reap --all                     # reap ALL dev procs incl. running instance (full reset) = npm run cdp:clean
 #   bash scripts/cdp/c.sh reload                          # hard cache-busting reload (stuck HMR)
 #   bash scripts/cdp/c.sh shutdown
 #
@@ -364,6 +366,50 @@ case "$cmd" in
         + "  (" + ((.elapsedMs // 0)|tostring) + "ms, " + ((.polls // 0)|tostring) + " polls)"
       else "[ready] ✗ timed out — app never mounted (" + ((.elapsedMs // 0)|tostring) + "ms)" end'
     ;;
+  reap|clean)
+    # reap [--all] — kill ORPHANED dev processes that leak after an ungraceful
+    # exit (Ctrl+C on tauri dev, VS Code closing its terminal, a hard-kill). These
+    # bypass Rift's RunEvent::Exit reap, so WebView2 trees + rift-tauri MCP children
+    # linger in Task Manager burning memory. STRICTLY path-scoped: only rift-tauri
+    # under the DEV target dir (cargo-targets / src-tauri\target) + EBWebView-Dev
+    # webviews + stale vite. NEVER touches the user's installed prod Rift (that
+    # lives under %LOCALAPPDATA%\Rift, a different path + user-data-dir).
+    #   c.sh reap        — reap orphans, KEEP a live/healthy dev instance (default)
+    #   c.sh reap --all  — reap EVERYTHING dev incl. a running instance (full reset)
+    all=""; [ "${1:-}" = "--all" ] && all="1"
+    powershell -NoProfile -Command "
+      \$all = '$all' -eq '1'
+      # The live dev instance to preserve (unless --all): the one owning :9222's parent chain, or the windowed one.
+      \$keep = @()
+      if (-not \$all) {
+        \$c = Get-NetTCPConnection -LocalPort 9222 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (\$c) { \$wv = Get-CimInstance Win32_Process -Filter \"ProcessId=\$(\$c.OwningProcess)\" -ErrorAction SilentlyContinue; if (\$wv) { \$keep += \$wv.ParentProcessId } }
+        # also keep the windowed dev app + its whole claude/MCP subtree
+        Get-Process rift-tauri -ErrorAction SilentlyContinue | Where-Object { \$_.MainWindowTitle -ne '' -and \$_.Path -like '*cargo-targets*' } | ForEach-Object { \$keep += \$_.Id }
+      }
+      \$keepSet = @{}; \$keep | ForEach-Object { \$keepSet[\$_] = \$true }
+      # Build the keep SUBTREE (a kept app's claude children + their rift MCP grandchildren must survive too)
+      if (\$keep.Count -gt 0) {
+        \$allProcs = Get-CimInstance Win32_Process
+        \$changed = \$true
+        while (\$changed) { \$changed = \$false; foreach (\$p in \$allProcs) { if (\$keepSet[\$p.ParentProcessId] -and -not \$keepSet[\$p.ProcessId]) { \$keepSet[\$p.ProcessId] = \$true; \$changed = \$true } } }
+      }
+      \$killedRift = 0; \$killedWv = 0; \$killedVite = 0
+      # 1) orphaned dev rift-tauri.exe (path-scoped, not in keep-subtree)
+      Get-CimInstance Win32_Process -Filter \"Name='rift-tauri.exe'\" | Where-Object { (\$_.ExecutablePath -like '*cargo-targets*' -or \$_.ExecutablePath -like '*src-tauri\\target*') -and -not \$keepSet[\$_.ProcessId] } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue; \$killedRift++ }
+      # 2) orphaned EBWebView-Dev webview trees (not owned by a kept rift)
+      Get-CimInstance Win32_Process -Filter \"Name='msedgewebview2.exe'\" | Where-Object { \$_.CommandLine -like '*Rift?EBWebView-Dev*' -and -not \$keepSet[\$_.ParentProcessId] } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue; \$killedWv++ }
+      # 3) stale vite on 1420 ONLY if we killed the app that owned it (--all), else leave it
+      if (\$all) { try { Get-NetTCPConnection -LocalPort 1420 -State Listen -ErrorAction Stop | ForEach-Object { Stop-Process -Id \$_.OwningProcess -Force -ErrorAction SilentlyContinue; \$killedVite++ } } catch {} }
+      \$viteMsg = if (\$all) { ', '+\$killedVite+' vite' } else { '' }
+      Write-Output ('[reap] killed '+\$killedRift+' orphan rift-tauri.exe, '+\$killedWv+' EBWebView-Dev webview proc(s)'+\$viteMsg)
+      if (-not \$all -and \$keep.Count -gt 0) { Write-Output ('[reap] preserved live dev instance (PID '+(\$keep -join ',')+') + its subtree. Use --all to reap everything.') }
+      # Report what remains
+      \$rn = @(Get-CimInstance Win32_Process -Filter \"Name='rift-tauri.exe'\" | Where-Object { \$_.ExecutablePath -like '*cargo-targets*' }).Count
+      \$wn = @(Get-CimInstance Win32_Process -Filter \"Name='msedgewebview2.exe'\" | Where-Object { \$_.CommandLine -like '*Rift?EBWebView-Dev*' }).Count
+      Write-Output ('[reap] remaining dev: '+\$rn+' rift-tauri, '+\$wn+' webview')
+    "
+    ;;
   doctor)
     # doctor — diagnose WHY CDP is down and print the exact fix. Runs a layered
     # check: wrapper (9223) -> WebView2 CDP (9222) -> ELEVATION (the #1 killer on
@@ -417,7 +463,7 @@ case "$cmd" in
     curl -sS -X POST "$API/shutdown" 2>/dev/null || true
     ;;
   *)
-    echo "usage: $0 [-t main|browser] {health|doctor|targets|look|act|nav|ready|state|page|ax|measure|console|eval|type|click|wait|shot|shot-sel|baseline|diff|batch|key|reload|reset-viewport|diag|shutdown} ..." >&2
+    echo "usage: $0 [-t main|browser] {health|doctor|reap|targets|look|act|nav|ready|state|page|ax|measure|console|eval|type|click|wait|shot|shot-sel|baseline|diff|batch|key|reload|reset-viewport|diag|shutdown} ..." >&2
     exit 2
     ;;
 esac
