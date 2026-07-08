@@ -44,7 +44,7 @@ scripts/cdp/.audit/
 # NEVER commit. release.ps1 auto-sources .secrets/env.ps1 if present.
 .secrets/
 
-# Internal working docs — kept locally, never shipped publicly (purged from history at public debut)
+# Internal working docs — local only, not part of the public tree
 /CLAUDE.md
 /docs/HANDOFF.md
 /docs/ISSUES.md
