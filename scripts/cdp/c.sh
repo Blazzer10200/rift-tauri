@@ -23,6 +23,9 @@
 #   bash scripts/cdp/c.sh shot-sel ".tabs-rail"          # clip to a selector
 #   bash scripts/cdp/c.sh shot-sel ".chat" jpeg 65
 #   bash scripts/cdp/c.sh batch '<json>'                 # raw batch body
+#   bash scripts/cdp/c.sh nav settings                   # jump to a workspace (chat/home/settings/ai-health/local-llm) + look
+#   bash scripts/cdp/c.sh ready                          # block until app mounted + idle (no settle guessing)
+#   bash scripts/cdp/c.sh doctor                         # diagnose WHY CDP is down (wrapper/port/ELEVATION) + print the fix
 #   bash scripts/cdp/c.sh reload                          # hard cache-busting reload (stuck HMR)
 #   bash scripts/cdp/c.sh shutdown
 #
@@ -310,11 +313,111 @@ case "$cmd" in
           + (if (.fields|type)=="object" and (.fields|length)>0 then " " + (.fields|tojson) else "" end))
       end'
     ;;
+  nav)
+    # nav <home|chat|settings|ai-health|local-llm|workspace> — jump to a workspace
+    # in ONE call (click the sidebar nav button by aria-label) + settle + look.
+    # No selector-hunting. Names are the friendly ids; aliased to the aria titles.
+    dest="${1:-}"; lookSel="${2:-}"; settle="${3:-450}"
+    if [ -z "$dest" ]; then echo "usage: $0 nav <home|chat|settings|ai-health|local-llm> [lookSel] [settleMs]" >&2; exit 2; fi
+    case "$dest" in
+      home|workspace|projects) label="Workspace" ;;
+      chat)                    label="Chat" ;;
+      settings)                label="Settings" ;;
+      ai-health|health|aihealth) label="AI Health" ;;
+      local-llm|local|llm)     label="Local LLM" ;;
+      *) label="$dest" ;;  # pass a literal aria-label through
+    esac
+    sel="[aria-label=\"$label\"]"
+    clickop="$(jq -nc --arg s "$sel" '{op:"click",params:{selector:$s}}')"
+    body="$(jq -nc --argjson click "$clickop" --argjson ms "$settle" --arg ls "$lookSel" \
+      '{ops:[ $click, {op:"sleep",params:{ms:$ms}}, ({op:"look"} + (if $ls=="" then {} else {params:{selector:$ls}} end)) ]}')"
+    resp="$(post batch "$body")"
+    printf '%s' "$resp" | jq -r --arg d "$dest" '
+      .results as $r | ($r[-1]) as $l |
+      (if ($r[0].error // $r[0].result.error) then "[nav:" + $d + "] ✗ click failed: " + (($r[0].error // $r[0].result.error)|tostring) else "[nav:" + $d + "] → clicked, settled " + (($r[1].sleptMs // 0)|tostring) + "ms" end),
+      "[look] " + ($l.page.location // "?") + " · ws=" + ($l.page.workspaceActiveId // "?")
+        + " · bubbles=" + (($l.page.bubbleCount // 0)|tostring),
+      "[errors] " + (($l.errorCount // 0)|tostring),
+      ($l.errors[]? | "  ✗ " + (.text // "?")),
+      ($l.shot.path // ($l.shot.error // "(no shot)"))'
+    ;;
+  ready)
+    # ready [timeoutMs] — block until the app is MOUNTED and IDLE: .app exists,
+    # fonts loaded, and NOT streaming. Kills the "guess a settle time before look"
+    # habit. Returns the page state once settled (or a timeout note).
+    t="${1:-30000}"
+    js='(() => {
+      const app = document.querySelector(".app");
+      if (!app) return false;
+      if (document.fonts && document.fonts.status !== "loaded") return false;
+      const streaming = !!(window.__assistant && window.__assistant.streaming);
+      const onboarding = !!document.querySelector(".ob-host");
+      return { mounted: true, streaming, onboarding, ws: document.documentElement.dataset.mode };
+    })()'
+    body="$(jq -nc --arg js "$js" --argjson t "$t" '{js:$js,timeoutMs:$t,intervalMs:200}')"
+    resp="$(post wait "$body")"
+    printf '%s' "$resp" | jq -r '
+      if .error then "[ready] ✗ " + .error
+      elif (.value|type)=="object" then "[ready] ✓ app mounted"
+        + (if .value.onboarding then " · ONBOARDING visible" else "" end)
+        + (if .value.streaming then " · streaming" else " · idle" end)
+        + "  (" + ((.elapsedMs // 0)|tostring) + "ms, " + ((.polls // 0)|tostring) + " polls)"
+      else "[ready] ✗ timed out — app never mounted (" + ((.elapsedMs // 0)|tostring) + "ms)" end'
+    ;;
+  doctor)
+    # doctor — diagnose WHY CDP is down and print the exact fix. Runs a layered
+    # check: wrapper (9223) -> WebView2 CDP (9222) -> ELEVATION (the #1 killer on
+    # WebView2 150.x). Turns a bare "fetch failed" into an actionable next step.
+    cdp_host="${RIFT_CDP_HOST:-127.0.0.1}"; cdp_port="${RIFT_CDP_PORT:-9222}"
+    api_ok=0; cdp_ok=0
+    echo "[doctor] Rift CDP diagnostic"
+    # 1) wrapper on 9223
+    if curl -sS --max-time 3 "$API/health" >/dev/null 2>&1; then
+      hb="$(curl -sS --max-time 3 "$API/health" 2>/dev/null)"
+      if [ -n "$(printf '%s' "$hb" | jq -r 'select(.ok==true) | .ok' 2>/dev/null)" ]; then
+        api_ok=1; cdp_ok=1
+        echo "  ✓ wrapper (9223): up   ✓ WebView2 CDP ($cdp_port): reachable"
+        printf '%s' "$hb" | jq -r '"  ✓ target=" + .target + " url=" + (.url//"?") + " pingMs=" + ((.pingMs//0)|tostring)'
+      else
+        api_ok=1
+        echo "  ✓ wrapper (9223): up"
+        echo "  ✗ WebView2 CDP ($cdp_port): wrapper is up but can't reach it — $(printf '%s' "$hb" | jq -r '.error // "unknown"')"
+      fi
+    else
+      echo "  ✗ wrapper (9223): NOT running  →  start it:  npm run cdp:serve"
+    fi
+    # 2) direct WebView2 CDP probe (independent of the wrapper)
+    if [ "$cdp_ok" -eq 0 ]; then
+      if curl -sS --max-time 3 "http://$cdp_host:$cdp_port/json/version" >/dev/null 2>&1; then
+        echo "  ✓ WebView2 CDP ($cdp_port): port IS bound (so the wrapper just needs a (re)start: npm run cdp:serve)"
+      else
+        echo "  ✗ WebView2 CDP ($cdp_port): port NOT bound"
+        # 3) is a dev rift-tauri.exe even running?
+        devpids="$(powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter \"Name='rift-tauri.exe'\" | Where-Object { \$_.ExecutablePath -like '*cargo-targets*' -or \$_.ExecutablePath -like '*src-tauri\\target*' }).ProcessId -join ','" 2>/dev/null | tr -d '\r')"
+        if [ -z "$devpids" ]; then
+          echo "     → the dev app isn't running.  Launch it:  pwsh -NoProfile -File scripts/run-dev-deelevated.ps1 -WaitForCdp"
+        else
+          echo "     → dev app IS running (PID $devpids) but CDP didn't bind. Checking elevation…"
+          # 4) ELEVATION — the WebView2 150.x killer
+          elev="$(powershell -NoProfile -Command "\$id=[System.Security.Principal.WindowsIdentity]::GetCurrent(); (New-Object System.Security.Principal.WindowsPrincipal(\$id)).IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)" 2>/dev/null | tr -d '\r ')"
+          wv_dbg="$(powershell -NoProfile -Command "\$p=Get-CimInstance Win32_Process -Filter \"Name='msedgewebview2.exe'\" | Where-Object { \$_.CommandLine -like '*Rift?EBWebView-Dev*' -and \$_.CommandLine -notlike '*--type=*' } | Select-Object -First 1; if(\$p){[bool](\$p.CommandLine -match 'remote-debugging-port')}else{'no-webview'}" 2>/dev/null | tr -d '\r ')"
+          echo "     · this shell elevated: $elev   · webview has debug-port arg: $wv_dbg"
+          if [ "$wv_dbg" = "False" ]; then
+            echo "     ┃ DIAGNOSIS: WebView2 launched WITHOUT the debug port. This is the"
+            echo "     ┃ WebView2 150.x elevated-process regression (WebView2Feedback#5640)."
+            echo "     ┃ FIX — relaunch dev at MEDIUM integrity (kills the stale one first):"
+            echo "     ┃   pwsh -NoProfile -File scripts/run-dev-deelevated.ps1 -WaitForCdp"
+            echo "     ┃ then: npm run cdp:serve   (wrapper)   &&   bash scripts/cdp/c.sh look"
+          fi
+        fi
+      fi
+    fi
+    ;;
   shutdown)
     curl -sS -X POST "$API/shutdown" 2>/dev/null || true
     ;;
   *)
-    echo "usage: $0 [-t main|browser] {health|targets|look|act|state|page|ax|measure|console|eval|type|click|wait|shot|shot-sel|baseline|diff|batch|key|reload|reset-viewport|diag|shutdown} ..." >&2
+    echo "usage: $0 [-t main|browser] {health|doctor|targets|look|act|nav|ready|state|page|ax|measure|console|eval|type|click|wait|shot|shot-sel|baseline|diff|batch|key|reload|reset-viewport|diag|shutdown} ..." >&2
     exit 2
     ;;
 esac

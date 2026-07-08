@@ -12,7 +12,9 @@
     "check:tokens": "node design-system/check-tokens.mjs",
     "tauri": "tauri",
     "test": "vitest run",
-    "cdp:serve": "node scripts/cdp/serve.cjs"
+    "cdp:serve": "node scripts/cdp/serve.cjs",
+    "cdp:dev": "pwsh -NoProfile -File scripts/run-dev-deelevated.ps1 -WaitForCdp",
+    "cdp:doctor": "bash scripts/cdp/c.sh doctor"
   },
   "license": "UNLICENSED",
   "private": true,

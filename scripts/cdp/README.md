@@ -10,11 +10,30 @@ Claude (bash)  ->  curl http://127.0.0.1:9223  ->  serve.cjs (persistent ws)  ->
 
 `serve.cjs` is a persistent Node HTTP wrapper. It holds ONE websocket to WebView2 open for the session, so each Claude command is ~40-60ms total instead of ~700-900ms (PowerShell cold-start path).
 
-## Enable
+## Enable — the one-command path (2026-07-08)
 
-Already wired:
-- `scripts/run-dev.bat` sets `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222` before launching dev. No prod impact.
-- Start the wrapper: `npm run cdp:serve` (or `node scripts/cdp/serve.cjs`). Runs in background while dev is up.
+From ANY shell (elevated or not), fully bring up CDP:
+```bash
+npm run cdp:dev      # launch dev at MEDIUM IL (de-elevates if needed) + wait for :9222.
+                     #   Kills stale dev instances FIRST — no orphan-window sprawl.
+npm run cdp:serve    # start the wrapper (background). Then you're live:
+bash scripts/cdp/c.sh look
+```
+If anything's off: `npm run cdp:doctor` (aka `bash scripts/cdp/c.sh doctor`) tells you exactly what and how to fix it.
+
+Under the hood:
+- `scripts/run-dev-deelevated.ps1` is the robust launcher: kill-stale-first → de-elevate to medium IL → launch → optional `-WaitForCdp`. `run-dev.bat` still works for a manual double-click from Explorer (already medium IL there).
+- The wrapper (`serve.cjs`) holds one persistent ws to WebView2 :9222 and exposes the HTTP API on :9223. Runs in background while dev is up.
+
+## ⚠ WebView2 150.x + ELEVATION — the #1 "CDP won't bind" cause (2026-07-08)
+
+**Symptom:** dev app is up (window renders, vite on :1420, bridge listening) but `:9222` never binds — `curl 127.0.0.1:9222/json/version` hangs/empties, `c.sh health` = `fetch failed`, and the WebView2 browser process shows **no** `--remote-debugging-port` in its args even though `--user-data-dir` (from `WEBVIEW2_USER_DATA_FOLDER`) IS present.
+
+**Root cause:** WebView2 **Runtime 150.0.4078.48** added a "trusted origin check" that **refuses to open the DevTools remote-debugging port when the host process runs ELEVATED** (admin / High Integrity Level). Confirmed v150 regression — [WebView2Feedback#5640](https://github.com/MicrosoftEdge/WebView2Feedback/issues/5640) (worked on Runtime 149). The env var propagates fine; the runtime just won't bind the socket for a High-IL process.
+
+**Who hits it:** a normal double-click of `run-dev.bat` from Explorer runs at **medium IL** → works. But launching dev from an **elevated** shell (admin terminal, or **Claude Code running elevated**) inherits High IL → CDP silently never binds. This is NOT flaky — it fails deterministically when elevated, works deterministically when not. (`--remote-allow-origins=*` is unrelated belt-and-suspenders, NOT the fix.)
+
+**Fix:** launch dev at **medium IL**. Use `pwsh -NoProfile -File scripts/run-dev-deelevated.ps1` — it detects elevation and, if elevated, de-elevates via a one-shot scheduled task (`/RL LIMITED`) so the dev server + WebView2 run at the user's normal level and CDP binds normally. From a non-elevated shell it just launches directly. Verified: 9222 binds in ~6s at medium IL, `c.sh look` returns a live screenshot. (Other options, heavier: pin WebView2 Fixed Version 149 via `BrowserExecutableFolder`; or wait for MS to ship the runtime fix.)
 
 ## Bash helper
 
@@ -23,6 +42,9 @@ Already wired:
 ```bash
 bash scripts/cdp/c.sh look                                     # VERIFY PRIMITIVE: state+errors+shot, path on last line
 bash scripts/cdp/c.sh look ".chat"                             # same, screenshot clipped to a selector
+bash scripts/cdp/c.sh doctor                                   # WHY is CDP down? layered diagnosis (wrapper/port/ELEVATION) + fix
+bash scripts/cdp/c.sh nav settings                             # jump to a workspace (home/chat/settings/ai-health/local-llm) + look
+bash scripts/cdp/c.sh ready                                    # block until app mounted + idle (kills settle-time guessing)
 bash scripts/cdp/c.sh health                                   # smoke + real eval ping (pingMs)
 bash scripts/cdp/c.sh state                                    # assistant snapshot (incl. workspaceActiveId)
 bash scripts/cdp/c.sh page                                     # generic "where am I" (every workspace)

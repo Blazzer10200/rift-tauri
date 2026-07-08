@@ -1033,7 +1033,18 @@ const routes = {
             const r = await cdp('Runtime.evaluate', { expression: '1', returnByValue: true }, 3000, target);
             const ok = r.result?.result?.value === 1;
             return { ok, target, url: t.url, title: t.title, pingMs: Date.now() - t0, wsOpen: conn(target).ws?.readyState === WebSocket.OPEN };
-        } catch (e) { return { ok: false, target, error: e.message }; }
+        } catch (e) {
+            // Can't reach WebView2 CDP (:9222). The #1 cause on WebView2 150.x is
+            // the elevated-process regression (WebView2Feedback#5640) — the dev
+            // app is up but WebView2 won't open the debug port because the host
+            // runs at High Integrity Level. Surface an actionable hint instead of
+            // a bare "fetch failed" so nobody re-debugs it from scratch.
+            const out = { ok: false, target, error: e.message };
+            if (/fetch failed|ECONNREFUSED|CDP \/json|no main page target/i.test(e.message || '')) {
+                out.hint = 'WebView2 CDP :9222 unreachable. If the dev app IS running, this is almost always the WebView2 150.x elevated-process regression — relaunch dev at MEDIUM integrity: `pwsh -NoProfile -File scripts/run-dev-deelevated.ps1 -WaitForCdp`. Full diagnosis: `bash scripts/cdp/c.sh doctor`.';
+            }
+            return out;
+        }
     },
     'GET /targets': async () => {
         try {
