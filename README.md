@@ -5,7 +5,7 @@
 <h1 align="center">Rift</h1>
 
 <p align="center">
-  A local-first coding assistant for Windows, powered by Claude Code.<br/>
+  Claude Code as a native Windows desktop app.<br/>
   Point it at a folder — chat, edit, search, and run git against it.<br/>
   <strong>No server, no telemetry — everything runs on your machine.</strong>
 </p>
