@@ -732,8 +732,8 @@ tap, fill it in with a CONCRETE machine value so Rift can apply it directly. Use
 (e.g. \"batch your tool calls\") that no single setting captures.\n\
 - kind \"effort\": value is one of \"none\"|\"smart\"|\"deep\"|\"ultra\" — the default reasoning tier. Lower \
 = cheaper/faster. Recommend lowering it only if the usage suggests over-spend on simple turns.\n\
-- kind \"model\": value is one of \"opus\"|\"sonnet\"|\"haiku\"|\"fable\" — the default model. Recommend a cheaper default \
-(sonnet/haiku) when an expensive model dominates spend on routine work. \"fable\" is Anthropic's most capable model \
+- kind \"model\": value is one of \"opus\"|\"sonnet\"|\"fable\" — the default model. Recommend a cheaper default \
+(sonnet) when an expensive model dominates spend on routine work. \"fable\" is Anthropic's most capable model \
 (1M context) — suggest it as a STEP-UP when the user is hitting quality ceilings or context limits on hard work, not \
 as a cost lever. Only recommend \"fable\" if the snapshot shows it's available to them (it appears in the model lineup).\n\
 - kind \"budget\": value is a positive NUMBER of US dollars — a per-turn spend ceiling. ONLY valid when the \

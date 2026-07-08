@@ -58,6 +58,19 @@ fn loopback_target(u: &Url) -> Option<(String, u16)> {
 /// clobber a navigation the user issued in the meantime.
 static OPEN_GEN: AtomicU64 = AtomicU64::new(0);
 
+/// Serializes the probe's final generation check + `open()` against the
+/// OPEN_GEN bumps in `hide`/`close`. Without it a dismiss landing between the
+/// generation load and `open()`'s `show()` is silently undone (check-then-act
+/// gap in the very mechanism meant to prevent that reopen).
+static NAV_GATE: Mutex<()> = Mutex::new(());
+
+fn nav_gate() -> std::sync::MutexGuard<'static, ()> {
+    match NAV_GATE.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    }
+}
+
 /// Dev-server race: the assistant opens http://localhost:5173 moments after
 /// spawning the dev server — navigating immediately lands on WebView2's
 /// connection-refused page. For loopback targets, wait (bounded, ~8s) for the
@@ -85,8 +98,9 @@ pub async fn open_probed(app: &AppHandle, url: &str, x: f64, y: f64, w: f64, h: 
             tokio::time::sleep(Duration::from_millis(300)).await;
         }
     }
+    let _gate = nav_gate();
     if OPEN_GEN.load(Ordering::Acquire) != generation {
-        return Ok(()); // superseded by a newer navigation while probing
+        return Ok(()); // superseded by a newer navigation/dismiss while probing
     }
     open(app, url, x, y, w, h)
 }
@@ -172,7 +186,9 @@ pub fn show(app: &AppHandle) -> Result<(), String> {
 pub fn hide(app: &AppHandle) -> Result<(), String> {
     // A hide supersedes any `open_probed` still parked in its loopback probe —
     // without this the probe resolves up to 8s later and open()'s unconditional
-    // show() reopens the dock the user just dismissed.
+    // show() reopens the dock the user just dismissed. The gate makes the bump
+    // atomic with the probe's final check+open.
+    let _gate = nav_gate();
     OPEN_GEN.fetch_add(1, Ordering::AcqRel);
     if let Some(wv) = app.get_webview(LABEL) {
         wv.hide().map_err(|e| format!("hide: {e}"))?;
@@ -192,6 +208,7 @@ pub fn current_url(app: &AppHandle) -> Result<String, String> {
 pub fn close(app: &AppHandle) -> Result<(), String> {
     // Same probe-supersede rule as hide() — a parked open_probed must not
     // recreate the dock after an explicit close.
+    let _gate = nav_gate();
     OPEN_GEN.fetch_add(1, Ordering::AcqRel);
     if let Some(wv) = app.get_webview(LABEL) {
         wv.close().map_err(|e| format!("close: {e}"))?;

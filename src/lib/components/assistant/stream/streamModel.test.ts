@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { messageToTurn, parseAskUserResult, groupNames, workLineMode, isFillerSay, classifySay, outputPeek, groupBlocks, shellFlavor, resultMeta, splitOutput, nextRevealTier, REVEAL_COLLAPSED, REVEAL_EXPANDED } from "./streamModel";
+import { messageToTurn, parseAskUserResult, groupNames, workLineMode, isFillerSay, classifySay, outputPeek, groupBlocks, shellFlavor, resultMeta, splitOutput, nextRevealTier, isPlanArtifact, REVEAL_COLLAPSED, REVEAL_EXPANDED } from "./streamModel";
 import type { StreamTool } from "./streamModel";
 import type { ChatMessage } from "$lib/state/assistant.svelte";
 
@@ -524,6 +524,16 @@ describe("S128 — CLI tool-name compat (kinds + captions)", () => {
       tool("ExitPlanMode", "done", { plan: "## The plan" }),
     ]));
     expect(t.outcome).toBe("planned");
+  });
+
+  it("isPlanArtifact spots ~/.claude/plans/ writes (backslashes normalized upstream)", () => {
+    // #91: the plan-artifact Write's diff folds by default in WriteBatch —
+    // its content duplicates the StreamExitPlan card rendered right below.
+    expect(isPlanArtifact("C:/Users/x/.claude/plans/my-plan.md")).toBe(true);
+    const t = toolOf(msg([tool("Write", "done", { file_path: "C:\\Users\\x\\.claude\\plans\\p.md" })]))!;
+    expect(isPlanArtifact(t.path)).toBe(true);
+    expect(isPlanArtifact("C:/repo/src/plans/roadmap.md")).toBe(false);
+    expect(isPlanArtifact(null)).toBe(false);
   });
 
   it("PowerShell captions the command like Bash and flavors pwsh", () => {

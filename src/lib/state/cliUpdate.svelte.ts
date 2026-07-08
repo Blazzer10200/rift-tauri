@@ -31,6 +31,7 @@
 // user is never told to run npm (which would create a conflicting install).
 
 import { invoke } from "@tauri-apps/api/core";
+import { assistant } from "./assistant.svelte";
 
 const PKG = "@anthropic-ai/claude-code";
 const LATEST_URL = `https://registry.npmjs.org/${PKG}/latest`;
@@ -409,6 +410,17 @@ export class CliUpdate {
    *  `updateError` and the copy-command fallback stays available. */
   async runUpdate(): Promise<boolean> {
     if (this.updating) return false;
+    // The backend reaps EVERY live CLI child (warm pool + all session PIDs) to
+    // release the claude binary's file lock before the install — any in-flight
+    // turn in any tab/window dies mid-stream. Never do that silently.
+    const live = assistant.liveTabs.length;
+    if (live > 0) {
+      const what = live === 1 ? "1 conversation is" : `${live} conversations are`;
+      const ok = window.confirm(
+        `${what} still running and will be interrupted by the CLI update.\n\nUpdate anyway?`,
+      );
+      if (!ok) return false;
+    }
     this.updating = true;
     this.updateError = null;
     this.updateOutput = null;

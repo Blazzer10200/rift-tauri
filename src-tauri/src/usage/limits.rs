@@ -173,9 +173,12 @@ static LAST_FAILURE: Mutex<Option<Instant>> = Mutex::new(None);
 /// slowly and the snapshot must never add an HTTP round-trip to turn start.
 pub fn cached_snapshot() -> Option<RateLimits> {
     const SNAPSHOT_TTL: Duration = Duration::from_secs(300);
+    // Recover a poisoned lock like usage_rate_limits() does — bailing here
+    // would silently blank the gauge + hot-gate for the process's lifetime
+    // (a poisoned mutex never un-poisons), indistinguishable from "no data".
     CACHE
         .lock()
-        .ok()?
+        .unwrap_or_else(|p| p.into_inner())
         .as_ref()
         .and_then(|(at, l)| (at.elapsed() < SNAPSHOT_TTL).then(|| l.clone()))
 }
@@ -186,7 +189,7 @@ pub fn cached_snapshot() -> Option<RateLimits> {
 /// gauge is optional enrichment, so they log at debug instead of surfacing.
 pub fn spawn_background_refresh() {
     {
-        let Ok(guard) = CACHE.lock() else { return };
+        let guard = CACHE.lock().unwrap_or_else(|p| p.into_inner());
         if let Some((at, _)) = guard.as_ref() {
             if at.elapsed() < CACHE_TTL {
                 return;
@@ -194,7 +197,7 @@ pub fn spawn_background_refresh() {
         }
     }
     {
-        let Ok(guard) = LAST_FAILURE.lock() else { return };
+        let guard = LAST_FAILURE.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(at) = guard.as_ref() {
             if at.elapsed() < CACHE_TTL {
                 return;

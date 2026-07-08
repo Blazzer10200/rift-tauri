@@ -80,7 +80,12 @@ fn load_roots() -> Vec<PathBuf> {
         // Fail-closed: a root we can't canonicalize can't serve as a reliable
         // containment boundary (the later starts_with check compares canonical
         // candidates), so drop it rather than store the raw path (F240/F244).
+        // Strip the Windows verbatim prefix HERE so every consumer gets the
+        // same plain form: PathFilter::allows_path/allows_dir strip_prefix a
+        // PLAIN resolved path against these roots — a verbatim `\\?\C:\` root
+        // never matches, which silently fail-opened the include/exclude scoping.
         .filter_map(|s| dunce::canonicalize(s).ok())
+        .map(|p| super::strip_unc(&p))
         .collect()
 }
 
@@ -1197,6 +1202,33 @@ mod tests {
         let f = PathFilter::from_globs("src/**", "src/**/*.test.rs");
         assert!(f.allows("src/main.rs"));
         assert!(!f.allows("src/foo.test.rs"), "exclude takes precedence over include");
+    }
+
+    // Regression: on Windows `std::fs::canonicalize` returns the verbatim
+    // `\\?\C:\…` form, whose Prefix component NEVER strip_prefix-matches a
+    // plain path — allows_path fail-opened and the whole per-project scoping
+    // was a silent no-op. load_roots must hand PathFilter plain roots (the
+    // same strip_unc shape resolve_under_roots normalizes candidates to).
+    #[test]
+    fn pathfilter_applies_on_real_canonicalized_roots() {
+        let tmp = std::env::temp_dir().join(format!("rift-pf-{}", std::process::id()));
+        std::fs::create_dir_all(tmp.join("secrets")).unwrap();
+        std::fs::write(tmp.join("secrets").join("key.env"), "x").unwrap();
+        // Mirror the fixed load_roots pipeline: canonicalize then strip_unc.
+        let root = crate::assistant::strip_unc(&std::fs::canonicalize(&tmp).unwrap());
+        let file = crate::assistant::strip_unc(
+            &std::fs::canonicalize(tmp.join("secrets").join("key.env")).unwrap(),
+        );
+        let f = PathFilter::from_globs("", "secrets/**");
+        assert!(
+            !f.allows_path(&file, &root),
+            "exclude glob must hide the file on a real canonicalized root"
+        );
+        assert!(
+            !f.allows_dir(&root.join("secrets"), &root),
+            "excluded dir must hide on a real canonicalized root"
+        );
+        std::fs::remove_dir_all(&tmp).ok();
     }
 
     // ─── trust_rank (pure, security-relevant ordering) ────────────────────────

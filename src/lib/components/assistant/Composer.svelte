@@ -576,7 +576,10 @@
     if (!enhancedPreview) return;
     enhanceSeq++;
     enhancing = false;
-    undoDraft = enhanceOriginal;
+    // Undo restores what accept REPLACED — the draft as it is right now, not
+    // the pre-enhance snapshot. Text typed after the preview settled would
+    // otherwise be unrecoverable (undo would roll back past it).
+    undoDraft = draft || enhanceOriginal;
     clearTimeout(undoTimer);
     undoTimer = setTimeout(() => (undoDraft = null), 12000);
     setDraft(enhancedPreview);
@@ -1210,6 +1213,7 @@
           placeholder=""
           class:scrollable={atMaxHeight}
           rows="1"
+          readonly={enhancing}
         ></textarea>
         {#if hero && draft.length === 0 && !streaming && attachments.length === 0}
           <span class="placeholder-ghost static" aria-hidden="true">What are we working on today?</span>

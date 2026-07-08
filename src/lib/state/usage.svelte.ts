@@ -50,7 +50,11 @@ export function limitZone(u: number, severity: string | null = null): string {
 }
 
 const EFFORT_VALUES = ["none", "smart", "deep", "ultra"] as const;
-const MODEL_VALUES = ["opus", "sonnet", "haiku", "fable"] as const;
+// Haiku is out of the pickable lineup (v0.51.3, HAIKU_DISABLED both sides) — an
+// advisor "haiku" apply would pin a model the picker can't render (raw-string
+// pill, dead effort dial) while turns silently coerce to sonnet. #60 contract:
+// this list ↔ ANALYZE_META_PROMPT's model enum (oneshot.rs) change together.
+const MODEL_VALUES = ["opus", "sonnet", "fable"] as const;
 
 /** Re-validate a model-emitted apply action into a known-safe shape, or drop it
  *  (→ null) if it's malformed or out of range. Never trust the model's value

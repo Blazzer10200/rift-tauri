@@ -169,6 +169,22 @@ fn take_interrupted_tools(session_id: &str) -> Option<Vec<String>> {
     g.as_mut()?.remove(session_id)
 }
 
+/// #88 reconciliation note for the next REAL send. A prewarm resolves the same
+/// spawn inputs but its envelope is never written (`prewarm_spawn` parks the
+/// child with no first turn) — draining the stash there would silently eat the
+/// note before the send it exists to warn. Prewarm must leave the stash alone.
+fn interrupted_note_for_send(session_id: &str, prewarm: bool) -> Option<String> {
+    if prewarm {
+        return None;
+    }
+    take_interrupted_tools(session_id).map(|tools| {
+        format!(
+            "Your previous turn in this conversation was interrupted (the app lost the Claude process mid-turn) while the following tool call(s) were still executing: {}. They may have FULLY COMPLETED even though no result was recorded — you may have no memory of issuing them. Before re-running anything non-idempotent (deploys, writes, pushes), verify their actual outcome first (check the relevant files, logs, or state).",
+            tools.join("; ")
+        )
+    })
+}
+
 /// Short "Name(input…)" for a tool_use block, feeding the #88 reconciliation
 /// note. Bash/file tools show their most identifying input field; anything else
 /// a compact input JSON. Char-capped (not byte-sliced — never panics mid-UTF-8).
@@ -747,7 +763,7 @@ async fn run_or_prewarm(
     let ResolvedSpawn { cmd, key, user_line, mcp_guard, model } = resolve_spawn(
         &app, &window_label, &prompt, &session_id, is_first_turn, model, attachments,
         dyslexia_mode, thinking_effort, thinking_enabled, permission_mode,
-        prior_context_summary, root,
+        prior_context_summary, root, prewarm,
     )
     .await?;
 
@@ -797,6 +813,7 @@ async fn resolve_spawn(
     permission_mode: Option<String>,
     prior_context_summary: Option<String>,
     root: Option<String>,
+    prewarm: bool,
 ) -> Result<ResolvedSpawn, String> {
     let cfg = load_config();
     let api_key = current_api_key_with(&cfg);
@@ -1448,11 +1465,10 @@ async fn resolve_spawn(
     // still executing (stall tree-kill / child death) — their frames may never
     // have reached the transcript, so the model may have NO memory of issuing
     // them while their side effects are real. Tell it to reconcile, not re-run.
-    if let Some(tools) = take_interrupted_tools(session_id) {
-        reminder_parts.push(format!(
-            "Your previous turn in this conversation was interrupted (the app lost the Claude process mid-turn) while the following tool call(s) were still executing: {}. They may have FULLY COMPLETED even though no result was recorded — you may have no memory of issuing them. Before re-running anything non-idempotent (deploys, writes, pushes), verify their actual outcome first (check the relevant files, logs, or state).",
-            tools.join("; ")
-        ));
+    // Prewarm-safe: a prewarm never sends its envelope, so the helper leaves
+    // the stash for the real send that follows.
+    if let Some(note) = interrupted_note_for_send(session_id, prewarm) {
+        reminder_parts.push(note);
     }
     // Rift environment snapshot: volatile app facts (browser-dock page, plan
     // usage) the model can't see otherwise. Rides the user turn — a dynamic
@@ -3142,7 +3158,18 @@ fn record_turn_perf(
     // = total wall-time in API calls. Lets the Health pane attribute the model's
     // share vs Rift's. Best-effort — absent on older CLIs or error frames.
     let cli_ttft_ms = v.get("ttft_ms").and_then(|x| x.as_u64());
-    let cli_api_ms = v.get("duration_api_ms").and_then(|x| x.as_u64());
+    // CAVEAT: the CLI's `duration_api_ms` is CUMULATIVE across a resumed session
+    // (it grows every turn — e.g. 22s→35s→133s on one real session), NOT per-turn.
+    // Convert to the per-turn delta BEFORE it reaches TurnPerf: perf::aggregate
+    // treats the persisted field as per-turn (`non_api_overhead = dur - api`,
+    // `avg_cli_api_ms`), so storing the raw cumulative inflated the model's share
+    // and zeroed Rift overhead for every turn 2+ in the AI Health attribution.
+    // First turn (no prior) uses the value as-is.
+    let cli_api_ms = v.get("duration_api_ms").and_then(|x| x.as_u64()).map(|api| {
+        let prev = prev_cumulative_cli_api(stream_sid);
+        store_cumulative_cli_api(stream_sid, api);
+        api.saturating_sub(prev)
+    });
 
     let cache_hit_rate = match (cache_read_tokens, input_tokens) {
         (Some(r), Some(i)) if r + i > 0 => Some(r as f64 / (r + i) as f64),
@@ -3197,18 +3224,10 @@ fn record_turn_perf(
     );
     diagnostics::perf::append_turn_perf(rec);
 
-    // Latency attribution at a glance: the CLI's own API time vs Rift's wall-clock.
-    // CAVEAT: the CLI's `duration_api_ms` is CUMULATIVE across a resumed session
-    // (it grows every turn — e.g. 22s→35s→133s on one real session), NOT per-turn.
-    // The old code did `overhead = this_turn_rift_wall - cumulative_cli_api`, which
-    // went wildly negative on turn 2+ (logged non_api_overhead=-2823403ms). Subtract
-    // the PREVIOUS cumulative for this session to recover the per-turn API time, then
-    // `overhead = rift_wall - per_turn_api` is meaningful again. First turn (no prior)
-    // uses the value as-is.
+    // Latency attribution at a glance: the CLI's own API time vs Rift's
+    // wall-clock. `cli_api_ms` is already the per-turn delta (converted above).
     if let Some(api) = cli_api_ms {
-        let prev = prev_cumulative_cli_api(stream_sid);
-        let per_turn_api = api.saturating_sub(prev) as i64;
-        store_cumulative_cli_api(stream_sid, api);
+        let per_turn_api = api as i64;
         let dur = turn_start.elapsed().as_millis() as i64;
         let overhead = dur - per_turn_api;
         // #69: include the actual sent effort + thinking state so a slow turn's
@@ -3344,9 +3363,10 @@ pub async fn assistant_stop(
 #[cfg(test)]
 mod tests {
     use super::{
-        drain_stale_buffered_lines, plan_usage_is_hot, routes_through_nothink_shim,
-        stash_interrupted_tools, take_interrupted_tools, tool_use_desc,
-        watchdog_should_stall, FABLE_MODEL, HAIKU_MODEL, STREAM_TOOL_CEILING_SECS,
+        drain_stale_buffered_lines, interrupted_note_for_send, plan_usage_is_hot,
+        routes_through_nothink_shim, stash_interrupted_tools, take_interrupted_tools,
+        tool_use_desc, watchdog_should_stall, FABLE_MODEL, HAIKU_MODEL,
+        STREAM_TOOL_CEILING_SECS,
     };
     use tokio::io::{AsyncBufReadExt, BufReader};
 
@@ -3459,6 +3479,30 @@ mod tests {
 
         stash_interrupted_tools("test-sid-88-clean", &std::collections::HashMap::new());
         assert!(take_interrupted_tools("test-sid-88-clean").is_none(), "clean turn stashes nothing");
+    }
+
+    // #88 follow-up: `resolve_spawn` runs for BOTH sends and prewarms, but a
+    // prewarm's envelope is never written (prewarm_spawn parks the child with
+    // no first turn). The FE prewarms eagerly right after a dead child — the
+    // exact post-stall state — so a prewarm drain would eat the reconciliation
+    // note before the real send could carry it.
+    #[test]
+    fn prewarm_leaves_the_interrupted_note_for_the_real_send() {
+        let mut inflight = std::collections::HashMap::new();
+        inflight.insert("t1".to_string(), "Bash(deploy.ps1)".to_string());
+        stash_interrupted_tools("sid-prewarm-88", &inflight);
+
+        assert!(
+            interrupted_note_for_send("sid-prewarm-88", true).is_none(),
+            "prewarm must not drain the stash"
+        );
+        let note = interrupted_note_for_send("sid-prewarm-88", false)
+            .expect("real send still gets the note after a prewarm");
+        assert!(note.contains("Bash(deploy.ps1)"));
+        assert!(
+            interrupted_note_for_send("sid-prewarm-88", false).is_none(),
+            "consumed exactly once"
+        );
     }
 
     // #88: the DeadOnReuse cold retry re-sends a preserved envelope — the splice

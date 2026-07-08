@@ -247,6 +247,13 @@ function pathOf(inp: Record<string, unknown>): string | null {
   return p ? p.replace(/\\/g, "/").replace(/\/$/, "") : null;
 }
 
+// #91: in plan mode the CLI Writes the proposal to ~/.claude/plans/<slug>.md —
+// a real Write whose expanded diff duplicates the StreamExitPlan card rendered
+// right below it. The row stays (honest state); its diff just folds by default.
+export function isPlanArtifact(path: string | null | undefined): boolean {
+  return !!path && path.includes("/.claude/plans/");
+}
+
 // Dir prefix of a full path, collapsed to its last two segments so the filename
 // stays readable (full path lives in the row's title/tooltip).
 function dirOf(path: string | null): string | null {

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { slide } from "svelte/transition";
   import { ChevronRight } from "lucide-svelte";
-  import { VERB_PAST, VERB_ING, type StreamTool } from "./streamModel";
+  import { VERB_PAST, VERB_ING, isPlanArtifact, type StreamTool } from "./streamModel";
   import EditDiff from "../EditDiff.svelte";
   import AnimatedCount from "./AnimatedCount.svelte";
 
@@ -27,6 +27,9 @@
     return !!t.input && (t.add != null || t.del != null);
   }
   function autoOpen(t: StreamTool): boolean {
+    // Plan artifacts (~/.claude/plans/) duplicate the ExitPlanMode card below —
+    // fold their diff by default; the chevron still opens it on demand (#91).
+    if (isPlanArtifact(t.path)) return false;
     return (t.add ?? 0) + (t.del ?? 0) <= (t.kind === "create" ? SMALL_CREATE : SMALL);
   }
   function isOpen(t: StreamTool): boolean {

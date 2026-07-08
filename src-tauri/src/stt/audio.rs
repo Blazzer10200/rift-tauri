@@ -12,9 +12,13 @@ use std::sync::{Arc, Mutex};
 
 /// Whisper's native sample rate.
 const TARGET_HZ: u32 = 16_000;
-/// Cap the ring buffer at 30s of 16 kHz mono = 480k samples (~1.9 MB). More
-/// than enough for the 3s rolling window + finalise-on-stop.
-const MAX_BUFFER_SECS: usize = 30;
+/// Cap the ring buffer at 5 min of 16 kHz mono (~19 MB worst case). The ring
+/// serves BOTH the 3s rolling-partial peeks AND the finalise-on-stop drain —
+/// the old 30s cap silently dropped everything before the last 30s of a long
+/// dictation from the FINAL transcript (the rolling partials are preview-only,
+/// never concatenated). 5 min covers any realistic dictation; past it the
+/// oldest audio still falls off (warned at drain).
+const MAX_BUFFER_SECS: usize = 300;
 
 /// Shared 16 kHz mono f32 ring buffer. Cheap to clone (Arc).
 pub type AudioRing = Arc<Mutex<VecDeque<f32>>>;
@@ -69,8 +73,10 @@ pub fn start_capture(device_name: Option<&str>) -> Result<AudioCapture, String> 
     let config: StreamConfig = supported.clone().into();
     let sample_format = supported.sample_format();
 
+    // Pre-alloc 1 min; grows amortized toward MAX_BUFFER_SECS only when a
+    // dictation actually runs long (don't commit 19 MB per mic start).
     let ring: AudioRing = Arc::new(Mutex::new(VecDeque::with_capacity(
-        TARGET_HZ as usize * MAX_BUFFER_SECS,
+        TARGET_HZ as usize * 60,
     )));
 
     let ring_cb = ring.clone();
@@ -291,5 +297,13 @@ pub fn drain_all(ring: &AudioRing) -> Vec<f32> {
     };
     let out: Vec<f32> = q.iter().copied().collect();
     q.clear();
+    // A full ring means eviction ran: the dictation outlived the cap and the
+    // final transcript covers only the most recent window. Say so instead of
+    // silently returning a truncated take.
+    if out.len() >= TARGET_HZ as usize * MAX_BUFFER_SECS {
+        log::warn!(
+            "[stt] dictation exceeded {MAX_BUFFER_SECS}s — final transcript covers only the most recent {MAX_BUFFER_SECS}s"
+        );
+    }
     out
 }

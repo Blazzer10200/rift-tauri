@@ -324,6 +324,10 @@ export async function renameConversation(
       return;
     }
     const convo = await invoke<ConversationRecord>("assistant_load_conversation", { id });
+    // Re-check after the await — a delete landing while the load was in flight
+    // has already removed the file; saving now would resurrect it as a ghost
+    // row (same guard maybeGenerateTitle applies after its own async gap).
+    if (deletedIds.has(id)) return;
     convo.title = newTitle;
     convo.updatedAt = Date.now();
     await trackSave(id, invoke("assistant_save_conversation", { convo }));
