@@ -52,6 +52,9 @@
   });
 
   let open = $state(false);
+  // Set by the IntersectionObserver effect below (declared here, above the
+  // deriveds that read it — Svelte 5 TDZ, see the pinned $effect.pre gotcha).
+  let cardsInView = $state(false);
 
   // sawLive/linger latch — same shape (and same reasons) as PlanHud: a
   // reopened convo must not flash a stale settled fleet, and the linger must
@@ -86,7 +89,8 @@
   });
   $effect(() => () => { if (lingerTimer) clearTimeout(lingerTimer); });
 
-  const visible = $derived((streaming && running.length > 0) || linger);
+  const hudLive = $derived((streaming && running.length > 0) || linger);
+  const visible = $derived(hudLive && !cardsInView);
   $effect(() => { if (!visible) open = false; });
 
   // 1s ticker for the per-row elapsed clocks while anything runs.
@@ -105,11 +109,52 @@
   // Row click → jump the transcript to that spawn's inline card. Scoped to
   // this pane (multi-pane: ids repeat across panes when a convo is mirrored).
   let hudEl = $state<HTMLElement | null>(null);
+  // Always-mounted zero-size handle for pane scoping — hudEl only exists while
+  // the bar renders, and the visibility decision below must run BEFORE that.
+  let sentinelEl = $state<HTMLElement | null>(null);
   function jumpTo(id: string) {
     const scope = hudEl?.closest(".csurf-col") ?? document;
     scope.querySelector(`#sacard-${CSS.escape(id)}`)
       ?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
+
+  // Duplication guard (owner ask 2026-07-08): the HUD is an OVERFLOW
+  // affordance, not a second copy — it only shows while the inline cards it
+  // mirrors are OFF-screen. An IntersectionObserver on the fleet's card
+  // anchors (running cards while live; the whole fleet during the linger)
+  // flips cardsInView (declared with the state above); any watched card ≥15%
+  // visible in this pane's scroll region suppresses the bar. Cards scroll
+  // away → bar fades in; scroll back to them → bar yields.
+  $effect(() => {
+    const fleet = running.length > 0 ? running : spawns;
+    const ids = fleet.map((s) => s.id);
+    const scope = sentinelEl?.closest(".csurf-col");
+    const rootEl = scope?.querySelector(".stream");
+    if (!scope || !rootEl || ids.length === 0) {
+      cardsInView = false;
+      return;
+    }
+    const els = ids
+      .map((id) => scope.querySelector(`#sacard-${CSS.escape(id)}`))
+      .filter((el): el is Element => !!el);
+    if (els.length === 0) {
+      cardsInView = false;
+      return;
+    }
+    const seen = new Set<Element>();
+    const io = new IntersectionObserver(
+      (entries) => {
+        for (const e of entries) {
+          if (e.isIntersecting) seen.add(e.target);
+          else seen.delete(e.target);
+        }
+        cardsInView = seen.size > 0;
+      },
+      { root: rootEl, threshold: 0.15 },
+    );
+    for (const el of els) io.observe(el);
+    return () => io.disconnect();
+  });
 
   // Focus rescue on non-user-initiated hide — same contract as PlanHud.
   function rescueFocus() {
@@ -121,6 +166,7 @@
   $effect(() => () => rescueFocus());
 </script>
 
+<span class="ahud-sentinel" bind:this={sentinelEl} aria-hidden="true"></span>
 {#if visible}
   <div class="ahud" class:complete={allDone} class:open bind:this={hudEl}>
     <button
@@ -179,6 +225,8 @@
 {/if}
 
 <style>
+  .ahud-sentinel { display: none; }
+
   /* Same glassy chrome family as .phud — this renders inside the shared
      .hud-stack (AssistantPane), which owns centering/width/stacking. */
   .ahud {

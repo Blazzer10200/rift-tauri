@@ -22,6 +22,12 @@
   );
 
   let open = $state(false);
+  // Duplication guard (owner ask 2026-07-08, mirrors AgentHud): the bar only
+  // shows while the inline plan card it mirrors is OFF-screen — it's an
+  // overflow affordance, not a second copy. Declared above the deriveds that
+  // read it (Svelte 5 TDZ — see the pinned $effect.pre gotcha).
+  let planCardInView = $state(false);
+  let sentinelEl = $state<HTMLElement | null>(null);
 
   // Completion linger — only after the HUD was live-visible for THIS tab, so
   // reopening an old convo with a finished plan doesn't flash a stale 4/4.
@@ -85,8 +91,38 @@
   // a failed turn — streaming is the only honest liveness signal. The
   // transcript's inline plan card + error banner keep the record between
   // turns; the next turn's task frames bring the HUD straight back.
-  const visible = $derived((streaming && total > 0 && !allDone) || linger);
+  const visible = $derived(((streaming && total > 0 && !allDone) || linger) && !planCardInView);
   $effect(() => { if (!visible) open = false; });
+
+  // Watch the LIVE inline plan card (the last .splan in this pane's stream —
+  // StreamTurn renders one card per plan-bearing turn; the newest mirrors the
+  // same aggregate this HUD reads). ≥15% visible → the card is the display,
+  // the bar yields. Re-arms when the plan grows (total) or the turn count
+  // changes the card set (items identity).
+  $effect(() => {
+    void total;
+    void items;
+    const scope = sentinelEl?.closest(".csurf-col");
+    const rootEl = scope?.querySelector(".stream");
+    if (!scope || !rootEl || total === 0) {
+      planCardInView = false;
+      return;
+    }
+    const cards = scope.querySelectorAll(".splan");
+    const target = cards[cards.length - 1];
+    if (!target) {
+      planCardInView = false;
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        planCardInView = entries.some((e) => e.isIntersecting);
+      },
+      { root: rootEl, threshold: 0.15 },
+    );
+    io.observe(target);
+    return () => io.disconnect();
+  });
 
   // Focus rescue — the HUD hides on events the user didn't initiate (linger
   // timeout, stream end); if the expand button held focus, the {#if} teardown
@@ -112,6 +148,7 @@
   $effect(() => () => rescueFocus());
 </script>
 
+<span class="phud-sentinel" bind:this={sentinelEl} aria-hidden="true"></span>
 {#if visible}
   <div class="phud" class:complete={allDone} class:open bind:this={hudEl}>
     <button
@@ -153,6 +190,8 @@
 {/if}
 
 <style>
+  .phud-sentinel { display: none; }
+
   /* Positioning moved to the shared .hud-stack in AssistantPane (2026-07-08,
      AgentHud arrival) — the stack owns centering/width/z so plan + agent bars
      stack with a gap instead of overlapping at the same absolute spot. */
