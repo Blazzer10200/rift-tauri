@@ -133,21 +133,6 @@ export async function setRoot(host: WorkspaceHost, path: string): Promise<void> 
   }
 }
 
-export async function clearRoot(host: WorkspaceHost): Promise<void> {
-  try {
-    host.workspace = await invoke<WorkspaceState>("assistant_clear_root");
-    // Same focused-pane rule as setRoot: clearing the global folder must also
-    // clear the focused tab's override, else the clear is invisible.
-    const focused = host.activeTab;
-    if (focused) focused.workspaceRoot = null;
-    host.workspaceFiles = [];
-    host.workspaceBranch = null;
-    host.applyWorkspacePrefs();
-  } catch (e) {
-    console.warn("assistant_clear_root failed", e);
-  }
-}
-
 export async function removeRecentRoot(host: WorkspaceHost, path: string): Promise<void> {
   try {
     host.workspace = await invoke<WorkspaceState>("assistant_remove_recent_root", { path });

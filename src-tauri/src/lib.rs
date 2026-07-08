@@ -250,7 +250,6 @@ pub fn run() {
             commands::assistant_get_workspace,
             commands::assistant_set_root,
             commands::assistant_set_tab_root,
-            commands::assistant_clear_root,
             commands::assistant_remove_recent_root,
             commands::assistant_list_workspace_files,
             commands::assistant_workspace_branch,
