@@ -9,7 +9,10 @@
   import { slide } from "svelte/transition";
   import { diffArrays } from "diff";
   import DOMPurify from "dompurify";
+  import { invoke } from "@tauri-apps/api/core";
   import { FileText, ChevronRight, CornerDownLeft, Copy, Check } from "lucide-svelte";
+  import { assistant } from "../../state/assistant.svelte";
+  import { notify } from "../../state/toast.svelte";
   import { highlightSync, whenReady } from "../../state/highlighter.svelte";
   import FilePathMenu from "./FilePathMenu.svelte";
   import { emphasisIntervals, emphasizeHtml, type CharInterval } from "./diffEmphasis";
@@ -297,13 +300,22 @@
   onDestroy(() => { if (copyTimer) clearTimeout(copyTimer); });
 
   // Open the file-actions menu (open in VS Code / default app, reveal, copy)
-  // anchored to the crumb button.
+  // anchored to the crumb button. `input.file_path` is raw model output —
+  // usually workspace-relative (opener actions need absolute) and never to be
+  // trusted outside the root — so resolve through the containment-checked
+  // `resolve_workspace_path` first, same as Markdown's .md-path flow.
   let menuPos = $state<{ x: number; y: number } | null>(null);
-  function openFile(e: MouseEvent) {
+  let menuPath = $state<string | null>(null);
+  async function openFile(e: MouseEvent) {
     e.stopPropagation();
     if (!filePath) return;
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    menuPos = { x: r.left, y: r.bottom + 4 };
+    try {
+      menuPath = await invoke<string>("resolve_workspace_path", { root: assistant.activeRoot, path: filePath });
+      menuPos = { x: r.left, y: r.bottom + 4 };
+    } catch (err) {
+      notify.warn("Couldn't locate path", { detail: String(err) });
+    }
   }
 </script>
 
@@ -367,8 +379,8 @@
   </div>
 {/if}
 
-{#if menuPos && filePath}
-  <FilePathMenu path={filePath} x={menuPos.x} y={menuPos.y} onClose={() => (menuPos = null)} />
+{#if menuPos && menuPath}
+  <FilePathMenu path={menuPath} x={menuPos.x} y={menuPos.y} onClose={() => { menuPos = null; menuPath = null; }} />
 {/if}
 
 <style>

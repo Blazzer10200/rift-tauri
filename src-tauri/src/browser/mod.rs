@@ -170,6 +170,10 @@ pub fn show(app: &AppHandle) -> Result<(), String> {
 }
 
 pub fn hide(app: &AppHandle) -> Result<(), String> {
+    // A hide supersedes any `open_probed` still parked in its loopback probe —
+    // without this the probe resolves up to 8s later and open()'s unconditional
+    // show() reopens the dock the user just dismissed.
+    OPEN_GEN.fetch_add(1, Ordering::AcqRel);
     if let Some(wv) = app.get_webview(LABEL) {
         wv.hide().map_err(|e| format!("hide: {e}"))?;
     }
@@ -186,6 +190,9 @@ pub fn current_url(app: &AppHandle) -> Result<String, String> {
 
 /// Destroy the dock webview. Safe to call when not open.
 pub fn close(app: &AppHandle) -> Result<(), String> {
+    // Same probe-supersede rule as hide() — a parked open_probed must not
+    // recreate the dock after an explicit close.
+    OPEN_GEN.fetch_add(1, Ordering::AcqRel);
     if let Some(wv) = app.get_webview(LABEL) {
         wv.close().map_err(|e| format!("close: {e}"))?;
     }
