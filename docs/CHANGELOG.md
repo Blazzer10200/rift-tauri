@@ -2,14 +2,12 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.91.0 — The assistant finishes what it starts + clickable file paths
+## v0.92.0 — Switching models mid-chat now actually switches
 
-- **The assistant now reports back when a background agent finishes.** The biggest fix in this release: when Claude delegates work to a background agent (or kicks off a build and says "I'll let you know how it goes"), it used to go silent forever once that work completed — the answer never arrived. Rift now catches the assistant's follow-up and streams it into the chat as it happens, so "I'll wait for this to finish" actually turns into a real reply.
-- **File paths in chat are clickable.** Any file path the assistant mentions (like `src-tauri/src/lib.rs`) now glows and opens straight in your editor when clicked — jumping to the exact line if one is given. Bare filenames get found anywhere in your workspace; folders open in your file manager.
-- **Local previews wait for the server to be ready.** When the assistant opens a `localhost` preview right after starting a dev server, Rift now waits for the server to actually accept connections before loading — no more landing on a "can't reach this page" error because it opened a second too early.
-- **Assistant-opened pages no longer get lost.** If the assistant opens a page while you're looking at a *different* chat tab, the page now waits and opens the instant you switch back to that chat — instead of being silently dropped (while the assistant thought it had shown you the page).
-- **Reopen your last page in one click.** Closing the built-in browser and reopening it now offers a "Reopen <site>" button so you don't have to retype the address.
-- **CLI update checks respect the right release channel.** Installs that track Claude Code's native installer channel are no longer nagged to "update" against npm's faster-moving channel — each install is now compared against its own feed, so "up to date" means up to date. Freshly-installed developer tools (Cargo, etc.) are also detected without an app restart.
+- **Picking a new model mid-conversation now takes effect on your next message.** Previously a conversation was silently locked to the model it started with — you could pick Fable mid-chat and the next reply still came from Sonnet, with only a small note buried in the picker admitting it. The lock existed to dodge an API rejection that could permanently wedge a resumed chat; the Claude CLI has since fixed that (verified against live sessions), so the lock is gone — your pick wins now.
+- **The chat shows where the switch happened.** A slim "Model switched · Sonnet 5 → Fable 5" divider appears in the transcript right above the first message that runs on the new model — and it's saved with the conversation, so reopened chats keep the marker.
+- **The model menu tells the truth about switching.** The old "Switching models only applies to a new chat" note now reads "Your next message switches it to <model>" — with "New chat in <model>" still offered as the fresh-start alternative.
+- **Clicked file paths open an actions menu.** Clicking a file path in chat now pops the same file-actions menu used everywhere else in the app — open in VS Code (at the exact line), open with the default app, reveal in the file manager, or copy the path — instead of jumping straight into VS Code.
 
 ## Known issues
 - **Voice profanity on Web Speech:** fully-masked words (`******`, no leading letter) can't be recovered from Azure's servers — the real fix is the on-device **Whisper** engine (built but not yet in the shipped binary). Planned.
@@ -17,6 +15,7 @@
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
 
+- **v0.91.0** — Background-agent completions stream into chat (no more silent-forever after "I'll wait for this to finish"); clickable file paths in chat; local previews wait for the dev server to accept connections; assistant-opened pages queue for backgrounded tabs; "Reopen <site>" pill; per-channel CLI update comparison + restart-free tool detection.
 - **v0.90.0** — Prompt-suggestion groundwork (dormant until Anthropic enables it server-side); voice-input failure notices; assistant-opened pages pull you to Chat; AI-Health Undo survives Re-analyze; chat delete sweeps dead CLI session files; secondary windows always start fresh.
 - **v0.89.0** — Claude Code 2.1.201 compatibility (full 2.1.19x–2.1.20x tool set, spend-cap + unknown-error surfacing); dead-workspace-tools notice; usage gauge tolerates odd values field-by-field; multi-window/multi-pane edge fixes (retry tab-identity, stale-folder honesty, sidecar cross-talk, dictation model pinning); steadier self-update; bridge/shim hardening.
 - **v0.88.0** — Terminal-style tool blocks (input line + labeled output, `exit N`); progressive "Show N more lines"; honest live "working" line; WYSIWYG texture previews; stream-event handling extracted + tested.

@@ -223,8 +223,8 @@
     {@const picked = currentModel}
     <div class="session-note" role="note">
       <span class="sn-text">
-        This chat runs on <strong>{pinned ? `${pinned.label} ${pinned.version}` : assistant.sessionPinnedModel}</strong>.
-        Switching models only applies to a new chat.
+        This chat has been running on <strong>{pinned ? `${pinned.label} ${pinned.version}` : assistant.sessionPinnedModel}</strong>.
+        Your next message switches it to <strong>{picked ? `${picked.label} ${picked.version}` : "the new model"}</strong>.
       </span>
       <button
         type="button"

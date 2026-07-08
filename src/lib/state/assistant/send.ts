@@ -120,11 +120,11 @@ export async function send(
     tab.convoCreatedAt = Date.now();
     tab.convoTitle = null;
   }
-  // Capture the model this session pins to backend-side on its first turn — the
-  // backend ignores a later picker switch on a resumed session, so this is the
-  // model the running turns truly use (drives the picker's "this session" tag +
-  // "New chat in <model>" honesty). Only set once, on the first turn.
-  if (isFirstTurn && !tab.pinnedModel) {
+  // Track the model this chat's turns run on. First turn (or a legacy tab with
+  // no capture yet) seeds it; a later differing pick is a deliberate mid-chat
+  // switch — the backend honors it and re-pins (turn.rs), and the transcript
+  // marker is inserted just before this turn's bubbles below.
+  if (!tab.pinnedModel) {
     tab.pinnedModel = effModel;
   }
   // A real turn — advance the sidebar's activity clock. Tab-switch auto-saves
@@ -272,6 +272,18 @@ export async function send(
     userBlocks.push({ type: "text", text: `📄 ${t.name}${t.truncated ? " (truncated)" : ""}` });
   }
   userBlocks.push({ type: "text", text: bubbleText });
+  // Mid-chat model switch → drop an inline marker above this turn's bubbles so
+  // the change is visible where it happened, then track the new running model
+  // (which also clears the picker's divergence note — the switch took effect).
+  if (tab.pinnedModel && tab.pinnedModel !== effModel) {
+    tab.messages = [...tab.messages, {
+      id: crypto.randomUUID(),
+      role: "system",
+      blocks: [{ type: "modelSwitch", from: tab.pinnedModel, to: effModel, at: Date.now() }],
+      ts: Date.now(),
+    }];
+    tab.pinnedModel = effModel;
+  }
   tab.messages = [
     ...tab.messages,
     { id: crypto.randomUUID(), role: "user", blocks: userBlocks, ts: Date.now() },

@@ -183,15 +183,16 @@ fn delete_session_cwd(id: &str) {
     }
 }
 
-/// Sidecar that pins the MODEL a conversation was started with. Extended-thinking
-/// blocks carry a model-bound cryptographic signature; when an assistant turn
-/// emits `thinking` + `tool_use`, every later `--resume` replays that message to
-/// the API. If the resume goes out under a different model (picker switched
-/// mid-chat — Opus↔Sonnet, or worst-case →Haiku which drops `--effort` and flips
-/// thinking off), the API rejects the replayed blocks with `400 ... thinking ...
-/// blocks ... cannot be modified` and the conversation is permanently wedged.
-/// Pinning the model per session keeps resume aimed at the model that signed the
-/// blocks; switching models is a new conversation.
+/// Sidecar that pins the MODEL a conversation currently runs on. Originally a
+/// hard guard against the model-bound thinking-signature 400 wedge (resuming a
+/// session whose transcript held `thinking` + `tool_use` blocks signed by a
+/// different model permanently wedged it) — the CLI now sanitizes cross-model
+/// thinking blocks on resume (verified on 2.1.204, 2026-07-07), so a mid-chat
+/// picker switch is honored and RE-pins this sidecar (turn.rs assistant_send).
+/// The pin still does real work: it keeps the exact resolved id stable across
+/// resumes when the picker selection hasn't changed (alias-stable — a legacy
+/// `sonnet` pin stays on claude-sonnet-4-6), and it's the fallback target when
+/// a send arrives without an explicit model.
 fn session_model_path(id: &str) -> Result<PathBuf, String> {
     Ok(session_cwd_path(id)?.with_extension("model"))
 }

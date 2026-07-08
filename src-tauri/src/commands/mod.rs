@@ -12,29 +12,34 @@ pub use assistant::*;
 pub use browser::*;
 pub use update::*;
 
-/// Open a path in VS Code. The opener plugin's `openWith` can't launch VS Code
-/// on Windows (its CLI is `code.cmd`, which `Command::new("code")` won't resolve
-/// without a shell) — so spawn through `cmd /C` on Windows, direct `code` elsewhere.
+/// Open a path in VS Code, optionally at a line (`-g path:line`). The opener
+/// plugin's `openWith` can't launch VS Code on Windows (its CLI is `code.cmd`,
+/// which `Command::new("code")` won't resolve without a shell) — so spawn
+/// through `cmd /C` on Windows, direct `code` elsewhere.
 #[tauri::command]
-pub fn open_in_vscode(path: String) -> Result<(), String> {
+pub fn open_in_vscode(path: String, line: Option<u32>) -> Result<(), String> {
+    let target = match line {
+        Some(l) if l > 0 => format!("{path}:{l}"),
+        _ => path.clone(),
+    };
     // The Windows path runs through `cmd /C`, which re-parses metacharacters
     // *after* Rust's arg quoting — so `&`/`|`/`<`/`>`/`^`/`%`/`"` (and control
     // chars) could chain a second command. None are needed to open a file; reject
     // them rather than try to escape cmd.exe's quoting (F19).
     #[cfg(windows)]
-    if path.bytes().any(|b| matches!(b, b'&' | b'|' | b'<' | b'>' | b'^' | b'%' | b'"') || b < 0x20) {
+    if target.bytes().any(|b| matches!(b, b'&' | b'|' | b'<' | b'>' | b'^' | b'%' | b'"') || b < 0x20) {
         return Err("path contains characters that can't be passed safely to the shell".into());
     }
     #[cfg(windows)]
     let mut cmd = {
         let mut c = std::process::Command::new("cmd");
-        c.args(["/C", "code", &path]);
+        c.args(["/C", "code", "-g", &target]);
         c
     };
     #[cfg(not(windows))]
     let mut cmd = {
         let mut c = std::process::Command::new("code");
-        c.arg(&path);
+        c.args(["-g", &target]);
         c
     };
     cmd.spawn()
@@ -42,18 +47,14 @@ pub fn open_in_vscode(path: String) -> Result<(), String> {
         .map_err(|e| format!("Couldn't launch VS Code (is `code` on PATH?): {e}"))
 }
 
-/// Clickable file paths in chat (Markdown `.md-path` spans). Resolve `path`
-/// against the focused tab's workspace `root`, refuse anything that escapes
-/// it, then open it in the editor at the optional line. A bare filename (no
-/// separator) gets a bounded workspace search so `turn.rs` in prose still
-/// lands on the file. Directories open in the system file manager.
-#[tauri::command]
-pub async fn workspace_open_path(
-    app: tauri::AppHandle,
+/// Shared resolution for clickable workspace paths: resolve `path` against
+/// `root`, refuse anything that escapes it. A bare filename (no separator)
+/// gets a bounded workspace search so `turn.rs` in prose still lands on the
+/// file. Filesystem walk + canonicalize run off the async worker.
+async fn resolve_in_workspace(
     root: Option<String>,
     path: String,
-    line: Option<u32>,
-) -> Result<(), String> {
+) -> Result<std::path::PathBuf, String> {
     let raw = path.trim().to_string();
     if raw.is_empty() {
         return Err("empty path".into());
@@ -62,23 +63,20 @@ pub async fn workspace_open_path(
         .filter(|r| !r.trim().is_empty())
         .ok_or("No workspace folder is open")?;
 
-    // Filesystem walk + canonicalize off the async worker.
-    let raw_for_resolve = raw.clone();
-    let resolved = tokio::task::spawn_blocking(move || -> Result<std::path::PathBuf, String> {
+    tokio::task::spawn_blocking(move || -> Result<std::path::PathBuf, String> {
         let root = std::path::PathBuf::from(&root)
             .canonicalize()
             .map_err(|_| "workspace root not found".to_string())?;
-        let p = std::path::Path::new(&raw_for_resolve);
+        let p = std::path::Path::new(&raw);
         let candidate = if p.is_absolute() { p.to_path_buf() } else { root.join(p) };
-        let has_sep = raw_for_resolve.contains('/') || raw_for_resolve.contains('\\');
+        let has_sep = raw.contains('/') || raw.contains('\\');
         let resolved = match candidate.canonicalize() {
             Ok(c) => Some(c),
             // Bare filename that doesn't sit at the root — bounded search.
-            Err(_) if !has_sep => find_by_name(&root, &raw_for_resolve),
+            Err(_) if !has_sep => find_by_name(&root, &raw),
             Err(_) => None,
         };
-        let resolved =
-            resolved.ok_or_else(|| format!("Not found in this workspace: {raw_for_resolve}"))?;
+        let resolved = resolved.ok_or_else(|| format!("Not found in this workspace: {raw}"))?;
         // Containment AFTER canonicalize so a symlink can't escape the root.
         if !resolved.starts_with(&root) {
             return Err("path is outside the open workspace".into());
@@ -86,16 +84,18 @@ pub async fn workspace_open_path(
         Ok(resolved)
     })
     .await
-    .map_err(|e| format!("resolve: {e}"))??;
+    .map_err(|e| format!("resolve: {e}"))?
+}
 
-    if resolved.is_dir() {
-        use tauri_plugin_opener::OpenerExt;
-        return app
-            .opener()
-            .open_path(resolved.display().to_string(), None::<&str>)
-            .map_err(|e| format!("open folder: {e}"));
-    }
-    open_in_editor(&app, &resolved, line).await
+/// Clickable file paths in chat (Markdown `.md-path` spans). Resolves `path`
+/// against the focused tab's workspace `root` and hands back the absolute,
+/// containment-checked path — the frontend feeds it to `FilePathMenu` (open in
+/// VS Code / default app / reveal in the system file manager / copy), the same
+/// action set every other file-path surface in the app already offers.
+#[tauri::command]
+pub async fn resolve_workspace_path(root: Option<String>, path: String) -> Result<String, String> {
+    let resolved = resolve_in_workspace(root, path).await?;
+    Ok(resolved.display().to_string())
 }
 
 /// Bounded workspace search for a bare filename — first match wins, heavy
@@ -124,44 +124,6 @@ fn find_by_name(root: &std::path::Path, name: &str) -> Option<std::path::PathBuf
         }
     }
     None
-}
-
-/// `code -g path:line` (same cmd.exe metachar guard as `open_in_vscode` — F19),
-/// falling back to the OS default opener when the `code` CLI isn't available.
-/// Line hints only work through an editor CLI; the fallback ignores them.
-async fn open_in_editor(
-    app: &tauri::AppHandle,
-    path: &std::path::Path,
-    line: Option<u32>,
-) -> Result<(), String> {
-    let target = match line {
-        Some(l) if l > 0 => format!("{}:{l}", path.display()),
-        _ => path.display().to_string(),
-    };
-    let unsafe_for_cmd = cfg!(windows)
-        && target
-            .bytes()
-            .any(|b| matches!(b, b'&' | b'|' | b'<' | b'>' | b'^' | b'%' | b'"') || b < 0x20);
-    if !unsafe_for_cmd {
-        #[cfg(windows)]
-        let status = {
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            tokio::process::Command::new("cmd")
-                .args(["/C", "code", "-g", &target])
-                .creation_flags(CREATE_NO_WINDOW)
-                .status()
-                .await
-        };
-        #[cfg(not(windows))]
-        let status = tokio::process::Command::new("code").args(["-g", &target]).status().await;
-        if matches!(status, Ok(s) if s.success()) {
-            return Ok(());
-        }
-    }
-    use tauri_plugin_opener::OpenerExt;
-    app.opener()
-        .open_path(path.display().to_string(), None::<&str>)
-        .map_err(|e| format!("open: {e}"))
 }
 
 /// B2 — AI Health turn-performance aggregate. Reads the persisted `turns.ndjson`

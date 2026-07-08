@@ -15,6 +15,7 @@
     formatDuration, formatDurationMs, groupDurationMs, elapsedFor, summarizeGroup, shortModel,
     coalesceToolGroups, numberActions, type TimelineUnit } from "./bubble/helpers";
   import BoundaryBlock from "./bubble/BoundaryBlock.svelte";
+  import ModelSwitchBlock from "./bubble/ModelSwitchBlock.svelte";
   import TurnSummary from "./bubble/TurnSummary.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
@@ -118,6 +119,15 @@
     isSystem
       ? (message.blocks.find((b) => b.type === "boundary") as
           | Extract<Block, { type: "boundary" }>
+          | undefined)
+      : undefined,
+  );
+  // Mid-chat model switch marker: same system-role single-block shape as the
+  // boundary — renders as a lean divider pill, not a bubble.
+  const modelSwitchBlock = $derived(
+    isSystem
+      ? (message.blocks.find((b) => b.type === "modelSwitch") as
+          | Extract<Block, { type: "modelSwitch" }>
           | undefined)
       : undefined,
   );
@@ -259,6 +269,8 @@
 
 {#if isSystem && boundaryBlock}
   <BoundaryBlock {boundaryBlock} />
+{:else if isSystem && modelSwitchBlock}
+  <ModelSwitchBlock block={modelSwitchBlock} />
 {:else}
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="bubble" data-role={message.role} data-model={modelFamily} data-streaming={streaming ? "true" : null} oncontextmenu={onBubbleContext}>

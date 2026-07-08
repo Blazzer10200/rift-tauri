@@ -713,6 +713,9 @@ async fn resolve_spawn(
     if !is_valid_model_name(&model) {
         return Err(format!("invalid model: {model}"));
     }
+    // Set when the picker model differs from the session pin on a resumed turn —
+    // a deliberate mid-chat switch. Drives the re-pin at the save site below.
+    let mut model_switched = false;
     if cfg.local_llm_enabled {
         // Local-LLM mode (experimental): use the configured local model verbatim
         // and skip cloud-only machinery (model pin, Fable guard) — there are no
@@ -722,17 +725,24 @@ async fn resolve_spawn(
             model = lm.to_string();
         }
     } else {
-        // Pin model per conversation: thinking-block signatures are model-bound, so
-        // resuming under a switched model 400s on the replayed prior turn (see
-        // session_model_path). On resume, the model the session was created with wins
-        // over a live picker change; the new model only takes effect in a new chat.
+        // Model pin vs picker on resume: the SAME selection keeps the pinned id
+        // (alias-stable — preserves the legacy `sonnet`→4.6 mapping below). A
+        // DIFFERENT selection is a deliberate mid-chat switch — honor it and
+        // re-pin at the save site below. The pin's original job (blocking
+        // switches because replayed thinking-block signatures are model-bound
+        // and 400'd the resume — see session_model_path) is obsolete: the CLI
+        // sanitizes cross-model thinking blocks on resume, verified empirically
+        // on 2.1.204 (2026-07-07: sonnet-5 history w/ signed thinking +
+        // tool_use resumed clean under fable-5 and haiku).
         if !is_first_turn {
             if let Some(pinned) = load_session_model(session_id) {
-                if pinned != model {
-                    log::info!(
-                        "assistant_send: session {session_id} pinned to model {pinned} (picker={model}) — preserving thinking-block signatures"
-                    );
+                if pinned == model || pinned == canonical_model_alias(&model) {
                     model = pinned;
+                } else {
+                    model_switched = true;
+                    log::info!(
+                        "assistant_send: session {session_id} mid-chat model switch {pinned} → {model}"
+                    );
                 }
             }
         }
@@ -853,11 +863,11 @@ async fn resolve_spawn(
             save_session_cwd(session_id, first);
         }
     }
-    // Capture the model the first turn runs under so every later --resume targets
-    // the same model the thinking blocks were signed by (see session_model_path).
-    // Also back-fill legacy/pre-pin conversations on their first turn after
-    // upgrade so they stop wedging on a subsequent model switch.
-    if is_first_turn || load_session_model(session_id).is_none() {
+    // Pin the model this session runs on: first turn captures it, legacy
+    // pre-pin conversations back-fill on their first post-upgrade turn, and a
+    // deliberate mid-chat switch RE-pins so later turns keep the user's pick
+    // (see session_model_path).
+    if is_first_turn || model_switched || load_session_model(session_id).is_none() {
         save_session_model(session_id, &model);
     }
 

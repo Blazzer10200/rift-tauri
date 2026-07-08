@@ -9,6 +9,7 @@
   import { browserDock } from "../../state/browserDock.svelte";
   import { notify } from "../../state/toast.svelte";
   import { highlightSync, normalizeLang, whenReady } from "../../state/highlighter.svelte";
+  import FilePathMenu from "./FilePathMenu.svelte";
 
   marked.setOptions({ gfm: true, breaks: true });
   marked.use(markedAlert());
@@ -356,11 +357,13 @@
       }
       return;
     }
-    // Clickable file path — resolve + open in the editor (backend-validated).
+    // Clickable file path — resolve (backend-validated) then open the same
+    // file-actions menu every other path surface in the app uses (open in
+    // VS Code / default app, reveal in the system file manager, copy).
     const pathEl = target?.closest("code.md-path") as HTMLElement | null;
     if (pathEl) {
       e.preventDefault();
-      void openWorkspacePath(pathEl.getAttribute("data-path") ?? "");
+      void openPathMenu(pathEl, pathEl.getAttribute("data-path") ?? "");
       return;
     }
     const a = target?.closest("a") as HTMLAnchorElement | null;
@@ -383,10 +386,13 @@
     void openUrl(href).catch((err) => console.warn("openUrl failed", err));
   }
 
-  // Split a trailing `:line[:col]` editor hint off a clicked path, then hand it
-  // to the backend: resolves against the workspace root, rejects escapes, opens
-  // the editor at the line (OS default opener as the no-`code`-CLI fallback).
-  async function openWorkspacePath(raw: string) {
+  // Popover anchor for the clicked path's file-actions menu.
+  let pathMenu = $state<{ path: string; line: number | null; x: number; y: number } | null>(null);
+
+  // Split a trailing `:line[:col]` editor hint off a clicked path, resolve the
+  // rest against the workspace root (rejects escapes), then anchor the
+  // FilePathMenu below the clicked span with the resolved absolute path.
+  async function openPathMenu(el: HTMLElement, raw: string) {
     if (!raw) return;
     let path = raw;
     let line: number | null = null;
@@ -396,9 +402,11 @@
       line = parseInt(m[2], 10);
     }
     try {
-      await invoke("workspace_open_path", { root: assistant.activeRoot, path, line });
+      const resolved = await invoke<string>("resolve_workspace_path", { root: assistant.activeRoot, path });
+      const r = el.getBoundingClientRect();
+      pathMenu = { path: resolved, line, x: r.left, y: r.bottom + 4 };
     } catch (err) {
-      notify.warn("Couldn't open file", { detail: String(err) });
+      notify.warn("Couldn't locate path", { detail: String(err) });
     }
   }
 
@@ -410,7 +418,7 @@
     const pathEl = target?.closest("code.md-path") as HTMLElement | null;
     if (pathEl) {
       e.preventDefault();
-      void openWorkspacePath(pathEl.getAttribute("data-path") ?? "");
+      void openPathMenu(pathEl, pathEl.getAttribute("data-path") ?? "");
       return;
     }
     const copyBtn = target?.closest(".code-copy") as HTMLElement | null;
@@ -619,6 +627,9 @@
 </script>
 
 <div class="md" class:streaming bind:this={container} onclick={onClick} onkeydown={onKey} role="presentation"></div>
+{#if pathMenu}
+  <FilePathMenu path={pathMenu.path} line={pathMenu.line} x={pathMenu.x} y={pathMenu.y} onClose={() => (pathMenu = null)} />
+{/if}
 
 <style>
   .md {

@@ -131,7 +131,19 @@ export type ImageBlock = {
   sizeBytes: number;
 };
 
-export type Block = TextBlock | ToolBlock | ThinkingBlock | BoundaryBlock | ImageBlock;
+/** Inline transcript marker for a mid-chat model switch — appended by send()
+ *  when a turn goes out under a different model than the chat was running on.
+ *  The backend honors the switch and re-pins the session (turn.rs). */
+export type ModelSwitchBlock = {
+  type: "modelSwitch";
+  /** ModelSel (or legacy full id) the chat ran on before the switch. */
+  from: string;
+  /** ModelSel the chat runs on from this turn forward. */
+  to: string;
+  at: number;
+};
+
+export type Block = TextBlock | ToolBlock | ThinkingBlock | BoundaryBlock | ImageBlock | ModelSwitchBlock;
 
 /** A queued outbound message (sent while the tab was already streaming).
  *  `images`/`textFiles` snapshot the composer attachments at enqueue time so

@@ -891,16 +891,16 @@ class AssistantStore {
    *  onboarding read `model` — the new-chat default. (ui-audit #5) */
   get effectiveModel(): ModelSel { return this.activeTab?.modelOverride ?? this.model; }
 
-  /** The model the active chat is PINNED to backend-side (the model its first
-   *  turn ran against), or null if no turn has run yet. A picker switch on a
-   *  pinned session changes the UI label but the running turns keep using this
-   *  model (turn.rs load_session_model) — the picker surfaces it + offers a
-   *  "New chat in <model>". */
+  /** The model the active chat's turns have been RUNNING on (seeded on the
+   *  first turn, advanced by send() when a mid-chat switch takes effect), or
+   *  null if no turn has run yet. Drives the picker's "this chat" tag + the
+   *  switch-pending note. */
   get sessionPinnedModel(): ModelSel | null { return this.activeTab?.pinnedModel ?? null; }
 
-  /** True when the picker selection has drifted ahead of the running pinned
-   *  model — i.e. the user switched the model mid-chat and the switch won't take
-   *  effect until a new chat. Drives the picker's honest "this session" notice. */
+  /** True when the picker selection differs from the chat's running model —
+   *  i.e. the user switched mid-chat and the switch takes effect on the next
+   *  message (send() inserts the transcript marker; turn.rs re-pins). Drives
+   *  the picker's "switches on your next message" note. */
   get sessionModelDiverged(): boolean {
     const pinned = this.sessionPinnedModel;
     return pinned !== null && pinned !== this.effectiveModel;
@@ -1485,10 +1485,9 @@ class AssistantStore {
 
   /** Start a fresh chat pinned to `id`. The honest answer to "I picked a new
    *  model mid-conversation": a resumed session is pinned to the model it was
-   *  created with (thinking-block signatures are model-bound — see turn.rs
-   *  load_session_model), so a picker switch can only take effect in a NEW
-   *  chat. This mints that new tab and sets the model up front so its first
-   *  turn runs against the user's pick. */
+   *  created with unless the user switches it. This mints a new tab and sets
+   *  the model up front so its first turn runs against the user's pick —
+   *  the fresh-start alternative to switching the current chat mid-flight. */
   async newChatWithModel(id: ModelSel) {
     await this.newTab();
     this.setModel(id);

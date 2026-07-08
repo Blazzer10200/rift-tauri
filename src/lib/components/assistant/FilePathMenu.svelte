@@ -11,7 +11,7 @@
   import { environment } from "$lib/state/environment.svelte";
   import { leafName } from "$lib/utils/path";
 
-  let { path, x, y, onClose }: { path: string; x: number; y: number; onClose: () => void } = $props();
+  let { path, line, x, y, onClose }: { path: string; line?: number | null; x: number; y: number; onClose: () => void } = $props();
 
   let menuEl = $state<HTMLDivElement | undefined>();
   // svelte-ignore state_referenced_locally
@@ -47,7 +47,7 @@
     try { await fn(); onClose(); } catch (e) { console.warn("[FilePathMenu] action failed", e); }
   }
 
-  const openInVscode = () => run(() => invoke("open_in_vscode", { path }));
+  const openInVscode = () => run(() => invoke("open_in_vscode", { path, line: line ?? null }));
   const openDefault = () => run(() => openPath(path));
   const reveal = () => run(() => revealItemInDir(path));
   const copyPath = () => run(async () => navigator.clipboard?.writeText(path));

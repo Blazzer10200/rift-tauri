@@ -269,7 +269,7 @@ pub fn run() {
             commands::browser_forward,
             commands::browser_reload,
             commands::browser_read_page,
-            commands::workspace_open_path,
+            commands::resolve_workspace_path,
             stt::stt_get_config,
             stt::stt_set_config,
             stt::stt_start_recording,
