@@ -136,6 +136,98 @@ fn take_session_stopped(session_id: &str) -> bool {
     with_session_stopped(|s| s.remove(session_id))
 }
 
+/// #88: tool calls that were still in flight when a turn was force-ended (stall
+/// tree-kill, child death, fatal pipe error). The turn's frames may never reach
+/// the CLI transcript, so on the next send the model can have NO memory of
+/// having issued a tool whose side effects (a deploy, a push) are already real —
+/// and blindly re-run it. Keyed by session; consumed by the next send, which
+/// injects a reconciliation <system-reminder>. Best-effort bookkeeping: a
+/// session that never sends again leaves one small stale entry.
+static INTERRUPTED_TOOLS: Mutex<Option<HashMap<String, Vec<String>>>> = Mutex::new(None);
+
+fn stash_interrupted_tools(session_id: &str, inflight: &HashMap<String, String>) {
+    if inflight.is_empty() {
+        return;
+    }
+    let descs: Vec<String> = inflight.values().take(3).cloned().collect();
+    log::warn!(
+        "turn interrupted with {} tool call(s) in flight, session={session_id} — stashing reconciliation note for the next send",
+        inflight.len()
+    );
+    let mut g = match INTERRUPTED_TOOLS.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    g.get_or_insert_with(HashMap::new).insert(session_id.to_string(), descs);
+}
+
+fn take_interrupted_tools(session_id: &str) -> Option<Vec<String>> {
+    let mut g = match INTERRUPTED_TOOLS.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    g.as_mut()?.remove(session_id)
+}
+
+/// Short "Name(input…)" for a tool_use block, feeding the #88 reconciliation
+/// note. Bash/file tools show their most identifying input field; anything else
+/// a compact input JSON. Char-capped (not byte-sliced — never panics mid-UTF-8).
+fn tool_use_desc(block: &Value) -> String {
+    let name = block.get("name").and_then(|n| n.as_str()).unwrap_or("tool");
+    let input = block.get("input");
+    let summary = input
+        .and_then(|i| {
+            i.get("command")
+                .or_else(|| i.get("file_path"))
+                .or_else(|| i.get("prompt"))
+                .and_then(|c| c.as_str())
+                .map(String::from)
+        })
+        .or_else(|| input.map(|i| i.to_string()))
+        .unwrap_or_default();
+    let capped: String = summary.chars().take(180).collect();
+    format!("{name}({capped})")
+}
+
+/// #88: a DeadOnReuse cold retry re-sends the ALREADY-BUILT envelope, skipping
+/// the `take_interrupted_tools` injection in the normal send path — so the note
+/// stashed by the dying attempt would miss the very retry most at risk of
+/// re-running the interrupted tool. Splice it into the envelope's leading text
+/// block here. Peek-then-take: the stash is only consumed once a splice is
+/// guaranteed, so an unexpected envelope shape leaves the note for the next send.
+fn inject_interrupted_note(line: Vec<u8>, session_id: &str) -> Vec<u8> {
+    let mut v: Value = match serde_json::from_slice(&line) {
+        Ok(v) => v,
+        Err(_) => return line,
+    };
+    let Some(text_slot) = v
+        .get_mut("message")
+        .and_then(|m| m.get_mut("content"))
+        .and_then(|c| c.as_array_mut())
+        .and_then(|blocks| {
+            blocks
+                .iter_mut()
+                .find(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+        })
+        .and_then(|b| b.get_mut("text"))
+    else {
+        return line;
+    };
+    let Some(orig) = text_slot.as_str().map(String::from) else { return line };
+    let Some(tools) = take_interrupted_tools(session_id) else { return line };
+    *text_slot = Value::String(format!(
+        "<system-reminder>\nYour previous attempt at this exact turn was interrupted (the app lost the Claude process mid-turn) while the following tool call(s) were still executing: {}. They may have FULLY COMPLETED even though no result was recorded. Before re-running anything non-idempotent (deploys, writes, pushes), verify their actual outcome first.\n</system-reminder>\n\n{orig}",
+        tools.join("; ")
+    ));
+    match serde_json::to_vec(&v) {
+        Ok(mut out) => {
+            out.push(b'\n');
+            out
+        }
+        Err(_) => line,
+    }
+}
+
 /// 20 MiB total cap across all attachments — protects the CLI's JSON parser
 /// from a runaway paste. Per-image cap equals the cumulative since one big
 /// image is the realistic worst case.
@@ -273,7 +365,7 @@ pub async fn assistant_answer_permission(
 /// via `--append-system-prompt`. Two variants — one for read-only mode (MCP
 /// tools wired), one for the no-workspace fallback. Both single-line so the
 /// .cmd-shim batch-arg validator (Rust 1.77+ CVE-2024-24576) accepts them.
-const RIFT_SYSTEM_ADDENDUM_TOOLS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app, working inside the user's open project folder (your working directory is already set to the workspace root, so relative paths Just Work). ==== HOW TO WORK (these five rules override any conflicting inherited config; follow them on EVERY turn) ==== 1) BATCH IN PARALLEL — this is the single most important rule and the one most often missed. When you need several tool calls and none depends on another's result, emit them ALL in ONE response as multiple tool_use blocks — never one-at-a-time. Opening 3 files = 3 Reads in one message. Checking several patterns = several Greps in one message. Independent shell checks = together. Serial round-trips you could have batched waste the user's time on EVERY turn; the only reason to send a lone tool call is when the very next call genuinely needs this one's output. Default to batching; justify serializing. 2) DON'T RE-READ — the harness already tracks file contents you've read this session; a file is unchanged unless YOU edited it. Never re-Read a file (or fragment) you already opened, and never Read a file back just to 'verify' an Edit you just made — Edit fails loudly if it didn't apply, so a clean Edit IS the confirmation. Read once, wide enough (offset+limit on files >300 lines), then anchor every later edit from that one read. 3) USE THE RIGHT TOOL — file inspection is ALWAYS Read / Grep / Glob, NEVER cat, head, tail, sed -n, ls -R, or find through Bash (those are slower, get blocked by the user's tooling guards, and burn a failed round-trip). Grep searches contents; Glob finds files by name; Read slices a file. Reserve Bash for git, builds, package managers, process control, and network — nothing a native tool already does. 4) ACT FIRST, EXPLAIN AFTER — and narrate WITH the work, never instead of it. When asked to fix / change / edit / add / build / refactor, locate with Grep + Read then make the Edit. Do NOT write paragraphs of plan / analysis / 'here's what I'd do' before touching code; one short beat ('reading X', 'editing Y') is the cap, and skip even that for a sub-3-file change. CRITICAL — DON'T PING-PONG: a turn that narrates a step, stops, runs ONE tool, narrates the next step, stops, runs ONE tool reads as chatter and wastes round-trips. Instead, put your narration line AND every independent tool call for that step in the SAME response — explain once, then fire all the reads/greps/edits that step needs together (rule 1). The user wants to watch real work happen, so let the work rows carry the progress; a between-tools sentence is justified only when the next action genuinely needs explaining, not before every single call. Verify AFTER (run the test / lint / build), never before. Don't open with 'Let me…' or 'I'll start by…' — just do it. 5) STAY IN SCOPE & DON'T STALL — fix exactly what was asked, no opportunistic refactors / renames / reformatting / unrequested error-handling (mention separate problems in your reply instead). Don't ask permission for routine work (file edits, shell, installs, local git) — the user expects real work and can revert via git. If an Edit fails on an old_string mismatch, re-Read ONLY that region and re-anchor — never retry it verbatim, and after two failures on one file switch tactic (smaller anchor, replace_all, or Write). Surface tool errors verbatim and try another approach instead of bouncing the problem back. ==== YOUR TOOLS ==== Full Claude Code toolset: Read / Write / Edit / MultiEdit for files, Bash for shell (runs in the workspace dir, output streamed back), Glob for filename patterns, Grep for content search, WebFetch / WebSearch for the open web, TaskCreate / TaskUpdate for multi-step plans (TodoWrite on older CLI builds), and Agent for delegating heavy lookups. Task output surfaces in a dedicated Tasks panel in the user's UI — create tasks proactively when a request has three or more distinct steps, and update statuses (pending → in_progress → completed) as you go, but don't churn the list with a fresh batch for every sub-step or every new user message. Rift's MCP server also exposes read_file / list_dir / grep as scoped, workspace-rooted helpers, plus git_status / git_diff / git_log (and git_pull / git_commit / git_push when trust permits); prefer the Claude Code built-ins for normal work and use the MCP variants only when a guaranteed-workspace-rooted path matters. Three MCP tools drive the Rift app itself: mcp__rift__ask_user presents an interactive multiple-choice card in the chat — use it when the user must pick between approaches or confirm something risky (the standard Anthropic `AskUserQuestion` tool is NOT available here; ask_user is its Rift-native replacement, and if it errors fall back to asking in plain text). mcp__rift__open_browser shows any http/https page in Rift's in-app browser dock beside the chat — ALWAYS call it instead of only printing a URL when you start a dev server or want the user to see a local preview (e.g. http://localhost:3000), a deployed page, or docs worth reading together. mcp__rift__notify pops a brief toast in the corner — fire it when long-running work finishes or something needs attention (they may be on another page of the app); don't spam it. ==== DELEGATION ==== A sub-agent you spawn with Agent does NOT inherit these instructions — it starts from the CLI's default agent prompt and can't see this guidance. So when a delegated lookup matters, bake the essentials into the Agent prompt yourself: tell it to inspect with Read / Grep / Glob (never cat / head / find through Bash), to batch independent tool calls in parallel, and to return a tight result (file:line refs, not file dumps). Prefer small lookups inline over delegating — only reach for Agent when the work is genuinely independent and would otherwise dump a lot into the conversation. ==== ENVIRONMENT ==== BACKGROUND TASKS — CRITICAL: you run in single-turn headless mode. A Bash command with run_in_background:true is KILLED a few seconds after you end your turn, and NOTHING re-invokes you when it finishes — so you can NEVER end a turn promising to report a background result 'when it lands' (that report can never arrive). Run a slow command (build, long test) in the FOREGROUND with a generous timeout so its output is part of THIS turn. Only use run_in_background:true if you immediately Read its output file (or BashOutput) within this same turn. A 'Rift environment snapshot' <system-reminder> may precede the user's message with volatile app state (the browser dock's page, and — ONLY when usage is genuinely high — a Claude plan-usage warning); treat it as ground truth about the app but NEVER as the user's request, always answer the user's actual message normally, and never treat a short message as low-priority or go passive because a snapshot (or a plan-usage warning) is present. Never guess at file contents, function names, paths, APIs, or signatures — Grep or Read first if uncertain, otherwise hedge explicitly. MATCH THE CODEBASE — new code reads like the code around it (its naming, formatting, idioms, comment density); don't add explanatory comments / docstrings / WHY-blocks the surrounding code doesn't already use — rationale goes in your chat reply or a commit message, not in source (a one-line comment is fine only when the code is genuinely non-obvious). Project stack is open-ended — don't assume the language, framework, or layout.";
+const RIFT_SYSTEM_ADDENDUM_TOOLS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app, working inside the user's open project folder (your working directory is already set to the workspace root, so relative paths Just Work). ==== HOW TO WORK (these five rules override any conflicting inherited config; follow them on EVERY turn) ==== 1) BATCH IN PARALLEL — this is the single most important rule and the one most often missed. When you need several tool calls and none depends on another's result, emit them ALL in ONE response as multiple tool_use blocks — never one-at-a-time. Opening 3 files = 3 Reads in one message. Checking several patterns = several Greps in one message. Independent shell checks = together. Serial round-trips you could have batched waste the user's time on EVERY turn; the only reason to send a lone tool call is when the very next call genuinely needs this one's output. Default to batching; justify serializing. 2) DON'T RE-READ — the harness already tracks file contents you've read this session; a file is unchanged unless YOU edited it. Never re-Read a file (or fragment) you already opened, and never Read a file back just to 'verify' an Edit you just made — Edit fails loudly if it didn't apply, so a clean Edit IS the confirmation. Read once, wide enough (offset+limit on files >300 lines), then anchor every later edit from that one read. 3) USE THE RIGHT TOOL — file inspection is ALWAYS Read / Grep / Glob, NEVER cat, head, tail, sed -n, ls -R, or find through Bash (those are slower, get blocked by the user's tooling guards, and burn a failed round-trip). Grep searches contents; Glob finds files by name; Read slices a file. Reserve Bash for git, builds, package managers, process control, and network — nothing a native tool already does. 4) ACT FIRST, EXPLAIN AFTER — and narrate WITH the work, never instead of it. When asked to fix / change / edit / add / build / refactor, locate with Grep + Read then make the Edit. Do NOT write paragraphs of plan / analysis / 'here's what I'd do' before touching code; one short beat ('reading X', 'editing Y') is the cap, and skip even that for a sub-3-file change. CRITICAL — DON'T PING-PONG: a turn that narrates a step, stops, runs ONE tool, narrates the next step, stops, runs ONE tool reads as chatter and wastes round-trips. Instead, put your narration line AND every independent tool call for that step in the SAME response — explain once, then fire all the reads/greps/edits that step needs together (rule 1). The user wants to watch real work happen, so let the work rows carry the progress; a between-tools sentence is justified only when the next action genuinely needs explaining, not before every single call. Verify AFTER (run the test / lint / build), never before. Don't open with 'Let me…' or 'I'll start by…' — just do it. 5) STAY IN SCOPE & DON'T STALL — fix exactly what was asked, no opportunistic refactors / renames / reformatting / unrequested error-handling (mention separate problems in your reply instead). Don't ask permission for routine work (file edits, shell, installs, local git) — the user expects real work and can revert via git. If an Edit fails on an old_string mismatch, re-Read ONLY that region and re-anchor — never retry it verbatim, and after two failures on one file switch tactic (smaller anchor, replace_all, or Write). Surface tool errors verbatim and try another approach instead of bouncing the problem back. ==== YOUR TOOLS ==== Full Claude Code toolset: Read / Write / Edit / MultiEdit for files, Bash for shell (runs in the workspace dir, output streamed back), Glob for filename patterns, Grep for content search, WebFetch / WebSearch for the open web, TaskCreate / TaskUpdate for multi-step plans (TodoWrite on older CLI builds), and Agent for delegating heavy lookups. Task output surfaces in a dedicated Tasks panel in the user's UI — create tasks proactively when a request has three or more distinct steps, and update statuses (pending → in_progress → completed) as you go, but don't churn the list with a fresh batch for every sub-step or every new user message. Rift's MCP server also exposes read_file / list_dir / grep as scoped, workspace-rooted helpers, plus git_status / git_diff / git_log (and git_pull / git_commit / git_push when trust permits); prefer the Claude Code built-ins for normal work and use the MCP variants only when a guaranteed-workspace-rooted path matters. Three MCP tools drive the Rift app itself: mcp__rift__ask_user presents an interactive multiple-choice card in the chat — use it when the user must pick between approaches or confirm something risky (the standard Anthropic `AskUserQuestion` tool is NOT available here; ask_user is its Rift-native replacement, and if it errors fall back to asking in plain text). mcp__rift__open_browser shows any http/https page in Rift's in-app browser dock beside the chat — ALWAYS call it instead of only printing a URL when you start a dev server or want the user to see a local preview (e.g. http://localhost:3000), a deployed page, or docs worth reading together. mcp__rift__notify pops a brief toast in the corner — fire it when long-running work finishes or something needs attention (they may be on another page of the app); don't spam it. ==== DELEGATION ==== A sub-agent you spawn with Agent does NOT inherit these instructions — it starts from the CLI's default agent prompt and can't see this guidance. So when a delegated lookup matters, bake the essentials into the Agent prompt yourself: tell it to inspect with Read / Grep / Glob (never cat / head / find through Bash), to batch independent tool calls in parallel, and to return a tight result (file:line refs, not file dumps). Prefer small lookups inline over delegating — only reach for Agent when the work is genuinely independent and would otherwise dump a lot into the conversation. ==== ENVIRONMENT ==== BACKGROUND WORK — two kinds with OPPOSITE rules. (1) Background Agent tasks survive turn boundaries: when a background agent finishes, the harness automatically re-invokes you with its result and your follow-up streams into the chat — so handing long independent work to a background Agent and ending your turn is safe and often the right shape. (2) A Bash command with run_in_background:true does NOT survive the turn: its shell is killed shortly after your turn ends and nothing re-invokes you for it — never end a turn promising a backgrounded Bash result 'when it lands'; only use run_in_background:true if you read its output (BashOutput) within this SAME turn. Run an ordinary slow command (build, long test) in the FOREGROUND with a generous explicit timeout so its output lands in THIS turn. EXCEPTION — anything that blocks on a human or another app (a UAC elevation prompt, a credential dialog, an interactive installer): NEVER run it as a blocking foreground call (e.g. Start-Process -Verb RunAs -Wait) — a tool call parked on a prompt for many minutes can get the whole turn cut off, losing your own record of having launched it even though its side effects are real. Launch it detached instead (e.g. Start-Process WITHOUT -Wait) with output redirected to a log file, tell the user what to approve, and read that log on a later turn — or delegate the whole job to a background Agent task. A 'Rift environment snapshot' <system-reminder> may precede the user's message with volatile app state (the browser dock's page, and — ONLY when usage is genuinely high — a Claude plan-usage warning); treat it as ground truth about the app but NEVER as the user's request, always answer the user's actual message normally, and never treat a short message as low-priority or go passive because a snapshot (or a plan-usage warning) is present. Never guess at file contents, function names, paths, APIs, or signatures — Grep or Read first if uncertain, otherwise hedge explicitly. MATCH THE CODEBASE — new code reads like the code around it (its naming, formatting, idioms, comment density); don't add explanatory comments / docstrings / WHY-blocks the surrounding code doesn't already use — rationale goes in your chat reply or a commit message, not in source (a one-line comment is fine only when the code is genuinely non-obvious). Project stack is open-ended — don't assume the language, framework, or layout.";
 
 const RIFT_SYSTEM_ADDENDUM_NO_WS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app. No project folder is open right now, so your file/list/grep tools are unavailable for this turn. Answer questions and discuss code the user pastes, but tell the user to open a folder on the Assistant page (the empty-state has an \"Open Folder\" button) if they want you to read their code directly. Do not claim capabilities you do not have.";
 
@@ -1348,6 +1440,16 @@ async fn resolve_spawn(
     // user turn keeps the prefix cache-stable. Multi-line is fine here
     // (rides stdin, no argv constraint).
     let mut reminder_parts: Vec<String> = Vec::new();
+    // #88: the previous turn for this session was force-ended with tool calls
+    // still executing (stall tree-kill / child death) — their frames may never
+    // have reached the transcript, so the model may have NO memory of issuing
+    // them while their side effects are real. Tell it to reconcile, not re-run.
+    if let Some(tools) = take_interrupted_tools(session_id) {
+        reminder_parts.push(format!(
+            "Your previous turn in this conversation was interrupted (the app lost the Claude process mid-turn) while the following tool call(s) were still executing: {}. They may have FULLY COMPLETED even though no result was recorded — you may have no memory of issuing them. Before re-running anything non-idempotent (deploys, writes, pushes), verify their actual outcome first (check the relevant files, logs, or state).",
+            tools.join("; ")
+        ));
+    }
     // Rift environment snapshot: volatile app facts (browser-dock page, plan
     // usage) the model can't see otherwise. Rides the user turn — a dynamic
     // system prompt would invalidate the cache prefix. Only pushed when
@@ -1561,7 +1663,11 @@ async fn dispatch_turn(
                             Ok(Err(ref s)) if s == RETRY_COLD_SENTINEL => {
                                 in_progress.store(false, Ordering::Release);
                                 emit_dispatch(&session_id, "dead_on_send", &model, &key);
-                                retry_line
+                                // #88: if the dead attempt stashed in-flight tools,
+                                // this retry must carry the reconciliation note —
+                                // it re-sends the same prompt the interrupted tool
+                                // came from, the exact double-execution shape.
+                                inject_interrupted_note(retry_line, &session_id)
                             }
                             Ok(r) => return r,
                             // Reader dropped done_tx without sending (loop exited /
@@ -2386,25 +2492,22 @@ struct StreamCtx<'a> {
 /// previously-infinite deadlock the UI used to mislabel as "the Anthropic API".
 const STREAM_NO_PROGRESS_SECS: u64 = 180;
 
-/// Consecutive dead-silent watchdog fires tolerated with a tool in flight before
-/// declaring a stall — bounds the re-arm so a never-completing tool can't disable
-/// the net forever (2 ≈ 6min). Any received line resets the counter.
-const STREAM_TOOL_GRACE_WINDOWS: u32 = 2;
-
 /// Absolute ceiling on how long ANY tool may stay continuously in flight before
-/// the turn is force-stalled — the net for the wedged-but-CHATTY sub-agent that
-/// `STREAM_TOOL_GRACE_WINDOWS` misses. A spawned Task counts as a tool in flight
-/// until its top-level `tool_result` lands; if that sub-agent wedges yet keeps
-/// dribbling nested frames, every line resets `tool_grace_fires` AND pushes the
-/// no-progress deadline forward, so the dead-silent grace path never trips and
-/// the parent hangs indefinitely (observed: a sub-agent stuck "Starting up…" for
-/// 40min, turn never ending → the dock spins forever). This ceiling is measured
-/// from when `tools_in_flight` first went positive and is NEVER reset by a line —
-/// so chatter cannot extend it. Set well above any legitimate long tool: a real
-/// Bash build / deep grep / long sub-agent finishes inside this; only a genuinely
-/// stuck one reaches it. 900s (15min) bounds the hang without false-positiving a
-/// slow-but-live agent. Keep > STREAM_NO_PROGRESS_SECS (the silent-pipe net fires
-/// first when there's no chatter; this only governs the chatty-wedge case).
+/// the turn is force-stalled — the SOLE watchdog net while a tool is open. The
+/// CLI emits no partial tool output in `-p` mode, so a healthy long tool (a
+/// build, a deep grep, a command parked on a UAC prompt — #88) is legitimately
+/// dead-silent for many minutes; the old per-fire grace counting stalled those
+/// at ~9min and tree-killed real interactive waits mid-side-effect. A spawned
+/// Task counts as a tool in flight until its top-level `tool_result` lands; if
+/// that sub-agent wedges yet keeps dribbling nested frames, every line pushes
+/// the no-progress deadline forward and nothing else detects it (observed: a
+/// sub-agent stuck "Starting up…" for 40min, turn never ending → the dock spins
+/// forever). This ceiling is measured from when `tools_in_flight` first went
+/// positive and is NEVER reset by a line — so neither chatter nor silence can
+/// extend it. 900s (15min) bounds both wedge shapes without false-positiving a
+/// slow-but-live tool; a wait that legitimately outlives it (an unanswered UAC
+/// prompt) is reconciled by the #88 interrupted-turn note on the next send.
+/// Keep > STREAM_NO_PROGRESS_SECS.
 const STREAM_TOOL_CEILING_SECS: u64 = 900;
 
 /// Pure decision: does a cloud turn route through the in-process no-think shim?
@@ -2423,28 +2526,20 @@ fn routes_through_nothink_shim(thinking_on: bool, model: &str) -> bool {
     !thinking_on && model != HAIKU_MODEL && model != FABLE_MODEL
 }
 
-/// Pure watchdog decision: on a no-progress fire with a tool in flight, do we
-/// re-arm (grace) or force-stall? Extracted as a seam so the wedged-sub-agent
-/// regression is unit-testable without the async IO loop.
+/// Pure watchdog decision: on a no-progress fire, do we re-arm or force-stall?
+/// Extracted as a seam so the wedged-sub-agent regression is unit-testable
+/// without the async IO loop.
 ///
 /// `tool_inflight_secs` = how long the OLDEST still-open tool has been in flight,
 /// measured continuously (NOT reset by stream lines). Returns `true` to STALL.
-///
-/// Two independent triggers, either fires:
-///   1. Dead-silent grace exhausted (`tool_grace_fires >= STREAM_TOOL_GRACE_WINDOWS`)
-///      — the original net for a tool that goes fully silent.
-///   2. A tool has been in flight past `STREAM_TOOL_CEILING_SECS` — the new net for
-///      a tool that stays "running" forever while emitting sparse output.
-fn watchdog_should_stall(
-    tools_in_flight: i32,
-    tool_grace_fires: u32,
-    tool_inflight_secs: u64,
-) -> bool {
+/// No tool in flight → the plain no-progress stall. Tool in flight → ONLY the
+/// absolute ceiling stalls: silence under a live tool is healthy (#88 — the CLI
+/// emits no partial tool output, and a UAC-parked command is dead-silent).
+fn watchdog_should_stall(tools_in_flight: i32, tool_inflight_secs: u64) -> bool {
     if tools_in_flight <= 0 {
         return true; // silent pipe, no tool → the plain no-progress stall
     }
-    tool_grace_fires >= STREAM_TOOL_GRACE_WINDOWS
-        || tool_inflight_secs >= STREAM_TOOL_CEILING_SECS
+    tool_inflight_secs >= STREAM_TOOL_CEILING_SECS
 }
 
 /// Max time spent discarding stale buffered stdout at the start of a reused
@@ -2620,20 +2715,17 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
     // parked on the human — so the watchdog must NOT fire while count > 0. Mirrors
     // the frontend's `liveTool != null` rule for the stall indicator.
     let mut tools_in_flight: i32 = 0;
-    // IDs of the tool_use blocks counted above (ExitPlanMode excluded). Only a
-    // tool_result whose tool_use_id is in here decrements — without this, an
-    // ExitPlanMode result (never counted on open) closed a SIBLING tool's
+    // Tool_use blocks counted above (ExitPlanMode excluded), id → short desc.
+    // Only a tool_result whose tool_use_id is in here decrements — without this,
+    // an ExitPlanMode result (never counted on open) closed a SIBLING tool's
     // in-flight slot, re-arming the no-progress stall under a live slow tool.
-    let mut inflight_tool_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
-    // Consecutive watchdog fires survived purely because a tool was in flight.
-    // Reset to 0 by ANY received line (real progress); when it exceeds the grace
-    // cap with the pipe still dead, the "tool" is wedged → stall anyway.
-    let mut tool_grace_fires: u32 = 0;
+    // The desc feeds the #88 reconciliation note when the turn dies mid-tool.
+    let mut inflight_tools: HashMap<String, String> = HashMap::new();
     // When `tools_in_flight` first went positive (the start of a continuous
     // in-flight stretch). Set on the 0→positive edge, cleared on the →0 edge.
-    // Deliberately NOT touched by the line-reset arm: a wedged-but-chatty tool
-    // keeps emitting frames that reset `tool_grace_fires`, so this absolute clock
-    // is the only signal that catches it (STREAM_TOOL_CEILING_SECS).
+    // Deliberately NOT reset by received lines: a wedged-but-chatty tool keeps
+    // emitting frames, so this absolute clock is the only signal that catches
+    // it (STREAM_TOOL_CEILING_SECS).
     let mut tool_in_flight_since: Option<std::time::Instant> = None;
 
     // No-progress watchdog: a deadline that any received line pushes forward.
@@ -2646,34 +2738,32 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
     loop {
         tokio::select! {
         () = &mut watchdog => {
-            // In-flight tool → silent-but-healthy, re-arm; but bound it two ways
-            // (watchdog_should_stall): the dead-silent grace cap (a tool that goes
-            // fully quiet) AND an absolute in-flight ceiling (a tool that stays
-            // "running" forever while dribbling frames — the wedged sub-agent that
-            // the grace path alone misses, since each line resets the grace count).
+            // In-flight tool → silent-but-healthy, re-arm. The CLI emits no
+            // partial tool output in -p mode, so a long build, deep grep, or a
+            // command parked on a human (a UAC prompt — #88) is legitimately
+            // dead-silent for many minutes; only the absolute in-flight ceiling
+            // (watchdog_should_stall) bounds it, silent and chatty wedges alike.
             let inflight_secs = tool_in_flight_since
                 .map(|t| t.elapsed().as_secs())
                 .unwrap_or(0);
-            if !watchdog_should_stall(tools_in_flight, tool_grace_fires, inflight_secs) {
-                tool_grace_fires += 1;
+            if !watchdog_should_stall(tools_in_flight, inflight_secs) {
                 watchdog.as_mut().reset(
                     tokio::time::Instant::now() + std::time::Duration::from_secs(STREAM_NO_PROGRESS_SECS),
                 );
                 continue;
             }
             log::warn!(
-                "warm_pool: stall (user_sent={user_sent}, tools_in_flight={tools_in_flight}, grace={tool_grace_fires}, inflight={inflight_secs}s) — child wedged, session={stream_sid}"
+                "warm_pool: stall (user_sent={user_sent}, tools_in_flight={tools_in_flight}, inflight={inflight_secs}s) — child wedged, session={stream_sid}"
             );
+            stash_interrupted_tools(stream_sid, &inflight_tools);
             return TurnOutcome::Stalled;
         }
         read = next_line_or_preread(lines, &mut preread) => {
             // Any line (even an ignored control frame) = the child is alive and
-            // making progress — push the no-progress deadline forward and clear
-            // the tool-grace counter (a working tool just proved itself).
+            // making progress — push the no-progress deadline forward.
             watchdog.as_mut().reset(
                 tokio::time::Instant::now() + std::time::Duration::from_secs(STREAM_NO_PROGRESS_SECS),
             );
-            tool_grace_fires = 0;
         match read {
             Ok(Some(line)) => {
                 let trimmed = line.trim();
@@ -2708,6 +2798,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                             == Some("can_use_tool");
                     if is_perm {
                         if let Err(e) = handle_permission_request(app_out, stream_sid, win_label, stdin, &v).await {
+                            stash_interrupted_tools(stream_sid, &inflight_tools);
                             return TurnOutcome::Fatal(format!("write permission response: {e}"));
                         }
                         // A permission ask parks on the USER (its own 120s
@@ -2739,6 +2830,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                         if let Err(e) = write_control_error(stdin, req_id, &format!(
                             "Rift does not support the `{subtype}` control request"
                         )).await {
+                            stash_interrupted_tools(stream_sid, &inflight_tools);
                             return TurnOutcome::Fatal(format!("write control error response: {e}"));
                         }
                         continue;
@@ -2746,6 +2838,14 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                     // `result` is the last frame — forward it, emit DONE, and
                     // RETURN (the loop parks for the next turn; stdin stays open).
                     if ty == Some("result") {
+                        // Invariant probe: tool_result always precedes result in a
+                        // well-formed stream. If a CLI quirk ever violates it, the
+                        // stuck-open tool would vanish with no #88 stash — log loud.
+                        if tools_in_flight > 0 {
+                            log::warn!(
+                                "warm_pool: result frame landed with {tools_in_flight} tool(s) still counted in flight, session={stream_sid}"
+                            );
+                        }
                         let res_is_err = v.get("is_error").and_then(|b| b.as_bool()).unwrap_or(false)
                             || v.get("subtype").and_then(|s| s.as_str()).map(|s| s != "success").unwrap_or(false);
                         let res_text = v.get("result").and_then(|s| s.as_str()).unwrap_or("");
@@ -2797,7 +2897,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                                     // Track the id so only ITS result closes this slot
                                     // (id-less block: count anyway, legacy behavior).
                                     let tracked = match block.get("id").and_then(|i| i.as_str()) {
-                                        Some(id) => inflight_tool_ids.insert(id.to_string()),
+                                        Some(id) => inflight_tools.insert(id.to_string(), tool_use_desc(block)).is_none(),
                                         None => true,
                                     };
                                     if tracked {
@@ -2840,7 +2940,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                                     // must not zero a sibling tool's slot. Untagged
                                     // results keep the legacy saturating behavior.
                                     let counted = match block.get("tool_use_id").and_then(|i| i.as_str()) {
-                                        Some(id) => inflight_tool_ids.remove(id),
+                                        Some(id) => inflight_tools.remove(id).is_some(),
                                         None => true,
                                     };
                                     if !counted {
@@ -2898,6 +2998,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
             Ok(None) => {
                 // Reused turn, stdout closed with no result → child died while
                 // parked. Retry cold instead of erroring the user's turn.
+                stash_interrupted_tools(stream_sid, &inflight_tools);
                 return if was_reused { TurnOutcome::DeadOnReuse } else { TurnOutcome::Eof };
             }
             Err(e) => {
@@ -2905,6 +3006,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                     "session_id": stream_sid, "message": format!("stdout read error: {e}"),
                     "turn_epoch": turn_epoch,
                 }));
+                stash_interrupted_tools(stream_sid, &inflight_tools);
                 return TurnOutcome::Fatal(format!("stdout read error: {e}"));
             }
         }
@@ -3238,8 +3340,8 @@ pub async fn assistant_stop(
 mod tests {
     use super::{
         drain_stale_buffered_lines, plan_usage_is_hot, routes_through_nothink_shim,
+        stash_interrupted_tools, take_interrupted_tools, tool_use_desc,
         watchdog_should_stall, FABLE_MODEL, HAIKU_MODEL, STREAM_TOOL_CEILING_SECS,
-        STREAM_TOOL_GRACE_WINDOWS,
     };
     use tokio::io::{AsyncBufReadExt, BufReader};
 
@@ -3309,34 +3411,93 @@ mod tests {
         assert!(plan_usage_is_hot(100.0, 100.0));
     }
 
-    // The reported bug: a sub-agent activates, wedges, but keeps dribbling nested
-    // frames — every line resets `tool_grace_fires`, so the dead-silent grace path
-    // NEVER trips and the parent turn hangs forever (observed: "Starting up…" for
-    // 40min, the dock spinning, nothing detecting the stall). The absolute in-flight
-    // ceiling is the net that catches it; this pins the decision logic.
+    // Two pinned regressions in one seam. (1) The wedged-but-chatty sub-agent:
+    // it keeps dribbling nested frames so every line pushes the no-progress
+    // deadline forward and nothing else detects the hang (observed: "Starting
+    // up…" for 40min, the dock spinning) — the absolute in-flight ceiling is
+    // the net that catches it. (2) #88: a healthy tool is legitimately
+    // dead-silent in -p mode (a build, a UAC-parked deploy), so silence alone
+    // must NEVER stall a live tool — the ceiling is the ONLY in-flight trigger
+    // (the old per-fire grace counting tree-killed real interactive waits).
     #[test]
-    fn watchdog_stalls_a_wedged_chatty_tool_via_the_absolute_ceiling() {
+    fn watchdog_stalls_in_flight_tools_only_at_the_absolute_ceiling() {
         let under = STREAM_TOOL_CEILING_SECS - 1;
         let over = STREAM_TOOL_CEILING_SECS;
 
-        // Healthy long tool: grace not exhausted, under the ceiling → keep re-arming.
-        // This is the case that USED to (correctly) re-arm and the case the bug
-        // exploited — a chatty wedge looks identical until the ceiling bites.
-        assert!(!watchdog_should_stall(1, 0, under), "live tool under ceiling re-arms");
-        assert!(!watchdog_should_stall(3, STREAM_TOOL_GRACE_WINDOWS - 1, under),
-            "multiple nested tools, grace not yet exhausted, under ceiling → re-arm");
+        // Healthy long tool under the ceiling → keep re-arming, no matter how
+        // long the pipe has been dead-silent (#88).
+        assert!(!watchdog_should_stall(1, under), "live tool under ceiling re-arms");
+        assert!(!watchdog_should_stall(3, under), "nested tools under ceiling re-arm");
 
-        // THE FIX: a tool in flight past the ceiling stalls even with grace fresh
-        // (grace=0 because chatter kept resetting it) — the previously-infinite hang.
-        assert!(watchdog_should_stall(1, 0, over), "tool past ceiling stalls despite fresh grace");
-        assert!(watchdog_should_stall(5, 0, over + 3600), "deeply wedged sub-agent stalls");
-
-        // Original net still works: dead-silent grace exhausted → stall, even well
-        // under the ceiling (no chatter to reset grace).
-        assert!(watchdog_should_stall(1, STREAM_TOOL_GRACE_WINDOWS, 0),
-            "dead-silent grace exhausted stalls immediately");
+        // Past the ceiling → stall, chatty or silent alike.
+        assert!(watchdog_should_stall(1, over), "tool past ceiling stalls");
+        assert!(watchdog_should_stall(5, over + 3600), "deeply wedged sub-agent stalls");
 
         // No tool in flight → the plain no-progress stall (silent pipe).
-        assert!(watchdog_should_stall(0, 0, 0), "silent pipe, no tool → stall");
+        assert!(watchdog_should_stall(0, 0), "silent pipe, no tool → stall");
+    }
+
+    // #88: a turn force-ended mid-tool must leave a reconciliation note for the
+    // next send — the model may have executed a real side effect it no longer
+    // remembers issuing. Consumed exactly once; empty in-flight stashes nothing.
+    #[test]
+    fn interrupted_tools_note_roundtrips_once() {
+        let mut inflight = std::collections::HashMap::new();
+        inflight.insert(
+            "toolu_88".to_string(),
+            "Bash(Start-Process -Verb RunAs -Wait deploy.ps1)".to_string(),
+        );
+        stash_interrupted_tools("test-sid-88", &inflight);
+        let took = take_interrupted_tools("test-sid-88").expect("stashed note must be takeable");
+        assert_eq!(took, vec!["Bash(Start-Process -Verb RunAs -Wait deploy.ps1)".to_string()]);
+        assert!(take_interrupted_tools("test-sid-88").is_none(), "note is consumed on take");
+
+        stash_interrupted_tools("test-sid-88-clean", &std::collections::HashMap::new());
+        assert!(take_interrupted_tools("test-sid-88-clean").is_none(), "clean turn stashes nothing");
+    }
+
+    // #88: the DeadOnReuse cold retry re-sends a preserved envelope — the splice
+    // must land the note in front of the original prompt, keep valid NDJSON, and
+    // consume the stash exactly once. No stash / odd shape → line unchanged.
+    #[test]
+    fn dead_on_reuse_retry_line_carries_the_reconciliation_note() {
+        let line = super::build_user_envelope("redeploy please", &[]).unwrap();
+        assert_eq!(
+            super::inject_interrupted_note(line.clone(), "sid-inject-none"),
+            line,
+            "no stash → envelope unchanged"
+        );
+
+        let mut inflight = std::collections::HashMap::new();
+        inflight.insert("t1".to_string(), "Bash(deploy.ps1)".to_string());
+        stash_interrupted_tools("sid-inject", &inflight);
+        let out = super::inject_interrupted_note(line.clone(), "sid-inject");
+        assert_eq!(out.last(), Some(&b'\n'), "stays a valid NDJSON line");
+        let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+        let text = v["message"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with("<system-reminder>"), "note leads the prompt");
+        assert!(text.contains("Bash(deploy.ps1)"));
+        assert!(text.ends_with("redeploy please"), "original prompt preserved");
+        assert!(take_interrupted_tools("sid-inject").is_none(), "stash consumed by the splice");
+
+        // Unparseable line → returned untouched AND the stash survives for the
+        // next ordinary send (peek-then-take).
+        stash_interrupted_tools("sid-inject-2", &inflight);
+        let junk = b"not json\n".to_vec();
+        assert_eq!(super::inject_interrupted_note(junk.clone(), "sid-inject-2"), junk);
+        assert!(take_interrupted_tools("sid-inject-2").is_some(), "stash preserved on parse failure");
+    }
+
+    #[test]
+    fn tool_use_desc_prefers_identifying_input_and_caps_length() {
+        let bash = serde_json::json!({"name":"Bash","input":{"command":"git push origin main"}});
+        assert_eq!(tool_use_desc(&bash), "Bash(git push origin main)");
+        let write = serde_json::json!({"name":"Write","input":{"file_path":"src/a.ts","content":"..."}});
+        assert_eq!(tool_use_desc(&write), "Write(src/a.ts)");
+        // Unknown input shape falls back to compact JSON; long inputs are
+        // char-capped (never byte-sliced — no mid-UTF-8 panic).
+        let long_cmd = "循".repeat(500);
+        let big = serde_json::json!({"name":"Bash","input":{"command": long_cmd}});
+        assert_eq!(tool_use_desc(&big).chars().count(), "Bash()".chars().count() + 180);
     }
 }
