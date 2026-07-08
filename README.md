@@ -5,13 +5,14 @@
 <h1 align="center">Rift</h1>
 
 <p align="center">
-  A local-first coding assistant for Windows, built on Claude.<br/>
+  A local-first coding assistant for Windows, powered by Claude Code.<br/>
   Point it at a folder — chat, edit, search, and run git against it.<br/>
   <strong>No server, no telemetry — everything runs on your machine.</strong>
 </p>
 
 <p align="center">
   <a href="https://github.com/Blazzer10200/rift/releases"><img src="https://img.shields.io/github/v/release/Blazzer10200/rift?label=download&color=10b981" alt="Latest release" /></a>
+  <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/powered%20by-Claude%20Code-d97757" alt="Powered by Claude Code" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%2011-0078d4" alt="Windows 11" />
   <img src="https://img.shields.io/badge/Tauri%202-Rust%20%2B%20Svelte%205-f74c00" alt="Tauri 2" />
@@ -51,7 +52,7 @@
 
 ## How it works
 
-Tauri 2 (Rust) shell around a SvelteKit 2 / Svelte 5 frontend. The backend spawns the Claude CLI as a per-turn subprocess (with a warm pool so turns start fast) and hosts a local stdio MCP server that exposes the workspace-scoped file, search, and git tools plus a small UI bridge (`ask_user` / `open_browser` / `notify`) over a loopback socket. There is no remote component: your code, your prompts, and your keys never leave the machine except for the model API call itself.
+Tauri 2 (Rust) shell around a SvelteKit 2 / Svelte 5 frontend. The backend spawns the Claude CLI as a per-turn subprocess (with a warm pool so turns start fast) and hosts a local stdio MCP server that exposes the workspace-scoped file, search, and git tools plus a small UI bridge (`ask_user` / `open_browser` / `notify`) over a loopback socket. There is no remote component: your code, your prompts, and your keys never leave the machine except for the model API call itself. Auth belongs to the CLI — Rift spawns the official `claude` binary, which handles its own sign-in; Rift never reads, stores, or proxies your Claude credentials.
 
 Full picture in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -79,3 +80,5 @@ Pre-1.0, moving fast — releases ship continuously via tag-driven CI to the [`r
 ## License
 
 [MIT](LICENSE) © 2026 Braison Swilling (Blazzer10200)
+
+<sub>Rift is an independent open-source project — not affiliated with, sponsored, or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic, PBC.</sub>
