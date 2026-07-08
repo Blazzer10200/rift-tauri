@@ -153,13 +153,11 @@
 {/if}
 
 <style>
+  /* Positioning moved to the shared .hud-stack in AssistantPane (2026-07-08,
+     AgentHud arrival) — the stack owns centering/width/z so plan + agent bars
+     stack with a gap instead of overlapping at the same absolute spot. */
   .phud {
-    position: absolute;
-    top: 10px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: min(560px, calc(100% - 36px));
-    z-index: 4;
+    width: 100%;
     border-radius: 12px;
     background: color-mix(in oklch, var(--surface) 84%, transparent);
     backdrop-filter: blur(16px) saturate(140%);
@@ -171,8 +169,8 @@
     transition: border-color 200ms ease-out;
   }
   @keyframes phud-in {
-    from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
-    to { opacity: 1; transform: translateX(-50%) translateY(0); }
+    from { opacity: 0; transform: translateY(-8px); }
+    to { opacity: 1; transform: none; }
   }
   .phud.complete { border-color: color-mix(in oklab, var(--ok) 45%, var(--border-strong)); }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { basename, captionForGroup, captionForTool } from "./toolCaption";
+import { agentNowLine, basename, captionForGroup, captionForTool } from "./toolCaption";
 
 // basename is a deliberate sibling of tabsbar/helpers.ts::leafName — these cases
 // mirror leafName's vitest so the two cannot silently drift.
@@ -87,5 +87,27 @@ describe("captionForGroup", () => {
     expect(captionForGroup([tool("LS"), tool("LS")])).toBe("Running 2 LS calls");
     expect(captionForGroup([])).toBe("Running tools");
     expect(captionForGroup([{ type: "text" }])).toBe("Running tools");
+  });
+});
+
+// Shared by StreamAgent (card) + AgentHud (periscope) — the tail-first scan.
+describe("agentNowLine", () => {
+  it("prefers the pending tool nearest the tail", () => {
+    expect(agentNowLine([
+      { type: "tool", name: "Read", input: { file_path: "/a/x.ts" }, status: "done" },
+      { type: "tool", name: "Grep", input: { pattern: "auth" }, status: "pending" },
+    ])).toEqual({ label: "Searching for auth", thinking: false });
+  });
+  it("reports active thinking when no tool is pending", () => {
+    expect(agentNowLine([
+      { type: "tool", name: "Read", input: {}, status: "done" },
+      { type: "thinking", status: "active" },
+    ])).toEqual({ label: "Thinking", thinking: true });
+  });
+  it("falls back to the most recent settled step, then to spinning up", () => {
+    expect(agentNowLine([
+      { type: "tool", name: "Bash", input: { command: "cargo test" }, status: "done" },
+    ])).toEqual({ label: "Running `cargo`", thinking: false });
+    expect(agentNowLine([])).toEqual({ label: "Spinning up", thinking: true });
   });
 });

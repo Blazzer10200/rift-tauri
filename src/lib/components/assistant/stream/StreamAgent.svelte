@@ -2,7 +2,7 @@
   import { Bot, Loader2, CheckCircle2, AlertCircle, ChevronDown, ArrowRight, Brain,
     FileSearch, FilePen, FilePlus, Search, FolderTree, Terminal, Globe, AppWindow, GitBranch, ListChecks, Wrench } from "lucide-svelte";
   import { fmtDur, type StreamTool } from "./streamModel";
-  import { captionForTool } from "../toolCaption";
+  import { captionForTool, agentNowLine } from "../toolCaption";
   import type { Block, TabState } from "$lib/state/assistant.svelte";
 
   // Live delegated sub-agent, rendered inline in the transcript (CC-UI ref §5) —
@@ -44,23 +44,10 @@
   const blocks = $derived((spawn?.blocks ?? []) as Block[]);
   const toolSteps = $derived(blocks.filter((b) => b.type === "tool"));
 
-  // Live "now-doing" headline while running: the pending tool / active thinking
-  // nearest the tail, else the most recent settled step (ported from the dock's
-  // currentActivity — this is what made it read as alive, not just a spinner).
-  const nowLine = $derived.by(() => {
-    if (status !== "running") return null;
-    for (let i = blocks.length - 1; i >= 0; i--) {
-      const b = blocks[i];
-      if (b.type === "tool" && b.status === "pending")
-        return { label: captionForTool(b.name, b.input ?? {}), thinking: false };
-      if (b.type === "thinking" && b.status !== "done")
-        return { label: "Thinking", thinking: true };
-    }
-    const last = blocks[blocks.length - 1];
-    if (last && last.type === "tool")
-      return { label: captionForTool(last.name, last.input ?? {}), thinking: false };
-    return { label: "Spinning up", thinking: true };
-  });
+  // Live "now-doing" headline while running — shared with AgentHud via
+  // agentNowLine (toolCaption.ts) so the card and the pinned periscope can't
+  // drift. This is what made the retired dock read as alive, not a spinner.
+  const nowLine = $derived(status === "running" ? agentNowLine(blocks) : null);
 
   // Ticking duration while running; final wall-clock when done. Interval is
   // cleared on completion/unmount ($effect cleanup) — this now mounts per-card.
@@ -86,12 +73,13 @@
   let open = $state(false);
 </script>
 
-<div class="sacard" data-status={status}>
+<div class="sacard" data-status={status} id={"sacard-" + tool.id}>
   <button class="sa-head" class:sa-clickable={expandable} type="button"
     onclick={() => expandable && (open = !open)} aria-expanded={open}>
     <span class="sa-bot" aria-hidden="true"><Bot size={14} strokeWidth={2} /></span>
     <span class="sa-pill">{agentType}</span>
     {#if desc}<span class="sa-desc">{desc}</span>{/if}
+    {#if toolSteps.length > 0 && !open}<span class="sa-dur">{toolSteps.length} step{toolSteps.length === 1 ? "" : "s"}</span>{/if}
     {#if durSecs != null}<span class="sa-dur">{fmtDur(durSecs)}</span>{/if}
     <span class="sa-stat" aria-label={status}>
       {#if status === "running"}<Loader2 size={13} class="sa-spin" />

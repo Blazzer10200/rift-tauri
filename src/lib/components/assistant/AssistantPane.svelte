@@ -6,6 +6,7 @@
   import MessageBubble from "./MessageBubble.svelte";
   import StreamTurn from "./stream/StreamTurn.svelte";
   import PlanHud from "./stream/PlanHud.svelte";
+  import AgentHud from "./stream/AgentHud.svelte";
   import { uiPrefs } from "$lib/state/ui-prefs.svelte";
   import AssistantWelcome from "./AssistantWelcome.svelte";
   import Composer from "./Composer.svelte";
@@ -505,13 +506,17 @@
             {/each}
           </div>
         </div>
-        <!-- Pinned plan HUD — floats over the stream's top edge so the live
-             plan stays glanceable while the timeline scrolls past it. NOT
-             {#key}-ed on the tab: the HUD resets its own per-tab state when
-             the `tab` prop swaps (see PlanHud) — a keyed remount here tore
-             down a focused .phud-bar on Ctrl+Tab and dropped keyboard focus
-             to <body>. -->
-        <PlanHud {tab} {streaming} />
+        <!-- Pinned HUD stack — plan + agent periscopes float over the stream's
+             top edge so live state stays glanceable while the timeline scrolls
+             past. The stack owns centering/width; each HUD manages its own
+             visibility. NOT {#key}-ed on the tab: each HUD resets its own
+             per-tab state when the `tab` prop swaps (see PlanHud) — a keyed
+             remount here tore down a focused bar on Ctrl+Tab and dropped
+             keyboard focus to <body>. -->
+        <div class="hud-stack">
+          <PlanHud {tab} {streaming} />
+          <AgentHud {tab} {streaming} />
+        </div>
       {/if}
 
       {#if showError || showNotice}
@@ -896,6 +901,19 @@
     width: 100%;
     will-change: transform;
   }
+
+  /* Pinned HUD stack (plan + agents) — owns the floating position both bars
+     used to carry individually, so two live HUDs stack with a gap instead of
+     overlapping. pointer-events pass through the empty stack area. */
+  .hud-stack {
+    position: absolute;
+    top: 10px; left: 50%; transform: translateX(-50%);
+    width: min(560px, calc(100% - 36px));
+    z-index: 4;
+    display: flex; flex-direction: column; gap: 8px;
+    pointer-events: none;
+  }
+  .hud-stack > :global(*) { pointer-events: auto; }
 
   /* Conversation scroll region — replaces the old single `.scroll` wrapper for
      the message timeline. Keeps the hidden-scrollbar + flex-column behavior. */

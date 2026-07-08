@@ -105,6 +105,27 @@ export function captionForTool(name: string, input: Input = {}): string {
   return `Running ${n}`;
 }
 
+/** Live "now-doing" headline for a running agent spawn: the pending tool or
+ *  active thinking nearest the tail, else the most recent settled step.
+ *  Shared by StreamAgent (inline card) + AgentHud (pinned periscope) so the
+ *  two readouts can never drift. Structurally typed — this module stays free
+ *  of state imports (see basename note above). */
+export type AgentNowLine = { label: string; thinking: boolean };
+type SpawnBlock = { type: string; name?: string; input?: Input; status?: string };
+export function agentNowLine(blocks: SpawnBlock[]): AgentNowLine {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const b = blocks[i];
+    if (b.type === "tool" && b.status === "pending")
+      return { label: captionForTool(b.name ?? "", b.input ?? {}), thinking: false };
+    if (b.type === "thinking" && b.status !== "done")
+      return { label: "Thinking", thinking: true };
+  }
+  const last = blocks[blocks.length - 1];
+  if (last && last.type === "tool")
+    return { label: captionForTool(last.name ?? "", last.input ?? {}), thinking: false };
+  return { label: "Spinning up", thinking: true };
+}
+
 /** Caption for a coalesced tool group — one verb if homogeneous, else a count. */
 export function captionForGroup(blocks: Array<{ type: string; name?: string }>): string {
   const names = blocks
