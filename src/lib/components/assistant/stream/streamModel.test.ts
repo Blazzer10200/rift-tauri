@@ -483,3 +483,77 @@ describe("streamModel — shell flavor + detail surfacing (transcript revamp)", 
     expect(resultMeta(toolOf(msg([tool("Read")]))!)).toBeNull();
   });
 });
+
+describe("S128 — CLI tool-name compat (kinds + captions)", () => {
+  const toolOf = (m: ChatMessage): StreamTool | null => {
+    const b = messageToTurn(m).blocks.find((x) => x.type === "tool");
+    return b && b.type === "tool" ? b.tool : null;
+  };
+
+  it("TaskOutput/TaskStop are shell-shaped bg-task ops, NOT plan", () => {
+    const tails = toolOf(msg([{ ...tool("TaskOutput", "done", { task_id: "t7" }), result: "build ok" }]))!;
+    expect(tails.kind).toBe("shell");
+    expect(tails.cap).toBe("tail t7");
+    const stop = toolOf(msg([tool("TaskStop", "done", { task_id: "t7" })]))!;
+    expect(stop.kind).toBe("shell");
+    expect(stop.cap).toBe("stop t7");
+    // legacy names keep their captions too
+    expect(toolOf(msg([tool("BashOutput", "done", { bash_id: "b1" })]))!.cap).toBe("tail b1");
+  });
+
+  it("TaskCreate/TaskUpdate/TaskList/TaskGet remain plan kind", () => {
+    for (const n of ["TaskCreate", "TaskUpdate", "TaskList", "TaskGet", "TodoWrite"]) {
+      expect(toolOf(msg([tool(n)]))!.kind).toBe("plan");
+    }
+  });
+
+  it("ExitPlanMode → exitplan kind, carries input.plan for the proposal card", () => {
+    const t = toolOf(msg([tool("ExitPlanMode", "pending", { plan: "## Step 1\ndo the thing" })]))!;
+    expect(t.kind).toBe("exitplan");
+    expect(t.cap).toBe("Proposed a plan");
+    expect(t.input).toEqual({ plan: "## Step 1\ndo the thing" });
+  });
+
+  it("a plan-mode turn outcome is 'planned', even though the CLI wrote its plan artifact", () => {
+    // Live-caught 2026-07-08: the CLI Writes ~/.claude/plans/<slug>.md during
+    // ExitPlanMode, which read as "Applied 1 file" on a turn that changed
+    // nothing in the user's repo.
+    const t = messageToTurn(msg([
+      tool("Read"),
+      tool("Write", "done", { file_path: "C:/Users/x/.claude/plans/my-plan.md" }),
+      tool("ExitPlanMode", "done", { plan: "## The plan" }),
+    ]));
+    expect(t.outcome).toBe("planned");
+  });
+
+  it("PowerShell captions the command like Bash and flavors pwsh", () => {
+    const t = toolOf(msg([tool("PowerShell", "done", { command: "Get-Process rift" })]))!;
+    expect(t.kind).toBe("shell");
+    expect(t.cap).toBe("Get-Process rift");
+    expect(t.flavor).toBe("pwsh");
+  });
+
+  it("Skill / SlashCommand / Workflow / AskUserQuestion / LSP get real captions, not bare names", () => {
+    expect(toolOf(msg([tool("Skill", "done", { skill: "check", args: "--fix" })]))!.cap).toBe("/check --fix");
+    expect(toolOf(msg([tool("SlashCommand", "done", { command: "/cost" })]))!.cap).toBe("/cost");
+    expect(toolOf(msg([tool("Workflow", "done", { name: "review-changes" })]))!.cap).toBe("review-changes");
+    expect(toolOf(msg([tool("AskUserQuestion", "done", { questions: [{}, {}] })]))!.cap).toBe("2 questions");
+    expect(toolOf(msg([tool("LSP", "done", { operation: "findReferences", filePath: "/s/a.ts" })]))!.cap).toBe("findReferences · a.ts");
+  });
+
+  it("a live-forming edit defers diff counts and marks forming", () => {
+    const forming = {
+      ...tool("Edit", "pending", { file_path: "/a/x.ts", old_string: "trunc" }),
+      inputPartial: true,
+    };
+    const t = toolOf(msg([forming]))!;
+    expect(t.forming).toBe(true);
+    expect(t.add).toBeNull();
+    expect(t.del).toBeNull();
+    // once complete, the same block yields counts again
+    const done = tool("Edit", "done", { file_path: "/a/x.ts", old_string: "a", new_string: "a\nb" });
+    const t2 = toolOf(msg([done]))!;
+    expect(t2.forming).toBeUndefined();
+    expect(t2.add).toBe(1);
+  });
+});

@@ -256,7 +256,14 @@ export function flattenToolResult(content: unknown): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
     return content
-      .map((c) => (typeof c === "object" && c && "text" in c ? String((c as { text: unknown }).text ?? "") : ""))
+      .map((c) => {
+        if (typeof c !== "object" || !c) return "";
+        if ("text" in c) return String((c as { text: unknown }).text ?? "");
+        // Image parts (Read on a PNG, screenshot-bearing results) have no text
+        // form — an honest placeholder beats silently rendering an empty result.
+        if ((c as { type?: unknown }).type === "image") return "[image]";
+        return "";
+      })
       .join("");
   }
   return "";

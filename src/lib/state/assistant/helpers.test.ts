@@ -220,6 +220,10 @@ describe("flattenToolResult + previewToolInput", () => {
     expect(flattenToolResult([{ text: "a" }, { other: 1 }, { text: "b" }])).toBe("ab");
     expect(flattenToolResult({ not: "array" })).toBe("");
   });
+  it("image parts render an honest [image] placeholder, not silence", () => {
+    expect(flattenToolResult([{ type: "image", source: { data: "…" } }])).toBe("[image]");
+    expect(flattenToolResult([{ text: "before " }, { type: "image" }, { text: " after" }])).toBe("before [image] after");
+  });
   it("previews the first known field in priority order and caps at 120", () => {
     expect(previewToolInput("Bash", { command: "ls", file_path: "x" })).toBe("ls");
     expect(previewToolInput("Read", { file_path: "src/a.ts" })).toBe("src/a.ts");

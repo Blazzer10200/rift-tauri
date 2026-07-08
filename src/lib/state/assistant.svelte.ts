@@ -374,6 +374,11 @@ export class TabState {
   lastDrainAt = 0;
   thinkingByIndex = new Map<number, { blockOffset: number; startedAt: number }>();
   activeThinkingIndex: number | null = null;
+  /** Live tool-input accumulation (S127, mirrors thinkingByIndex): stream index
+   *  → forming tool block. `json` accumulates input_json_delta.partial_json;
+   *  `extracted` memoizes the last caption-field snapshot so no-op deltas skip
+   *  the block mutate. Cleared in beginTurn + finalizeInflightBlocks. */
+  toolInputByIndex = new Map<number, { id: string; name: string; json: string; extracted: string }>();
   /** Wall-clock of the most recent `stream_event` arrival. Null between turns.
    *  Used to compute `maxStreamGapMs` on the in-flight TurnRecord. */
   lastStreamEventAt: number | null = null;

@@ -48,6 +48,7 @@ function pumpRaf() {
 
 import { assistant } from "./assistant.svelte.js";
 import { send as sendDirect } from "./assistant/send.js";
+import { finalizeInflightBlocks } from "./assistant/streaming.js";
 import { notify, toast } from "./toast.svelte";
 import { invoke } from "@tauri-apps/api/core";
 import type { TurnRecord } from "./assistant/types.js";
@@ -1114,5 +1115,111 @@ describe("playback — continuation turn (background agent finished)", () => {
       { type: "assistant", message: { content: [{ type: "text", text: "mid-turn text" }] } },
     ]);
     expect(tab.messages.length).toBe(before); // painted into the live bubble
+  });
+});
+
+// ── Live tool-block forming (S127) ───────────────────────────────────────────
+// content_block_start(tool_use) → input_json_delta chunks → content_block_stop
+// forms a pending block live; the assistant envelope only finalizes input.
+const toolStart = (index: number, id: string, name: string) => ({
+  type: "stream_event",
+  event: { type: "content_block_start", index, content_block: { type: "tool_use", id, name, input: {} } },
+});
+const inputDelta = (index: number, partial: string) => ({
+  type: "stream_event",
+  event: { type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: partial } },
+});
+
+describe("playback — live tool-block forming (S127)", () => {
+  it("forms a pending block at content_block_start and fills caption fields as they stream", () => {
+    const tab = freshTab();
+    const rec = beginTurn(tab);
+    const id = tab.streamingMsgId!;
+    feed(tab, [toolStart(1, "tf-1", "Bash")]);
+
+    let tool = textBlocks(tab, id).find((b) => b.type === "tool");
+    expect(tool).toMatchObject({ id: "tf-1", name: "Bash", status: "pending", inputPartial: true });
+    expect(rec.toolUses).toHaveLength(1);
+
+    // Tail capture: the still-open command string is provisionally visible.
+    feed(tab, [inputDelta(1, '{"command":"cargo ')]);
+    tool = textBlocks(tab, id).find((b) => b.type === "tool");
+    expect(tool).toMatchObject({ input: { command: "cargo " }, inputPartial: true });
+
+    // Completed pair replaces the provisional value.
+    feed(tab, [inputDelta(1, 'build"}')]);
+    tool = textBlocks(tab, id).find((b) => b.type === "tool");
+    expect(tool).toMatchObject({ input: { command: "cargo build" } });
+
+    // content_block_stop parses the full JSON and finalizes.
+    feed(tab, [blockStop(1)]);
+    tool = textBlocks(tab, id).find((b) => b.type === "tool");
+    expect(tool).toMatchObject({ input: { command: "cargo build" }, status: "pending" });
+    expect((tool as { inputPartial?: boolean }).inputPartial).toBeUndefined();
+    expect(rec.toolUses[0].inputPreview).toBe("cargo build");
+  });
+
+  it("the assistant envelope finalizes a formed block — no duplicate, authoritative input", () => {
+    const tab = freshTab();
+    const rec = beginTurn(tab);
+    const id = tab.streamingMsgId!;
+    feed(tab, [
+      toolStart(0, "tf-2", "Edit"),
+      inputDelta(0, '{"file_path":"/a/foo.ts","old_string":"x'),
+      // no blockStop — envelope arrives with the complete input
+      toolUseEnv("tf-2", "Edit", { file_path: "/a/foo.ts", old_string: "x", new_string: "y" }),
+    ]);
+    const tools = textBlocks(tab, id).filter((b) => b.type === "tool");
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({
+      id: "tf-2",
+      input: { file_path: "/a/foo.ts", old_string: "x", new_string: "y" },
+    });
+    expect((tools[0] as { inputPartial?: boolean }).inputPartial).toBeUndefined();
+    expect(rec.toolUses).toHaveLength(1);
+
+    // and the result still settles it by id
+    feed(tab, [toolResultEnv("tf-2", "ok", false)]);
+    expect(textBlocks(tab, id).find((b) => b.type === "tool")).toMatchObject({ status: "done", result: "ok" });
+  });
+
+  it("side-effectful names (TodoWrite/Task/Agent/suppressed) never live-form", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    const id = tab.streamingMsgId!;
+    feed(tab, [
+      toolStart(0, "tf-todo", "TodoWrite"),
+      toolStart(1, "tf-agent", "Agent"),
+      toolStart(2, "tf-tsearch", "ToolSearch"),
+    ]);
+    expect(textBlocks(tab, id).filter((b) => b.type === "tool")).toHaveLength(0);
+
+    // The envelope path still handles them normally afterwards.
+    feed(tab, [toolUseEnv("tf-todo", "TodoWrite", { todos: [{ content: "step 1", status: "pending" }] })]);
+    const plan = textBlocks(tab, id).find((b) => b.type === "tool" && b.name === "TodoWrite");
+    expect(plan).toBeTruthy();
+  });
+
+  it("huge input stays bounded: only caption fields are extracted, diff fields ignored", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    const id = tab.streamingMsgId!;
+    const bigChunk = '{"file_path":"/a/big.ts","content":"' + "x".repeat(20_000);
+    feed(tab, [toolStart(0, "tf-3", "Write"), inputDelta(0, bigChunk)]);
+    const tool = textBlocks(tab, id).find((b) => b.type === "tool");
+    expect(tool).toMatchObject({ input: { file_path: "/a/big.ts" }, inputPartial: true });
+    expect((tool as { input: Record<string, unknown> }).input.content).toBeUndefined();
+  });
+
+  it("a user Stop mid-forming sweeps the block to error and clears the partial flag", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    const id = tab.streamingMsgId!;
+    feed(tab, [toolStart(0, "tf-4", "Bash"), inputDelta(0, '{"command":"sleep 999')]);
+    // finalizeInflightBlocks is what every terminal path (error/Stop) runs.
+    finalizeInflightBlocks(tab);
+    const tool = textBlocks(tab, id).find((b) => b.type === "tool");
+    expect(tool).toMatchObject({ status: "error" });
+    expect((tool as { inputPartial?: boolean }).inputPartial).toBeUndefined();
   });
 });

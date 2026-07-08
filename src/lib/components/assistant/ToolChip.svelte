@@ -67,10 +67,20 @@
     }
     if (n === "NotebookEdit") return fp ?? "notebook";
     // Shell.
-    if (n === "Bash") return typeof inp.command === "string" ? trim(inp.command as string, 70) : "shell";
-    if (n === "BashOutput") return typeof inp.bash_id === "string" ? `tail ${inp.bash_id}` : "tail bg shell";
-    if (n === "KillBash" || n === "KillShell") return typeof inp.shell_id === "string" ? `kill ${inp.shell_id}` : "kill shell";
+    if (n === "Bash" || n === "PowerShell") return typeof inp.command === "string" ? trim(inp.command as string, 70) : "shell";
+    if (n === "BashOutput" || n === "TaskOutput") {
+      const id = typeof inp.bash_id === "string" ? inp.bash_id : typeof inp.task_id === "string" ? inp.task_id : null;
+      return id ? `tail ${id}` : "tail bg task";
+    }
+    if (n === "KillBash" || n === "KillShell" || n === "TaskStop") {
+      const id = typeof inp.shell_id === "string" ? inp.shell_id : typeof inp.task_id === "string" ? inp.task_id : null;
+      return id ? `stop ${id}` : "stop bg task";
+    }
     if (n === "remote_bash") return typeof inp.command === "string" ? trim(inp.command as string, 70) : "remote shell";
+    if (n === "LSP") {
+      const op = typeof inp.operation === "string" ? (inp.operation as string) : "lsp";
+      return typeof inp.filePath === "string" ? `${op} · ${basename(inp.filePath as string)}` : op;
+    }
     // Search / nav.
     if (n === "Glob") {
       const pat = typeof inp.pattern === "string" ? (inp.pattern as string) : "?";
@@ -138,7 +148,7 @@
   const category = $derived.by<Category>(() => {
     const n = shortName(tool.name);
     if (n === "Edit" || n === "MultiEdit" || n === "Write" || n === "NotebookEdit") return "write";
-    if (n === "Bash" || n === "remote_bash" || n === "BashOutput" || n === "KillBash" || n === "KillShell" || n === "Monitor" || n === "REPL") return "shell";
+    if (n === "Bash" || n === "PowerShell" || n === "remote_bash" || n === "BashOutput" || n === "KillBash" || n === "KillShell" || n === "TaskOutput" || n === "TaskStop" || n === "Monitor" || n === "REPL") return "shell";
     if (n === "Agent" || n === "Task" || n === "Skill" || n === "SlashCommand" || n === "Workflow" || n === "SendMessage") return "agent";
     if (n === "TodoWrite" || n === "TaskCreate" || n === "TaskUpdate" || n === "AskUserQuestion" || n === "ask_user" || n === "ExitPlanMode" || n === "EnterPlanMode" || n === "ReportFindings") return "meta";
     // Cloud publish + repo/worktree mutation read as consequential.
@@ -204,9 +214,9 @@
     if (sn === "Edit" || sn === "MultiEdit") return FilePen;
     if (sn === "NotebookEdit") return BookOpen;
     // Shell.
-    if (sn === "Bash" || sn === "remote_bash") return Terminal;
-    if (sn === "BashOutput") return SkipForward;
-    if (sn === "KillBash" || sn === "KillShell") return Square;
+    if (sn === "Bash" || sn === "PowerShell" || sn === "remote_bash") return Terminal;
+    if (sn === "BashOutput" || sn === "TaskOutput") return SkipForward;
+    if (sn === "KillBash" || sn === "KillShell" || sn === "TaskStop") return Square;
     // Search / nav.
     if (sn === "list_dir" || sn === "Glob") return FolderTree;
     if (sn === "Grep" || sn === "grep") return Search;

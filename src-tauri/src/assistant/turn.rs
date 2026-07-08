@@ -1211,7 +1211,10 @@ async fn resolve_spawn(
         // on older CLIs (allowlist entries that never match). SlashCommand/
         // MultiEdit/KillBash/KillShell/BashOutput are GONE from 2.1.201 but stay
         // listed for older installs. AskUserQuestion stays excluded (see above).
-        const BUILTINS: &str = "Agent,Artifact,Bash,BashOutput,CronCreate,CronDelete,CronList,DesignSync,Edit,EnterPlanMode,EnterWorktree,ExitPlanMode,ExitWorktree,Glob,Grep,KillBash,KillShell,ListMcpResources,Monitor,MultiEdit,NotebookEdit,PushNotification,Read,ReadMcpResource,ReadMcpResourceDir,REPL,RemoteTrigger,ReportFindings,ScheduleWakeup,SendMessage,Skill,SlashCommand,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,TodoWrite,ToolSearch,WebFetch,WebSearch,Workflow,Write";
+        // S128 (2026-07-08): + PowerShell (the CLI's dedicated Windows shell
+        // tool — omitting it denial-gated every PowerShell call on Windows) and
+        // LSP (deferred symbol-query tool, loaded via ToolSearch).
+        const BUILTINS: &str = "Agent,Artifact,Bash,BashOutput,CronCreate,CronDelete,CronList,DesignSync,Edit,EnterPlanMode,EnterWorktree,ExitPlanMode,ExitWorktree,Glob,Grep,KillBash,KillShell,ListMcpResources,LSP,Monitor,MultiEdit,NotebookEdit,PowerShell,PushNotification,Read,ReadMcpResource,ReadMcpResourceDir,REPL,RemoteTrigger,ReportFindings,ScheduleWakeup,SendMessage,Skill,SlashCommand,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,TodoWrite,ToolSearch,WebFetch,WebSearch,Workflow,Write";
         // Read-only / non-mutating subset always auto-approved even in a
         // prompting mode — these shouldn't interrupt the user. Everything
         // omitted (Bash, Edit, Write, Agent, Skill, Workflow, Monitor/REPL
@@ -1220,8 +1223,9 @@ async fn resolve_spawn(
         // `can_use_tool` prompt. New no-op additions: ToolSearch (schema fetch),
         // EnterPlanMode (mode flip), ScheduleWakeup (self-timer), ReportFindings
         // (display-only), CronList (read), PushNotification (user-directed toast,
-        // parallel to mcp__rift__notify below).
-        const SAFE_BUILTINS: &str = "BashOutput,CronList,EnterPlanMode,Glob,Grep,KillBash,KillShell,PushNotification,Read,ReportFindings,ScheduleWakeup,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,TodoWrite,ToolSearch,WebFetch,WebSearch";
+        // parallel to mcp__rift__notify below), LSP (read-only symbol queries).
+        // PowerShell executes commands → BUILTINS only, prompts like Bash here.
+        const SAFE_BUILTINS: &str = "BashOutput,CronList,EnterPlanMode,Glob,Grep,KillBash,KillShell,LSP,PushNotification,Read,ReportFindings,ScheduleWakeup,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,TodoWrite,ToolSearch,WebFetch,WebSearch";
         // UI-presentation tools (ask_user / open_browser / notify) are safe to
         // auto-approve: scheme-allowlisted, length-capped, no workspace writes.
         const SAFE_MCP: &str = "mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__ask_user,mcp__rift__open_browser,mcp__rift__notify";

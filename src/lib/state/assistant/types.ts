@@ -73,6 +73,12 @@ export type ToolBlock = {
   // call was slow (>1s). Optional — legacy records omit both fields.
   startedAt?: number;
   durationMs?: number;
+  // S127: true while the tool_use input is still streaming in via
+  // input_json_delta (live-forming block) — `input` holds only the caption
+  // fields extracted so far. Cleared when the complete input lands
+  // (content_block_stop parse or the assistant envelope); never true on
+  // persisted records (terminal sweeps clear it).
+  inputPartial?: boolean;
 };
 
 export type TextBlock = {
@@ -231,6 +237,8 @@ export type StreamDelta = {
   text?: string;
   thinking?: string;
   signature?: string;
+  // input_json_delta: one chunk of a tool_use input's JSON as it streams.
+  partial_json?: string;
   // message_delta carries the terminal stop reason for the current assistant
   // message — `max_tokens` (output truncated) / `refusal` are surfaced to the
   // user; `end_turn`/`tool_use`/`stop_sequence` are normal and ignored.

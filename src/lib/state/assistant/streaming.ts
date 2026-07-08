@@ -53,6 +53,7 @@ export function beginTurn(tab: TabState) {
   }
   tab.pendingText = "";
   tab.thinkingByIndex.clear();
+  tab.toolInputByIndex.clear();
   tab.activeThinkingIndex = null;
   tab.lastStreamEventAt = null;
   tab.liveOutputTokens = 0;
@@ -467,8 +468,187 @@ function ensurePlanBlock(tab: TabState) {
   }));
 }
 
+// ── Live tool-block forming (S127) ──────────────────────────────────────────
+// With --include-partial-messages the CLI streams each tool_use as it FORMS:
+// content_block_start (id+name, empty input) → input_json_delta chunks (the
+// input JSON typing itself out) → content_block_stop. All three were ignored —
+// a tool block only appeared once the complete assistant envelope landed, so a
+// long Write/Edit (10s+ of args streaming) showed NOTHING happening. Now the
+// pending block appears the moment the model commits to the call, its caption
+// fills live as recognizable fields complete, and the envelope merely finalizes
+// input (upsert by id — no duplicate).
+//
+// Names with side-effectful append paths (plan aggregation, agent spawns,
+// ask_user binding) and suppressed names keep their envelope-only path —
+// forming them early would run those side effects on empty input.
+const FORMING_SKIP = new Set([
+  ...SUPPRESSED_TOOL_NAMES,
+  "TodoWrite", "TaskCreate", "TaskUpdate", "Task", "Agent", "mcp__rift__ask_user",
+]);
+
+// Caption-worthy string fields worth extracting from a *partial* input JSON —
+// mirrors streamModel caption()/pathOf() sources. Deliberately excludes
+// old_string/new_string/content (huge, diff-only). Inside a JSON string every
+// `"` is escaped as `\"`, so a bare `"key"` match can only be a real key.
+const FORM_FIELD_RE = /"(file_path|command|pattern|path|url|query|prompt|description|notebook_path|skill|name|operation)"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+// Trailing still-open string value — lets a shell command "type" live.
+const FORM_TAIL_RE = /"(command|file_path|pattern|url|query)"\s*:\s*"((?:[^"\\]|\\.)*)$/;
+const FORM_SCAN_CAP = 6144; // caption fields stream first; never scan a huge blob
+
+function unescapeJsonString(raw: string): string | null {
+  try { return JSON.parse(`"${raw}"`) as string; } catch { return null; }
+}
+
+/** Bounded extraction of completed (plus one trailing incomplete) caption
+ *  fields from partial input JSON. Never throws; {} until something usable. */
+export function extractFormingFields(json: string): Record<string, string> {
+  const win = json.length > FORM_SCAN_CAP ? json.slice(0, FORM_SCAN_CAP) : json;
+  const out: Record<string, string> = {};
+  for (const m of win.matchAll(FORM_FIELD_RE)) {
+    if (out[m[1]] === undefined) {
+      const v = unescapeJsonString(m[2]);
+      if (v !== null) out[m[1]] = v;
+    }
+  }
+  const tail = win.match(FORM_TAIL_RE);
+  if (tail && out[tail[1]] === undefined) {
+    const v = unescapeJsonString(tail[2]);
+    if (v !== null && v.length > 0) out[tail[1]] = v;
+  }
+  return out;
+}
+
+function beginToolForming(
+  tab: TabState,
+  index: number,
+  cb: { id: string; name: string; input?: Record<string, unknown> },
+) {
+  if (FORMING_SKIP.has(cb.name)) return;
+  if (tab.seenToolUseIds.has(cb.id)) return;
+  let applied = false;
+  mutateStreaming(tab, (m) => {
+    applied = true;
+    return {
+      ...m,
+      blocks: [
+        ...m.blocks,
+        {
+          type: "tool",
+          id: cb.id,
+          name: cb.name,
+          input: cb.input ?? {},
+          result: null,
+          isError: false,
+          status: "pending",
+          startedAt: Date.now(),
+          inputPartial: true,
+        },
+      ],
+    };
+  });
+  // Late frame after stop() cleared streamingMsgId → nothing was pushed; keep
+  // all bookkeeping consistent with that no-op (mirrors beginThinking RR9).
+  if (!applied) return;
+  tab.seenToolUseIds.add(cb.id);
+  tab.toolInputByIndex.set(index, { id: cb.id, name: cb.name, json: "", extracted: "" });
+  if (tab.currentTurnRecord) {
+    tab.currentTurnRecord.toolUses.push({
+      name: cb.name,
+      id: cb.id,
+      startedAt: Date.now(),
+      completedAt: null,
+      durationMs: null,
+      isError: null,
+      inputPreview: null,
+    });
+  }
+  tab.activity = {
+    ...tab.activity,
+    currentLabel: tab.shortToolLabel ? tab.shortToolLabel(cb.name, cb.input) : cb.name,
+  };
+}
+
+function appendToolInputDelta(tab: TabState, index: number, partialJson: string) {
+  const entry = tab.toolInputByIndex.get(index);
+  if (!entry) return;
+  entry.json += partialJson;
+  // Tool args are real output tokens — keep the live meter honest during a
+  // big Write instead of freezing until the envelope lands.
+  tab.liveOutputChars += partialJson.length;
+  refreshLiveTokens(tab);
+  const fields = extractFormingFields(entry.json);
+  const snap = JSON.stringify(fields);
+  if (snap === entry.extracted) return;
+  entry.extracted = snap;
+  const id = entry.id;
+  mutateStreaming(tab, (m) => ({
+    ...m,
+    blocks: m.blocks.map((b) =>
+      b.type === "tool" && b.id === id && b.inputPartial ? { ...b, input: fields } : b,
+    ),
+  }));
+}
+
+/** content_block_stop for a forming tool: the accumulated JSON is complete —
+ *  parse + finalize now instead of waiting for the assistant envelope. Parse
+ *  failure just leaves the block partial (the envelope finalizes it). */
+function endToolForming(tab: TabState, index: number) {
+  const entry = tab.toolInputByIndex.get(index);
+  if (!entry) return;
+  tab.toolInputByIndex.delete(index);
+  let full: Record<string, unknown> | null = entry.json === "" ? {} : null;
+  if (full === null) {
+    try {
+      const p: unknown = JSON.parse(entry.json);
+      if (p && typeof p === "object" && !Array.isArray(p)) full = p as Record<string, unknown>;
+    } catch { /* truncated/odd JSON — envelope will finalize */ }
+  }
+  if (full === null) return;
+  const id = entry.id;
+  const input = full;
+  mutateStreaming(tab, (m) => ({
+    ...m,
+    blocks: m.blocks.map((b) =>
+      b.type === "tool" && b.id === id && b.inputPartial
+        ? { ...b, input, inputPartial: undefined }
+        : b,
+    ),
+  }));
+  if (tab.currentTurnRecord) {
+    const rec = tab.currentTurnRecord.toolUses.find((t) => t.id === id);
+    if (rec) rec.inputPreview = previewToolInput(entry.name, input);
+  }
+  tab.activity = {
+    ...tab.activity,
+    currentLabel: tab.shortToolLabel ? tab.shortToolLabel(entry.name, input) : entry.name,
+  };
+}
+
+/** The assistant envelope re-delivers a tool_use we already live-formed —
+ *  upsert its authoritative complete input onto the existing block. No-op for
+ *  blocks already finalized by endToolForming (inputPartial cleared). */
+function finalizeFormedTool(tab: TabState, block: { id: string; name: string; input?: Record<string, unknown> }) {
+  const input = block.input ?? {};
+  mutateStreaming(tab, (m) => ({
+    ...m,
+    blocks: m.blocks.map((b) =>
+      b.type === "tool" && b.id === block.id && b.inputPartial
+        ? { ...b, name: block.name, input, inputPartial: undefined }
+        : b,
+    ),
+  }));
+  if (tab.currentTurnRecord) {
+    const rec = tab.currentTurnRecord.toolUses.find((t) => t.id === block.id);
+    if (rec && rec.inputPreview === null) rec.inputPreview = previewToolInput(block.name, block.input);
+  }
+}
+
 function appendToolUse(tab: TabState, block: { id: string; name: string; input?: Record<string, unknown> }) {
-  if (tab.seenToolUseIds.has(block.id)) return;
+  if (tab.seenToolUseIds.has(block.id)) {
+    // Already live-formed from stream_events — the envelope finalizes input.
+    finalizeFormedTool(tab, block);
+    return;
+  }
   tab.seenToolUseIds.add(block.id);
   if (tab.currentTurnRecord) {
     tab.currentTurnRecord.toolUses.push({
@@ -745,13 +925,16 @@ function applySubAgentFrame(tab: TabState, agentId: string, env: StreamEnvelope)
   }
 }
 
-/** Find an in-flight Skill/SlashCommand tool block by id — the lazy-promotion
- *  lookup for forking slash commands (/plan etc.) whose sub-agents multiplex
- *  under the skill's tool_use id. */
+/** Find an in-flight Skill/SlashCommand/Workflow tool block by id — the lazy-
+ *  promotion lookup for tools whose sub-agents multiplex under the parent's
+ *  tool_use id (forking slash commands, Workflow orchestration runs). */
 function findPendingSkillBlock(tab: TabState, id: string): ToolBlock | null {
   for (const m of tab.messages) {
     for (const b of m.blocks) {
-      if (b.type === "tool" && b.id === id && (b.name === "Skill" || b.name === "SlashCommand")) {
+      if (
+        b.type === "tool" && b.id === id &&
+        (b.name === "Skill" || b.name === "SlashCommand" || b.name === "Workflow")
+      ) {
         return b;
       }
     }
@@ -767,13 +950,18 @@ function findPendingSkillBlock(tab: TabState, id: string): ToolBlock | null {
 function promoteSkillSpawn(tab: TabState, block: ToolBlock) {
   if (tab.agentSpawns.some((a) => a.id === block.id)) return;
   const isSkill = block.name === "Skill";
+  const isWorkflow = block.name === "Workflow";
   const subagentType = isSkill
     ? String(block.input?.skill ?? "skill")
-    : String(block.input?.command ?? "command");
+    : isWorkflow
+      ? "workflow"
+      : String(block.input?.command ?? "command");
   const args = isSkill && typeof block.input?.args === "string" ? (block.input.args as string) : "";
   const description = isSkill
     ? `/${String(block.input?.skill ?? "")}${args ? ` ${args}` : ""}`.trim()
-    : String(block.input?.command ?? "(command)");
+    : isWorkflow
+      ? String(block.input?.name ?? "workflow run")
+      : String(block.input?.command ?? "(command)");
   tab.agentSpawns = capSpawns([
     ...tab.agentSpawns,
     {
@@ -853,8 +1041,13 @@ export function onStreamLine(tab: TabState, raw: string) {
       const ev = env.event;
       const evType = ev?.type;
       const idx = typeof ev?.index === "number" ? ev.index : null;
-      if (evType === "content_block_start" && ev?.content_block?.type === "thinking" && idx !== null) {
-        beginThinking(tab, idx);
+      if (evType === "content_block_start" && idx !== null) {
+        const cb = ev?.content_block;
+        if (cb?.type === "thinking") {
+          beginThinking(tab, idx);
+        } else if (cb?.type === "tool_use" && typeof cb.id === "string" && typeof cb.name === "string") {
+          beginToolForming(tab, idx, cb);
+        }
       } else if (evType === "content_block_delta") {
         const d = ev?.delta;
         if (d?.type === "text_delta" && d.text) {
@@ -868,9 +1061,12 @@ export function onStreamLine(tab: TabState, raw: string) {
           appendThinkingText(tab, idx, d.thinking);
         } else if (d?.type === "signature_delta" && idx !== null) {
           markThinkingSignature(tab, idx);
+        } else if (d?.type === "input_json_delta" && typeof d.partial_json === "string" && idx !== null) {
+          appendToolInputDelta(tab, idx, d.partial_json);
         }
       } else if (evType === "content_block_stop" && idx !== null) {
         endThinking(tab, idx);
+        endToolForming(tab, idx);
       } else if (evType === "message_delta") {
         // Terminal stop reason for this assistant message. Only the noteworthy
         // ones land on the bubble — a normal end_turn/tool_use is silent.
@@ -1075,6 +1271,7 @@ export function finalizeInflightBlocks(tab: TabState) {
     );
   }
   tab.thinkingByIndex.clear();
+  tab.toolInputByIndex.clear();
   tab.activeThinkingIndex = null;
   if (tab.activity.currentLabel === "Thinking…") {
     tab.activity = { ...tab.activity, currentLabel: null };
@@ -1102,7 +1299,9 @@ export function finalizeInflightBlocks(tab: TabState) {
     mutateStreaming(tab, (m) => ({
       ...m,
       blocks: m.blocks.map((b) =>
-        b.type === "tool" && b.status === "pending" ? { ...b, status: "error" } : b,
+        b.type === "tool" && b.status === "pending"
+          ? { ...b, status: "error", inputPartial: undefined }
+          : b,
       ),
     }));
   }

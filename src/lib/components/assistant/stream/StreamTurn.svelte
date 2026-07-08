@@ -11,6 +11,7 @@
   import StreamAgent from "./StreamAgent.svelte";
   import StreamAskUser from "./StreamAskUser.svelte";
   import StreamShell from "./StreamShell.svelte";
+  import StreamExitPlan from "./StreamExitPlan.svelte";
   import PermissionBar from "../PermissionBar.svelte";
   import { messageToTurn, groupBlocks, fmtDur, classifySay, VERB_ING, tasksToPlanItems, type StreamTool } from "./streamModel";
   import { assistant, type ChatMessage, type TabState } from "$lib/state/assistant.svelte";
@@ -266,6 +267,8 @@
             <StreamAgent tool={seg.tool} {spawn} />
           {:else if seg.tool.kind === "ask"}
             <StreamAskUser tool={seg.tool} />
+          {:else if seg.tool.kind === "exitplan"}
+            <StreamExitPlan tool={seg.tool} />
           {:else if seg.tool.kind === "shell"}
             <StreamShell tool={seg.tool} streaming={streaming && gi === groups.length - 1} />
           {/if}
@@ -331,6 +334,8 @@
         <span class="files">{turn.files} file{turn.files === 1 ? "" : "s"}</span>
       {:else if turn.outcome === "failed"}
         <span class="bad"><AlertTriangle size={13} strokeWidth={2.5} /> Changes failed</span>
+      {:else if turn.outcome === "planned"}
+        <span class="ran"><Check size={13} strokeWidth={2.5} /> Plan proposed</span>
       {:else}
         <span class="ran"><Check size={13} strokeWidth={2.5} /> Done</span>
       {/if}

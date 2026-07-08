@@ -15,7 +15,7 @@ import { diffArrays } from "diff";
 
 export type TKind =
   | "read" | "grep" | "edit" | "create" | "shell"
-  | "agent" | "web" | "fetch" | "test" | "lint" | "mcp" | "plan" | "ask";
+  | "agent" | "web" | "fetch" | "test" | "lint" | "mcp" | "plan" | "ask" | "exitplan";
 
 export type PlanItem = { text: string; status: "done" | "active" | "todo" };
 
@@ -52,6 +52,9 @@ export type StreamTool = {
   fail?: number | null; pass?: number | null; // test/lint
   task?: string; result?: string | null; // agent · shell · read/grep/mcp detail
   flavor?: ShellFlavor; // shell only — which shell ran it (badge identity)
+  /** Input still streaming in (live-forming block) — captions are provisional,
+   *  diff counts/expand deferred until the complete input lands. */
+  forming?: boolean;
 };
 
 /** Which shell a command ran under — drives the StreamShell identity badge.
@@ -72,8 +75,12 @@ type StreamBlock =
 //  - "applied": at least one edit/create tool succeeded → green "Applied"
 //  - "ran":     ran tools but changed no files (read/grep/shell/web/…) → muted "Done"
 //  - "failed":  edits/creates were attempted but every one errored → "Changes failed"
+//  - "planned": the turn ended in an ExitPlanMode proposal — the CLI writes the
+//               plan artifact to ~/.claude/plans/, which is a real Write tool
+//               call, so without this the footer claimed "Applied 1 file" on a
+//               turn that changed nothing in the user's repo.
 //  - "text":    no tools at all (a plain answer) → no status badge
-export type TurnOutcome = "applied" | "ran" | "failed" | "text";
+export type TurnOutcome = "applied" | "ran" | "failed" | "planned" | "text";
 
 export type TurnModel = {
   blocks: StreamBlock[];
@@ -125,14 +132,22 @@ function nameToKind(name: string): TKind {
   if (n === "Write") return "create";
   if (n === "Bash" || n === "remote_bash" || n === "BashOutput" || n === "KillBash" || n === "KillShell") return "shell";
   if (n === "PowerShell") return "shell"; // CC's dedicated PowerShell tool — same in/out shape as Bash
+  // TaskOutput/TaskStop are the newer CLI's background-TASK ops (tail/stop a bg
+  // shell or agent) — shell-shaped, NOT part of the TaskCreate/Update todo set.
+  // Mapping them to "plan" rendered a bg-build tail as a checklist card.
+  if (n === "TaskOutput" || n === "TaskStop") return "shell";
   if (n === "Agent" || n === "Task") return "agent";
   if (n === "WebSearch") return "web";
   if (n === "WebFetch") return "fetch";
   if (
     n === "TodoWrite" || n === "TaskCreate" || n === "TaskUpdate" ||
-    n === "TaskList" || n === "TaskGet" || n === "TaskStop" || n === "TaskOutput"
+    n === "TaskList" || n === "TaskGet"
   ) return "plan";
   if (n === "ask_user") return "ask";
+  // The plan-mode exit carries the FULL proposed plan markdown in input.plan —
+  // the deliverable of plan mode. Dedicated kind so it renders readable, not
+  // as a 48-char generic peek.
+  if (n === "ExitPlanMode") return "exitplan";
   return "mcp";
 }
 
@@ -172,6 +187,32 @@ function caption(tb: ToolBlock): string {
   if (n === "TodoWrite") {
     const c = Array.isArray(inp.todos) ? inp.todos.length : 0;
     return `${c} task${c === 1 ? "" : "s"}`;
+  }
+  if (n === "BashOutput" || n === "TaskOutput") {
+    const id = typeof inp.bash_id === "string" ? inp.bash_id : typeof inp.task_id === "string" ? inp.task_id : null;
+    return id ? `tail ${id}` : "tail background task";
+  }
+  if (n === "KillBash" || n === "KillShell" || n === "TaskStop") {
+    const id = typeof inp.shell_id === "string" ? inp.shell_id : typeof inp.task_id === "string" ? inp.task_id : null;
+    return id ? `stop ${id}` : "stop background task";
+  }
+  if (n === "AskUserQuestion") {
+    const qs = Array.isArray(inp.questions) ? inp.questions.length : 0;
+    return `${qs} question${qs === 1 ? "" : "s"}`;
+  }
+  if (n === "Skill") {
+    const s = typeof inp.skill === "string" ? inp.skill : "skill";
+    const args = typeof inp.args === "string" && inp.args ? ` ${trim(inp.args, 30)}` : "";
+    return `/${s}${args}`;
+  }
+  if (n === "SlashCommand") return typeof inp.command === "string" ? trim(inp.command, 60) : "slash command";
+  if (n === "Workflow") return typeof inp.name === "string" ? inp.name : "workflow";
+  if (n === "ExitPlanMode") return "Proposed a plan";
+  if (n === "EnterPlanMode") return "entered plan mode";
+  if (n === "LSP") {
+    const op = typeof inp.operation === "string" ? inp.operation : "lsp";
+    const f = typeof inp.filePath === "string" ? ` · ${basename(inp.filePath)}` : "";
+    return `${op}${f}`;
   }
   // Unknown/MCP tool: name + a peek at its most meaningful input, so "Called
   // ScheduleWakeup" becomes "ScheduleWakeup · reason: watching CI run". The
@@ -285,11 +326,18 @@ function adaptTool(tb: ToolBlock): StreamTool {
     status: tb.status, durSecs, add: null, del: null,
     path, dir: dirOf(path),
   };
+  if (tb.inputPartial) t.forming = true;
   if (kind === "edit" || kind === "create") {
-    t.input = inp;
-    const dc = diffCountsCached(tb.id, inp);
-    if (dc) { t.add = dc.add; t.del = dc.del; }
+    // While the input is still streaming (live-forming), old/new strings are
+    // truncated — a diff over them is wrong AND diffCountsCached memoizes by id,
+    // so a partial count would stick. Defer both until the input is complete.
+    if (!tb.inputPartial) {
+      t.input = inp;
+      const dc = diffCountsCached(tb.id, inp);
+      if (dc) { t.add = dc.add; t.del = dc.del; }
+    }
   }
+  if (kind === "exitplan") t.input = inp; // input.plan = the proposed plan markdown
   if (kind === "plan") t.items = planItems(tb);
   if (kind === "web" || kind === "fetch") {
     t.query = t.cap; t.sources = []; t.count = null;
@@ -438,7 +486,8 @@ export function messageToTurn(m: ChatMessage): TurnModel {
   const changedFiles = new Set(okMutators.map((t) => t.path ?? t.cap)); // distinct by full path
 
   let outcome: TurnOutcome;
-  if (okMutators.length > 0) outcome = "applied";
+  if (tools.some((t) => t.kind === "exitplan")) outcome = "planned";
+  else if (okMutators.length > 0) outcome = "applied";
   else if (mutators.length > 0) outcome = "failed"; // attempted edits, all errored
   else if (tools.length > 0) outcome = "ran"; // tools, but nothing mutating
   else outcome = "text"; // a plain answer
@@ -467,7 +516,7 @@ export function groupBlocks(blocks: StreamBlock[]): Group[] {
   return out;
 }
 
-const isRichKind = (k: TKind) => k === "plan" || k === "web" || k === "fetch" || k === "test" || k === "lint" || k === "agent" || k === "ask";
+const isRichKind = (k: TKind) => k === "plan" || k === "web" || k === "fetch" || k === "test" || k === "lint" || k === "agent" || k === "ask" || k === "exitplan";
 
 // A tool gets its own rich block when its KIND is inherently rich, OR it's a
 // shell command that (a) is still RUNNING — so it renders as a terminal block
@@ -512,7 +561,7 @@ function segmentWork(tools: StreamTool[]): WorkSeg[] {
 const KIND_VERB: Record<TKind, string> = {
   read: "read", grep: "searched", edit: "edited", create: "created", shell: "ran",
   agent: "delegated", web: "searched the web", fetch: "fetched", test: "tested",
-  lint: "checked", mcp: "called", plan: "planned", ask: "asked",
+  lint: "checked", mcp: "called", plan: "planned", ask: "asked", exitplan: "proposed a plan",
 };
 
 function groupSummary(tools: StreamTool[]): string {
@@ -664,12 +713,13 @@ export function isFillerSay(text: string): boolean {
 export const VERB_PAST: Record<TKind, string> = {
   read: "Read", grep: "Searched", edit: "Edited", create: "Created", shell: "Ran",
   agent: "Delegated", web: "Searched the web", fetch: "Fetched", test: "Tested",
-  lint: "Checked", mcp: "Called", plan: "Planned", ask: "Asked",
+  lint: "Checked", mcp: "Called", plan: "Planned", ask: "Asked", exitplan: "Proposed a plan",
 };
 export const VERB_ING: Record<TKind, string> = {
   read: "Reading", grep: "Searching", edit: "Editing", create: "Creating", shell: "Running",
   agent: "Delegating", web: "Searching the web", fetch: "Fetching", test: "Running tests",
   lint: "Type-checking", mcp: "Calling", plan: "Planning", ask: "Waiting for your answer",
+  exitplan: "Proposing a plan",
 };
 
 export type AnsweredPair = { question: string; answers: string[] };
