@@ -14,9 +14,14 @@
   // streaming turn (streaming = the honest liveness signal; the turn-end sweep
   // closes every spawn), then a brief linger showing the settled fleet.
   import { Bot, Check, ChevronDown, AlertCircle, Brain, Loader2 } from "lucide-svelte";
+  import { fade } from "svelte/transition";
   import { agentNowLine } from "../toolCaption";
   import { fmtDur } from "./streamModel";
   import type { Block, TabState } from "$lib/state/assistant.svelte";
+
+  // Svelte transitions don't respect prefers-reduced-motion on their own.
+  const reduceMotion =
+    typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   let { tab = null, streaming = false }:
     { tab?: TabState | null; streaming?: boolean } = $props();
@@ -142,18 +147,32 @@
       return;
     }
     const seen = new Set<Element>();
+    // Boundary polish: yield IMMEDIATELY when a card comes into view, but
+    // debounce the APPEAR — auto-scroll hovers cards right at the threshold,
+    // and an undebounced bar flickered in/out at that edge. Pessimistic start
+    // (true until the first IO callback) kills the one-frame flash on re-arm.
+    let showTimer: ReturnType<typeof setTimeout> | null = null;
+    cardsInView = true;
     const io = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
           if (e.isIntersecting) seen.add(e.target);
           else seen.delete(e.target);
         }
-        cardsInView = seen.size > 0;
+        if (seen.size > 0) {
+          if (showTimer) { clearTimeout(showTimer); showTimer = null; }
+          cardsInView = true;
+        } else if (!showTimer) {
+          showTimer = setTimeout(() => { cardsInView = false; showTimer = null; }, 350);
+        }
       },
       { root: rootEl, threshold: 0.15 },
     );
     for (const el of els) io.observe(el);
-    return () => io.disconnect();
+    return () => {
+      io.disconnect();
+      if (showTimer) clearTimeout(showTimer);
+    };
   });
 
   // Focus rescue on non-user-initiated hide — same contract as PlanHud.
@@ -168,7 +187,8 @@
 
 <span class="ahud-sentinel" bind:this={sentinelEl} aria-hidden="true"></span>
 {#if visible}
-  <div class="ahud" class:complete={allDone} class:open bind:this={hudEl}>
+  <div class="ahud" class:complete={allDone} class:open bind:this={hudEl}
+    out:fade={{ duration: reduceMotion ? 0 : 160 }}>
     <button
       class="ahud-bar"
       type="button"

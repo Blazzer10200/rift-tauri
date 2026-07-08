@@ -4,8 +4,13 @@
   // with the stream. Collapsed: icon + current task + progress + count.
   // Click expands the full checklist. All-done → brief green linger, then gone.
   import { Check, ChevronDown, ListChecks } from "lucide-svelte";
+  import { fade } from "svelte/transition";
   import { tasksToPlanItems } from "./streamModel";
   import type { TabState } from "$lib/state/assistant.svelte";
+
+  // Svelte transitions don't respect prefers-reduced-motion on their own.
+  const reduceMotion =
+    typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   let { tab = null, streaming = false }:
     { tab?: TabState | null; streaming?: boolean } = $props();
@@ -114,14 +119,28 @@
       planCardInView = false;
       return;
     }
+    // Boundary polish (mirrors AgentHud): yield immediately on card-in-view,
+    // debounce the appear so threshold-hover during auto-scroll can't flicker
+    // the bar. Pessimistic start kills the one-frame flash on re-arm.
+    let showTimer: ReturnType<typeof setTimeout> | null = null;
+    planCardInView = true;
     const io = new IntersectionObserver(
       (entries) => {
-        planCardInView = entries.some((e) => e.isIntersecting);
+        const inView = entries.some((e) => e.isIntersecting);
+        if (inView) {
+          if (showTimer) { clearTimeout(showTimer); showTimer = null; }
+          planCardInView = true;
+        } else if (!showTimer) {
+          showTimer = setTimeout(() => { planCardInView = false; showTimer = null; }, 350);
+        }
       },
       { root: rootEl, threshold: 0.15 },
     );
     io.observe(target);
-    return () => io.disconnect();
+    return () => {
+      io.disconnect();
+      if (showTimer) clearTimeout(showTimer);
+    };
   });
 
   // Focus rescue — the HUD hides on events the user didn't initiate (linger
@@ -150,7 +169,8 @@
 
 <span class="phud-sentinel" bind:this={sentinelEl} aria-hidden="true"></span>
 {#if visible}
-  <div class="phud" class:complete={allDone} class:open bind:this={hudEl}>
+  <div class="phud" class:complete={allDone} class:open bind:this={hudEl}
+    out:fade={{ duration: reduceMotion ? 0 : 160 }}>
     <button
       class="phud-bar"
       type="button"
