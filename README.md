@@ -17,7 +17,18 @@
   <img src="https://img.shields.io/badge/Tauri%202-Rust%20%2B%20Svelte%205-f74c00" alt="Tauri 2" />
 </p>
 
-<!-- hero screenshot: docs/screenshot.png -->
+<p align="center">
+  <!-- Relative src so the media resolves on whichever repo this README ships in.
+       GitHub renders the MP4 inline (autoplay/loop/muted); the GIF is the
+       fallback for viewers/mirrors that don't play video. -->
+  <video src="docs/media/rift-demo.mp4"
+         poster="docs/media/rift-demo-poster.jpg"
+         autoplay loop muted playsinline width="820">
+    <img src="docs/media/rift-demo.gif" width="820" alt="Rift: ask a question about your codebase and watch Claude read files and stream a structured answer, live." />
+  </video>
+</p>
+
+<p align="center"><sub>Real capture — a live turn against Rift's own source. Ask, watch it read the code, and stream a structured answer.</sub></p>
 
 ## Install
 
