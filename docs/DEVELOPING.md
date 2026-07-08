@@ -83,7 +83,7 @@ Dev watches `src/` + `src-tauri/src/` and hot-reloads. **Don't run `cargo check`
 | `src/` | SvelteKit frontend (Svelte 5 runes, Tailwind 4) |
 | `src-tauri/src/` | Rust backend — `assistant/` (Claude CLI spawn + MCP server + local git), `browser/`, `commands/`, `diagnostics/`, `state/`, `stt/`, plus `lib.rs` / `update_service.rs` / `secrets.rs` |
 | `src-tauri/capabilities/` | Tauri 2 permission grants |
-| `docs/` | Live state — read `HANDOFF.md` first each session |
+| `docs/` | Architecture, security model, release history |
 | `scripts/` | Dev launcher + release pipeline + CDP helpers |
 
 ### Before opening a PR
@@ -175,7 +175,7 @@ The tag-driven `release.yml` now **runs the full test suite (`cargo test` + `sve
 - `pwsh scripts/smoke-turn.ps1 -Model haiku` — **before** tagging, prove a real Claude turn still completes end-to-end (spawns `claude` with Rift's exact turn flags against a throwaway folder; ~a cent of quota). Covers the live-turn check that CDP can't.
 - `pwsh scripts/ship-watch.ps1` — **after** `git push --tags`, blocks on the release run and reports green/red (exit-status mirrors the run). Replaces the manual "confirm CI landed next session" step.
 
-CI runs on the self-hosted `proxmox-win` runner. When a tagged release sits `queued` and never starts, or the **Verify published** step red-X's a release that actually shipped, see [`RUNNER-RUNBOOK.md`](RUNNER-RUNBOOK.md) for the diagnose/unstick steps.
+CI runs on a self-hosted runner. When a tagged release sits `queued` and never starts, or the **Verify published** step red-X's a release that actually shipped, the run usually just needs a cancel + rerun once the runner service is back.
 
 ---
 

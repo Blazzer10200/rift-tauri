@@ -46,7 +46,6 @@ design-system/
   foundations/            colors · type · spacing-shape
   components/             buttons · pills-badges · menu · tool-chips · page-hero · forms · sidebar
   pages/                  home · chat · workspace · settings · ai-health  (full ~1400×880 workspace mockups)
-  _briefs/                point-in-time design briefs (history, NOT manifest cards) — see _briefs/README.md
 ```
 
 15 cards total: **3 foundations + 7 components + 5 pages.** Every card is CDP-verified against the live app

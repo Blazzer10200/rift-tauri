@@ -31,7 +31,7 @@ permissions:
 # couldn't alarm at all if the runner is wedged, since neither job would run).
 # Replaced with a post-publish verify step inside the build job (below): it proves
 # the release actually landed in rift-releases. A wedged runner now surfaces as a
-# release that simply never publishes — recover per docs/RUNNER-RUNBOOK.md.
+# release that simply never publishes — recover per the internal runner runbook.
 jobs:
   release:
     name: build + pack + publish

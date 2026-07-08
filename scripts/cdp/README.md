@@ -81,7 +81,7 @@ Args: `act {click|key} <selector-or-key> [lookSel] [settleMs=350]`. Backed by a 
 
 ## Design-inspector loop — measure · baseline · diff · state-shots (2026-07-01)
 
-Purpose-built for one-shot UI/UX work: gather real design FACTS instead of eyeballing a screenshot, and catch unintended visual regressions. See `docs/design/PREFERENCES.md` for the owner taste memo + the full loop.
+Purpose-built for one-shot UI/UX work: gather real design FACTS instead of eyeballing a screenshot, and catch unintended visual regressions.
 
 ```bash
 bash scripts/cdp/c.sh measure ".new-chat"          # exact px + resolved CSS vars, self + children

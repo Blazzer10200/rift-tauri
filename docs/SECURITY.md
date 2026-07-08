@@ -66,7 +66,7 @@ there. (Verified by a full backend review 2026-06-15: 0 critical, 0 high.)
   no keepalive. MCP `read_file`/`list_dir` have a documented TOCTOU symlink
   window. Full-config (OAuth) mode wildcards `mcp__*`, so a user's own malicious
   global MCP server would be reachable — opt-in, same-user. None are remotely
-  exploitable; tracked in `docs/ISSUES.md` #39.
+  exploitable; tracked internally (#39).
 
 ## Known accepted advisories
 

@@ -1,6 +1,6 @@
 # Rift — Architecture
 
-> How the whole system fits together. For *running/building* see [`DEVELOPING.md`](DEVELOPING.md); for the *security model* see [`SECURITY.md`](SECURITY.md); for *current in-flight state* see [`HANDOFF.md`](HANDOFF.md). This doc is the durable system map — update it when the topology changes, not every session.
+> How the whole system fits together. For *running/building* see [`DEVELOPING.md`](DEVELOPING.md); for the *security model* see [`SECURITY.md`](SECURITY.md). This doc is the durable system map — update it when the topology changes, not every session.
 
 ## 1. One sentence
 
@@ -107,7 +107,7 @@ The MCP server runs as a child process and can't touch the webview directly. For
 
 ## 7. Self-update (Velopack)
 
-`update_service.rs` wraps `velopack::UpdateManager` over a Velopack `HttpSource` pointed at the Cloudflare R2 feed (`UPDATE_FEED_URL`, `update_service.rs:35`). Flow: check on launch + every 6h → background download with progress (`update-progress`/`update-downloaded`) → on consent, `wait_exit_then_apply_updates(silent, restart)`. **Critical:** before exit, `apply()` reaps the per-turn `rift-tauri.exe` MCP children (they lock `current/`, and `app.exit(0)` skips `Drop` so `kill_on_drop` never fires). The CLI child's cwd defaulting to `temp_dir()` (not the install dir) is the load-bearing prevention added in v0.12.3. Full lineage + rationale: `git log -- docs/design/velopack-auto-update.md` (arc doc retired after ship).
+`update_service.rs` wraps `velopack::UpdateManager` over a Velopack `HttpSource` pointed at the Cloudflare R2 feed (`UPDATE_FEED_URL`, `update_service.rs:35`). Flow: check on launch + every 6h → background download with progress (`update-progress`/`update-downloaded`) → on consent, `wait_exit_then_apply_updates(silent, restart)`. **Critical:** before exit, `apply()` reaps the per-turn `rift-tauri.exe` MCP children (they lock `current/`, and `app.exit(0)` skips `Drop` so `kill_on_drop` never fires). The CLI child's cwd defaulting to `temp_dir()` (not the install dir) is the load-bearing prevention added in v0.12.3.
 
 ## 8. Build & release
 

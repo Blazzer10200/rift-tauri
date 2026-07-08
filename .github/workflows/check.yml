@@ -1,7 +1,8 @@
 name: check
 
 on:
-  pull_request:
+  # NO pull_request trigger: this job runs on a self-hosted runner — a fork PR
+  # must never execute code on it. Re-add PR checks only on GitHub-hosted runners.
   push:
     branches:
       - main

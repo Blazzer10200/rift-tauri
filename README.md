@@ -60,9 +60,7 @@ Prereqs, the release pipeline, and the contributor map live in [`docs/DEVELOPING
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — how the pieces fit together
 - [`docs/DEVELOPING.md`](docs/DEVELOPING.md) — install, build, contribute
 - [`docs/CHANGELOG.md`](docs/CHANGELOG.md) — release history
-- [`docs/ISSUES.md`](docs/ISSUES.md) — the live issue tracker
 - [`docs/SECURITY.md`](docs/SECURITY.md) — security model + accepted advisories
-- [`docs/HANDOFF.md`](docs/HANDOFF.md) — in-flight engineering state (kept current every session)
 
 ## Status
 
