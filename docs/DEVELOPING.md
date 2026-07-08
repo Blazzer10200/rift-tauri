@@ -16,7 +16,7 @@ For someone handed a `Setup.exe` who wants to start coding with Claude against a
 
 ### Install
 
-- Run `Rift-Setup.exe`. Per-user install, no admin required. Lands at `%LOCALAPPDATA%\Rift\rift-tauri.exe` w/ a Start-menu shortcut.
+- Run `Rift-win-Setup.exe`. Per-user install, no admin required. Lands at `%LOCALAPPDATA%\Rift\rift-tauri.exe` w/ a Start-menu shortcut.
 - SmartScreen flag → **More info → Run anyway** (no code-signing cert yet).
 
 ### Sign in to Claude
@@ -41,7 +41,7 @@ Rift self-updates via Velopack. It checks on launch + every ~6h; when a build is
 
 ### Trouble?
 
-- The CLI not found / not signed in → the auth pill explains it; install/parse `claude` (§3) or add an API key in Settings.
+- The CLI not found / not signed in → the auth pill explains it; install / sign in to `claude` (§3) or add an API key in Settings.
 - CLI logs/auth live under `~/.claude/`. Rift's own config is managed in-app via Settings.
 
 ---
@@ -122,11 +122,6 @@ Verify: `claude --version` v2.1.111+ and `claude config` shows `model: claude-so
     "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "250000",
     "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "80"
   },
-  "skillOverrides": {
-    "plan": "user-invocable-only",
-    "quick-review": "user-invocable-only",
-    "diagnose": "user-invocable-only"
-  },
   "permissions": {
     "deny": ["Read(./.env)", "Bash(curl *)"]
   }
@@ -138,7 +133,6 @@ Verify: `claude --version` v2.1.111+ and `claude config` shows `model: claude-so
 - Haiku for subagents — recon/grep agents fire at ~5% of Sonnet cost.
 - `effortLevel: medium` — caps output ~2500 tok. Xhigh burns the 5-hour window ~3× faster.
 - `CLAUDE_CODE_AUTO_COMPACT_WINDOW: "250000"` + `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: "80"` — bound + trigger the CLI's own auto-compaction at 80% of a 250K window. Pro plan can't afford the 300K cliff. (This is the `claude` CLI's built-in compaction — Rift's in-app compaction UI was removed in the 2026-06-12 minimal-core strip.)
-- Skill overrides — fork-mode skills user-invocable-only; auto-firing burns 10-30K tokens each.
 - `autoUpdatesChannel: stable` — avoids regression releases (v2.1.89+ caused 3-50x quota burn for some).
 - Opus on-demand only — every Opus turn competes w/ your Sonnet budget. `/model claude-opus-4-8` per-session, then `/model claude-sonnet-5` back.
 
@@ -158,13 +152,12 @@ Rift's Assistant shells `claude` with `--mcp-config <rift.mcp.json>` + `--allowe
 
 - Shared quota: claude.ai browser eats the same pool as the CLI.
 - Silent fallback: over-limit may downgrade silently — check `/status` if output quality drops.
-- Don't `EnterPlanMode` — use the `/plan` skill if you have it; otherwise describe + execute.
 
 ---
 
 ## 4. Releases
 
-Maintainers only. Versions bumped manually (or via `/git-ship`) across all three files (`package.json` + `Cargo.toml` + `tauri.conf.json`) BEFORE `scripts/release.ps1` runs — preflight bails on any mismatch (and on a dirty tree, which also catches an un-committed `Cargo.lock` after a version bump).
+Maintainers only. Versions bumped manually across all three files (`package.json` + `Cargo.toml` + `tauri.conf.json`) BEFORE `scripts/release.ps1` runs — preflight bails on any mismatch (and on a dirty tree, which also catches an un-committed `Cargo.lock` after a version bump).
 
 `release.ps1` drives `tauri build` → Velopack pack (`vpk`) → publish to the public `Blazzer10200/rift` repo (renamed from `rift-releases` at v0.16.2), with a SHA256 round-trip verify. **The `vpk` CLI version MUST equal the `velopack` crate version** (both pinned `=1.2.0`) — bump them together (`dotnet tool update -g vpk` + the Cargo pin).
 

@@ -4,6 +4,13 @@
 > that enforce it; (2) **known accepted advisories** — audit findings we ship
 > with explicit rationale. Re-evaluate the advisories on every dep bump.
 
+## Reporting a vulnerability
+
+Please report suspected vulnerabilities **privately** via
+[GitHub private vulnerability reporting](https://github.com/Blazzer10200/rift-tauri/security/advisories/new)
+("Report a vulnerability" on the repo's **Security** tab) rather than a public
+issue. Reports get a response within a few days.
+
 ## Security model
 
 ### Threat model
@@ -66,7 +73,7 @@ there. (Verified by a full backend review 2026-06-15: 0 critical, 0 high.)
   no keepalive. MCP `read_file`/`list_dir` have a documented TOCTOU symlink
   window. Full-config (OAuth) mode wildcards `mcp__*`, so a user's own malicious
   global MCP server would be reachable — opt-in, same-user. None are remotely
-  exploitable; tracked internally (#39).
+  exploitable; tracked on the internal backlog.
 
 ## Known accepted advisories
 
@@ -85,7 +92,7 @@ there. (Verified by a full backend review 2026-06-15: 0 critical, 0 high.)
 - **Severity:** MODERATE (3 advisories: dev-server SSRF + esbuild dev request).
 - **Status:** ACCEPTED for the alpha train.
 - **Why:** Fix path is `npm audit fix --force` which bumps vitest to 4.x — a
-  breaking change blocked behind the test rollout (#21 / #265). Dev server is
+  breaking change deferred until the test suite stabilizes. Dev server is
   only ever bound to `127.0.0.1` and only exposed during `npm run dev`.
 - **Revisit when:** vitest test suite stabilizes; one batched 4.x bump.
 

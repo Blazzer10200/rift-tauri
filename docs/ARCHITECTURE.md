@@ -115,7 +115,7 @@ Tag-driven CI: push a `v*` tag → `.github/workflows/release.yml` builds + pack
 
 ## 9. Hot-file split invariants (don't regress a load-bearing seam)
 
-Four hot files were split into module dirs (cont.207); step detail in `git log`. Forward-looking invariants a future refactor must preserve:
+Four hot files were split into module dirs; step detail in `git log`. Forward-looking invariants a future refactor must preserve:
 
 - **`assistant/mod.rs`** — every `#[tauri::command]` is registered by path in `lib.rs`; extracted modules re-export commands (`pub use cli_install::*;`) so the registry never churns. `kill_all_session_children()` is load-bearing for the Velopack apply — keep it on whatever module owns `SESSION_PIDS`. Process-state statics (`SESSION_PIDS`/`SESSION_STOPPED`/`CLAUDE_EXE`/`MCP_CFG_SEQ`/`CONFIG_WRITE_LOCK`) move with their accessor cluster, never duplicated. `McpConfigGuard` (Drop) stays paired with `write_mcp_config` (the Drop deletes the temp config — splitting invites a leak).
 - **`assistant.svelte.ts`** — per-tab fields live on `TabState` with a getter on `AssistantStore`, never back on the store (compaction/queue/draft/attachments/messages/streaming/agentSpawns/askUser bindings are all per-tab). `import { assistant } from "$lib/state/assistant.svelte"` MUST keep working — extracted concerns re-export at the same shape. Persisted JSON contract (`compactionHistory[]` camelCase, `openTabs`/`panes`/`currentConvoId` shapes) is locked; shared defs live in `types.ts`. `TabState` ctor signature locked (`ensureTab` passes `(cliSessionId)`).
