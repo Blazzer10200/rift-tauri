@@ -1134,7 +1134,7 @@
     {/if}
 
     {#if assistant.ui.usageOpen}
-      <UsagePanel {tab} onClose={() => (assistant.ui.usageOpen = false)} />
+      <UsagePanel {tab} mode={assistant.ui.usageOpen === "full" ? "full" : "ctx"} onClose={() => (assistant.ui.usageOpen = false)} />
     {/if}
 
     {#if mentionState && mentionResults.length > 0}
@@ -1440,8 +1440,8 @@
               pct={paneCtxPct}
               tokens={paneCtxTokens}
               window={paneCtxWindow}
-              open={assistant.ui.usageOpen}
-              onClick={() => (assistant.ui.usageOpen = !assistant.ui.usageOpen)}
+              open={!!assistant.ui.usageOpen}
+              onClick={() => (assistant.ui.usageOpen = assistant.ui.usageOpen ? false : "ctx")}
             />
           {/if}
 
@@ -1482,6 +1482,7 @@
     </div>
   </div>
 
+  <p class="ai-note" class:hero={hero}>Claude can make mistakes — double-check important work.</p>
 </div>
 
 <style>
@@ -1497,6 +1498,10 @@
      tint by model. Every accent inside reads from this single source; model
      identity lives on the model-card swatch in the picker. */
   .composer-wrap                      { --model-color: var(--accent); }
+
+  /* Sub-composer AI disclaimer — lives inside the wrap so it rides the hero⇄docked FLIP. */
+  .ai-note { margin: 7px 0 0; text-align: center; font-size: 10.5px; line-height: 1; letter-spacing: 0.01em; color: var(--fg-muted); user-select: none; pointer-events: none; }
+  .ai-note.hero { margin-top: 10px; font-size: 11px; }
   .composer-shell { position: relative; z-index: 1; }
   .composer-shell.drag-over .composer-box {
     border-color: color-mix(in oklch, var(--model-color) 70%, transparent);

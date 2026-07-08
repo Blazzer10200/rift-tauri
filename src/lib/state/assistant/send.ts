@@ -501,7 +501,7 @@ function runSlash(store: AssistantStore, input: string): boolean {
       void copyLastAssistant(store);
       return true;
     case "usage":
-      store.ui.usageOpen = true;
+      store.ui.usageOpen = "full";
       return true;
     case "cost":
       if (store.totalCostUsd != null) {

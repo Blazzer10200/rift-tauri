@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/Blazzer10200/rift/releases"><img src="https://img.shields.io/github/v/release/Blazzer10200/rift?label=download&color=10b981" alt="Latest release" /></a>
-  <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/powered%20by-Claude%20Code-d97757" alt="Powered by Claude Code" /></a>
+  <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/powered%20by-Claude%20Code-d97757?logo=claude&logoColor=white" alt="Powered by Claude Code" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%2011-0078d4" alt="Windows 11" />
   <img src="https://img.shields.io/badge/Tauri%202-Rust%20%2B%20Svelte%205-f74c00" alt="Tauri 2" />

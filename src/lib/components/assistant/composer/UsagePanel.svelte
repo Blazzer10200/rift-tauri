@@ -8,12 +8,21 @@
   import { usage, limitZone, type LimitWindow, type ScopedLimit } from "../../../state/usage.svelte";
   import { assistant, type TabState } from "../../../state/assistant.svelte";
   import { fmtTokens } from "../../../state/assistant/helpers";
+  import { MODEL_OPTIONS } from "./modelMatrix";
 
-  let { onClose, tab = null, anchor = "composer", ignoreSel = ".ctxring" }: {
+  let { onClose, tab = null, anchor = "composer", ignoreSel = ".ctxring", mode = "full" }: {
     onClose: () => void; tab?: TabState | null;
     anchor?: "composer" | "statusbar"; ignoreSel?: string;
+    mode?: "ctx" | "full";
   } = $props();
   let el = $state<HTMLDivElement | undefined>();
+
+  // "ctx" mode (composer ring): just this conversation's window + model — the
+  // plan-limit bars live in the status bar / /usage, so no rate-limit fetch.
+  const modelName = $derived.by(() => {
+    const m = MODEL_OPTIONS.find((o) => o.id === (tab?.modelOverride ?? assistant.model));
+    return m ? `${m.label} ${m.version}` : null;
+  });
 
   // Live conversation context (the same value the composer ring fills toward).
   // Read this pane's own tab — the bare assistant.ctx* getters delegate to the
@@ -103,6 +112,7 @@
   }
 
   onMount(() => {
+    if (mode === "ctx") return;
     void usage.refreshRateLimits(assistant.auth?.cliVersion ?? null);
     const t = setInterval(() => (nowTick = Date.now()), 30_000);
     return () => clearInterval(t);
@@ -120,27 +130,35 @@
   }}
 />
 
-<div class="rift-menu usage-pop" class:statusbar={anchor === "statusbar"} role="dialog" aria-label="Plan limits" bind:this={el}>
+<div class="rift-menu usage-pop" class:statusbar={anchor === "statusbar"} class:ctx={mode === "ctx"} role="dialog" aria-label={mode === "ctx" ? "Conversation context" : "Plan limits"} bind:this={el}>
   <header class="up-head">
-    <span class="up-title"><Gauge size={13} /> Plan limits</span>
-    <span class="up-meta">{usage.rateLimits ? updatedAgo : "claude.ai"}</span>
-    <button class="up-x" class:spin={refreshing} type="button" onclick={() => void doRefresh()} aria-label="Refresh limits" disabled={refreshing}><RefreshCw size={12} /></button>
+    <span class="up-title"><Gauge size={13} /> {mode === "ctx" ? "This conversation" : "Plan limits"}</span>
+    {#if mode === "ctx"}
+      <span class="up-meta">live</span>
+    {:else}
+      <span class="up-meta">{usage.rateLimits ? updatedAgo : "claude.ai"}</span>
+      <button class="up-x" class:spin={refreshing} type="button" onclick={() => void doRefresh()} aria-label="Refresh limits" disabled={refreshing}><RefreshCw size={12} /></button>
+    {/if}
     <button class="up-x" type="button" onclick={onClose} aria-label="Close"><X size={13} /></button>
   </header>
   {#if showCtx}
-    <div class="up-row up-ctx">
+    <div class="up-row up-ctx" class:solo={mode === "ctx"}>
       <div class="up-top">
-        <span class="up-k">This conversation · context</span>
+        <span class="up-k">{mode === "ctx" ? "Context used" : "This conversation · context"}</span>
         <span class="up-pct mono" data-zone={ctxZone(ctxPct)}>{ctxPct.toFixed(0)}<span class="up-pct-u">%</span></span>
       </div>
       <div class="up-track">
         <span class="up-fill up-fill-ctx" data-zone={ctxZone(ctxPct)} style="width:{Math.min(100, Math.max(2, ctxPct))}%"></span>
       </div>
-      <div class="up-reset">{fmtTokens(ctxTokens)} / {fmtTokens(ctxWindow)} tokens</div>
+      <div class="up-reset">{fmtTokens(ctxTokens)} / {fmtTokens(ctxWindow)} tokens{#if mode === "ctx" && modelName} · on {modelName}{/if}</div>
     </div>
-    <div class="up-sep" aria-hidden="true"></div>
+    {#if mode === "full"}<div class="up-sep" aria-hidden="true"></div>{/if}
+  {:else if mode === "ctx"}
+    <div class="up-empty">No context measured yet — send a message first.</div>
   {/if}
-  {#if rows.length > 0}
+  {#if mode === "ctx"}
+    <!-- plan-limit bars intentionally absent — see status bar / /usage -->
+  {:else if rows.length > 0}
     <div class="up-rows">
       {#each rows as r (r.k)}
         <div class="up-row" class:live={r.active}>
@@ -186,6 +204,9 @@
     animation: usage-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
   }
   .usage-pop.statusbar { left: auto; right: 0; width: min(380px, 92vw); }
+  /* ctx mode — compact card, right-anchored so it hangs over the ring that opened it. */
+  .usage-pop.ctx { left: auto; right: 0; width: min(290px, 100%); }
+  .up-ctx.solo { margin-bottom: 0; }
   @keyframes usage-in {
     from { opacity: 0; transform: translateY(4px); }
     to { opacity: 1; transform: translateY(0); }

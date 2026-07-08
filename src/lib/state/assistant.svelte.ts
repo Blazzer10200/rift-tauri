@@ -809,7 +809,9 @@ class AssistantStore {
   // (see ctxWindowFor). Global, persisted; default `max` (1M). Free/uncredited-Pro
   // users set it once in Settings to cap the gauge honestly at 200K.
   plan = $state<RiftPlan>(loadPlan());
-  ui = $state({ tasksUpdatedAt: 0, usageOpen: false });
+  // usageOpen: "ctx" = compact conversation-context popover (composer ring),
+  // "full" = plan-limits panel (/usage command; status bar owns its own copy).
+  ui = $state({ tasksUpdatedAt: 0, usageOpen: false as false | "ctx" | "full" });
 
   // Conversation history.
   //   - `currentConvoId` is null before the first message is sent; first
