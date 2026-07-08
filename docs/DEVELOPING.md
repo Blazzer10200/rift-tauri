@@ -97,7 +97,7 @@ Dev watches `src/` + `src-tauri/src/` and hot-reloads. **Don't run `cargo check`
 
 ## 3. Claude Code w/ Rift on the Pro plan
 
-Pro-plan-optimized setup for Claude Code (the CLI Rift drives via MCP). ~10 min.
+Optional power-user setup — Rift works fine with a plain `claude` login and zero config. This section is a Pro-plan-optimized tuning pass for Claude Code (the CLI Rift drives via MCP). ~10 min.
 
 ### Install + auth
 
@@ -106,7 +106,7 @@ npm install -g @anthropic-ai/claude-code
 claude  # first run: opens browser for Pro auth
 ```
 
-Verify: `claude --version` v2.1.111+ and `claude config` shows `model: claude-sonnet-5`. (The bare `sonnet` alias still resolves to 4.6 on shipped CLIs — pin the explicit id.)
+Verify: `claude --version` v2.1.111+ and `claude config` shows `model: claude-sonnet-5`. (The bare `sonnet` alias still resolves to Sonnet 4.6 on shipped CLIs — pin the explicit id.)
 
 ### `~/.claude/settings.json`
 

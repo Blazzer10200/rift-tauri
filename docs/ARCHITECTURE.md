@@ -4,7 +4,7 @@
 
 ## 1. One sentence
 
-Rift is a Tauri 2 desktop app that wraps the **Claude CLI** as a per-turn subprocess and feeds it a **local stdio MCP server** scoped to a chosen workspace folder, so Claude can read / search / edit / run-git against that folder — entirely on-device, no remote connections.
+Rift is a Tauri 2 desktop app that wraps the **Claude Code CLI** (`claude`) as a per-turn subprocess and feeds it a **local stdio MCP server** scoped to a chosen workspace folder, so Claude can read / search / edit / run-git against that folder — entirely on-device, no remote connections.
 
 ## 2. The stack
 

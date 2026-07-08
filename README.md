@@ -6,7 +6,7 @@
 
 <p align="center">
   Claude Code as a native Windows desktop app.<br/>
-  Point it at a folder — chat, edit, search, and run git against it.<br/>
+  Point it at a folder and chat — Claude reads, edits, searches, and runs git in place.<br/>
   <strong>No server, no telemetry — everything runs on your machine.</strong>
 </p>
 
@@ -28,21 +28,21 @@
   <img src="docs/media/rift-demo.gif" width="820" alt="Rift demo: ask a question about your codebase and watch Claude read files and stream a structured answer, live." />
 </p>
 
-<p align="center"><sub>Real capture — a live turn against Rift's own source. Ask, watch it read the code, and stream a structured answer.</sub></p>
+<p align="center"><sub>Real capture — a live turn on Rift's own source code. Ask, watch it read the files, and stream a structured answer.</sub></p>
 
 ## Install
 
 1. Download the latest `Rift-win-Setup.exe` from the **[releases page](https://github.com/Blazzer10200/rift/releases)** and run it.
 2. Per-user install, no admin needed. Rift self-updates from then on (background download, apply on restart, one-click consent).
-3. On first launch, connect your Claude account (Claude CLI login or an API key — stored in the Windows Credential Manager, never on disk).
+3. On first launch, connect your Claude account (the CLI's own sign-in, or an API key stored in the Windows Credential Manager — never on disk).
 
-**Requirements:** Windows 11 x64 and a [Claude](https://claude.com) subscription or API key. macOS / Linux build from source but aren't packaged or tested yet.
+**Requirements:** Windows 11 x64 · the [Claude Code CLI](https://claude.com/claude-code) (Rift checks for it on first launch and guides setup) · a [Claude](https://claude.com) subscription or API key. macOS / Linux build from source but aren't packaged or tested yet.
 
 ## What it does
 
-- **Workspace chat** — pick a folder; Claude works scoped to it through a local MCP server (`read_file` / `list_dir` / `grep`). Nothing outside the workspace is reachable.
+- **Workspace chat** — pick a folder; Claude works scoped to it through a local MCP (Model Context Protocol) server (`read_file` / `list_dir` / `grep`). Nothing outside the workspace is reachable.
 - **Local git built in** — `status` / `diff` / `log` / `commit` / `push` / `pull` exposed as assistant tools.
-- **Live streaming UI** — watch tool calls form in real time: shell commands render as terminal IN/OUT blocks, edits as diffs, plans as task cards, sub-agents as live inline cards with a pinned HUD.
+- **Live streaming UI** — watch tool calls form in real time: shell commands render as terminal IN/OUT blocks, edits as diffs, plans as task cards, sub-agents as live inline cards with a floating overview bar.
 - **Per-tab sessions** — multiple concurrent chats, each with its own model, permission mode, and thinking-effort dial. Mid-chat model switching included.
 - **Permission modes** — ask-before-edits, auto-edit, plan-first, or bypass — switchable per turn.
 - **Voice dictation** — push-to-talk speech-to-text plus a prompt-enhance wand.
@@ -52,9 +52,23 @@
 
 ## How it works
 
-Tauri 2 (Rust) shell around a SvelteKit 2 / Svelte 5 frontend. The backend spawns the Claude CLI as a per-turn subprocess (with a warm pool so turns start fast) and hosts a local stdio MCP server that exposes the workspace-scoped file, search, and git tools plus a small UI bridge (`ask_user` / `open_browser` / `notify`) over a loopback socket. There is no remote component: your code, your prompts, and your keys never leave the machine except for the model API call itself. Auth belongs to the CLI — Rift spawns the official `claude` binary, which handles its own sign-in; Rift never reads, stores, or proxies your Claude credentials.
+Tauri 2 (Rust) shell around a SvelteKit 2 / Svelte 5 frontend. The backend spawns the Claude Code CLI as a per-turn subprocess (a warm child stays ready so turns start fast) and hosts a local stdio MCP server that exposes the workspace-scoped file, search, and git tools plus a small UI bridge (`ask_user` / `open_browser` / `notify`) over a loopback socket. There is no remote component: your code, your prompts, and your keys never leave the machine except for the model API call itself. Auth belongs to the CLI — Rift spawns the official `claude` binary, which handles its own sign-in; Rift never reads, stores, or proxies your Claude credentials.
 
 Full picture in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+## FAQ
+
+**Do I need Claude Code installed?**
+Yes — Rift drives the official CLI rather than reimplementing it. First launch checks for it and guides setup; sign-in and credentials stay inside the CLI.
+
+**Does my Claude Pro / Max subscription work?**
+Yes. Sign in to the CLI as usual — Rift turns are ordinary Claude Code usage on your plan. Your own API key works too.
+
+**Where does my code go?**
+Nowhere except the model call the official CLI makes. No server, no telemetry, no analytics — Rift is a local shell around a local process. Details in [`docs/SECURITY.md`](docs/SECURITY.md).
+
+**Windows only?**
+Packaged and tested for Windows 11 today. macOS / Linux build from source; packaging them is on the roadmap.
 
 ## Building from source
 
@@ -72,10 +86,11 @@ Prereqs, the release pipeline, and the contributor map live in [`docs/DEVELOPING
 - [`docs/DEVELOPING.md`](docs/DEVELOPING.md) — install, build, contribute
 - [`docs/CHANGELOG.md`](docs/CHANGELOG.md) — release history
 - [`docs/SECURITY.md`](docs/SECURITY.md) — security model + accepted advisories
+- [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) — how to file issues and open PRs
 
 ## Status
 
-Pre-1.0, moving fast — releases ship continuously via tag-driven CI to the [`rift`](https://github.com/Blazzer10200/rift) feed repo. See the [changelog](docs/CHANGELOG.md) for what's landing.
+Pre-1.0, moving fast — releases ship continuously via tag-driven CI to the [`rift`](https://github.com/Blazzer10200/rift) feed repo. Rift is built with Rift and is its maintainer's daily driver, but expect fast iteration and the occasional rough edge. See the [changelog](docs/CHANGELOG.md) for what's landing.
 
 ## License
 
