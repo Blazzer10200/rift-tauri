@@ -24,6 +24,7 @@
 #   bash scripts/cdp/c.sh shot-sel ".chat" jpeg 65
 #   bash scripts/cdp/c.sh batch '<json>'                 # raw batch body
 #   bash scripts/cdp/c.sh nav settings                   # jump to a workspace (chat/home/settings/ai-health/local-llm) + look
+#   bash scripts/cdp/c.sh tour chat home ai-health settings   # visit N surfaces + shot EACH in ONE round-trip (no nav→shot→nav)
 #   bash scripts/cdp/c.sh ready                          # block until app mounted + idle (no settle guessing)
 #   bash scripts/cdp/c.sh doctor                         # diagnose WHY CDP is down (wrapper/port/ELEVATION) + print the fix
 #   bash scripts/cdp/c.sh reap                           # kill ORPHANED dev procs (webview/MCP leak), keep the live instance
@@ -319,7 +320,10 @@ case "$cmd" in
     # nav <home|chat|settings|ai-health|local-llm|workspace> — jump to a workspace
     # in ONE call (click the sidebar nav button by aria-label) + settle + look.
     # No selector-hunting. Names are the friendly ids; aliased to the aria titles.
-    dest="${1:-}"; lookSel="${2:-}"; settle="${3:-450}"
+    # Settle default 250ms: workspace switches are near-instant (measured — 150ms
+    # already lands correctly; 250 is a safe margin). For capturing SEVERAL
+    # surfaces, use `tour` instead — one round-trip for all of them.
+    dest="${1:-}"; lookSel="${2:-}"; settle="${3:-250}"
     if [ -z "$dest" ]; then echo "usage: $0 nav <home|chat|settings|ai-health|local-llm> [lookSel] [settleMs]" >&2; exit 2; fi
     case "$dest" in
       home|workspace|projects) label="Workspace" ;;
@@ -342,6 +346,43 @@ case "$cmd" in
       "[errors] " + (($l.errorCount // 0)|tostring),
       ($l.errors[]? | "  ✗ " + (.text // "?")),
       ($l.shot.path // ($l.shot.error // "(no shot)"))'
+    ;;
+  tour)
+    # tour <ws1> <ws2> ... [--settle N] — visit N workspaces and screenshot EACH,
+    # all in ONE server round-trip. Kills the nav→shot→nav→shot pattern (each of
+    # which was a separate ~600-900ms call + re-reasoning between). One `tour chat
+    # home ai-health settings` = one call that returns every shot path, labeled.
+    # Default settle 250ms/surface (workspace switches are near-instant).
+    settle=250; args=()
+    while [ $# -gt 0 ]; do
+      case "$1" in --settle) settle="${2:-250}"; shift 2 ;; *) args+=("$1"); shift ;; esac
+    done
+    [ ${#args[@]} -eq 0 ] && { echo "usage: $0 tour <ws1> <ws2> ... [--settle N]   (ws: home|chat|settings|ai-health|local-llm)" >&2; exit 2; }
+    # Build one batch: per surface -> click nav button, sleep settle, screenshot.
+    labels=""
+    ops="$(jq -nc '[]')"
+    for ws in "${args[@]}"; do
+      case "$ws" in
+        home|workspace|projects) label="Workspace" ;;
+        chat) label="Chat" ;;
+        settings) label="Settings" ;;
+        ai-health|health|aihealth) label="AI Health" ;;
+        local-llm|local|llm) label="Local LLM" ;;
+        *) label="$ws" ;;
+      esac
+      labels="$labels $ws"
+      ops="$(jq -nc --argjson ops "$ops" --arg sel "[aria-label=\"$label\"]" --argjson ms "$settle" --arg tag "$ws" \
+        '$ops + [ {op:"click",params:{selector:$sel}}, {op:"sleep",params:{ms:$ms}}, {op:"screenshot",params:{format:"jpeg",quality:70,_tag:$tag}} ]')"
+    done
+    body="$(jq -nc --argjson ops "$ops" '{ops:$ops}')"
+    resp="$(post batch "$body")"
+    # Pull every screenshot result (every 3rd op) with its surface tag.
+    printf '%s' "$resp" | jq -r --arg labels "$labels" '
+      ($labels | ltrimstr(" ") | split(" ")) as $L |
+      "[tour] " + (($L|length)|tostring) + " surfaces captured in ONE round-trip:",
+      ( [ .results[] | select(.path) ] as $shots
+        | range(0; ($shots|length)) as $i
+        | "  " + ($L[$i] // "?") + " → " + ($shots[$i].path // "(no shot)") )'
     ;;
   ready)
     # ready [timeoutMs] — block until the app is MOUNTED and IDLE: .app exists,
@@ -463,7 +504,7 @@ case "$cmd" in
     curl -sS -X POST "$API/shutdown" 2>/dev/null || true
     ;;
   *)
-    echo "usage: $0 [-t main|browser] {health|doctor|reap|targets|look|act|nav|ready|state|page|ax|measure|console|eval|type|click|wait|shot|shot-sel|baseline|diff|batch|key|reload|reset-viewport|diag|shutdown} ..." >&2
+    echo "usage: $0 [-t main|browser] {health|doctor|reap|targets|look|act|nav|tour|ready|state|page|ax|measure|console|eval|type|click|wait|shot|shot-sel|baseline|diff|batch|key|reload|reset-viewport|diag|shutdown} ..." >&2
     exit 2
     ;;
 esac

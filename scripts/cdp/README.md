@@ -44,6 +44,7 @@ bash scripts/cdp/c.sh look                                     # VERIFY PRIMITIV
 bash scripts/cdp/c.sh look ".chat"                             # same, screenshot clipped to a selector
 bash scripts/cdp/c.sh doctor                                   # WHY is CDP down? layered diagnosis (wrapper/port/ELEVATION) + fix
 bash scripts/cdp/c.sh nav settings                             # jump to a workspace (home/chat/settings/ai-health/local-llm) + look
+bash scripts/cdp/c.sh tour chat home ai-health settings        # visit N surfaces + screenshot EACH in ONE round-trip
 bash scripts/cdp/c.sh ready                                    # block until app mounted + idle (kills settle-time guessing)
 bash scripts/cdp/c.sh health                                   # smoke + real eval ping (pingMs)
 bash scripts/cdp/c.sh state                                    # assistant snapshot (incl. workspaceActiveId)
@@ -174,6 +175,15 @@ bash scripts/cdp/c.sh ax "" full 200     # every named node (verbose), cap raise
 Default tier = interactive roles (button/link/textbox/tab/menuitem/…) + landmarks + **StaticText** (the readable content), with `InlineTextBox` dropped and consecutive duplicate text collapsed. States surfaced: `focused`, `disabled`, `checked`, `expanded/collapsed`, `selected`, heading `level`. `full:true` keeps generic/group roles too. Whole-page shots cap at 120 nodes (raise via the 3rd arg, or scope with a selector — Rift's conversation list alone is 250+ buttons).
 
 **When `ax` beats `shot`:** label/value/ordering checks ("did the badge land after its label", "is the right model shown", "what controls exist", "did the empty-state text change"). **When you still need `shot`:** anything visual — spacing, colour, overlap, animation, contrast, alignment. Reading order in `ax` ≠ visual layout, so a real pixel collision needs the image. Rule of thumb: "what does it SAY / what's THERE" → `ax`; "does it LOOK right" → `shot`.
+
+## Latency discipline (measured 2026-07-08)
+
+Real timings on a warm session: `health`/`state`/`page` ~80ms · `ax` ~290ms · `shot` (whole-page) **~430ms** · `look` ~370ms · `nav` ~720ms (250ms settle + a look). The screenshot capture is the dominant cost, and the killer isn't any single op — it's **round-trip count**: the old `nav → shot → nav → shot …` pattern for a multi-surface sweep was one slow call *per surface* plus re-reasoning between each.
+
+- **Capturing several surfaces? Use `tour ws1 ws2 …`** — ONE round-trip navigates + screenshots each, returns every path labeled. Don't hand-roll `nav`+`shot` per surface.
+- **Acting then checking? Use `act`** (click/key + settle + look folded), never `click; sleep; look`.
+- **Structure, not pixels? Use `ax`/`state`** — no image tokens, ~4× faster than a shot.
+- Workspace switches settle fast (150ms lands); `nav`/`tour` default to 250ms. Only raise settle for genuinely slow renders.
 
 ## Cost discipline
 
