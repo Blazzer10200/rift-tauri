@@ -2320,9 +2320,10 @@ async fn run_turn_loop(mut ctx: RunCtx) {
                 // Honest error (NOT "the Anthropic API"), drop the child so the
                 // next send cold-respawns, and end the turn so the UI unwedges.
                 let msg = format!(
-                    "Claude stopped responding — no output for {STREAM_NO_PROGRESS_SECS}s, so Rift ended the turn. \
+                    "Claude stopped responding — no output for {STREAM_NO_PROGRESS_SECS}s (or a tool ran past the {}-minute in-flight ceiling), so Rift ended the turn. \
                      This is the local Claude process stalling (a hung startup, a stuck tool/MCP connection, or a dropped pipe), not a slow model. \
-                     Try the turn again; if it keeps happening, run `claude` in a terminal to confirm the CLI itself works."
+                     Try the turn again; if it keeps happening, run `claude` in a terminal to confirm the CLI itself works.",
+                    STREAM_TOOL_CEILING_SECS / 60
                 );
                 // cont.228 (prod incident 2026-06-28, session 87a27f20): a child
                 // wedged AFTER an auto-denied permission ask sat for 9+ min holding
