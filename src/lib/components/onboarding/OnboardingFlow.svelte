@@ -23,9 +23,9 @@
 
   const steps = [
     { t: "Welcome", s: "What Rift is" },
-    { t: "Connect Claude", s: "CLI & sign-in" },
-    { t: "Open a project", s: "Pick a folder" },
-    { t: "Defaults", s: "Model & tools" },
+    { t: "Connect Claude", s: "Install & sign in" },
+    { t: "Open a project", s: "Choose a folder" },
+    { t: "Defaults", s: "Model & working style" },
   ];
 
   let step = $state(1);
@@ -49,7 +49,21 @@
       return;
     }
     if (step < last) step += 1;
-    else onDone();
+    else {
+      seedFirstPrompt();
+      onDone();
+    }
+  }
+
+  // Finish (not Skip) lands with a ghost first-prompt in the composer — the
+  // existing promptSuggestion affordance (#87): Tab to accept, dismissible,
+  // never blocks typing. Carries setup momentum straight into a first turn.
+  function seedFirstPrompt() {
+    const tab = assistant.activeTab;
+    if (!tab || (tab.draft ?? "").trim() || tab.promptSuggestion) return;
+    tab.promptSuggestion = assistant.workspace.current
+      ? "Give me a tour of this project — what it does, how it's organized, and where to start."
+      : "What can you do? Show me how to work with you.";
   }
   function back() {
     warnSkipConnect = false;
@@ -106,9 +120,9 @@
     trust: "readonly" | "standard";
   };
   const PRESETS: Preset[] = [
-    { id: "cautious", label: "Cautious", blurb: "Asks before every edit. Read-only git. Safest while you learn what Rift does.", perm: "default",           thinking: { on: true,  effort: "smart" }, trust: "readonly" },
-    { id: "balanced", label: "Balanced", blurb: "Edits files automatically, asks for anything riskier. Git commit/pull/push on. Recommended.", perm: "acceptEdits",       thinking: { on: true,  effort: "smart" }, trust: "standard" },
-    { id: "fast",     label: "Fast",     blurb: "Runs everything without prompts and replies instantly (no thinking step). Most autonomous.", perm: "bypassPermissions", thinking: { on: false, effort: "smart" }, trust: "standard" },
+    { id: "cautious", label: "Cautious", blurb: "Rift asks for your approval before every change, and version control stays read-only. The safest way to learn what Rift can do.", perm: "default",           thinking: { on: true,  effort: "smart" }, trust: "readonly" },
+    { id: "balanced", label: "Balanced", blurb: "Rift edits files on its own and asks before anything riskier. Git commits, pulls, and pushes are enabled. The best fit for most people.", perm: "acceptEdits",       thinking: { on: true,  effort: "smart" }, trust: "standard" },
+    { id: "fast",     label: "Fast",     blurb: "Rift works without asking for approval and replies immediately, skipping the extended-thinking step. The most autonomous option.", perm: "bypassPermissions", thinking: { on: false, effort: "smart" }, trust: "standard" },
   ];
   // Reflect the live state back to a preset chip so the selection survives a
   // back-nav (or a granular change made elsewhere) without a separate $state.
@@ -178,21 +192,21 @@
             <header class="ob-head">
               <span class="ob-eyebrow">Step 1 · Welcome</span>
               <h1 class="ob-title">Meet Rift</h1>
-              <p class="ob-sub">A local coding assistant powered by the <code>claude</code> CLI — it reads, searches, and edits your codebase entirely on your machine. No remote connections, no sync; your auth, your billing.</p>
+              <p class="ob-sub">Rift is a coding assistant that runs entirely on your computer. It reads, searches, and edits code in the folder you choose — nothing is uploaded and nothing leaves your machine. It's powered by Claude, through your own Claude account.</p>
             </header>
             <div class="ob-vlist">
               <div class="ob-vrow">
                 <span class="ob-vic"><FolderGit2 size={18} /></span>
                 <span class="ob-vbody">
-                  <span class="ob-vt">Local &amp; private</span>
-                  <span class="ob-vp">Works in the folder you point it at — nothing leaves your machine. MCP tools (read, grep, local-git) built in, no config.</span>
+                  <span class="ob-vt">Private by design</span>
+                  <span class="ob-vp">Rift only works inside the project folder you choose. Reading, searching, and version control are built in — no setup required.</span>
                 </span>
               </div>
               <div class="ob-vrow">
                 <span class="ob-vic warn"><TriangleAlert size={18} /></span>
                 <span class="ob-vbody">
-                  <span class="ob-vt">You're testing the beta</span>
-                  <span class="ob-vp">Pre-release, and replies are AI-generated — review changes before relying on them and keep your work backed up.</span>
+                  <span class="ob-vt">This is a beta release</span>
+                  <span class="ob-vp">Rift is still in active development, and its replies are AI-generated. Review changes before you rely on them, and keep backups of important work.</span>
                 </span>
               </div>
             </div>
@@ -218,14 +232,14 @@
             <ObStage kind="claude" caption="embedded assistant" />
             <ClaudeConnect onConnectedChange={(c) => { connectConnected = c; if (c) warnSkipConnect = false; }} />
             {#if warnSkipConnect}
-              <p class="ob-hint ob-hint--warn"><TriangleAlert size={14} /><span>Claude isn't connected yet — your model and tool picks won't work until it is. Press Next again to continue anyway, or connect above first.</span></p>
+              <p class="ob-hint ob-hint--warn"><TriangleAlert size={14} /><span>Claude isn't connected yet, so Rift won't be able to reply until it is. Press Next again to continue anyway, or finish connecting first.</span></p>
             {/if}
           {:else if step === 3}
             <ObStage kind="project" caption="your workspace" />
             <header class="ob-head">
               <span class="ob-eyebrow">Step 3 · Open a project</span>
               <h1 class="ob-title">Open a project</h1>
-              <p class="ob-sub">Point Rift at a code folder so the assistant has something to work on. You can switch projects anytime from the title bar.</p>
+              <p class="ob-sub">Choose the folder that holds your code. Rift reads and works only inside that folder, and you can switch projects at any time from the title bar.</p>
             </header>
             {#if assistant.workspace.current}
               <div class="ob-statcard">
@@ -258,14 +272,14 @@
                   </div>
                 </div>
               {/if}
-              <p class="ob-hint"><span>Or skip — Rift works in a private scratch space until you pick a folder, and you can open one anytime from the Workspace page.</span></p>
+              <p class="ob-hint"><span>You can also skip this for now. Rift will use a private scratch space until you choose a folder — open one at any time from the Workspace page.</span></p>
             {/if}
           {:else}
             <ObStage kind="defaults" caption="tuned to you" />
             <header class="ob-head">
               <span class="ob-eyebrow">Step 4 · Defaults</span>
               <h1 class="ob-title">Pick your defaults</h1>
-              <p class="ob-sub">How the assistant runs by default. Each project remembers its own model and effort — change these anytime from the composer.</p>
+              <p class="ob-sub">Choose how Rift works by default. Every project remembers its own settings, and you can change any of this later from the chat controls.</p>
             </header>
             <div class="ob-fields">
               <div class="ob-field">
@@ -306,7 +320,7 @@
                     </button>
                   {/each}
                 </div>
-                <span class="ob-field-hint">Fine-tune permissions, thinking, and git access anytime from the composer and Settings.</span>
+                <span class="ob-field-hint">You can fine-tune permissions, thinking, and version-control access at any time in Settings.</span>
               </div>
             </div>
           {/if}

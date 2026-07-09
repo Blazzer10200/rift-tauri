@@ -11,12 +11,10 @@
   let destroyed = false;
   onDestroy(() => { destroyed = true; });
 
-  // FLOOR_MS keeps the splash visible long enough for the seam-reveal to
-  // play out and land: seam draws (~340ms) → tears open (~520ms) → letters
-  // cascade (~1025ms total) → short hold → exit.
-  const FLOOR_MS = 1300;
-
-  const LETTERS = ["R", "I", "F", "T"];
+  // One continuous motion: the seam draws (~240ms), then tears open and the
+  // lockup settles as a single reveal (~460ms), short hold, exit. FLOOR_MS
+  // covers draw + open + hold.
+  const FLOOR_MS = 1000;
 
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -66,17 +64,12 @@
   <div class="drift" aria-hidden="true"></div>
   <div class="content">
     <div class="stage">
-      <div class="burst" aria-hidden="true"></div>
       <div class="reveal">
         <div class="half top">
           <div class="mark"><RiftLogo size={68} /></div>
         </div>
         <div class="half bottom">
-          <div class="wordmark">
-            {#each LETTERS as ch, i (i)}
-              <span class="ltr" style="--i:{i}">{ch}</span>
-            {/each}
-          </div>
+          <div class="wordmark">RIFT</div>
         </div>
       </div>
       <div class="seam"></div>
@@ -161,38 +154,14 @@
     position: relative;
   }
 
-  /* One-time light burst behind the content as the seam tears open —
-     sells the energy release without lingering. */
-  .burst {
-    position: absolute;
-    left: 50%;
-    top: 50%;
-    width: 560px;
-    height: 320px;
-    transform: translate(-50%, -50%) scale(0.6);
-    pointer-events: none;
-    background: radial-gradient(
-      50% 50% at center,
-      color-mix(in oklab, var(--accent) 22%, transparent),
-      transparent 70%
-    );
-    opacity: 0;
-    animation: burst 680ms ease-out 320ms forwards;
-  }
-  @keyframes burst {
-    0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
-    30%  { opacity: 0.6; }
-    100% { opacity: 0; transform: translate(-50%, -50%) scale(1.35); }
-  }
-
-  /* The reveal opens vertically from the seam line — clip-path tears from a
-     closed slit at 50% to fully open. Halves are equal-height so the seam
-     sits exactly on the logo/wordmark boundary. */
+  /* The reveal opens vertically from the seam line — one motion, one curve.
+     Halves are equal-height so the seam sits exactly on the logo/wordmark
+     boundary. */
   .reveal {
     display: grid;
     grid-template-rows: 1fr 1fr;
     justify-items: center;
-    animation: tear 520ms cubic-bezier(0.22, 1, 0.36, 1) 340ms both;
+    animation: tear 460ms cubic-bezier(0.22, 1, 0.36, 1) 240ms both;
   }
   @keyframes tear {
     from { clip-path: inset(50% 0 50% 0); }
@@ -208,17 +177,19 @@
   .half.top { align-items: flex-end; padding: 24px 32px 18px; }
   .half.bottom { align-items: flex-start; padding: 18px 32px 24px; }
 
+  /* Mark + wordmark settle on the SAME window and curve as the tear — the
+     content rides the opening instead of arriving after it. Both land
+     slightly hot (brightness) and cool to resting as they settle. */
   .mark {
     filter: drop-shadow(0 10px 32px color-mix(in oklab, var(--accent) 28%, transparent));
-    animation: mark-in 460ms cubic-bezier(0.22, 1, 0.36, 1) 400ms both;
+    animation: settle-mark 480ms cubic-bezier(0.22, 1, 0.36, 1) 260ms both;
   }
-  @keyframes mark-in {
-    from { opacity: 0; transform: scale(0.92) translateY(6px); filter: blur(6px); }
-    to   { opacity: 1; transform: scale(1) translateY(0); filter: blur(0); }
+  @keyframes settle-mark {
+    from { opacity: 0; transform: translateY(7px) scale(0.96); filter: blur(6px) brightness(1.4); }
+    to   { opacity: 1; transform: translateY(0) scale(1); filter: blur(0) brightness(1); }
   }
 
   .wordmark {
-    display: flex;
     font-family: "Lexend Variable", var(--font-ui);
     font-weight: 600;
     font-size: 56px;
@@ -229,28 +200,29 @@
        optically centered. */
     padding-left: 0.22em;
     user-select: none;
-    /* Tracking settles inward as the letters land — wide → resting. */
-    animation: track-in 620ms cubic-bezier(0.22, 1, 0.36, 1) 440ms both;
-  }
-  @keyframes track-in {
-    from { letter-spacing: 0.34em; }
-    to   { letter-spacing: 0.22em; }
-  }
-  .ltr {
-    display: inline-block;
     text-shadow:
       0 0 28px color-mix(in oklab, var(--accent) 45%, transparent),
       0 0 64px color-mix(in oklab, var(--accent) 18%, transparent);
-    animation: ltr-in 420ms cubic-bezier(0.22, 1, 0.36, 1)
-      calc(440ms + var(--i) * 55ms) both;
+    /* Tracking settles inward as the wordmark lands — wide → resting. */
+    animation: settle-word 480ms cubic-bezier(0.22, 1, 0.36, 1) 260ms both;
   }
-  @keyframes ltr-in {
-    from { opacity: 0; transform: translateY(10px); filter: blur(8px); }
-    to   { opacity: 1; transform: translateY(0); filter: blur(0); }
+  @keyframes settle-word {
+    from {
+      opacity: 0;
+      transform: translateY(-7px);
+      letter-spacing: 0.3em;
+      filter: blur(6px) brightness(1.4);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+      letter-spacing: 0.22em;
+      filter: blur(0) brightness(1);
+    }
   }
 
-  /* The seam — a line of accent light that draws in, flares, then dissolves
-     into the opening rift. */
+  /* The seam — a line of accent light that draws in, then dissolves into the
+     opening rift (expands + fades over the tear window). */
   .seam {
     position: absolute;
     left: 50%;
@@ -279,28 +251,23 @@
       0 0 36px color-mix(in oklab, var(--accent) 35%, transparent);
     transform: translate(-50%, -50%) scaleX(0);
     animation:
-      seam-draw 340ms cubic-bezier(0.4, 0, 0.2, 1) both,
-      seam-flare 240ms ease-out 300ms both,
-      seam-fade 460ms ease-out 380ms forwards;
+      seam-draw 240ms cubic-bezier(0.4, 0, 0.2, 1) both,
+      seam-open 460ms ease-out 240ms forwards;
   }
   @keyframes seam-draw {
     from { transform: translate(-50%, -50%) scaleX(0); }
     to   { transform: translate(-50%, -50%) scaleX(1); }
   }
-  @keyframes seam-flare {
-    from { filter: brightness(1); }
-    60%  { filter: brightness(1.9); }
-    to   { filter: brightness(1.5); }
-  }
-  @keyframes seam-fade {
+  @keyframes seam-open {
     from {
       opacity: 1;
       transform: translate(-50%, -50%) scaleX(1) scaleY(1);
+      filter: brightness(1.6);
     }
     to {
       opacity: 0;
-      transform: translate(-50%, -50%) scaleX(1.15) scaleY(3.5);
-      filter: blur(6px) brightness(1.6);
+      transform: translate(-50%, -50%) scaleX(1.12) scaleY(4);
+      filter: blur(6px) brightness(1.3);
     }
   }
 
@@ -323,12 +290,10 @@
       animation: none;
       clip-path: none;
     }
-    .seam,
-    .burst {
+    .seam {
       display: none;
     }
     .mark,
-    .ltr,
     .wordmark {
       animation: none;
     }

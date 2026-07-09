@@ -130,7 +130,7 @@
 <header class="ob-head">
   {#if !standalone}<span class="ob-eyebrow">Step 2 · Connect Claude</span>{/if}
   <h1 class="ob-title">Connect Claude</h1>
-  <p class="ob-sub">Rift runs the <code>claude</code> CLI under the hood — your auth, your billing. Finish here, or anytime in Settings → Assistant.</p>
+  <p class="ob-sub">Rift is powered by the <code>claude</code> command-line tool and your own Claude account, so you stay in control of your sign-in and billing. You can finish this step now, or later in Settings → Claude.</p>
 </header>
 
 {#if !status && probing}
@@ -144,7 +144,7 @@
       {#if status.cliPresent}
         <span class="v ok"><CheckCircle2 size={14} /> {status.cliVersion ?? "installed"}</span>
       {:else}
-        <span class="v warn"><AlertCircle size={14} /> not on PATH</span>
+        <span class="v warn"><AlertCircle size={14} /> not found</span>
       {/if}
     </div>
     <div class="ob-statrow">
@@ -172,21 +172,21 @@
 
   {#if !status.cliPresent}
     <div class="ob-field">
-      <span class="ob-flabel">Install the CLI — run in PowerShell</span>
+      <span class="ob-flabel">Install the Claude CLI — run this command in PowerShell</span>
       <div class="ob-copy-block">
         <span class="ob-copy-cmd">{INSTALL_CMD}</span>
         <button type="button" class="ob-copy-btn" class:ok={copied} onclick={copyCmd}>
           {#if copied}<Check size={13} /> Copied{:else}<Copy size={13} /> Copy{/if}
         </button>
       </div>
-      <span class="ob-flabel ob-flabel--alt">Or, if PowerShell blocks scripts — install with npm</span>
+      <span class="ob-flabel ob-flabel--alt">If PowerShell blocks scripts, install with npm instead</span>
       <div class="ob-copy-block">
         <span class="ob-copy-cmd">{INSTALL_CMD_NPM}</span>
         <button type="button" class="ob-copy-btn" class:ok={copiedNpm} onclick={copyCmdNpm}>
           {#if copiedNpm}<Check size={13} /> Copied{:else}<Copy size={13} /> Copy{/if}
         </button>
       </div>
-      <p class="ob-hint"><span>Rift detects either install automatically. After installing, click <strong>Re-check</strong> — or <strong>relaunch Rift</strong> if it's still not found (a fresh PATH only reaches Rift on restart; rarely a full sign-out is needed). More options at <button type="button" class="ob-link" onclick={() => void openUrl(CLI_DOCS_URL).catch((e) => console.warn("openUrl failed", e))}>docs.claude.com/en/docs/claude-code</button>.</span></p>
+      <p class="ob-hint"><span>Rift detects the installation automatically. After installing, click <strong>Re-check</strong>. If the CLI still isn't found, restart Rift — Windows sometimes needs a restart before newly installed programs become visible. More options at <button type="button" class="ob-link" onclick={() => void openUrl(CLI_DOCS_URL).catch((e) => console.warn("openUrl failed", e))}>docs.claude.com/en/docs/claude-code</button>.</span></p>
     </div>
   {:else if !connected}
     <div class="ob-input-row">
@@ -195,9 +195,9 @@
       </button>
     </div>
     {#if assistant.loginInProgress}
-      <p class="ob-hint"><span>A console window opened with the login link — it may be behind this window (check your taskbar). Complete the sign-in there; Rift detects it automatically.</span></p>
+      <p class="ob-hint"><span>A console window has opened with your sign-in link — it may be behind this window, so check your taskbar. Complete the sign-in there and Rift will detect it automatically.</span></p>
     {:else}
-      <p class="ob-hint"><span>Subscription (Pro/Max) login. On a Console/API account instead? <button type="button" class="ob-link" onclick={() => void signIn(true)}>Sign in with Console</button> — or <button type="button" class="ob-link" onclick={() => (showApiKey = !showApiKey)}>paste an API key</button>.</span></p>
+      <p class="ob-hint"><span>This signs you in with a Claude subscription (Pro or Max). If you use the Anthropic API instead, <button type="button" class="ob-link" onclick={() => void signIn(true)}>sign in with Console</button> or <button type="button" class="ob-link" onclick={() => (showApiKey = !showApiKey)}>paste an API key</button>.</span></p>
     {/if}
     {#if showApiKey}
       <div class="ob-input-row">
@@ -212,10 +212,10 @@
           {#if savingKey}<Loader2 size={14} class="spin" />{:else}<KeyRound size={14} />{/if} Save key
         </button>
       </div>
-      <p class="ob-hint"><span>Bills per-token to your Anthropic Console account. Rift's built-in tools still work — only the Claude CLI's own personal config (<code>%USERPROFILE%\.claude</code> settings, MCP servers, CLAUDE.md) is bypassed on key turns.</span></p>
+      <p class="ob-hint"><span>API keys bill per use through your Anthropic Console account. Everything in Rift works the same — your personal Claude CLI settings simply aren't applied when a key is used.</span></p>
     {/if}
   {:else}
-    <div class="ob-connbar"><span class="dot"></span> Claude is connected and ready — you're set.</div>
+    <div class="ob-connbar"><span class="dot"></span> Claude is connected and ready to work.</div>
   {/if}
 {/if}
 

@@ -347,40 +347,151 @@
   color: var(--fg-faint); text-transform: uppercase;
 }
 
-/* Welcome / Personalize — pulse rings behind the mark */
-.ob-w-mark {
-  position: relative; z-index: 2; width: 58px; height: 58px; border-radius: 17px;
-  display: grid; place-items: center; color: var(--accent); background: var(--gi-ghost-bg);
-  box-shadow: inset 0 0 0 1px var(--gi-ghost-border);
+/* Mini product moments — each stage shows a tiny real moment of the app.
+   Motion discipline: ONE loop per scene; children animate inside % windows of
+   that loop. Base (no-animation) state = fully composed scene, so reduced-
+   motion users see a static miniature, not an empty box. */
+.ob-mini { position: relative; z-index: 2; }
+
+/* welcome — miniature chat turn (7s loop: ask → tools → reply) */
+.ob-mini-chat { width: min(320px, 78%); display: flex; flex-direction: column; gap: 7px; }
+.ob-mc-user {
+  align-self: flex-end; max-width: 82%;
+  padding: 6px 11px; border-radius: 12px 12px 3px 12px;
+  font-size: 11px; color: var(--fg);
+  background: color-mix(in oklab, var(--accent) 16%, var(--bg-elev-2));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 22%, transparent);
 }
-.ob-ring {
-  position: absolute; left: 50%; top: 50%; width: 58px; height: 58px; border-radius: 19px;
-  border: 1px solid var(--gi-ghost-border); transform: translate(-50%, -50%) scale(0.7); opacity: 0;
+.ob-mc-chip {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 9px; border-radius: 7px;
+  font-family: var(--font-mono); font-size: 9.5px; color: var(--fg-muted);
+  background: var(--bg-elev-1); border: 1px solid var(--border);
+}
+.ob-mc-chip b { font-weight: 600; color: var(--fg-2); }
+.ob-mc-chip i {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 6px color-mix(in oklab, var(--accent) 70%, transparent);
+}
+.ob-mc-reply {
+  align-self: flex-start; width: 88%;
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 9px 11px; border-radius: 12px 12px 12px 3px;
+  background: var(--bg-elev-1); border: 1px solid var(--border);
+}
+.ob-mc-reply .l {
+  height: 5px; border-radius: 3px; transform-origin: left center;
+  background: color-mix(in oklab, var(--fg) 16%, transparent);
+}
+.ob-mc-reply .l1 { width: 88%; }
+.ob-mc-reply .l2 { width: 72%; }
+.ob-mc-reply .l3 { width: 46%; background: color-mix(in oklab, var(--accent) 34%, transparent); }
+
+/* claude — CLI heartbeat (5.5s loop: type `claude` → connected pill) */
+.ob-mini-cli { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.ob-mcl-term {
+  display: flex; align-items: center; gap: 8px;
+  min-width: 210px; padding: 10px 14px; border-radius: var(--r-card);
+  background: var(--code-bg); border: 1px solid var(--code-border);
+  font-family: var(--font-mono); font-size: 12.5px;
+}
+.ob-mcl-term .ps { color: var(--accent); font-weight: 600; }
+.ob-mcl-term .cmd { color: var(--code-fg); overflow: hidden; white-space: nowrap; }
+.ob-mcl-term .caret { width: 7px; height: 14px; background: var(--accent); opacity: 0.85; border-radius: 1px; }
+.ob-mcl-pill {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 6px 12px; border-radius: 999px;
+  font-size: 10.5px; font-weight: 560; color: var(--ok);
+  background: var(--ok-soft); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ok) 25%, transparent);
+}
+.ob-mcl-pill i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+/* project — workspace scope (6.5s loop: rows land → scan pass) */
+.ob-mini-tree {
+  position: relative; width: min(280px, 72%); overflow: hidden;
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 11px 13px; border-radius: var(--r-card);
+  background: var(--bg-elev-1); border: 1px solid var(--border);
+}
+.ob-mini-tree .row {
+  display: flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-muted);
+  padding: 4px 6px; border-radius: 6px;
+}
+.ob-mini-tree .row :global(.lucide) { flex: none; color: var(--fg-subtle); }
+.ob-mini-tree .r0 { color: var(--fg-2); font-weight: 600; }
+.ob-mini-tree .r0 :global(.lucide) { color: var(--accent); }
+.ob-mini-tree .r1, .ob-mini-tree .r2, .ob-mini-tree .r3 { margin-left: 14px; }
+.ob-mini-tree .scan {
+  position: absolute; left: 0; right: 0; top: -18%; height: 26px; opacity: 0;
+  background: linear-gradient(180deg, transparent, color-mix(in oklab, var(--accent) 9%, transparent), transparent);
 }
 
-/* Claude — breathing core + typing dots */
-.ob-cl { position: relative; z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 16px; }
-.ob-cl-core { position: relative; width: 56px; height: 56px; border-radius: 17px; display: grid; place-items: center; color: var(--accent); background: var(--gi-ghost-bg); box-shadow: inset 0 0 0 1px var(--gi-ghost-border); }
-.ob-tw { position: absolute; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); opacity: 0; z-index: 2; }
-.ob-typing { display: flex; gap: 6px; }
-.ob-typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-subtle); }
+/* defaults — composer controls in miniature (5s loop: dial fills) */
+.ob-mini-def { display: flex; align-items: center; gap: 10px; }
+.ob-md-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 11px; border-radius: 999px;
+  font-size: 11px; font-weight: 600; color: var(--accent);
+  background: var(--gi-ghost-bg); box-shadow: inset 0 0 0 1px var(--gi-ghost-border);
+}
+.ob-md-pill.perm { color: var(--fg-2); background: var(--bg-elev-2); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.ob-md-dial { display: inline-flex; align-items: center; gap: 5px; padding: 0 2px; }
+.ob-md-dial i {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 7px color-mix(in oklab, var(--accent) 55%, transparent);
+}
 
 @media (prefers-reduced-motion: no-preference) {
-  .ob-ring { animation: ob-ring 3.3s ease-out infinite; }
-  .ob-ring.r2 { animation-delay: 1.1s; }
-  .ob-ring.r3 { animation-delay: 2.2s; }
-  .ob-cl-core { animation: ob-breathe 2.8s ease-in-out infinite; }
-  .ob-tw.t1 { animation: ob-twinkle 2.4s ease-in-out infinite; }
-  .ob-tw.t2 { animation: ob-twinkle 2.4s ease-in-out infinite; animation-delay: 0.8s; }
-  .ob-tw.t3 { animation: ob-twinkle 2.4s ease-in-out infinite; animation-delay: 1.6s; }
-  .ob-typing i { animation: ob-bounce 1.3s ease-in-out infinite; }
-  .ob-typing i:nth-child(2) { animation-delay: 0.16s; }
-  .ob-typing i:nth-child(3) { animation-delay: 0.32s; }
+  /* shared loop-out: scene holds, dips at the tail, restarts */
+  .ob-mini-chat { animation: ob-loop-out 7s ease-in-out infinite; }
+  .ob-mc-user  { animation: ob-mc-user 7s ease-out infinite; }
+  .ob-mc-chip.c1 { animation: ob-mc-c1 7s ease-out infinite; }
+  .ob-mc-chip.c2 { animation: ob-mc-c2 7s ease-out infinite; }
+  .ob-mc-chip i { animation: ob-mc-dot 1.4s ease-in-out infinite; }
+  .ob-mc-reply { animation: ob-mc-reply 7s ease-out infinite; }
+  .ob-mc-reply .l1 { animation: ob-mc-l1 7s var(--ease-soft, ease-out) infinite; }
+  .ob-mc-reply .l2 { animation: ob-mc-l2 7s var(--ease-soft, ease-out) infinite; }
+  .ob-mc-reply .l3 { animation: ob-mc-l3 7s var(--ease-soft, ease-out) infinite; }
+
+  .ob-mini-cli { animation: ob-loop-out 5.5s ease-in-out infinite; }
+  .ob-mcl-term .cmd { animation: ob-mcl-type 5.5s steps(6, end) infinite; }
+  .ob-mcl-term .caret { animation: ob-mcl-caret 5.5s ease-out infinite, ob-blink 1.1s steps(1) infinite; }
+  .ob-mcl-pill { animation: ob-mcl-pill 5.5s ease-out infinite; }
+
+  .ob-mini-tree { animation: ob-loop-out 6.5s ease-in-out infinite; }
+  .ob-mini-tree .r0 { animation: ob-tree-row 6.5s ease-out infinite; }
+  .ob-mini-tree .r1 { animation: ob-tree-row-1 6.5s ease-out infinite; }
+  .ob-mini-tree .r2 { animation: ob-tree-row-2 6.5s ease-out infinite; }
+  .ob-mini-tree .r3 { animation: ob-tree-row-3 6.5s ease-out infinite; }
+  .ob-mini-tree .scan { animation: ob-tree-scan 6.5s ease-in-out infinite; }
+
+  .ob-md-dial .d1 { animation: ob-dial 5s ease-out infinite; }
+  .ob-md-dial .d2 { animation: ob-dial 5s ease-out infinite; animation-delay: 0.55s; }
+  .ob-md-dial .d3 { animation: ob-dial 5s ease-out infinite; animation-delay: 1.1s; }
+  .ob-md-dial .d4 { animation: ob-dial 5s ease-out infinite; animation-delay: 1.65s; }
 }
-@keyframes ob-ring { 0% { opacity: 0.55; transform: translate(-50%, -50%) scale(0.7); } 70% { opacity: 0; } 100% { opacity: 0; transform: translate(-50%, -50%) scale(2.3); } }
-@keyframes ob-breathe { 0%, 100% { transform: scale(1); box-shadow: inset 0 0 0 1px var(--gi-ghost-border), 0 0 0 0 color-mix(in oklab, var(--accent) 24%, transparent); } 50% { transform: scale(1.07); box-shadow: inset 0 0 0 1px var(--gi-ghost-border), 0 0 0 13px color-mix(in oklab, var(--accent) 0%, transparent); } }
-@keyframes ob-twinkle { 0%, 100% { opacity: 0; transform: scale(0.5); } 50% { opacity: 0.9; transform: scale(1); } }
-@keyframes ob-bounce { 0%, 100% { transform: translateY(0); opacity: 0.4; background: var(--fg-subtle); } 50% { transform: translateY(-6px); opacity: 1; background: var(--accent); } }
+
+@keyframes ob-loop-out { 0%, 93% { opacity: 1; } 98%, 100% { opacity: 0; } }
+@keyframes ob-mc-user { 0% { opacity: 0; transform: translateY(5px); } 3% { opacity: 0; } 8%, 100% { opacity: 1; transform: none; } }
+@keyframes ob-mc-c1 { 0%, 15% { opacity: 0; transform: translateY(4px); } 21%, 100% { opacity: 1; transform: none; } }
+@keyframes ob-mc-c2 { 0%, 27% { opacity: 0; transform: translateY(4px); } 33%, 100% { opacity: 1; transform: none; } }
+@keyframes ob-mc-dot { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+@keyframes ob-mc-reply { 0%, 42% { opacity: 0; transform: translateY(5px); } 48%, 100% { opacity: 1; transform: none; } }
+@keyframes ob-mc-l1 { 0%, 46% { transform: scaleX(0); } 55%, 100% { transform: scaleX(1); } }
+@keyframes ob-mc-l2 { 0%, 52% { transform: scaleX(0); } 61%, 100% { transform: scaleX(1); } }
+@keyframes ob-mc-l3 { 0%, 58% { transform: scaleX(0); } 67%, 100% { transform: scaleX(1); } }
+@keyframes ob-mcl-type { 0%, 6% { max-width: 0; } 26%, 100% { max-width: 6ch; } }
+@keyframes ob-mcl-caret { 0%, 88% { opacity: 0.85; } 94%, 100% { opacity: 0; } }
+@keyframes ob-blink { 0%, 55% { visibility: visible; } 56%, 100% { visibility: hidden; } }
+@keyframes ob-mcl-pill { 0%, 46% { opacity: 0; transform: translateY(5px) scale(0.97); } 54%, 100% { opacity: 1; transform: none; } }
+@keyframes ob-tree-row { 0%, 5% { opacity: 0; transform: translateX(-5px); } 11%, 100% { opacity: 1; transform: none; } }
+@keyframes ob-tree-row-1 { 0%, 14% { opacity: 0; transform: translateX(-5px); } 20%, 100% { opacity: 1; transform: none; } }
+@keyframes ob-tree-row-2 { 0%, 23% { opacity: 0; transform: translateX(-5px); } 29%, 100% { opacity: 1; transform: none; } }
+@keyframes ob-tree-row-3 { 0%, 32% { opacity: 0; transform: translateX(-5px); } 38%, 100% { opacity: 1; transform: none; } }
+@keyframes ob-tree-scan { 0%, 48% { top: -18%; opacity: 0; } 54% { opacity: 1; } 74% { top: 104%; opacity: 1; } 80%, 100% { top: 104%; opacity: 0; } }
+@keyframes ob-dial { 0%, 8% { opacity: 0.22; box-shadow: none; } 16%, 82% { opacity: 1; } 92%, 100% { opacity: 0.22; box-shadow: none; } }
 
 /* ── Narrow window ────────────────────────────────────────────────────────── */
 @media (max-width: 720px) {
