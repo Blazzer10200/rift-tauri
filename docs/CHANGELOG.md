@@ -2,7 +2,7 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — Slash-menu skills + Settings overhaul
+## Unreleased — Settings overhaul + slash-menu skills
 
 - **Your Claude Code skills in the `/` menu** — user + project skills/commands scanned from `.claude` dirs with descriptions and argument hints; fuzzy filter with highlight, source badges, Tab-inserts-args vs Enter-runs. Menu chrome redesigned (glass panel, count header, styled scrollbar, sticky groups).
 - **Settings restructured into 5 tabs** with a search box (press `/` or Ctrl+F) that jumps to and flashes the matching card; redundant cards merged. **Show-don't-tell everywhere:** live code + density preview, accent sample strip, mini activity-stream preview, classic-bubbles preview when stream view is off, real-pipeline reply preview, a live context gauge under the plan picker, collapsed option grids with animated expanders, and slider drag-bubbles.
