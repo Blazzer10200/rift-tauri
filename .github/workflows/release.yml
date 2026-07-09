@@ -25,7 +25,7 @@ on:
 permissions:
   contents: read
 
-# NOTE: there is ONE self-hosted runner (`proxmox-win`). A queue-stall watchdog
+# NOTE: there is ONE self-hosted runner. A queue-stall watchdog
 # can't live here — a GitHub-HOSTED watcher needs billed minutes (suspended), and
 # a self-hosted watcher would compete with the build for the single runner (and
 # couldn't alarm at all if the runner is wedged, since neither job would run).
@@ -35,7 +35,7 @@ permissions:
 jobs:
   release:
     name: build + pack + publish
-    # Self-hosted WS2022 runner on Proxmox (blazzer-labs). Free + warm target/ +
+    # Self-hosted WS2022 runner. Free + warm target/ +
     # sccache make this faster than the metered windows-latest it replaced.
     runs-on: [self-hosted, windows, tauri-build]
     timeout-minutes: 40

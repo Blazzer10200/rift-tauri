@@ -26,7 +26,7 @@ Composer (Svelte)
             └─ commands/assistant.rs → assistant::turn::assistant_send
                  └─ spawn `claude` subprocess   turn.rs
                       • --mcp-config <rift mcp>  (Rift's own stdio MCP server)
-                      • --allowed-tools <CLI builtins + mcp__rift__*> (see turn.rs S91/S107)
+                      • --allowed-tools <CLI builtins + mcp__rift__*> (see the allowlists in turn.rs)
                       • --session-id (1st) / --resume (subsequent)
                       • --model / --permission-mode / effort flag
                       • prompt delivered on STDIN as a stream-json envelope
@@ -49,7 +49,7 @@ Key properties:
 
 ## 4. Backend (`src-tauri/src/`)
 
-`lib.rs` is the Tauri entry: it registers ~79 `#[tauri::command]`s (most live per-domain in `commands/*.rs`; `stt::*` and `usage::limits` register directly from their own modules) and runs `VelopackApp::build().run()` early for install/update hooks. `main.rs` is the thin binary.
+`lib.rs` is the Tauri entry: it registers ~86 `#[tauri::command]`s (most live per-domain in `commands/*.rs`; `stt::*` and `usage::limits` register directly from their own modules) and runs `VelopackApp::build().run()` early for install/update hooks. `main.rs` is the thin binary.
 
 ### `assistant/` — the engine
 | File | Role |

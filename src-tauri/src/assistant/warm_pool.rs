@@ -74,6 +74,15 @@ pub(super) fn kill_child_tree(pid: u32) {
     }
 }
 
+/// Async-context wrapper: taskkill's `.status()` blocks until the tree exits —
+/// under AV/process contention that can stall a Tokio worker for seconds (RR11,
+/// same hazard `assistant_stop` guards against). Same completion semantics,
+/// runs on the blocking pool. Sync callers (update-apply sweep, shutdown drain)
+/// keep calling `kill_child_tree` directly — blocking is intended there.
+pub(super) async fn kill_child_tree_async(pid: u32) {
+    let _ = tokio::task::spawn_blocking(move || kill_child_tree(pid)).await;
+}
+
 /// One in-flight turn handed to a warm child's reader loop. Carries everything
 /// the loop needs to stream this turn's events and signal completion back to
 /// the awaiting `assistant_send` command.

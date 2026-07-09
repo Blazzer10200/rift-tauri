@@ -419,6 +419,10 @@ names), then output the rewritten prompt. Keep lookups minimal."
         Ok(r) => r?,
         Err(_) => {
             let _ = child.start_kill();
+            // Reap the killed child — start_kill alone drops the handle un-waited
+            // (turn.rs::loop_cleanup pairs kill+wait for the same reason). Bounded
+            // so a kill that somehow fails can't wedge the enhance path.
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await;
             stderr_task.abort();
             // Drop our PID entry so a later cancel doesn't double-kill a recycled PID.
             with_enhance_pids(|m| m.remove(&request_id));
@@ -600,6 +604,9 @@ pub async fn assistant_generate_title(prompt: String) -> Result<String, String> 
             Ok(r) => r?,
             Err(_) => {
                 let _ = child.start_kill();
+                // Reap the killed child (see enhance path — start_kill alone
+                // drops the handle un-waited).
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await;
                 // RR7: abort the orphaned stderr drain so it doesn't keep
                 // reading the killed child's pipe in the background.
                 stderr_task.abort();
@@ -906,6 +913,9 @@ pub async fn assistant_analyze_usage(app: AppHandle, snapshot_json: String) -> R
             Ok(r) => r?,
             Err(_) => {
                 let _ = child.start_kill();
+                // Reap the killed child (see enhance path — start_kill alone
+                // drops the handle un-waited).
+                let _ = tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await;
                 // Salvage whatever the CLI wrote to stderr before the cap so a
                 // timeout reports *why* (OAuth re-prompt, network stall) instead
                 // of a bare "timed out". 500ms is plenty — the pipe's already

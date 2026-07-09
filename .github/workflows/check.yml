@@ -19,7 +19,7 @@ concurrency:
 jobs:
   rust:
     name: rust (cargo check + test + machete)
-    # Self-hosted WS2022 runner (Proxmox blazzer-labs); persistent warm target/.
+    # Self-hosted WS2022 runner; persistent warm target/.
     # Advisory scanning (cargo audit) lives in audit.yml on a DAILY schedule —
     # a fresh RUSTSEC advisory is not a property of the pushed commit, and
     # per-push audit failed every push (+1 email each) until someone intervened.

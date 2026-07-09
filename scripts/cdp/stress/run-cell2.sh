@@ -5,7 +5,7 @@
 # we can assert tools actually fired (not just that a turn completed).
 # Usage: run-cell2.sh <model> <effort> <thinking on|off> <prompt> [timeout_ms]
 set -u
-CDP="c:/AI Workflow/projects/rift-tauri/scripts/cdp/c.sh"
+CDP="$(cd "$(dirname "$0")/.." && pwd)/c.sh"
 NDJSON="$LOCALAPPDATA/com.blazzer.rift/logs/turns.ndjson"
 SCRATCH="$(dirname "$0")/.cell-scratch"
 

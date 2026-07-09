@@ -21,11 +21,11 @@ describe("humanizeError", () => {
   });
 
   it("strips ANSI + wrapper prefixes and scrubs the username from passthrough text", () => {
-    const out = humanizeError("Error: \x1b[31mboom\x1b[0m at C:\\Users\\BLAZZER\\app");
+    const out = humanizeError("Error: \x1b[31mboom\x1b[0m at C:\\Users\\someuser\\app");
     expect(out).not.toContain("\x1b");
     expect(out).not.toMatch(/^Error:/);
     expect(out).toContain("<user>");
-    expect(out).not.toContain("BLAZZER");
+    expect(out).not.toContain("someuser");
   });
 
   it("passes unknown errors through, bounded", () => {

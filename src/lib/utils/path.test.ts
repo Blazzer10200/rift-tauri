@@ -36,7 +36,7 @@ describe("shortPath", () => {
 
 describe("rootKey", () => {
   it("normalizes separators, strips a trailing one, and lowercases", () => {
-    expect(rootKey("C:\\AI Workflow\\Projects\\Rift\\")).toBe("c:/ai workflow/projects/rift");
+    expect(rootKey("C:\\Dev Space\\Projects\\Rift\\")).toBe("c:/dev space/projects/rift");
     expect(rootKey("/Home/User/Proj/")).toBe("/home/user/proj");
   });
   it("treats null/undefined as empty", () => {

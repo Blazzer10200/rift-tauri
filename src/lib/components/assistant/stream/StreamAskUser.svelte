@@ -52,8 +52,8 @@
   const askAnswered = $derived(tool.status === "done");
 
   // The backend tool_result is plain text Claude reads ("Q: …\nA: …" pairs, or
-  // a dismissal sentence). Rendering it raw in a <pre> was the "looks like shit"
-  // complaint. Parse it back into structured {header, question, answer[]} so the
+  // a dismissal sentence). Rendering it raw in a <pre> read as an unstyled
+  // dump. Parse it back into structured {header, question, answer[]} so the
   // answered state can render as clean chips that mirror the question chrome —
   // headers pulled from tool.input (the result text only has the question body).
   const askDismissed = $derived(

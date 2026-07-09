@@ -3,7 +3,7 @@
 # Each cell: configure model+effort, send a tool-forcing prompt, verify the
 # right model dispatched + tools fired cleanly. One JSON record per cell.
 set -u
-DIR="c:/AI Workflow/projects/rift-tauri/scripts/cdp/stress"
+DIR="$(cd "$(dirname "$0")" && pwd)"
 OUT="$DIR/results2.ndjson"
 : > "$OUT"
 

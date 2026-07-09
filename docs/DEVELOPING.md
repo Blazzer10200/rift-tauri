@@ -182,7 +182,7 @@ Every variable below is **optional** and scoped to development or release toolin
 |---|---|---|
 | `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` | dev | Set by `scripts/run-dev.bat` to expose CDP on `localhost:9222` for live-UI verification. Not used in prod. |
 | `WEBVIEW2_USER_DATA_FOLDER` | dev | Isolates the dev WebView2 profile from an installed Rift so the two don't share cookies/state. |
-| `RIFT_CDP_MAX_EDGE` | dev | Overrides the 1280px screenshot long-edge clamp in `scripts/cdp/serve.cjs`. Cosmetic. |
+| `RIFT_CDP_MAX_EDGE` | dev | Overrides the 2576px screenshot long-edge clamp in `scripts/cdp/serve.cjs`. Cosmetic. |
 | `RIFT_MCP_SERVER` | internal | Set by Rift on itself when it re-spawns as the stdio MCP child for a turn. **Do not set manually.** |
 | `RELEASES_TOKEN` | CI/release | Fine-grained PAT (`Blazzer10200/rift` Contents:write) used by the tag-driven release workflow. Repo secret, never local. |
 

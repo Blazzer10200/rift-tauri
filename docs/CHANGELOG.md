@@ -2,18 +2,15 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.95.0 — Deep-review hardening + public-debut polish
+## v0.95.1 — Pre-open-source audit
 
-- **Workspace scoping rules now actually apply on Windows.** Per-project include/exclude patterns (e.g. hiding `secrets/**` from the assistant) were silently ignored — a Windows path-form mismatch made the filter never match, so it failed open. Fixed, with a regression test on real canonicalized paths.
-- **Voice dictation over 30 seconds no longer loses its beginning.** The audio buffer only kept the last 30s and the final transcript was built from it; the cap is now 5 minutes.
-- **AI Health numbers are honest again.** Model time was being recorded cumulatively instead of per-turn, inflating model attribution and zeroing Rift overhead from turn 2 onward.
-- **Updating the CLI mid-conversation asks first.** The updater has to stop live CLI processes to free the binary — with turns running you now get a confirm instead of silent kills.
-- **Prompt-enhance can't clobber your typing.** The box locks while enhancing, and undo restores the draft you actually had, not a stale snapshot.
-- **Interrupted-turn reconciliation note survives the fast-restart path** (follow-up to v0.93.0 — the pre-warmed next session used to swallow it).
-- **Plan diffs deduplicated** — the CLI's own plan artifact no longer renders a second diff under the plan card.
-- **Powered by Claude Code, officially MIT.** Settings → About gains a clickable attribution row and a corrected MIT license row; the composer carries a subtle "Claude can make mistakes" note; the context ring opens a compact context-only popover (the full plan-limits panel stays on `/usage` and the status bar).
-- **New README product tour** — a 45-second capture of the real app: workspace → chat → split panes → AI Health → live re-theme from Settings.
-- Smaller fixes: conversation rename can no longer resurrect a just-deleted chat; retired-model cleanup; usage-cache lock recovery.
+A 13-reviewer adversarial sweep of the entire codebase — both stacks, security-first — ahead of the source going public. The security surfaces (path containment, XSS sanitization, capability grants, TLS, token auth) all held under adversarial reading. What it did catch, now fixed:
+
+- **Killed helper processes are now always reaped.** The prompt-enhance, title, and AI-Health analyze timeouts killed their CLI child but never waited on it, leaking the process handle.
+- **Process kills moved off the async runtime.** Tree-killing a CLI child could block an async worker thread for seconds under antivirus contention; kills from live-turn paths now run on the blocking pool.
+- **Package metadata now tells the truth: MIT.** `package.json` still claimed UNLICENSED and the Rust manifest had no license field — both contradicted the repo's actual MIT license.
+- Housekeeping: dev-machine paths removed from stress scripts and test fixtures, infra names scrubbed from CI comments, one hot-path allocation hoisted.
+
 
 ## Known issues
 - **Voice profanity on Web Speech:** fully-masked words (`******`, no leading letter) can't be recovered from Azure's servers — the real fix is the on-device **Whisper** engine (built but not yet in the shipped binary). Planned.
@@ -21,6 +18,7 @@
 
 ## Earlier (full detail via `git log -- docs/CHANGELOG.md`)
 
+- **v0.95.0** — Deep-review hardening: Windows workspace-scoping globs actually apply (was fail-open); >30s dictations keep their start; honest per-turn AI-Health attribution; CLI update asks before killing live turns; enhance can't clobber drafts; MIT attribution row + README product tour.
 - **v0.94.0** — Live tool-call display: blocks land the instant the model commits, shell commands type themselves out; PowerShell un-blocked on Windows; plan-mode renders the actual plan card; floating agent fleet bar; honest captions for a dozen tools.
 - **v0.93.0** — Turns survive long-blocking tools (UAC/credential prompts get the full 15-min ceiling); interrupted-turn reconciliation note (no more forgotten in-flight deploys); background-agent guidance corrected; edit-card file menus containment-checked; browser dock stays dismissed.
 - **v0.92.0** — Mid-chat model switching actually switches (transcript divider marks where); model menu copy honest; clicked file paths open an actions menu.

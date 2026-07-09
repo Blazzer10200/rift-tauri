@@ -1,6 +1,6 @@
 {
   "name": "rift-tauri",
-  "version": "0.95.0",
+  "version": "0.95.1",
   "description": "A local-workspace coding assistant for Windows — wraps the Claude CLI in a native Tauri shell.",
   "type": "module",
   "scripts": {
@@ -17,7 +17,11 @@
     "cdp:doctor": "bash scripts/cdp/c.sh doctor",
     "cdp:clean": "bash scripts/cdp/c.sh reap --all"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Blazzer10200/rift-tauri.git"
+  },
   "private": true,
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",

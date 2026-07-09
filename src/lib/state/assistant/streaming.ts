@@ -38,6 +38,19 @@ const DESIGN_DOCK_OPENED = new WeakSet<TabState>();
 const DESIGN_WRITE_METHODS = new Set(["create_project", "write_files", "finalize_plan"]);
 const SUPPRESSED_TOOL_NAMES = new Set(["ToolSearch", "TaskList", "TaskGet", "TaskStop", "TaskOutput"]);
 
+// Whitelist (S105 A3): known CLI result-error subtypes surface as user-visible
+// errors w/ a plain-English message; anything else logs but doesn't false-alarm.
+// Pre-emptive guard for CLI subtypes we haven't seen yet.
+const RESULT_ERROR_MESSAGES: Record<string, string> = {
+  error_max_turns: "The run hit its maximum number of turns and stopped.",
+  error_during_execution: "The run stopped on an execution error.",
+  error_max_thinking_tokens: "The run hit its thinking-token budget and stopped.",
+  error_max_budget_usd:
+    "The run hit your per-turn spend cap and stopped. Raise or remove it in Settings → CLI session.",
+  model_context_window_exceeded:
+    "The context window filled up and couldn't be compacted further. Start a fresh chat to keep going.",
+};
+
 /** Called at the start of every send(). Clears per-turn pacer / thinking
  *  / dedupe state and flips streaming on. */
 export function beginTurn(tab: TabState) {
@@ -1115,19 +1128,7 @@ export function onStreamLine(tab: TabState, raw: string) {
       const resultUsage = (env as { usage?: Record<string, unknown> }).usage;
       if (resultUsage) recordTurnUsage(tab, resultUsage, true);
       if (env.subtype && env.subtype !== "success") {
-        // Whitelist (S105 A3): known CLI error subtypes surface as user-visible
-        // errors w/ a plain-English message; anything else logs but doesn't
-        // false-alarm. Pre-emptive guard for CLI subtypes we haven't seen yet.
-        const ERROR_MESSAGES: Record<string, string> = {
-          error_max_turns: "The run hit its maximum number of turns and stopped.",
-          error_during_execution: "The run stopped on an execution error.",
-          error_max_thinking_tokens: "The run hit its thinking-token budget and stopped.",
-          error_max_budget_usd:
-            "The run hit your per-turn spend cap and stopped. Raise or remove it in Settings → CLI session.",
-          model_context_window_exceeded:
-            "The context window filled up and couldn't be compacted further. Start a fresh chat to keep going.",
-        };
-        const msg = ERROR_MESSAGES[env.subtype];
+        const msg = RESULT_ERROR_MESSAGES[env.subtype];
         if (msg) {
           tab.lastError = msg;
         } else if ((env as { is_error?: boolean }).is_error === true) {

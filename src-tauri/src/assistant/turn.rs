@@ -16,7 +16,7 @@ use tokio::io::BufReader;
 use tokio::sync::{mpsc, oneshot};
 
 use super::warm_pool;
-use super::warm_pool::kill_child_tree;
+use super::warm_pool::{kill_child_tree, kill_child_tree_async};
 
 use super::auth_update::assistant_auth_probe;
 use super::cli_install::{claude_command, resolve_claude_exe};
@@ -1725,7 +1725,7 @@ async fn dispatch_turn(
                 let old_pid = warm_pool::pid_of(&session_id);
                 warm_pool::remove_if(&session_id, &arc);
                 if let Some(p) = old_pid {
-                    kill_child_tree(p);
+                    kill_child_tree_async(p).await;
                     log::info!("warm_pool: drained + reaped old child pid={p} for {session_id} (signature change)");
                 }
                 emit_dispatch(&session_id, "signature_drain", &model, &key);
@@ -1870,7 +1870,7 @@ async fn cold_spawn_and_run(
         if let Some(racer) = warm_pool::get(&session_id) {
             let racer_pid = match racer.lock() { Ok(g) => g.pid, Err(p) => p.into_inner().pid };
             warm_pool::remove_if(&session_id, &racer);
-            if let Some(p) = racer_pid { kill_child_tree(p); }
+            if let Some(p) = racer_pid { kill_child_tree_async(p).await; }
             log::info!("cold_spawn: reaped racing warm child pid={racer_pid:?} for {session_id} — live send takes the slot");
             // The racer's set_session_pid may have overwritten ours — re-assert
             // so stop/velopack sweeps see the child that actually survives.
@@ -2353,7 +2353,7 @@ async fn run_turn_loop(mut ctx: RunCtx) {
                 // wedged process and all descendants are reaped, not orphaned.
                 if let Some(pid) = warm_pool::pid_of(&ctx.session_id) {
                     log::warn!("warm_pool: tree-killing wedged child pid={pid} session={stream_sid}");
-                    kill_child_tree(pid);
+                    kill_child_tree_async(pid).await;
                 }
                 warm_pool::remove_if(&ctx.session_id, &ctx.warm);
                 // Mirror assistant_stop's safety net: a stall while parked on
@@ -2430,7 +2430,7 @@ async fn loop_cleanup(
     warm_pool::remove_if(session_id, warm);
     if let Some(p) = turn_pid { clear_session_pid_if(session_id, p); }
     forget_cumulative_cli_api(session_id);
-    if let Some(p) = turn_pid { kill_child_tree(p); }
+    if let Some(p) = turn_pid { kill_child_tree_async(p).await; }
     let _ = child.start_kill();
     let _ = child.wait().await;
 }
