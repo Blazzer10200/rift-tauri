@@ -167,19 +167,20 @@ async fn handle_conn(
     let (read_half, mut write_half) = stream.into_split();
     // Bound the read half so an oversized line can't buffer unbounded (RR10).
     let mut lines = BufReader::new(read_half.take(MAX_BRIDGE_LINE)).lines();
-    while let Some(line) = lines.next_line().await.map_err(|e| e.to_string())? {
+    // RR10: the protocol is one request per connection (bridge_call opens a
+    // fresh TCP stream per call) — read exactly one line, never loop.
+    if let Some(line) = lines.next_line().await.map_err(|e| e.to_string())? {
         let req: Request = match serde_json::from_str(&line) {
             Ok(r) => r,
             Err(e) => {
                 // One request per connection: report the parse error, then close.
-                // `continue`ing here let an unauthenticated local process hold the
-                // Tokio task open forever by streaming malformed lines (the flood
-                // never reaches the wrong-token gate that shuts down). Breaking
-                // aligns behavior with the one-request-per-connection protocol
-                // below — a real client (bridge_call) sends exactly one line.
+                // Reading further lines let an unauthenticated local process hold
+                // the Tokio task open forever by streaming malformed lines (the
+                // flood never reaches the wrong-token gate that shuts down) —
+                // a real client (bridge_call) sends exactly one line.
                 let _ = write_line(&mut write_half, &err(format!("invalid request: {e}"))).await;
                 let _ = write_half.shutdown().await;
-                break;
+                return Ok(());
             }
         };
         if !ct_eq(&req.token, &token) {
@@ -193,9 +194,6 @@ async fn handle_conn(
         }
         let resp = dispatch(&app, req).await;
         write_line(&mut write_half, &resp).await?;
-        // RR10: the protocol is one request per connection (bridge_call opens a
-        // fresh TCP stream per call). Close after the first authed dispatch.
-        break;
     }
     Ok(())
 }
