@@ -48,7 +48,7 @@
   }
 
   function openClaudeSettings() {
-    commandPalette.requestSettingsSection("chat");
+    commandPalette.requestSettingsSection("claude");
     workspace.setActive("settings");
   }
 

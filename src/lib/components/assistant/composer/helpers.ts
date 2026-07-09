@@ -37,6 +37,63 @@ export function fuzzyScore(path: string, query: string): number | null {
   return -firstHit;
 }
 
+// Slash-menu ranking — three tiers so `/de` puts `design-sync` (prefix) above
+// `model` (subsequence via …odel? no — null) and `co` puts `copy`/`cost`
+// (prefix) above `openincli` (substring/subsequence). Prefix > substring >
+// subsequence; ties break toward shorter names / earlier hits. null = no match.
+export function slashScore(name: string, query: string): number | null {
+  if (query.length === 0) return 0;
+  const n = name.toLowerCase();
+  const q = query.toLowerCase();
+  if (n.startsWith(q)) return 3000 - n.length;
+  const idx = n.indexOf(q);
+  if (idx !== -1) return 2000 - idx * 10 - n.length;
+  let pi = 0;
+  let firstHit = -1;
+  for (const ch of q) {
+    const found = n.indexOf(ch, pi);
+    if (found === -1) return null;
+    if (firstHit === -1) firstHit = found;
+    pi = found + 1;
+  }
+  // Penalize late starts and spread-out matches so tight clusters win.
+  const spread = pi - firstHit - q.length;
+  return 1000 - firstHit * 10 - spread * 2 - n.length;
+}
+
+// Which chars of `name` the query hit — drives per-char highlight in the menu.
+// Mirrors slashScore's tiers (contiguous run when substring-matched, else
+// greedy left-to-right subsequence); empty query or no match → no highlights.
+export function slashMatchSegments(
+  name: string,
+  query: string,
+): { text: string; hit: boolean }[] {
+  const whole = [{ text: name, hit: false }];
+  if (query.length === 0) return whole;
+  const n = name.toLowerCase();
+  const q = query.toLowerCase();
+  const hits = new Array<boolean>(name.length).fill(false);
+  const idx = n.indexOf(q);
+  if (idx !== -1) {
+    for (let i = idx; i < idx + q.length; i++) hits[i] = true;
+  } else {
+    let pi = 0;
+    for (const ch of q) {
+      const found = n.indexOf(ch, pi);
+      if (found === -1) return whole;
+      hits[found] = true;
+      pi = found + 1;
+    }
+  }
+  const segs: { text: string; hit: boolean }[] = [];
+  for (let i = 0; i < name.length; i++) {
+    const last = segs[segs.length - 1];
+    if (last && last.hit === hits[i]) last.text += name[i];
+    else segs.push({ text: name[i], hit: hits[i] });
+  }
+  return segs;
+}
+
 export function bytesToBase64(buf: ArrayBuffer): string {
   const bytes = new Uint8Array(buf);
   let bin = "";

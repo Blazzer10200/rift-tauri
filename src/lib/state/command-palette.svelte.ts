@@ -4,7 +4,8 @@
 
 import type { WorkspaceId } from "./workspace.svelte";
 
-type Section = "appearance" | "chat" | "speech" | "about";
+// "chat" = conversation display prefs; "claude" = session/plan/API-key tab.
+type Section = "appearance" | "chat" | "claude" | "speech" | "about";
 
 class CommandPaletteState {
   open = $state(false);

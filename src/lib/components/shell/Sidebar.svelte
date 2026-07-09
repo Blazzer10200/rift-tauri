@@ -48,13 +48,24 @@
   );
 
   // Sliding thumb under the active scope button — measured (labels differ in
-  // width), re-measured on every scope flip.
+  // width). A one-shot measure dislocates whenever layout shifts AFTER it ran
+  // (font swap, project-switch re-render, rail resize), so a ResizeObserver on
+  // the segment re-measures on any size change; zero-width reads (hidden /
+  // mid-transition) are discarded rather than committed.
   let segEl = $state<HTMLElement>();
   let segThumb = $state({ x: 2, w: 0 });
   $effect(() => {
     void shell.allProjects;
-    const on = segEl?.querySelector<HTMLElement>(".seg-btn.on");
-    if (on) segThumb = { x: on.offsetLeft, w: on.offsetWidth };
+    const seg = segEl;
+    if (!seg) return;
+    const measure = () => {
+      const on = seg.querySelector<HTMLElement>(".seg-btn.on");
+      if (on && on.offsetWidth > 0) segThumb = { x: on.offsetLeft, w: on.offsetWidth };
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(seg);
+    return () => ro.disconnect();
   });
 
   // ── rail resize ──────────────────────────────────────────────────────

@@ -210,6 +210,31 @@ body {
   line-height: 1;
 }
 
+/* Slider focus-mode bubble ($lib/actions/sliderBubble.ts) — body-appended,
+   tracks the thumb while dragging with the precise formatted value. */
+.slider-bubble {
+  position: fixed; z-index: 9999; pointer-events: none;
+  transform: translate(-50%, -100%) scale(0.7);
+  transform-origin: 50% 100%;
+  opacity: 0;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 14px; font-weight: 700;
+  color: var(--accent);
+  background: color-mix(in oklab, var(--bg-elev-2) 92%, transparent);
+  border: 1px solid color-mix(in oklab, var(--accent) 35%, var(--border-strong));
+  box-shadow: 0 6px 18px oklch(0 0 0 / 0.5), 0 0 12px color-mix(in oklab, var(--accent) 18%, transparent);
+  transition: opacity 120ms ease-out, transform 160ms var(--ease-page, ease-out);
+}
+.slider-bubble.on { opacity: 1; transform: translate(-50%, -100%) scale(1); }
+/* the grabbed thumb zooms up alongside the bubble */
+input.slider-zoom::-webkit-slider-thumb { transform: scale(1.35); }
+@media (prefers-reduced-motion: reduce) {
+  .slider-bubble { transition: opacity 80ms; transform: translate(-50%, -100%); }
+  .slider-bubble.on { transform: translate(-50%, -100%); }
+}
+
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   height: 26px; padding: 0 10px;
@@ -493,7 +518,11 @@ body {
    and warm-tint apply only inside reading surfaces so the rest of the UI
    keeps its compact information density. */
 
+/* `.app` re-declares font-family (AppShell), so it must be re-fonted here too —
+   body alone never reaches anything inside the shell (bug found 2026-07-09 via
+   the Settings reading-comfort preview). */
 [data-a11y-font="lexend"] body,
+html[data-a11y-font="lexend"] .app,
 [data-a11y-font="lexend"] textarea,
 [data-a11y-font="lexend"] input,
 [data-a11y-font="lexend"] button,

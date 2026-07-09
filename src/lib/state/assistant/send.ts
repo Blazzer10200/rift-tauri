@@ -579,7 +579,8 @@ function runSlash(store: AssistantStore, input: string): boolean {
       store.lastNotice =
         "Slash commands: /new · /clear · /model · /retry · /copy · /stop · /tools · /cost · /usage · /openincli · /diag · /diag-clear · /help. " +
         "/clear wipes the current chat in place (old convo saved to History); /new opens a separate tab. /openincli copies a `claude --resume` command for the standalone CLI. " +
-        "/diag exports session telemetry as JSON to clipboard. Up-arrow recalls previous prompts.";
+        "/diag exports session telemetry as JSON to clipboard. Up-arrow recalls previous prompts. " +
+        "Your own Claude Code skills and commands (from ~/.claude and the project's .claude folder) show up in the / menu too — they run through the CLI.";
       return true;
     default:
       return false;

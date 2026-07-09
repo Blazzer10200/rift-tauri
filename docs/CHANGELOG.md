@@ -2,6 +2,13 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## Unreleased — Slash-menu skills + Settings overhaul
+
+- **Your Claude Code skills in the `/` menu** — user + project skills/commands scanned from `.claude` dirs with descriptions and argument hints; fuzzy filter with highlight, source badges, Tab-inserts-args vs Enter-runs. Menu chrome redesigned (glass panel, count header, styled scrollbar, sticky groups).
+- **Settings restructured into 5 tabs** with a search box that jumps to and flashes the matching card; redundant cards merged. **Show-don't-tell everywhere:** live code preview, accent sample strip, mini activity-stream preview, real-pipeline reply preview, collapsed option grids with animated expanders, and slider drag-bubbles showing the precise value.
+- **Claude tab reworked:** CLI version chip, billing route strip, contextual Pro note, warn-only tab dot, tightened copy.
+- **Fixed:** dyslexia Lexend font never applied app-wide (`.app` overrode it); sidebar scope-toggle thumb dislocating after layout shifts.
+
 ## v0.95.1 — Pre-open-source audit
 
 A 13-reviewer adversarial sweep of the entire codebase — both stacks, security-first — ahead of the source going public. The security surfaces (path containment, XSS sanitization, capability grants, TLS, token auth) all held under adversarial reading. What it did catch, now fixed:

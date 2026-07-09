@@ -264,6 +264,7 @@ pub fn run() {
             commands::assistant_set_tab_root,
             commands::assistant_remove_recent_root,
             commands::assistant_list_workspace_files,
+            commands::assistant_list_custom_commands,
             commands::assistant_workspace_branch,
             commands::assistant_local_scratch_path,
             commands::assistant_list_projects,

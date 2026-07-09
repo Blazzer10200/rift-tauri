@@ -8,7 +8,7 @@
   import type { PermissionMode } from "../../state/assistant/types";
   import { clampEffort, modelFamily } from "../../state/assistant/helpers";
   import { requestPrewarm, resetPrewarmDedup } from "../../state/assistant/prewarm";
-  import { fuzzyScore, isFileDrag, attachImageFiles, summarizeAttach, attachTextFiles, summarizeTextAttach } from "./composer/helpers";
+  import { fuzzyScore, slashScore, isFileDrag, attachImageFiles, summarizeAttach, attachTextFiles, summarizeTextAttach } from "./composer/helpers";
   import AttachmentsRow from "./composer/AttachmentsRow.svelte";
   import QueueRail from "./composer/QueueRail.svelte";
   import LivePills from "./composer/LivePills.svelte";
@@ -115,7 +115,15 @@
   let multiline = $state(false);
   let atMaxHeight = $state(false);
 
-  type SlashCmd = { name: string; desc: string };
+  type SlashCmd = {
+    name: string;
+    desc: string;
+    // Present on entries discovered from the user's Claude Code setup
+    // (`~/.claude` + `<root>/.claude` skills/commands). These aren't run by
+    // runSlash — they ride to the CLI as `/name`, where its own skill
+    // resolution takes over.
+    custom?: { source: "user" | "project"; kind: "skill" | "command"; hint?: string };
+  };
   // Grouped: conversation lifecycle → model + composition → flow control → info.
   const SLASH_COMMANDS: SlashCmd[] = [
     { name: "new",       desc: "Start a new conversation (saves current)" },
@@ -312,15 +320,49 @@
       !draft.includes(" ") &&
       draft.length >= 1,
   );
+  // Custom skills/commands ride the CLI's own config resolution: local-LLM
+  // (--bare) strips them all; sandbox mode (useFullConfig off) drops the
+  // `user` setting source, so personal entries can't run — hide accordingly.
+  // Builtins always win a name collision.
+  const customSlash = $derived.by<SlashCmd[]>(() => {
+    if (localLlm.enabled) return [];
+    const seen = new Set(SLASH_COMMANDS.map((c) => c.name));
+    const out: SlashCmd[] = [];
+    for (const c of assistant.customCommands) {
+      if (c.source === "user" && !assistant.useFullConfig) continue;
+      if (seen.has(c.name)) continue;
+      seen.add(c.name);
+      out.push({
+        name: c.name,
+        desc: c.description || (c.kind === "skill" ? "Custom skill" : "Custom command"),
+        custom: { source: c.source, kind: c.kind, hint: c.argumentHint },
+      });
+    }
+    return out;
+  });
   const slashFiltered = $derived.by(() => {
     const q = draft.slice(1).toLowerCase();
-    return SLASH_COMMANDS.filter((c) => c.name.startsWith(q));
+    const all = [...SLASH_COMMANDS, ...customSlash];
+    if (!q) return all;
+    return all
+      .map((c) => ({ c, s: slashScore(c.name, q) }))
+      .filter((x): x is { c: SlashCmd; s: number } => x.s !== null)
+      .sort((a, b) => b.s - a.s)
+      .map((x) => x.c);
   });
   let slashIdx = $state(0);
   $effect(() => {
     const _v = slashFiltered.length;
     void _v;
     slashIdx = 0;
+  });
+  // Rescan the custom catalog on each menu OPEN (not per keystroke) so a skill
+  // added mid-session shows up on the next `/`. Plain (non-$state) latch —
+  // this is edge detection, not render state.
+  let slashScanLatch = false;
+  $effect(() => {
+    if (slashOpen && !slashScanLatch) void assistant.loadCustomCommands();
+    slashScanLatch = slashOpen;
   });
   // Current model row — drives the composer's bottom-right pill label.
   const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === paneEffectiveModel));
@@ -402,6 +444,20 @@
     else { settingsOpen = false; void tick().then(() => ta?.focus()); }
   }
 
+  // Tab (or picking a command that wants arguments): insert `/name ` into the
+  // draft instead of firing, so the user can type args — the trailing space
+  // closes the menu (slashOpen requires a space-free draft) and Enter sends.
+  function fillSlash(c: SlashCmd) {
+    const text = `/${c.name} `;
+    setDraft(text);
+    stt.consume();
+    void tick().then(() => {
+      ta?.focus();
+      ta?.setSelectionRange(text.length, text.length);
+      autosize();
+    });
+  }
+
   function pickSlash(c: SlashCmd) {
     if (c.name === "model") {
       // Open the unified settings panel instead of inserting `/model ` text.
@@ -418,6 +474,11 @@
       notify.warn("Claude Design needs cloud Claude", {
         detail: "Turn off local-LLM mode in Settings to sync with claude.ai/design.",
       });
+      return;
+    }
+    // A custom command with an argument hint expects args — fill, don't fire.
+    if (c.custom?.hint) {
+      fillSlash(c);
       return;
     }
     // Direct-fire commands skip the textarea round-trip entirely.
@@ -942,21 +1003,24 @@
       // Any other key cancels the panel so the user can type normally.
       if (e.key.length === 1) settingsOpen = false;
     }
-    if (slashOpen && slashFiltered.length > 0) {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        slashIdx = (slashIdx + 1) % slashFiltered.length;
-        return;
-      }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        slashIdx = (slashIdx - 1 + slashFiltered.length) % slashFiltered.length;
-        return;
-      }
-      if (e.key === "Tab") {
-        e.preventDefault();
-        pickSlash(slashFiltered[slashIdx]);
-        return;
+    if (slashOpen) {
+      if (slashFiltered.length > 0) {
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          slashIdx = (slashIdx + 1) % slashFiltered.length;
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          slashIdx = (slashIdx - 1 + slashFiltered.length) % slashFiltered.length;
+          return;
+        }
+        // Tab = insert `/name ` for arg typing; Enter (below) runs it.
+        if (e.key === "Tab") {
+          e.preventDefault();
+          fillSlash(slashFiltered[slashIdx]);
+          return;
+        }
       }
       if (e.key === "Escape") {
         e.preventDefault();
@@ -1129,7 +1193,7 @@
       <PreviewPanel {draft} />
     {/if}
 
-    {#if slashOpen && slashFiltered.length > 0}
+    {#if slashOpen}
       <SlashMenu commands={slashFiltered} activeIdx={slashIdx} query={draft.slice(1).toLowerCase()} onPick={pickSlash} />
     {/if}
 

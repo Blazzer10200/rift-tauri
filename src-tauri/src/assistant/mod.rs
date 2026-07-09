@@ -27,6 +27,7 @@ pub mod nothink;
 pub mod oneshot;
 pub mod permission;
 pub mod projects;
+pub mod skills_catalog;
 pub mod turn;
 pub mod warm_pool;
 pub mod workspace;
@@ -70,6 +71,9 @@ pub(crate) use workspace::current_root;
 // Projects: named alias over a workspace folder + per-project file-pattern
 // config. Glob re-export for the __cmd__ items (same reason as workspace).
 pub use projects::*;
+// Custom slash-command discovery (`/` menu): user + project skills/commands
+// metadata. Glob re-export for the __cmd__ item.
+pub use skills_catalog::*;
 pub use permission::PermissionRegistry;
 // R8 split (2026-06-09): the live-turn nervous system — session registry
 // (PIDs/stop + `kill_all_session_children`, load-bearing for the

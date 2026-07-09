@@ -1,5 +1,49 @@
 import { describe, expect, it } from "vitest";
-import { attachImageFiles, bytesToBase64, fmtClock, fmtSize, fuzzyScore, isFileDrag, queueChipLabel, summarizeAttach, summarizeTextAttach } from "./helpers";
+import { attachImageFiles, bytesToBase64, fmtClock, fmtSize, fuzzyScore, isFileDrag, queueChipLabel, slashMatchSegments, slashScore, summarizeAttach, summarizeTextAttach } from "./helpers";
+
+describe("slashScore", () => {
+  it("returns 0 for an empty query (everything matches, original order kept)", () => {
+    expect(slashScore("clear", "")).toBe(0);
+  });
+  it("ranks prefix above substring above subsequence", () => {
+    const prefix = slashScore("copy", "co")!;
+    const substring = slashScore("openincli", "inc")!;
+    const subsequence = slashScore("design-sync", "dsc")!;
+    expect(prefix).toBeGreaterThan(substring);
+    expect(substring).toBeGreaterThan(subsequence);
+  });
+  it("prefers shorter names on a prefix tie", () => {
+    expect(slashScore("new", "n")!).toBeGreaterThan(slashScore("new-longer", "n")!);
+  });
+  it("returns null when a query char is missing", () => {
+    expect(slashScore("clear", "zz")).toBeNull();
+  });
+  it("is case-insensitive", () => {
+    expect(slashScore("Design-Sync", "design")).not.toBeNull();
+  });
+});
+
+describe("slashMatchSegments", () => {
+  it("whole name unhighlighted for empty query", () => {
+    expect(slashMatchSegments("clear", "")).toEqual([{ text: "clear", hit: false }]);
+  });
+  it("marks a contiguous substring run", () => {
+    expect(slashMatchSegments("openincli", "inc")).toEqual([
+      { text: "open", hit: false },
+      { text: "inc", hit: true },
+      { text: "li", hit: false },
+    ]);
+  });
+  it("marks scattered subsequence chars", () => {
+    const segs = slashMatchSegments("design-sync", "dsc");
+    const hit = segs.filter((s) => s.hit).map((s) => s.text).join("");
+    expect(hit).toBe("dsc");
+    expect(segs.map((s) => s.text).join("")).toBe("design-sync");
+  });
+  it("falls back to unhighlighted on no match", () => {
+    expect(slashMatchSegments("clear", "zz")).toEqual([{ text: "clear", hit: false }]);
+  });
+});
 
 describe("queueChipLabel", () => {
   it("returns the message text when present", () => {

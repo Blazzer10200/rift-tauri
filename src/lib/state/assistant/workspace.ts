@@ -14,10 +14,23 @@ import { prettyPath } from "../../components/shell/tabsbar/helpers";
 
 /** Shape of the bits of AssistantStore the workspace fns mutate. Structural
  *  type (no class import) — matches AssistantStore's declared $state fields. */
+/** One entry in the composer's `/` menu sourced from the user's Claude Code
+ *  setup — a `~/.claude` or `<root>/.claude` skill or command. Metadata only;
+ *  execution rides the normal CLI passthrough. */
+export type CustomCommand = {
+  name: string;
+  description: string;
+  source: "user" | "project";
+  kind: "skill" | "command";
+  argumentHint?: string;
+};
+
 type WorkspaceHost = {
   workspace: WorkspaceState;
   workspaceFiles: string[];
   workspaceFilesLoadingFor: string | null;
+  customCommands: CustomCommand[];
+  customCommandsLoadingFor: string | null;
   workspaceBranch: string | null;
   localScratchPath: string | null;
   lastError: string | null;
@@ -158,6 +171,26 @@ export async function loadWorkspaceFiles(host: WorkspaceHost): Promise<void> {
     // Only release the guard if it's still ours — a root-switch mid-await may
     // have armed a newer load; clearing unconditionally would mask it.
     if (host.workspaceFilesLoadingFor === root) host.workspaceFilesLoadingFor = null;
+  }
+}
+
+/** Refresh the custom slash-command catalog (user + project skills/commands)
+ *  for the focused pane's root. Fired on every slash-menu open — the backend
+ *  scan is a few small dir reads, so freshness beats caching (a skill added
+ *  mid-session shows up on the next `/`). Unlike the file walk, a null root is
+ *  still a valid scan: user-level `~/.claude` entries exist regardless. */
+export async function loadCustomCommands(host: WorkspaceHost): Promise<void> {
+  const root = host.activeRoot;
+  const key = root ?? "";
+  if (host.customCommandsLoadingFor === key) return;
+  host.customCommandsLoadingFor = key;
+  try {
+    const cmds = await invoke<CustomCommand[]>("assistant_list_custom_commands", { root });
+    if ((host.activeRoot ?? "") === key) host.customCommands = cmds;
+  } catch (e) {
+    console.warn("assistant_list_custom_commands failed", e);
+  } finally {
+    if (host.customCommandsLoadingFor === key) host.customCommandsLoadingFor = null;
   }
 }
 

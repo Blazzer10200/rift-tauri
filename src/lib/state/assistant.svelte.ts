@@ -123,6 +123,8 @@ import {
   removeRecentRoot as wsRemoveRecentRoot,
   loadWorkspaceFiles as wsLoadFiles,
   loadWorkspaceBranch as wsLoadBranch,
+  loadCustomCommands as wsLoadCustomCommands,
+  type CustomCommand,
 } from "./assistant/workspace";
 // M5 split (2026-05-26): conversation persistence + tab-list save in
 // `./assistant/persistence`. loadConversation + deleteConversation stay on
@@ -766,6 +768,11 @@ class AssistantStore {
   workspaceFiles = $state<string[]>([]);
   workspaceFilesLoadingFor = $state<string | null>(null);
   workspaceBranch = $state<string | null>(null);
+  // Custom slash commands (user + project skills/commands from `.claude` dirs).
+  // Refreshed on every slash-menu open — scan is a few dir reads, so freshness
+  // beats caching. Drives the composer's `/` menu custom sections.
+  customCommands = $state<CustomCommand[]>([]);
+  customCommandsLoadingFor = $state<string | null>(null);
 
   // composerDraft + composerAttachments live on TabState in v2.1 split-pane.
   // These getter/setter shims delegate to the focused-pane's tab so non-pane
@@ -1426,6 +1433,7 @@ class AssistantStore {
   removeRecentRoot(path: string) { return wsRemoveRecentRoot(this, path); }
   loadWorkspaceFiles() { return wsLoadFiles(this); }
   loadWorkspaceBranch() { return wsLoadBranch(this); }
+  loadCustomCommands() { return wsLoadCustomCommands(this); }
 
   refreshConversations() { return persistRefresh(this); }
 
