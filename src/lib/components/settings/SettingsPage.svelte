@@ -6,7 +6,7 @@
     Cog, Info, RefreshCw, Sparkles, Palette,
     FolderOpen, Copy, Check, Eye, EyeOff, Mic,
     CircleCheck, RotateCcw, Trash2, ArrowUpCircle, Loader2,
-    Download, ShieldCheck,
+    Download, ShieldCheck, ExternalLink, Bug,
     Activity, MessageSquare, Search, CornerDownLeft, ChevronDown,
   } from "lucide-svelte";
   import { appConfigDir, appLogDir } from "@tauri-apps/api/path";
@@ -91,12 +91,13 @@
     { tab: "speech",     anchor: "card-composer",  card: "Composer integration", title: "Voice commands",   kw: "send it new line scratch that" },
     { tab: "speech",     anchor: "card-composer",  card: "Composer integration", title: "Auto-stop on silence", kw: "pause hands-free recording" },
     { tab: "speech",     anchor: "card-composer",  card: "Composer integration", title: "Live partial transcripts", kw: "interim words appear speak" },
-    { tab: "about",      anchor: "card-build",     card: "Build & install",    title: "Version & paths",    kw: "build config logs folders license update" },
+    { tab: "about",      anchor: "card-build",     card: "Build & install",    title: "Version & paths",    kw: "build config logs folders license update github source mit stack" },
     { tab: "about",      anchor: "card-shortcuts", card: "Keyboard shortcuts", title: "Keyboard shortcuts", kw: "hotkeys ctrl palette tabs split" },
     { tab: "about",      anchor: "card-tools",     card: "Local tools",        title: "Local tools",        kw: "git node npm cargo vs code install winget" },
     { tab: "about",      anchor: "card-help",      card: "Help & diagnostics", title: "Repair installation", kw: "reinstall corrupted fix" },
     { tab: "about",      anchor: "card-help",      card: "Help & diagnostics", title: "Diagnostics console", kw: "events logs export bug report copy" },
     { tab: "about",      anchor: "card-help",      card: "Help & diagnostics", title: "Replay first-run walkthrough", kw: "onboarding intro welcome tour" },
+    { tab: "about",      anchor: "card-help",      card: "Help & diagnostics", title: "Report a bug", kw: "bug issue github feedback problem broken" },
   ];
   let searchQ = $state("");
   let searchIdx = $state(0);
@@ -213,6 +214,21 @@
   async function openClaudeCode() {
     try { await openUrl("https://claude.com/claude-code"); } catch (e) { console.error("openUrl failed", e); }
   }
+  async function openRepo() {
+    try { await openUrl("https://github.com/Blazzer10200/rift"); } catch (e) { console.error("openUrl failed", e); }
+  }
+  // Report-a-bug journey: diagnostic lands on the clipboard first, so the new
+  // GitHub issue is one paste away from being useful.
+  async function reportBug() {
+    await copyDiagnostic();
+    try { await openUrl("https://github.com/Blazzer10200/rift/issues/new"); } catch (e) { console.error("openUrl failed", e); }
+  }
+  // Resetting the flags remounts the walkthrough immediately — the takeover IS
+  // the click feedback.
+  function replayWalkthrough() {
+    onboarding.reset();
+    betaNotice.reset();
+  }
   async function copyDiagnostic() {
     const lines = [
       `Rift ${appVersion}`,
@@ -288,12 +304,14 @@
   // Optional host tools surfaced in About → Local tools. `use` = what breaks
   // without it; `hint` = how to get it (shown only when missing).
   const LOCAL_TOOLS: { key: "git" | "node" | "npm" | "cargo" | "code"; label: string; use: string; hint: string }[] = [
-    { key: "git",   label: "Git",     use: "Version control — powers the assistant's git tools.", hint: "install Git for Windows (git-scm.com)" },
-    { key: "node",  label: "Node.js", use: "JavaScript runtime for project tooling.", hint: "install from nodejs.org" },
-    { key: "npm",   label: "npm",     use: "Runs frontend project tooling like npm run check.", hint: "ships with Node.js" },
-    { key: "cargo", label: "Cargo",   use: "Runs Rust project tooling like cargo check.", hint: "install via rustup.rs" },
-    { key: "code",  label: "VS Code", use: "Enables “Open in VS Code” on file paths.", hint: "install VS Code and enable the ‘code’ command in PATH" },
+    { key: "git",   label: "Git",     use: "Version control — powers the assistant's git tools.", hint: "Install Git for Windows (git-scm.com)." },
+    { key: "node",  label: "Node.js", use: "JavaScript runtime for project tooling.", hint: "Install from nodejs.org." },
+    { key: "npm",   label: "npm",     use: "Runs frontend project tooling like npm run check.", hint: "Ships with Node.js." },
+    { key: "cargo", label: "Cargo",   use: "Runs Rust project tooling like cargo check.", hint: "Install via rustup.rs." },
+    { key: "code",  label: "VS Code", use: "Enables “Open in VS Code” on file paths.", hint: "Install VS Code and enable the ‘code’ command in PATH." },
   ];
+  const toolsInstalled = $derived(LOCAL_TOOLS.filter((t) => environment[t.key]));
+  const toolsMissing = $derived(LOCAL_TOOLS.filter((t) => !environment[t.key]));
 
   const STT_ENGINES: { id: "web_speech" | "whisper"; label: string; sub: string }[] = [
     { id: "web_speech", label: "Web Speech", sub: "Edge · Azure when online" },
@@ -1170,10 +1188,15 @@
                   {/if}
                 </div>
               </div>
+              <button class="st-btn st-build-check" type="button" onclick={() => updates.open()}><RefreshCw size={14} /> Check for updates</button>
             </div>
-            {#each [["Engine", "SvelteKit · Svelte 5 (runes)"], ["Platform", "Tauri 2 · Rust"], ["Style", "Graphite Ink · Tailwind v4 · OKLCH"], ["License", "MIT · github.com/Blazzer10200/rift"]] as kv (kv[0])}
-              <div class="st-kv"><span class="st-kv-k">{kv[0]}</span><span class="st-kv-v">{kv[1]}</span></div>
-            {/each}
+            <!-- Stack trivia compressed to a chip strip — Engine/Platform/Style rows
+                 were four lines of developer trivia; the license row is now a real link. -->
+            <div class="st-stack">
+              {#each ["Tauri 2", "Rust", "SvelteKit", "Svelte 5", "Tailwind 4", "OKLCH"] as chip (chip)}
+                <span class="st-stack-chip">{chip}</span>
+              {/each}
+            </div>
             <!-- Paths folded in from the old standalone card — same "this install" domain. -->
             <div class="ctl-row tight">
               <div><div class="ctl-t">Config</div><div class="ctl-s"><span class="mono" use:tooltip={configDir}>{configDir || "—"}</span></div></div>
@@ -1183,6 +1206,10 @@
               <div><div class="ctl-t">Logs</div><div class="ctl-s"><span class="mono" use:tooltip={logDir}>{logDir || "—"}</span></div></div>
               <button class="st-btn" type="button" disabled={!logDir} onclick={() => openDir(logDir)}><FolderOpen size={14} /> Open</button>
             </div>
+            <button class="st-about-row" type="button" onclick={openRepo}>
+              <span class="st-about-ic"><ExternalLink size={15} /></span>
+              <span class="st-about-body"><span class="st-about-t">Source code &amp; license</span><span class="st-about-s">MIT-licensed and open on GitHub — github.com/Blazzer10200/rift</span></span>
+            </button>
             <button class="st-powered" type="button" onclick={() => void openClaudeCode()} use:tooltip={"Rift runs every turn through Anthropic's Claude Code CLI — opens claude.com/claude-code"}>
               <svg class="st-powered-mark" viewBox="0 0 24 24" aria-hidden="true"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>
               <span class="st-powered-t">Powered by <b>Claude Code</b></span>
@@ -1209,18 +1236,27 @@
 
           <div class="card" id="card-tools">
             <div class="card-tt">Local tools</div>
-            <div class="card-sub">Optional programs that unlock extra assistant abilities — install any missing one with a click.</div>
-            {#each LOCAL_TOOLS as t (t.key)}
-              {@const present = environment[t.key]}
+            <div class="card-sub">{toolsMissing.length === 0
+              ? "Optional programs that unlock extra assistant abilities. You have all of them — hover one to see what it does."
+              : "Optional programs that unlock extra assistant abilities — install any missing one with a click."}</div>
+            <!-- Healthy tools collapse to chips; a tool only earns a full row (what it
+                 does + install CTA) while it's actually missing. -->
+            {#if toolsInstalled.length > 0}
+              <div class="tools-strip">
+                {#each toolsInstalled as t (t.key)}
+                  <span class="env-stat ok" use:tooltip={t.use}><span class="env-dot"></span>{t.label}</span>
+                {/each}
+                <button class="link-btn tools-recheck" type="button" onclick={() => void environment.refresh()} use:tooltip={"Probe the system again — e.g. after installing something yourself"}>Re-check</button>
+              </div>
+            {/if}
+            {#each toolsMissing as t (t.key)}
               {@const installing = environment.installing[t.key]}
               <div class="ctl-row tight">
-                <div><div class="ctl-t">{t.label}</div><div class="ctl-s">{t.use}{present ? "" : ` · ${t.hint}`}</div></div>
-                {#if present}
-                  <span class="env-stat ok"><span class="env-dot"></span>Installed</span>
-                {:else if installing}
+                <div><div class="ctl-t">{t.label}</div><div class="ctl-s">{t.use} {t.hint}</div></div>
+                {#if installing}
                   <span class="env-stat warn"><Loader2 size={12} class="spin" /> Installing…</span>
                 {:else}
-                  <button class="st-btn accent" type="button" onclick={() => void environment.install(t.key)} use:tooltip={`Install ${t.label} via winget`}>
+                  <button class="st-btn primary" type="button" onclick={() => void environment.install(t.key)} use:tooltip={`Install ${t.label} via winget`}>
                     <Download size={13} /> Install
                   </button>
                 {/if}
@@ -1235,11 +1271,7 @@
 
           <div class="card" id="card-help">
             <div class="card-tt">Help &amp; diagnostics</div>
-            <div class="card-sub">Fix a wonky install, replay the intro, or grab info for a bug report.</div>
-            <button class="st-about-row" type="button" onclick={() => updates.open()}>
-              <span class="st-about-ic"><RefreshCw size={15} /></span>
-              <span class="st-about-body"><span class="st-about-t">Check for updates</span><span class="st-about-s">Compare against the latest GitHub release</span></span>
-            </button>
+            <div class="card-sub">Fix a wonky install, replay the intro, or file a bug.</div>
             <button class="st-about-row" type="button" onclick={() => (diagConsoleOpen = true)}>
               <span class="st-about-ic"><Activity size={15} /></span>
               <span class="st-about-body"><span class="st-about-t">Open diagnostics console</span><span class="st-about-s">Live event stream — filter, search, and export. Username-scrubbed.</span></span>
@@ -1248,9 +1280,13 @@
               <span class="st-about-ic">{#if diagCopied}<Check size={15} />{:else}<Copy size={15} />{/if}</span>
               <span class="st-about-body"><span class="st-about-t">{diagCopied ? "Copied to clipboard" : "Copy diagnostic"}</span><span class="st-about-s">Version, platform, and paths — username-scrubbed</span></span>
             </button>
-            <button class="st-about-row" type="button" onclick={() => { onboarding.reset(); betaNotice.reset(); }}>
+            <button class="st-about-row" type="button" onclick={reportBug}>
+              <span class="st-about-ic"><Bug size={15} /></span>
+              <span class="st-about-body"><span class="st-about-t">Report a bug</span><span class="st-about-s">Copies your diagnostic info, then opens a new GitHub issue to paste it into</span></span>
+            </button>
+            <button class="st-about-row" type="button" onclick={replayWalkthrough}>
               <span class="st-about-ic"><RotateCcw size={15} /></span>
-              <span class="st-about-body"><span class="st-about-t">Replay first-run walkthrough</span><span class="st-about-s">Shows the welcome walkthrough — including the beta &amp; AI-disclaimer notice — again on next launch</span></span>
+              <span class="st-about-body"><span class="st-about-t">Replay first-run walkthrough</span><span class="st-about-s">Restarts the welcome setup right now — the beta &amp; AI-disclaimer notice will show again too</span></span>
             </button>
             <button class="st-about-row" type="button" onclick={repairInstall}>
               <span class="st-about-ic"><ShieldCheck size={15} /></span>
@@ -1646,10 +1682,13 @@
   .st-powered:hover .st-powered-t b { color: var(--fg); }
 
   /* ── About: kv + resource rows ── */
-  .st-kv { display: flex; align-items: center; gap: 16px; padding: 11px 0; }
-  .st-kv + .st-kv { border-top: 1px solid var(--border); }
-  .st-kv-k { font-size: var(--fs-md); font-weight: 600; color: var(--fg); flex: none; width: 84px; }
-  .st-kv-v { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .st-build-check { margin-left: auto; flex: none; }
+  .st-stack { display: flex; flex-wrap: wrap; gap: 6px; padding: 11px 0 9px; }
+  .st-stack-chip { font-family: var(--font-mono); font-size: 11px; line-height: 1; color: var(--fg-muted); background: var(--field); border: 1px solid var(--field-border); border-radius: 999px; padding: 5px 10px; }
+  .tools-strip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 0 4px; }
+  .tools-recheck { margin-left: auto; }
+  .link-btn { border: 0; background: none; padding: 0; font: inherit; font-size: var(--fs-xs); color: var(--fg-muted); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+  .link-btn:hover { color: var(--fg-2); }
   .st-about-row { display: flex; align-items: center; gap: 12px; padding: 13px 12px; margin: 0 -12px; width: calc(100% + 24px); border: 0; background: none; text-align: left; font: inherit; cursor: pointer; border-radius: 10px; }
   .st-about-row + .st-about-row { border-top: 1px solid var(--border); }
   .st-about-ic { width: 32px; height: 32px; border-radius: var(--radius); display: grid; place-items: center; background: var(--field); border: 1px solid var(--field-border); color: var(--fg-muted); flex: none; }

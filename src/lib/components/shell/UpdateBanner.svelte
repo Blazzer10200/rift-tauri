@@ -40,9 +40,11 @@
   let checkFailDismissed = $state(false);
 
   // ── App update ─────────────────────────────────────────────────────────
-  // hasUpdate stays true through download/install; the bar shows live progress.
-  const appAvailable = $derived(updates.hasUpdate && !updates.snoozeActive);
   const appBusy = $derived(updates.state === "downloading" || updates.state === "installing");
+  // Busy states must keep the row alive: `hasUpdate` is available-only, so
+  // without them a banner-initiated download unmounted its own progress bar
+  // the moment it started (Update click → bar vanishes, zero feedback).
+  const appAvailable = $derived((updates.hasUpdate || appBusy) && !updates.snoozeActive);
 
   type Row = {
     key: string;

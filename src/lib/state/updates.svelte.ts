@@ -131,6 +131,16 @@ class UpdateStore {
     return /properly installed|reinstall/i.test(this.error);
   }
 
+  /** Dev binary is never Velopack-installed, so its "broken install" is
+   *  expected, not alarming — every surface (chip, dialog) renders it calm. */
+  get devUnavailable(): boolean {
+    return this.installBroken && import.meta.env.DEV;
+  }
+
+  /** When the last check finished (success OR failure) — trust signal for the
+   *  dialog's "checked N min ago" line. Null until the first check resolves. */
+  lastCheckedAt = $state<number | null>(null);
+
   /** An update exists and is waiting on user action — true even while snoozed.
    *  Drives the always-visible titlebar dot so a snoozed update is never
    *  invisible. */
@@ -166,7 +176,7 @@ class UpdateStore {
       case "error":
         // Dev binary is never Velopack-installed — "reinstall needed" there is
         // noise, not a broken install. Real packaged installs keep the alarm.
-        if (this.installBroken && import.meta.env.DEV) return { kind: "dev", label: "dev" };
+        if (this.devUnavailable) return { kind: "dev", label: "dev" };
         return { kind: "danger", label: this.installBroken ? "reinstall needed" : "update check failed" };
       case "uptodate":
         return { kind: "ok", label: "up to date" };
@@ -183,12 +193,6 @@ class UpdateStore {
     const mb = b / (1024 * 1024);
     if (mb >= 1) return `${mb.toFixed(1)} MB`;
     return `${(b / 1024).toFixed(0)} KB`;
-  }
-
-  /** Velopack's feed carries no publish date — kept for UI back-compat (the
-   *  dialog guards with `{#if}`), always empty. */
-  get publishedLabel(): string {
-    return "";
   }
 
   async refresh() {
@@ -219,6 +223,8 @@ class UpdateStore {
       this.error = String(e);
       this.state = "error";
       this.scheduleRefreshRetry();
+    } finally {
+      this.lastCheckedAt = Date.now();
     }
   }
 
@@ -292,9 +298,6 @@ class UpdateStore {
       if (unlisten) unlisten();
     }
   }
-
-  /** Back-compat alias — any "Install" caller routes through the same flow. */
-  async applyNow() { await this.download(); }
 
   /** Repair installation — force a fresh full re-download + re-apply of the
    *  LATEST release (even when already on it), overwriting corrupted/half-written

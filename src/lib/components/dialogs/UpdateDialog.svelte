@@ -1,42 +1,26 @@
 <script lang="ts">
   import {
     Download, X, RefreshCw, AlertTriangle, CheckCircle2,
-    Sparkles, ArrowRight, ExternalLink, Clock,
+    ArrowRight, ExternalLink, Clock, WifiOff, FlaskConical,
   } from "lucide-svelte";
   import { fade, fly } from "svelte/transition";
   import { updates } from "../../state/updates.svelte";
-  import { toast } from "../../state/toast.svelte";
 
-  type Variant = "accent" | "ok" | "warn" | "danger" | "info";
-
-  const variant = $derived<Variant>(
-    updates.state === "available" ? "accent" :
-    updates.state === "downloading" ? "accent" :
-    updates.state === "installing" ? "ok"     :
-    updates.state === "uptodate"  ? "ok"     :
-    updates.state === "error"     ? "danger" :
-                                    "info"
+  // One tone drives the hero accents per state; "muted" is the calm default
+  // (checking, idle, dev build).
+  type Tone = "accent" | "ok" | "warn" | "danger" | "muted";
+  const tone = $derived<Tone>(
+    updates.state === "available" || updates.state === "downloading" ? "accent" :
+    updates.state === "installing" || updates.state === "uptodate" ? "ok" :
+    updates.state === "error"
+      ? (updates.devUnavailable ? "muted" : updates.installBroken ? "danger" : "warn")
+      : "muted"
   );
 
-  const subTitle = $derived(
-    updates.state === "available" ? "A new release is ready" :
-    updates.state === "downloading" ? "Downloading update…" :
-    updates.state === "installing" ? "Installing — relaunching…" :
-    updates.state === "uptodate"  ? "You're up to date" :
-    updates.state === "error"     ? "Update check failed" :
-                                    "Checking for updates"
-  );
-
-  function iconFor(v: Variant) {
-    switch (v) {
-      case "ok":     return CheckCircle2;
-      case "accent": return Sparkles;
-      case "danger": return AlertTriangle;
-      case "info":   return Download;
-      case "warn":   return Download;
-      default:       return Download;
-    }
-  }
+  // Only the brief pre-exit install window locks the dialog. A download is
+  // closable — the top banner keeps showing live progress (UpdateBanner gates
+  // on busy states too), so hiding the dialog loses nothing.
+  const busy = $derived(updates.state === "installing");
 
   let shellEl: HTMLDivElement | undefined = $state();
 
@@ -45,10 +29,6 @@
       void Promise.resolve().then(() => shellEl?.focus());
     }
   });
-
-  const busy = $derived(
-    updates.state === "downloading" || updates.state === "installing"
-  );
 
   function onBackdrop(e: MouseEvent) {
     if (e.target === e.currentTarget && !busy) updates.close();
@@ -60,7 +40,7 @@
       if (!shellEl) return;
       e.preventDefault();
       const focusable = Array.from(
-        shellEl.querySelectorAll<HTMLElement>("button:not([disabled]), [href], input, [tabindex]:not([tabindex='-1'])")
+        shellEl.querySelectorAll<HTMLElement>("button:not([disabled]), [href], input, summary, [tabindex]:not([tabindex='-1'])")
       );
       if (!focusable.length) return;
       const cur = document.activeElement as HTMLElement;
@@ -88,31 +68,30 @@
       return { kind: "p" as const, text: line };
     });
   }
-
   const notes = $derived(notesLines(updates.info?.notesMarkdown ?? ""));
 
-  async function openReleasePage() {
-    const url = updates.info?.releaseUrl;
-    if (!url) return;
-    // F47: only ever hand a real web URL to the OS opener — never file:/data:/js:.
-    if (!/^https:\/\//i.test(url)) {
-      toast.push({ severity: "danger", title: "Release link looks unsafe — not opening." });
-      return;
-    }
-    try {
-      const { openUrl } = await import("@tauri-apps/plugin-opener");
-      await openUrl(url);
-    } catch (e) {
-      // F175: surface the failure instead of swallowing it silently.
-      toast.push({ severity: "danger", title: "Couldn't open the release page", detail: String(e) });
-    }
+  /** "just now" / "3 min ago" / "2 h ago" — computed on each render pass (the
+   *  dialog re-renders on every state change, which is fresh enough). */
+  function ago(ts: number | null): string {
+    if (ts == null) return "";
+    const s = Math.max(0, (Date.now() - ts) / 1000);
+    if (s < 45) return "just now";
+    if (s < 3600) return `${Math.round(s / 60)} min ago`;
+    return `${Math.round(s / 3600)} h ago`;
   }
+
+  /** "5.2 of 12.4 MB" derived from the total size + percent ticks. */
+  const mbProgress = $derived.by(() => {
+    const total = updates.info?.sizeBytes ?? 0;
+    if (total <= 0) return "";
+    const mb = (n: number) => (n / (1024 * 1024)).toFixed(1);
+    return `${mb(total * (updates.progress / 100))} of ${mb(total)} MB`;
+  });
 </script>
 
 <svelte:window onkeydown={onKey} />
 
 {#if updates.dialogOpen}
-  {@const Ico = iconFor(variant)}
   <div class="dialog-overlay" onclick={onBackdrop} role="presentation" transition:fade={{ duration: 120 }}>
     <div
       class="upd-shell"
@@ -123,90 +102,101 @@
       bind:this={shellEl}
       transition:fly={{ y: 8, duration: 180 }}
     >
-      <!-- Gradient header -->
-      <div class="upd-head" data-variant={variant}>
-        <div class="head-glow"></div>
-        <div class="head-row">
-          <div class="head-icon" data-variant={variant}>
-            {#if updates.state === "checking"}
-              <RefreshCw size={16} class="spin"/>
-            {:else}
-              <Ico size={16}/>
-            {/if}
-          </div>
-          <div class="head-text">
-            <div class="head-title">Rift Updates</div>
-            <div class="head-sub">{subTitle}</div>
-          </div>
-          <button
-            class="head-close"
-            type="button"
-            onclick={() => updates.close()}
-            aria-label="Close"
-            disabled={busy}
-          >
-            <X size={14}/>
-          </button>
-        </div>
+      <!-- Slim top bar -->
+      <div class="upd-top">
+        <span class="upd-top-t">Updates</span>
+        {#if updates.lastCheckedAt != null && updates.state !== "checking"}
+          <span class="upd-top-when"><Clock size={10} /> checked {ago(updates.lastCheckedAt)}</span>
+        {/if}
+        <button class="upd-x" type="button" onclick={() => updates.close()} aria-label="Close" disabled={busy}>
+          <X size={14} />
+        </button>
+      </div>
 
-        <!-- Version diff strip (only when we know the target) -->
-        {#if updates.info && (updates.state === "available" || updates.state === "downloading" || updates.state === "installing")}
-          <div class="head-diff">
-            <span class="diff-chip current mono">v{updates.currentVersion}</span>
-            <ArrowRight size={12} class="diff-arrow"/>
-            <span class="diff-chip target mono">v{updates.info.version}</span>
-            {#if updates.sizeLabel}
-              <span class="diff-meta">· {updates.sizeLabel}</span>
-            {/if}
-            {#if updates.publishedLabel}
-              <span class="diff-meta">· {updates.publishedLabel}</span>
-            {/if}
+      <!-- Hero — the state IS the interface -->
+      <div class="upd-hero" data-tone={tone}>
+        {#if updates.state === "checking"}
+          <div class="hero-ic"><RefreshCw size={20} class="spin" /></div>
+          <div class="hero-title">Checking for updates…</div>
+          <div class="hero-sub">Asking the release feed what's newest.</div>
+
+        {:else if updates.state === "available"}
+          <div class="hero-vers">
+            <span class="hv-cur mono">v{updates.currentVersion}</span>
+            <ArrowRight size={15} class="hv-arr" />
+            <span class="hv-new mono">v{updates.info?.version}</span>
           </div>
+          <div class="hero-title">A new version of Rift is ready</div>
+          <div class="hero-sub">
+            {#if updates.sizeLabel}{updates.sizeLabel} download — {/if}installs and relaunches in one click. Your chats and settings carry over.
+          </div>
+
+        {:else if updates.state === "downloading"}
+          <div class="hero-pct mono">{updates.progress}<span class="hero-pct-sign">%</span></div>
+          <div class="hero-track" role="progressbar" aria-valuenow={updates.progress} aria-valuemin={0} aria-valuemax={100} aria-label="Download progress">
+            <div class="hero-fill" style="width:{updates.progress}%"></div>
+          </div>
+          <div class="hero-sub">Downloading v{updates.info?.version}{mbProgress ? ` — ${mbProgress}` : ""}</div>
+
+        {:else if updates.state === "installing"}
+          <div class="hero-ic"><RefreshCw size={20} class="spin" /></div>
+          <div class="hero-title">Installing v{updates.info?.version}</div>
+          <div class="hero-sub">Rift will close, swap in the new version, and relaunch itself in a moment.</div>
+
+        {:else if updates.state === "uptodate"}
+          <div class="hero-ic"><CheckCircle2 size={20} /></div>
+          <div class="hero-ver-big mono">v{updates.currentVersion}</div>
+          <div class="hero-title">You're up to date</div>
+          <div class="hero-sub">Rift re-checks automatically — every 6 hours and at every launch.</div>
+
+        {:else if updates.state === "error"}
+          {#if updates.devUnavailable}
+            <div class="hero-ic"><FlaskConical size={20} /></div>
+            <div class="hero-title">Dev build — updates don't apply here</div>
+            <div class="hero-sub">This binary is rebuilt by the dev server, not the updater. Installed copies of Rift update themselves from the release feed.</div>
+          {:else if updates.installBroken}
+            <div class="hero-ic"><AlertTriangle size={20} /></div>
+            <div class="hero-title">Auto-update is unavailable on this install</div>
+            <div class="hero-sub">Rift can't find its install manifest — usually after files were moved by hand. One reinstall with the latest Setup.exe restores auto-updates; your chats and settings are kept.</div>
+          {:else}
+            <div class="hero-ic"><WifiOff size={20} /></div>
+            <div class="hero-title">Couldn't reach the update feed</div>
+            <div class="hero-sub">You may be offline, or a firewall or proxy is blocking the feed. Rift keeps retrying in the background.</div>
+          {/if}
+          {#if !updates.devUnavailable}
+            <details class="hero-tech">
+              <summary>Technical details</summary>
+              <pre>{updates.error}</pre>
+            </details>
+          {/if}
+
+        {:else}
+          <div class="hero-ic"><Download size={20} /></div>
+          <div class="hero-title">No update info yet</div>
+          <div class="hero-sub">Check the release feed to see if something newer shipped.</div>
         {/if}
       </div>
 
-      <!-- Body -->
-      <div class="upd-body">
-        {#if updates.state === "checking"}
-          <p class="lead">Talking to GitHub releases…</p>
-
-        {:else if updates.state === "downloading"}
-          <div class="dl-card">
-            <div class="dl-row">
-              <span>Downloading v{updates.info?.version}…</span>
-              <span class="mono">{updates.progress}%</span>
-            </div>
-            <div class="dl-track" role="progressbar" aria-valuenow={updates.progress} aria-valuemin={0} aria-valuemax={100} aria-label="Download progress"><div class="dl-fill" style="width:{updates.progress}%"></div></div>
-            {#if updates.sizeLabel}<div class="dl-sub">{updates.sizeLabel}</div>{/if}
-          </div>
-
-        {:else if updates.state === "installing"}
-          <div class="ready-card">
-            <RefreshCw size={18} class="spin"/>
-            <div class="ready-text">
-              <div class="ready-title">Installing v{updates.info?.version}…</div>
-              <div class="ready-sub">Rift will close, apply the update, and relaunch automatically.</div>
-            </div>
-          </div>
-
-        {:else if updates.state === "available"}
+      <!-- Body — release notes / download-failure strip (available state only) -->
+      {#if updates.state === "available"}
+        <div class="upd-body">
           {#if updates.downloadError}
-            <div class="err-card">
-              <AlertTriangle size={16}/>
+            <div class="err-strip">
+              <AlertTriangle size={14} />
               <div class="err-text">
-                <div class="err-title">Couldn't install the update.</div>
-                <div class="err-detail mono">{updates.downloadError}</div>
-                <div class="err-hint">Try again, or click "View release on GitHub" below to download manually.</div>
+                <div class="err-title">The install didn't finish — nothing was changed.</div>
+                <details class="err-tech">
+                  <summary>Technical details</summary>
+                  <pre>{updates.downloadError}</pre>
+                </details>
+                <div class="err-hint">Try again, or grab the installer from GitHub below.</div>
               </div>
             </div>
           {/if}
 
-          {#if updates.info?.notesMarkdown && notes.length > 0}
+          {#if notes.length > 0}
             <div class="notes-card">
-              <div class="notes-head">
-                <Sparkles size={11}/>
-                <span>What's new</span>
-              </div>
+              <div class="notes-head">What's new in v{updates.info?.version}</div>
               <div class="notes-body">
                 {#each notes as ln, i (`${i}:${ln.kind}`)}
                   {#if ln.kind === "h"}
@@ -223,73 +213,44 @@
             </div>
           {/if}
 
-          {#if updates.info?.releaseUrl}
-            <button class="link-row" type="button" onclick={openReleasePage}>
-              <ExternalLink size={11}/>
-              <span>View release on GitHub</span>
-            </button>
-          {/if}
-
-        {:else if updates.state === "uptodate"}
-          <div class="ok-card">
-            <CheckCircle2 size={20}/>
-            <div>
-              <div class="ok-title">You're on the latest release.</div>
-              <div class="ok-sub">Running v{updates.currentVersion}. We re-check GitHub on every launch.</div>
-            </div>
-          </div>
-
-        {:else if updates.state === "error"}
-          <div class="err-card">
-            <AlertTriangle size={16}/>
-            <div class="err-text">
-              {#if updates.installBroken}
-                <div class="err-title">Auto-update is unavailable on this install.</div>
-                <div class="err-detail mono">{updates.error}</div>
-                <div class="err-hint">Rift can't locate its install manifest — usually from a manual file swap or launching the wrong copy. Reinstall once with the latest Setup.exe to restore auto-updates, and launch from the Start Menu shortcut.</div>
-              {:else}
-                <div class="err-title">Couldn't reach the update feed.</div>
-                <div class="err-detail mono">{updates.error}</div>
-                <div class="err-hint">GitHub unreachable or rate-limited. Try again shortly.</div>
-              {/if}
-            </div>
-          </div>
-
-          {#if updates.installBroken}
-            <button class="link-row" type="button" onclick={() => updates.openLatestRelease()}>
-              <ExternalLink size={11}/>
-              <span>Get the latest Setup.exe on GitHub</span>
-            </button>
-          {/if}
-
-        {:else}
-          <p class="lead">No update info yet. Click "Check now" to query GitHub.</p>
-        {/if}
-      </div>
+          <button class="link-row" type="button" onclick={() => void updates.openReleasePage()}>
+            <ExternalLink size={11} />
+            <span>{notes.length > 0 ? "View this release on GitHub" : "Read the release notes on GitHub"}</span>
+          </button>
+        </div>
+      {/if}
 
       <!-- Footer adapts per state -->
       <div class="upd-foot">
         {#if updates.state === "available"}
           <button class="btn ghost" type="button" onclick={() => updates.snooze()}>
-            <Clock size={11}/> Remind me tomorrow
+            <Clock size={11} /> Remind me tomorrow
           </button>
           <div class="foot-spacer"></div>
           <button class="btn primary glow" type="button" onclick={() => updates.download()}>
-            <Download size={11}/> Download installer
+            <Download size={11} /> Update now
           </button>
 
         {:else if updates.state === "downloading"}
-          <span class="foot-status">Downloading… {updates.progress}%</span>
+          <span class="foot-status">You can keep using Rift — the top bar tracks progress.</span>
           <div class="foot-spacer"></div>
-          <button class="btn" type="button" disabled>
-            <RefreshCw size={11} class="spin"/> Please wait
-          </button>
+          <button class="btn ghost" type="button" onclick={() => updates.close()}>Hide</button>
 
         {:else if updates.state === "installing"}
           <span class="foot-status">Installing… Rift will relaunch.</span>
           <div class="foot-spacer"></div>
           <button class="btn" type="button" disabled>
-            <RefreshCw size={11} class="spin"/> Please wait
+            <RefreshCw size={11} class="spin" /> Please wait
+          </button>
+
+        {:else if updates.state === "error" && updates.installBroken && !updates.devUnavailable}
+          <button class="btn ghost" type="button" onclick={() => updates.close()}>Close</button>
+          <div class="foot-spacer"></div>
+          <button class="btn" type="button" onclick={() => updates.refresh()}>
+            <RefreshCw size={11} /> Check again
+          </button>
+          <button class="btn primary" type="button" onclick={() => void updates.openLatestRelease()}>
+            <ExternalLink size={11} /> Get Setup.exe
           </button>
 
         {:else}
@@ -301,7 +262,7 @@
             onclick={() => updates.refresh()}
             disabled={updates.state === "checking"}
           >
-            <RefreshCw size={11} class={updates.state === "checking" ? "spin" : ""}/>
+            <RefreshCw size={11} class={updates.state === "checking" ? "spin" : ""} />
             {updates.state === "checking" ? "Checking…" : "Check now"}
           </button>
         {/if}
@@ -312,7 +273,7 @@
 
 <style>
   .upd-shell {
-    width: 520px;
+    width: 500px;
     max-width: calc(100vw - 32px);
     max-height: calc(100vh - 48px);
     background: var(--bg-elev-1);
@@ -327,198 +288,220 @@
     color: var(--fg);
   }
 
-  /* ── Header ─────────────────────────────────────────────── */
-  .upd-head {
-    position: relative;
-    padding: 16px 18px 12px;
-    background:
-      linear-gradient(180deg,
-        color-mix(in oklab, var(--accent) 14%, var(--bg-elev-2)) 0%,
-        var(--bg-elev-2) 100%);
+  /* ── Top bar ────────────────────────────────────────────── */
+  .upd-top {
+    display: flex; align-items: center; gap: 10px;
+    height: 42px;
+    padding: 0 8px 0 16px;
     border-bottom: 1px solid var(--border);
-    overflow: hidden;
+    flex: none;
   }
-  .upd-head[data-variant="ok"] {
-    background: linear-gradient(180deg,
-      color-mix(in oklab, var(--ok) 14%, var(--bg-elev-2)) 0%,
-      var(--bg-elev-2) 100%);
-  }
-  .upd-head[data-variant="danger"] {
-    background: linear-gradient(180deg,
-      color-mix(in oklab, var(--danger) 14%, var(--bg-elev-2)) 0%,
-      var(--bg-elev-2) 100%);
-  }
-  .upd-head[data-variant="info"] {
-    background: linear-gradient(180deg,
-      color-mix(in oklab, var(--info) 14%, var(--bg-elev-2)) 0%,
-      var(--bg-elev-2) 100%);
-  }
-
-  .head-glow {
-    position: absolute;
-    inset: -40% -20% auto -20%;
-    height: 80%;
-    background: radial-gradient(60% 100% at 50% 0%,
-      color-mix(in oklab, var(--accent) 25%, transparent) 0%,
-      transparent 70%);
-    pointer-events: none;
-    opacity: 0.7;
-  }
-  .upd-head[data-variant="ok"] .head-glow     { background: radial-gradient(60% 100% at 50% 0%, color-mix(in oklab, var(--ok) 22%, transparent), transparent 70%); }
-  .upd-head[data-variant="danger"] .head-glow { background: radial-gradient(60% 100% at 50% 0%, color-mix(in oklab, var(--danger) 22%, transparent), transparent 70%); }
-  .upd-head[data-variant="info"] .head-glow   { background: radial-gradient(60% 100% at 50% 0%, color-mix(in oklab, var(--info) 22%, transparent), transparent 70%); }
-
-  .head-row {
-    position: relative;
-    display: grid;
-    grid-template-columns: 32px 1fr auto;
-    gap: 12px; align-items: center;
-  }
-  .head-icon {
-    width: 32px; height: 32px;
-    border-radius: 8px;
-    display: flex; align-items: center; justify-content: center;
-    background: color-mix(in oklab, var(--accent) 25%, var(--bg-elev-3));
-    color: var(--accent);
-    border: 1px solid color-mix(in oklab, var(--accent) 30%, transparent);
-    box-shadow: 0 0 16px color-mix(in oklab, var(--accent) 22%, transparent);
-  }
-  .head-icon[data-variant="ok"]     { background: color-mix(in oklab, var(--ok) 25%, var(--bg-elev-3));     color: var(--ok);     border-color: color-mix(in oklab, var(--ok) 30%, transparent);     box-shadow: 0 0 16px color-mix(in oklab, var(--ok) 22%, transparent); }
-  .head-icon[data-variant="danger"] { background: color-mix(in oklab, var(--danger) 25%, var(--bg-elev-3)); color: var(--danger); border-color: color-mix(in oklab, var(--danger) 30%, transparent); box-shadow: 0 0 16px color-mix(in oklab, var(--danger) 22%, transparent); }
-  .head-icon[data-variant="info"]   { background: color-mix(in oklab, var(--info) 25%, var(--bg-elev-3));   color: var(--info);   border-color: color-mix(in oklab, var(--info) 30%, transparent);   box-shadow: 0 0 16px color-mix(in oklab, var(--info) 22%, transparent); }
-
-  .head-text { min-width: 0; }
-  .head-title {
-    font-size: var(--fs-md, 14px);
-    font-weight: 600;
+  .upd-top-t {
+    font-size: var(--fs-sm);
+    font-weight: 650;
+    letter-spacing: -0.01em;
     color: var(--fg);
-    line-height: 1.2;
   }
-  .head-sub {
+  .upd-top-when {
+    display: inline-flex; align-items: center; gap: 4px;
+    margin-left: auto;
     font-size: var(--fs-xs);
-    color: var(--fg-subtle);
-    margin-top: 2px;
+    color: var(--fg-faint);
+    white-space: nowrap;
   }
-  .head-close {
+  .upd-top-when + .upd-x { margin-left: 0; }
+  .upd-x {
+    margin-left: auto;
     background: transparent;
     border: 0;
     color: var(--fg-faint);
     cursor: pointer;
-    padding: 4px;
+    width: 28px; height: 28px;
     border-radius: var(--radius-xs);
     display: flex; align-items: center; justify-content: center;
+    flex: none;
     transition: background 120ms ease, color 120ms ease;
   }
-  .head-close:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg); }
-  .head-close:disabled { opacity: 0.4; cursor: not-allowed; }
+  .upd-x:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg); }
+  .upd-x:disabled { opacity: 0.4; cursor: not-allowed; }
 
-  .head-diff {
+  /* ── Hero ───────────────────────────────────────────────── */
+  .upd-hero {
+    --tone: var(--fg-muted);
+    --tone-soft: color-mix(in oklab, var(--fg-muted) 10%, transparent);
     position: relative;
-    margin-top: 12px;
-    display: flex; align-items: center; gap: 8px;
-    flex-wrap: wrap;
+    display: flex; flex-direction: column; align-items: center;
+    gap: 8px;
+    padding: 28px 24px 24px;
+    text-align: center;
+    overflow: hidden;
   }
-  .diff-chip {
-    padding: 2px 8px;
-    border-radius: 999px;
-    font-size: var(--fs-xs);
-    border: 1px solid var(--border);
+  .upd-hero[data-tone="accent"] { --tone: var(--accent); --tone-soft: color-mix(in oklab, var(--accent) 12%, transparent); }
+  .upd-hero[data-tone="ok"]     { --tone: var(--ok);     --tone-soft: color-mix(in oklab, var(--ok) 12%, transparent); }
+  .upd-hero[data-tone="warn"]   { --tone: var(--warn);   --tone-soft: color-mix(in oklab, var(--warn) 12%, transparent); }
+  .upd-hero[data-tone="danger"] { --tone: var(--danger); --tone-soft: color-mix(in oklab, var(--danger) 12%, transparent); }
+  /* Soft state-tinted wash behind the hero — glow without a heavy banner. */
+  .upd-hero::before {
+    content: "";
+    position: absolute;
+    inset: -60% -30% auto -30%;
+    height: 130%;
+    background: radial-gradient(50% 55% at 50% 0%, var(--tone-soft), transparent 75%);
+    pointer-events: none;
   }
-  .diff-chip.current {
-    color: var(--fg-faint);
-    background: var(--bg-elev-3);
-  }
-  .diff-chip.target {
-    color: var(--accent);
-    background: color-mix(in oklab, var(--accent) 14%, var(--bg-elev-3));
-    border-color: color-mix(in oklab, var(--accent) 35%, transparent);
-  }
-  .upd-head[data-variant="ok"]     .diff-chip.target { color: var(--ok);     background: color-mix(in oklab, var(--ok) 14%, var(--bg-elev-3));     border-color: color-mix(in oklab, var(--ok) 35%, transparent); }
-  .upd-head[data-variant="info"]   .diff-chip.target { color: var(--info);   background: color-mix(in oklab, var(--info) 14%, var(--bg-elev-3));   border-color: color-mix(in oklab, var(--info) 35%, transparent); }
-  .upd-head[data-variant="danger"] .diff-chip.target { color: var(--danger); background: color-mix(in oklab, var(--danger) 14%, var(--bg-elev-3)); border-color: color-mix(in oklab, var(--danger) 35%, transparent); }
+  .upd-hero > :global(*) { position: relative; }
 
-  :global(.diff-arrow) { color: var(--fg-faint); }
-  .diff-meta {
+  .hero-ic {
+    width: 44px; height: 44px;
+    border-radius: 13px;
+    display: grid; place-items: center;
+    color: var(--tone);
+    background: color-mix(in oklab, var(--tone) 14%, var(--bg-elev-2));
+    border: 1px solid color-mix(in oklab, var(--tone) 26%, transparent);
+    box-shadow: 0 0 22px var(--tone-soft);
+    margin-bottom: 2px;
+  }
+
+  .hero-vers {
+    display: flex; align-items: baseline; gap: 12px;
+    margin-bottom: 2px;
+  }
+  .hv-cur { font-size: 15px; font-weight: 550; color: var(--fg-faint); }
+  .hero-vers :global(.hv-arr) { color: var(--fg-faint); align-self: center; }
+  .hv-new {
+    font-size: 32px;
+    font-weight: 680;
+    letter-spacing: -0.02em;
+    color: var(--tone);
+    text-shadow: 0 0 26px var(--tone-soft);
+    line-height: 1.1;
+  }
+
+  .hero-ver-big {
+    font-size: 26px;
+    font-weight: 660;
+    letter-spacing: -0.02em;
+    color: var(--fg);
+    line-height: 1.1;
+  }
+
+  .hero-title {
+    font-size: 15px;
+    font-weight: 620;
+    color: var(--fg);
+    letter-spacing: -0.01em;
+  }
+  .hero-sub {
+    font-size: var(--fs-xs);
+    color: var(--fg-subtle);
+    line-height: 1.55;
+    max-width: 380px;
+  }
+
+  /* Download hero */
+  .hero-pct {
+    font-size: 40px;
+    font-weight: 680;
+    letter-spacing: -0.02em;
+    color: var(--tone);
+    line-height: 1;
+    text-shadow: 0 0 28px var(--tone-soft);
+    font-variant-numeric: tabular-nums;
+  }
+  .hero-pct-sign { font-size: 20px; font-weight: 600; color: color-mix(in oklab, var(--tone) 65%, transparent); margin-left: 2px; }
+  .hero-track {
+    width: 100%;
+    max-width: 320px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--bg-elev-3);
+    overflow: hidden;
+    margin: 4px 0 2px;
+  }
+  .hero-fill {
+    height: 100%;
+    background: linear-gradient(90deg, color-mix(in oklab, var(--tone) 78%, transparent), var(--tone));
+    border-radius: 999px;
+    transition: width 160ms ease;
+  }
+
+  /* Collapsed raw error — human copy leads, the dump is opt-in. */
+  .hero-tech, .err-tech {
+    margin-top: 6px;
+    max-width: 400px;
+    width: 100%;
+    text-align: left;
+  }
+  .hero-tech summary, .err-tech summary {
     font-size: var(--fs-xs);
     color: var(--fg-faint);
+    cursor: pointer;
+    user-select: none;
+    text-align: center;
+    list-style-position: inside;
+  }
+  .err-tech summary { text-align: left; }
+  .hero-tech summary:hover, .err-tech summary:hover { color: var(--fg-subtle); }
+  .hero-tech pre, .err-tech pre {
+    margin: 6px 0 0;
+    padding: 8px 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--fg-subtle);
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    max-height: 96px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
 
   /* ── Body ───────────────────────────────────────────────── */
   .upd-body {
-    padding: 16px 18px;
+    padding: 0 20px 16px;
     overflow-y: auto;
-    display: flex; flex-direction: column; gap: 12px;
+    display: flex; flex-direction: column; gap: 10px;
   }
-  .lead { color: var(--fg-2); font-size: var(--fs-sm); line-height: 1.5; margin: 0; }
 
-  /* Ready/launched card */
-  .ready-card {
-    display: grid; grid-template-columns: 24px 1fr; gap: 12px;
-    align-items: start;
-    padding: 12px 14px;
-    background: color-mix(in oklab, var(--ok) 10%, var(--bg-elev-2));
-    border: 1px solid color-mix(in oklab, var(--ok) 30%, var(--border));
-    border-radius: var(--radius-sm);
-    color: var(--fg);
-  }
-  .ready-card :global(svg) { color: var(--ok); margin-top: 2px; }
-  .ready-title { font-size: var(--fs-sm); color: var(--fg); margin-bottom: 2px; }
-  .ready-sub   { font-size: var(--fs-xs); color: var(--fg-subtle); line-height: 1.4; }
-
-  /* OK / error cards */
-  .ok-card {
-    display: grid; grid-template-columns: 24px 1fr; gap: 12px;
-    align-items: start;
-    padding: 12px 14px;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-  }
-  .ok-card :global(svg) { color: var(--ok); margin-top: 2px; }
-  .ok-title { font-size: var(--fs-sm); color: var(--fg); }
-  .ok-sub   { font-size: var(--fs-xs); color: var(--fg-subtle); margin-top: 4px; }
-
-  .err-card {
-    display: grid; grid-template-columns: 18px 1fr; gap: 10px;
-    padding: 12px 14px;
+  .err-strip {
+    display: grid; grid-template-columns: 16px 1fr; gap: 10px;
+    padding: 11px 13px;
     background: color-mix(in oklab, var(--danger) 8%, var(--bg-elev-2));
-    border: 1px solid color-mix(in oklab, var(--danger) 30%, var(--border));
+    border: 1px solid color-mix(in oklab, var(--danger) 28%, var(--border));
     border-radius: var(--radius-sm);
   }
-  .err-card :global(svg) { color: var(--danger); }
-  .err-title  { font-size: var(--fs-sm); color: var(--fg); margin-bottom: 4px; }
-  .err-detail { font-size: var(--fs-xs); color: var(--danger); margin-bottom: 6px; word-break: break-all; }
-  .err-hint   { font-size: var(--fs-xs); color: var(--fg-subtle); }
+  .err-strip :global(svg) { color: var(--danger); margin-top: 1px; }
+  .err-title { font-size: var(--fs-sm); color: var(--fg); }
+  .err-hint  { font-size: var(--fs-xs); color: var(--fg-subtle); margin-top: 5px; }
 
-  /* Notes card */
   .notes-card {
     background: var(--bg-elev-2);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
   }
   .notes-head {
-    display: flex; align-items: center; gap: 6px;
-    padding: 8px 12px;
+    padding: 9px 13px;
     border-bottom: 1px solid var(--border);
     color: var(--accent);
     font-size: var(--fs-xs);
     text-transform: uppercase;
-    letter-spacing: 0.04em;
-    font-weight: 600;
+    letter-spacing: 0.05em;
+    font-weight: 650;
   }
   .notes-body {
     padding: 10px 14px 12px;
     font-size: var(--fs-sm);
     color: var(--fg-2);
     line-height: 1.55;
-    max-height: 200px;
+    max-height: 190px;
     overflow-y: auto;
   }
   .notes-h {
     color: var(--fg);
     font-weight: 600;
-    margin-top: 8px;
-    margin-bottom: 4px;
+    margin: 8px 0 4px;
     font-size: var(--fs-sm);
   }
   .notes-h:first-child { margin-top: 0; }
@@ -550,11 +533,13 @@
     padding: 12px 16px;
     border-top: 1px solid var(--border);
     background: var(--bg-elev-2);
+    flex: none;
   }
   .foot-spacer { flex: 1; }
   .foot-status {
     font-size: var(--fs-xs);
     color: var(--fg-subtle);
+    min-width: 0;
   }
 
   .btn.glow {
@@ -563,34 +548,10 @@
       0 0 18px color-mix(in oklab, var(--accent) 35%, transparent);
   }
 
-  /* Download progress */
-  .dl-card {
-    display: flex; flex-direction: column; gap: 8px;
-    padding: 14px;
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-  }
-  .dl-row {
-    display: flex; align-items: center; justify-content: space-between;
-    font-size: var(--fs-sm); color: var(--fg);
-  }
-  .dl-track {
-    height: 6px; border-radius: 999px;
-    background: var(--bg-elev-3);
-    overflow: hidden;
-  }
-  .dl-fill {
-    height: 100%;
-    background: var(--accent);
-    border-radius: 999px;
-    transition: width 160ms ease;
-  }
-  .dl-sub { font-size: var(--fs-xs); color: var(--fg-subtle); }
-
   :global(.spin) { animation: spin 1s linear infinite; }
   @keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) {
     :global(.spin) { animation: none; }
+    .hero-fill { transition: none; }
   }
 </style>

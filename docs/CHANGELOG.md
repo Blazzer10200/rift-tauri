@@ -9,7 +9,9 @@
 - **One-click Looks** — five curated accent + texture + vividness combos at the top of Appearance; every dial stays individually tunable after.
 - **Per-tab "Reset to defaults"** on Appearance, Chat, Claude, and Speech — with a confirm step; your API key, spending cap, and downloaded Whisper models are never touched.
 - **Claude tab reworked:** CLI version chip, billing route strip, contextual Pro note, warn-only tab dot, tightened copy.
-- **Fixed:** interface density (compact/regular/comfy) silently never applied — a theme selector outranked it; dyslexia Lexend font never applied app-wide; sidebar scope-toggle thumb dislocating; background-texture picker tiles too faint to tell apart.
+- **About tab redone:** version and stack collapse to a chip strip with an inline "Check for updates"; a "Source code & license" row links the GitHub repo; installed local tools shrink to hover-labelled chips (full rows only for missing ones); new "Report a bug" copies your diagnostic and opens a GitHub issue.
+- **Update dialog rebuilt** — the version jump (v0.95 → v0.96) is now the hero, with the download size, a "checked N min ago" line, and one-tap release notes. Every state got human copy: a calm "dev build" panel instead of a scary error on dev machines, an offline/firewall message with the raw error tucked into a collapsible, and a reassuring "your chats and settings are kept" on a broken install with a one-click "Get Setup.exe". Downloads are now non-blocking — hide the dialog and the top bar tracks progress.
+- **Fixed:** interface density (compact/regular/comfy) silently never applied — a theme selector outranked it; dyslexia Lexend font never applied app-wide; sidebar scope-toggle thumb dislocating; background-texture picker tiles too faint to tell apart; the "Install" button in Settings → Local tools rendered unstyled (dead CSS class); a banner-started download briefly hid its own progress bar.
 
 ## v0.95.1 — Pre-open-source audit
 
