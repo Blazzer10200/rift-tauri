@@ -35,6 +35,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { confirm } from "@tauri-apps/plugin-dialog";
 import { toast } from "./toast.svelte";
+import { cmpSemver } from "./cliUpdate.svelte";
 import { humanizeError } from "../utils/humanizeError";
 import { assistant } from "./assistant.svelte";
 
@@ -66,6 +67,11 @@ export type UpdateState =
 
 const DISMISSED_KEY = "rift.updates.dismissed-version";
 const SNOOZE_MS = 24 * 60 * 60 * 1000; // 24h — snooze is a delay, never a kill switch
+
+// Last app version this install launched with. On the next launch a HIGHER
+// running version means Velopack just swapped us up → show the success toast.
+// (A lower/equal version — fresh install, downgrade, dev rebuild — stays quiet.)
+const SEEN_VERSION_KEY = "rift.updates.last-seen-version";
 
 // Bounded backoff for a transient check failure. Without it, an offline-at-launch
 // (or a momentary R2 feed blip) lands in "error" and gets no re-check until the
@@ -141,6 +147,12 @@ class UpdateStore {
    *  dialog's "checked N min ago" line. Null until the first check resolves. */
   lastCheckedAt = $state<number | null>(null);
 
+  /** The version we were on BEFORE this launch, set only when this launch is a
+   *  post-update relaunch (running version > last-seen). Drives the one-time
+   *  "Updated to vX" success toast + lets the dialog show what changed. Null on
+   *  a normal launch, fresh install, or dev rebuild. */
+  justUpdatedFrom = $state<string | null>(null);
+
   /** An update exists and is waiting on user action — true even while snoozed.
    *  Drives the always-visible titlebar dot so a snoozed update is never
    *  invisible. */
@@ -199,7 +211,12 @@ class UpdateStore {
     this.state = "checking";
     this.error = "";
     try {
-      this.currentVersion = await invoke<string>("app_version");
+      // The running version can't change within a session — fetch it once.
+      // detectPostUpdate() already set it on launch; a manual "Check now" or the
+      // auto-tick then skips the redundant IPC.
+      if (this.currentVersion === "?") {
+        this.currentVersion = await invoke<string>("app_version");
+      }
     } catch (e) {
       this.error = String(e);
       this.state = "error";
@@ -398,8 +415,42 @@ class UpdateStore {
   async checkOnLaunch() {
     // A snooze restored from a previous launch still expires on time.
     if (this.snoozed) this.armSnoozeTimer(Math.max(0, this.snoozed.until - Date.now()));
+    await this.detectPostUpdate();
     await this.refresh();
     this.startAutoCheck();
+  }
+
+  /** Compare the running version against the one persisted last launch. A jump
+   *  UP means Velopack just swapped us — celebrate it once, then record the new
+   *  version so the toast never re-fires. First launch (no stored version) just
+   *  records silently; a downgrade/equal stays quiet. */
+  private async detectPostUpdate() {
+    let running: string;
+    try {
+      running = await invoke<string>("app_version");
+    } catch {
+      return; // can't read version — skip; refresh() will surface real errors
+    }
+    this.currentVersion = running;
+    let seen: string | null = null;
+    try { seen = localStorage.getItem(SEEN_VERSION_KEY); } catch { /* private mode */ }
+
+    if (seen && cmpSemver(running, seen) > 0) {
+      this.justUpdatedFrom = seen;
+      toast.push({
+        severity: "ok",
+        title: `Updated to v${running}`,
+        detail: `You were on v${seen}. Here's what changed.`,
+        mono: true,
+        timeoutMs: 9000,
+        action: { label: "What's new", onClick: () => this.open() },
+      });
+    }
+    // Record the running version regardless (first launch, upgrade, or downgrade)
+    // so the next launch compares against where we actually are now.
+    if (seen !== running) {
+      try { localStorage.setItem(SEEN_VERSION_KEY, running); } catch { /* best-effort */ }
+    }
   }
 
   private startAutoCheck() {

@@ -146,8 +146,13 @@
         {:else if updates.state === "uptodate"}
           <div class="hero-ic"><CheckCircle2 size={20} /></div>
           <div class="hero-ver-big mono">v{updates.currentVersion}</div>
-          <div class="hero-title">You're up to date</div>
-          <div class="hero-sub">Rift re-checks automatically — every 6 hours and at every launch.</div>
+          {#if updates.justUpdatedFrom}
+            <div class="hero-title">Updated — you're on the latest</div>
+            <div class="hero-sub">Just moved up from v{updates.justUpdatedFrom}. Rift keeps itself current, re-checking every 6 hours and at every launch.</div>
+          {:else}
+            <div class="hero-title">You're up to date</div>
+            <div class="hero-sub">Rift re-checks automatically — every 6 hours and at every launch.</div>
+          {/if}
 
         {:else if updates.state === "error"}
           {#if updates.devUnavailable}
