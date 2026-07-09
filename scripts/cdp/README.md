@@ -21,6 +21,23 @@ bash scripts/cdp/c.sh look
 ```
 If anything's off: `npm run cdp:doctor` (aka `bash scripts/cdp/c.sh doctor`) tells you exactly what and how to fix it.
 
+## Second parallel window — instance 2 (2026-07-09)
+
+When another session owns the primary dev instance, `scripts/run-dev2-deelevated.ps1` opens an
+INDEPENDENT second window on isolated ports: CDP **:9224** · wrapper **:9225** · WebView2 profile
+`EBWebView-Dev2`. It runs the already-built dev exe directly (no `tauri dev`, no second vite — it
+feeds off instance 1's :1420), so it can't trigger the cargo relink that fails while instance 1 runs.
+```bash
+pwsh -NoProfile -File scripts/run-dev2-deelevated.ps1 -WaitForCdp
+RIFT_CDP_HOST=127.0.0.1 RIFT_CDP_PORT=9224 RIFT_CDP_API_PORT=9225 node scripts/cdp/serve.cjs   # background
+RIFT_CDP_API=http://127.0.0.1:9225 bash scripts/cdp/c.sh look
+```
+Caveats: instance 1 must be running (instance 2 dies with its vite) · src/ edits HMR into BOTH
+windows · NO Rust rebuilds while either runs · instance 1's cleanup (`c.sh reap`, kill-stale) globs
+`*EBWebView-Dev*`, which matches Dev2 — it will reap instance 2 as stale (relaunch takes ~5s) ·
+pin `RIFT_CDP_HOST=127.0.0.1` on the wrapper (default `localhost` can resolve IPv6 and miss the
+IPv4-only CDP socket).
+
 Under the hood:
 - `scripts/run-dev-deelevated.ps1` is the robust launcher: kill-stale-first → de-elevate to medium IL → launch → optional `-WaitForCdp`. `run-dev.bat` still works for a manual double-click from Explorer (already medium IL there).
 - The wrapper (`serve.cjs`) holds one persistent ws to WebView2 :9222 and exposes the HTTP API on :9223. Runs in background while dev is up.
