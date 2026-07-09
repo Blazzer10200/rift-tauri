@@ -212,6 +212,22 @@ class UiPrefs {
     this.setVividness(DEFAULT_VIVIDNESS);
   }
 
+  /** Appearance tab → factory defaults: accent, texture, density, code rendering. */
+  resetAppearance() {
+    this.resetAccent();
+    this.setDotField("dots");
+    this.setDensity("compact");
+    this.setCode({ ...DEFAULT_CODE });
+  }
+
+  /** Chat-rendering knobs → factory defaults: stream view on, Standard dial triple. */
+  resetChatRendering() {
+    if (!this.streamMode) this.toggleStreamMode();
+    this.setToolDetail("balanced");
+    this.setNarration("balanced");
+    this.setCommandOutput("peek");
+  }
+
   // dotField drives `.app[data-dots]` via a template binding in AppShell — no
   // DOM write needed here beyond persisting the choice.
   setDotField(d: DotField) {

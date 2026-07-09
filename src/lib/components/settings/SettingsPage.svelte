@@ -18,7 +18,7 @@
   import { stt } from "../../state/stt.svelte";
   import { accessibility } from "../../state/accessibility.svelte";
   import { commandPalette } from "../../state/command-palette.svelte";
-  import { uiPrefs, ACCENTS, DOT_FIELDS, TOOL_DETAILS, DENSITY_PRESETS, VIVIDNESS_MIN, VIVIDNESS_MAX } from "../../state/ui-prefs.svelte";
+  import { uiPrefs, ACCENTS, DOT_FIELDS, TOOL_DETAILS, DENSITY_PRESETS, VIVIDNESS_MIN, VIVIDNESS_MAX, type DotField } from "../../state/ui-prefs.svelte";
   import { onboarding } from "../../state/onboarding.svelte";
   import { betaNotice } from "../../state/betaNotice.svelte";
   import { environment } from "../../state/environment.svelte";
@@ -61,6 +61,7 @@
   // to the always-rendered Engine card so a jump never lands nowhere.
   type SearchEntry = { tab: Section; anchor: string; card: string; title: string; kw: string };
   const SEARCH_INDEX: SearchEntry[] = [
+    { tab: "appearance", anchor: "card-looks",     card: "Looks",             title: "One-click looks",     kw: "theme preset vibe blueprint ember monochrome curated" },
     { tab: "appearance", anchor: "card-accent",    card: "Accent color",      title: "Accent color",        kw: "theme hue swatch color highlight" },
     { tab: "appearance", anchor: "card-accent",    card: "Accent color",      title: "Vividness",           kw: "saturation intensity accent" },
     { tab: "appearance", anchor: "card-texture",   card: "Background texture", title: "Background texture", kw: "pattern dots grid blueprint wallpaper glow" },
@@ -99,6 +100,17 @@
   ];
   let searchQ = $state("");
   let searchIdx = $state(0);
+  let searchEl = $state<HTMLInputElement>();
+  // "/" or Ctrl+F anywhere on the page focuses the settings search.
+  function onGlobalKey(ev: KeyboardEvent) {
+    const t = ev.target as HTMLElement | null;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
+    if ((ev.key === "/" && !ev.ctrlKey && !ev.altKey && !ev.metaKey) ||
+        (ev.ctrlKey && !ev.shiftKey && !ev.altKey && ev.key.toLowerCase() === "f")) {
+      ev.preventDefault();
+      searchEl?.focus();
+    }
+  }
   const searchResults = $derived.by(() => {
     const q = searchQ.trim().toLowerCase();
     if (!q) return [];
@@ -151,6 +163,27 @@
 
   const vivPct = $derived(Math.round(((uiPrefs.vividness - VIVIDNESS_MIN) / (VIVIDNESS_MAX - VIVIDNESS_MIN)) * 100));
 
+  // ── One-click looks — curated accent + vividness + texture combos.
+  // Same pattern as the Chat density presets: a look just drives the three
+  // dials below it, so everything stays individually tunable afterwards.
+  type Look = { id: string; label: string; hue: number; viv: number; dot: DotField };
+  const LOOKS: Look[] = [
+    { id: "stock",     label: "Emerald Ink", hue: 163, viv: 0.15, dot: "dots" },
+    { id: "blueprint", label: "Blueprint",   hue: 230, viv: 0.16, dot: "blueprint" },
+    { id: "haze",      label: "Violet Haze", hue: 275, viv: 0.18, dot: "glow" },
+    { id: "ember",     label: "Ember",       hue: 55,  viv: 0.19, dot: "grain" },
+    { id: "mono",      label: "Monochrome",  hue: 220, viv: 0.05, dot: "off" },
+  ];
+  const dotLabel = (d: DotField) => DOT_FIELDS.find((f) => f.id === d)?.label ?? d;
+  function lookOn(lk: Look): boolean {
+    return uiPrefs.accentHue === lk.hue && Math.abs(uiPrefs.vividness - lk.viv) < 0.003 && uiPrefs.dotField === lk.dot;
+  }
+  function applyLook(lk: Look) {
+    uiPrefs.setAccentHue(lk.hue);
+    uiPrefs.setVividness(lk.viv);
+    uiPrefs.setDotField(lk.dot);
+  }
+
   // Command-palette deep-link: open the requested tab, then clear (one-shot).
   $effect(() => {
     const req = commandPalette.targetSettingsSection;
@@ -193,6 +226,40 @@
       if (diagCopiedTimer) clearTimeout(diagCopiedTimer);
       diagCopiedTimer = setTimeout(() => { diagCopied = false; diagCopiedTimer = null; }, 1400);
     } catch (e) { console.error("clipboard failed", e); }
+  }
+
+  // ── Per-tab factory reset. Defaults live in each store's reset method so
+  // they can't drift from the store's own initial values. About has no reset —
+  // it's info and actions, not preferences.
+  const RESET_COPY: Partial<Record<Section, string>> = {
+    appearance: "Accent, texture, density, and code rendering go back to the stock emerald look.",
+    chat: "Stream layout, detail dials, and reading comfort go back to their defaults.",
+    claude: "Full config on, git tools read-only, plan Max. Your API key and spending cap are kept.",
+    speech: "All voice-input settings return to factory defaults. Downloaded Whisper models stay on disk.",
+  };
+  // In-flight latch: stacked confirm() calls (double-click, programmatic) leave
+  // orphaned native dialogs whose promises never settle — allow exactly one.
+  let resetBusy = false;
+  async function resetTab(sec: Section) {
+    if (resetBusy) return;
+    resetBusy = true;
+    let ok = false;
+    try {
+      const label = ST_SECTIONS.find((s) => s.id === sec)?.label ?? sec;
+      ok = await confirm(`Reset all ${label} settings to their defaults?\n\n${RESET_COPY[sec] ?? ""}`,
+        { title: `Reset ${label}`, kind: "warning", okLabel: "Reset", cancelLabel: "Cancel" });
+    } finally {
+      resetBusy = false;
+    }
+    if (!ok) return;
+    try {
+      if (sec === "appearance") uiPrefs.resetAppearance();
+      else if (sec === "chat") { uiPrefs.resetChatRendering(); accessibility.reset(); }
+      else if (sec === "claude") await assistantStore.resetSessionDefaults();
+      else if (sec === "speech") await stt.resetConfig();
+    } catch (e) {
+      console.error(`reset ${sec} failed`, e); // store already toasted the failure
+    }
   }
 
   async function repairInstall() {
@@ -395,6 +462,8 @@
   });
 </script>
 
+<svelte:window onkeydown={onGlobalKey} />
+
 <div class="sb-main">
   <!-- ── Hero + sticky tab bar ── -->
   <PageHero eyebrow="Settings" title={activeMeta.label} desc={activeMeta.sub} padBottom={false} maxWidth={820}>
@@ -444,10 +513,12 @@
             type="text"
             placeholder="Find a setting…"
             bind:value={searchQ}
+            bind:this={searchEl}
             onkeydown={onSearchKey}
             aria-label="Search settings"
             spellcheck="false"
           />
+          <span class="sset-search-kbd mono" aria-hidden="true">/</span>
           {#if searchResults.length > 0}
             <div class="sset-results" role="listbox" aria-label="Matching settings">
               {#each searchResults as r, i (r.tab + r.anchor + r.title)}
@@ -472,6 +543,23 @@
     {#if activeSec === "appearance"}
       <div class="set-surface"><div class="set-col">
 
+          <div class="card" id="card-looks">
+            <div class="card-tt">Looks</div>
+            <div class="card-sub">Curated accent + texture combos — one click sets everything below, and each dial still fine-tunes after.</div>
+            <div class="look-grid">
+              {#each LOOKS as lk (lk.id)}
+                <button type="button" class="look" data-active={lookOn(lk)} style="--lk-h: {lk.hue}; --lk-c: {lk.viv};" onclick={() => applyLook(lk)} aria-pressed={lookOn(lk)}>
+                  <span class="look-dot"></span>
+                  <span class="look-body">
+                    <span class="look-name">{lk.label}</span>
+                    <span class="look-sub">{lk.dot === "off" ? "no texture" : dotLabel(lk.dot)}</span>
+                  </span>
+                  {#if lookOn(lk)}<span class="look-ck"><Check size={11} strokeWidth={3} /></span>{/if}
+                </button>
+              {/each}
+            </div>
+          </div>
+
           <div class="card" id="card-accent">
             <div class="card-tt">Accent color <span class="ap-dot" style="background: oklch(0.72 var(--accent-c) var(--accent-h));"></span>
               <button class="st-btn card-tt-act" type="button" onclick={() => uiPrefs.resetAccent()} use:tooltip={"Back to the stock emerald look"}><RotateCcw size={13} /> Reset</button>
@@ -491,7 +579,7 @@
               <div class="ap-divider"></div>
               <div class="ctl-row tight">
                 <div><div class="ctl-t">Vividness</div><div class="ctl-s">How saturated the accent reads across the app.</div></div>
-                <div class="range-wrap">
+                <div class="range-wrap grow">
                   <input class="set-range" type="range" min={VIVIDNESS_MIN} max={VIVIDNESS_MAX} step="0.005" value={uiPrefs.vividness} style="--fill: {vivPct}%" oninput={(e) => uiPrefs.setVividness(Number(e.currentTarget.value))} aria-label="Accent vividness" use:sliderBubble={{ format: (v) => `${Math.round(((v - VIVIDNESS_MIN) / (VIVIDNESS_MAX - VIVIDNESS_MIN)) * 100)}%` }} />
                   <span class="range-val">{vivPct}%</span>
                 </div>
@@ -569,10 +657,20 @@
                    above repaints it exactly as replies will render. Tab-indented
                    + ligature-rich on purpose. -->
               <div class="code-preview" aria-hidden="true">
-                <div class="code-preview-bar"><span></span><span></span><span></span><span class="code-preview-name mono">preview.ts · updates live</span></div>
+                <div class="code-preview-bar"><span></span><span></span><span></span><span class="code-preview-name mono">interface &amp; code · updates live</span></div>
+                <!-- Density stage — rows sized by the REAL --row-h/--gap/--fs-md
+                     vars the density attribute drives, so the seg above repaints
+                     it exactly like the app chrome. -->
+                <div class="iface-stage">
+                  <div class="iface-row"><span class="iface-dot"></span>Fix composer bug<span class="iface-meta mono">2m</span></div>
+                  <div class="iface-row on"><span class="iface-dot on"></span>Settings overhaul<span class="iface-meta mono">now</span></div>
+                  <div class="iface-row"><span class="iface-dot"></span>Refactor turn engine<span class="iface-meta mono">1h</span></div>
+                </div>
                 <pre class="mono"><span class="cp-kw">const</span> ship = (v) <span class="cp-op">=&gt;</span> &#123;{"\n\t"}<span class="cp-kw">if</span> (v <span class="cp-op">!=</span> <span class="cp-kw">null</span> &amp;&amp; v <span class="cp-op">&gt;=</span> <span class="cp-num">1</span>) <span class="cp-kw">return</span> <span class="cp-str">"ready"</span>;{"\n\t"}<span class="cp-kw">return</span> <span class="cp-str">"hold"</span>; <span class="cp-cm">// ligatures: =&gt; != &gt;=</span>{"\n"}&#125;;</pre>
               </div>
           </div>
+
+          <button class="set-expand set-reset" type="button" onclick={() => void resetTab("appearance")}><RotateCcw size={13} /> Reset Appearance to defaults</button>
       </div></div>
     {/if}
 
@@ -649,6 +747,17 @@
                 {/if}
               </div>
             </div>
+          {:else}
+            <!-- The toggle explains itself both ways — off shows what classic
+                 bubbles look like instead of collapsing to an empty card. -->
+            <div class="code-preview" aria-hidden="true">
+              <div class="code-preview-bar"><span></span><span></span><span></span><span class="code-preview-name mono">classic bubbles · what off looks like</span></div>
+              <div class="bp-stage">
+                <div class="bp-row user"><div class="bp-bubble user">fix the composer bug</div></div>
+                <div class="bp-row"><div class="bp-bubble">Found it — the mention popover was anchored to a stale offset. Patched and verified.</div></div>
+                <div class="bp-row"><div class="bp-tool mono">▸ Edit Composer.svelte · +12 −4</div></div>
+              </div>
+            </div>
           {/if}
         </div>
 
@@ -686,6 +795,8 @@
             </div>
           </div>
         </div>
+
+        <button class="set-expand set-reset" type="button" onclick={() => void resetTab("chat")}><RotateCcw size={13} /> Reset Chat to defaults</button>
       </div></div>
     {/if}
 
@@ -783,13 +894,21 @@
               <button class:on={assistantStore.trustLevel !== "readonly"} role="radio" aria-checked={assistantStore.trustLevel !== "readonly"} type="button" onclick={() => void assistantStore.setTrustLevel("standard")}>Standard</button>
             </div>
           </div>
-          <div class="ctl-row tight">
+          <div class="ctl-row tight no-line">
             <div><div class="ctl-t">Plan</div><div class="ctl-s">Sets the context-window gauge — Anthropic doesn't expose your plan, so pick it here. Free caps at 200K; Pro and Max unlock 1M.</div></div>
             <div class="seg" role="radiogroup" aria-label="Subscription plan">
               <button class:on={assistantStore.plan === "free"} role="radio" aria-checked={assistantStore.plan === "free"} type="button" onclick={() => assistantStore.setPlan("free")}>Free</button>
               <button class:on={assistantStore.plan === "pro"} role="radio" aria-checked={assistantStore.plan === "pro"} type="button" onclick={() => assistantStore.setPlan("pro")}>Pro</button>
               <button class:on={assistantStore.plan === "max"} role="radio" aria-checked={assistantStore.plan === "max"} type="button" onclick={() => assistantStore.setPlan("max")}>Max</button>
             </div>
+          </div>
+          <!-- What the picker actually drives: the context gauge, live. -->
+          <div class="plan-gauge" aria-hidden="true">
+            <div class="plan-gauge-track">
+              <span class="plan-gauge-tick"></span>
+              <div class="plan-gauge-fill" style="width: {assistantStore.plan === 'free' ? 20 : 100}%"></div>
+            </div>
+            <span class="plan-gauge-cap mono">{assistantStore.plan === "free" ? "200K" : "1M"} context</span>
           </div>
           {#if assistantStore.plan === "pro"}
             <div class="st-note">Pro reaches 1M only once usage credits are enabled at <code>claude.ai/settings/usage</code> — otherwise it behaves like 200K.</div>
@@ -844,6 +963,8 @@
               {#if asstMaxBudgetMsg}<div class="st-note">{asstMaxBudgetMsg}</div>{/if}
             {/if}
           </div>
+
+          <button class="set-expand set-reset" type="button" onclick={() => void resetTab("claude")}><RotateCcw size={13} /> Reset Claude session to defaults</button>
       </div></div>
     {/if}
 
@@ -1025,6 +1146,8 @@
               </div>
             </div>
           </div>
+
+          <button class="set-expand set-reset" type="button" onclick={() => void resetTab("speech")}><RotateCcw size={13} /> Reset Speech to defaults</button>
       </div></div>
     {/if}
 
@@ -1170,6 +1293,8 @@
   .sset-search :global(.sset-search-ic) { flex: none; color: var(--fg-subtle); }
   .sset-search-in { flex: 1; min-width: 0; background: none; border: 0; outline: none; color: var(--fg); font: inherit; font-size: 12px; }
   .sset-search-in::placeholder { color: var(--fg-faint); }
+  .sset-search-kbd { flex: none; font-size: 10px; line-height: 16px; padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; color: var(--fg-faint); }
+  .sset-search:focus-within .sset-search-kbd { display: none; }
   .sset-results { position: absolute; top: calc(100% + 8px); right: 0; width: 330px; max-height: 340px; overflow-y: auto; z-index: 30; padding: 5px; border-radius: 12px; background: color-mix(in oklab, var(--surface) 92%, transparent); backdrop-filter: blur(14px); border: 1px solid color-mix(in oklab, var(--accent) 14%, var(--border)); box-shadow: 0 18px 44px -8px oklch(0 0 0 / 0.6); scrollbar-width: thin; }
   .sset-result { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 9px; border: 0; background: none; text-align: left; font: inherit; cursor: pointer; border-radius: 8px; }
   .sset-result[data-active="true"] { background: color-mix(in oklab, var(--accent) 14%, transparent); }
@@ -1236,6 +1361,22 @@
   .sp-out { color: var(--fg-muted); }
   .sp-out.dim { color: var(--fg-subtle); font-style: italic; }
 
+  /* classic-bubbles preview (Stream view OFF) — schematic, not the live renderer */
+  .bp-stage { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+  .bp-row { display: flex; }
+  .bp-row.user { justify-content: flex-end; }
+  .bp-bubble { max-width: 78%; padding: 8px 12px; border-radius: 12px; border-bottom-left-radius: 4px; border: 1px solid var(--border); background: var(--bg-elev-2); color: var(--fg-2); font-size: 12px; line-height: 1.5; }
+  .bp-bubble.user { border-radius: 12px; border-bottom-right-radius: 4px; background: color-mix(in oklab, var(--accent) 14%, var(--bg-elev-2)); border-color: color-mix(in oklab, var(--accent) 30%, var(--border)); color: var(--fg); }
+  .bp-tool { font-size: 11px; color: var(--fg-muted); padding-left: 2px; }
+
+  /* plan → context-window mini gauge */
+  .ctl-row.no-line { border-bottom: 0; }
+  .plan-gauge { display: flex; align-items: center; gap: 12px; padding: 2px 0 10px; }
+  .plan-gauge-track { position: relative; flex: 1; height: 6px; border-radius: 999px; background: var(--track); border: 1px solid var(--border); overflow: hidden; }
+  .plan-gauge-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, color-mix(in oklab, var(--accent) 55%, transparent), var(--accent)); transition: width 420ms var(--ease-page); }
+  .plan-gauge-tick { position: absolute; left: 20%; top: 0; bottom: 0; width: 1px; background: var(--border-strong); }
+  .plan-gauge-cap { flex: none; min-width: 86px; text-align: right; font-size: 10.5px; color: var(--fg-muted); }
+
   /* reading-comfort reply preview — bare .bubble/.markdown-body so the global
      data-a11y-* rules (app.css) style it exactly like a real reply */
   .cf-stage { padding: 13px 14px; }
@@ -1248,6 +1389,20 @@
   :where(.cf-bubble p) { line-height: 1.6; }
   :where(.cf-bubble code) { background: var(--code-bg); color: var(--code-fg); }
 
+  /* ── One-click looks — each tile tinted by its OWN hue (not the live accent) ── */
+  .look-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 8px; }
+  .look { position: relative; display: flex; align-items: center; gap: 9px; padding: 9px 11px; border-radius: 10px; cursor: pointer; text-align: left; font: inherit;
+    border: 1px solid color-mix(in oklab, oklch(0.72 var(--lk-c) var(--lk-h)) 22%, var(--border));
+    background: linear-gradient(135deg, oklch(0.72 var(--lk-c) var(--lk-h) / 0.1), transparent 72%), var(--field);
+    transition: transform var(--dur-fast) var(--ease-page), border-color var(--dur-fast), box-shadow var(--dur-fast); }
+  .look:hover { transform: translateY(-2px); border-color: color-mix(in oklab, oklch(0.72 var(--lk-c) var(--lk-h)) 45%, var(--border)); }
+  .look[data-active="true"] { border-color: oklch(0.72 var(--lk-c) var(--lk-h)); box-shadow: 0 0 14px -4px oklch(0.72 var(--lk-c) var(--lk-h) / 0.5); }
+  .look-dot { width: 14px; height: 14px; border-radius: 50%; flex: none; background: oklch(0.72 var(--lk-c) var(--lk-h)); box-shadow: 0 0 0 1px var(--border-strong), 0 0 8px -1px oklch(0.72 var(--lk-c) var(--lk-h) / 0.6); }
+  .look-body { min-width: 0; }
+  .look-name { display: block; font-size: 12px; font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .look-sub { display: block; font-size: 10px; color: var(--fg-subtle); margin-top: 1px; }
+  .look-ck { position: absolute; top: -5px; right: -5px; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; background: oklch(0.72 var(--lk-c) var(--lk-h)); color: rgba(0,0,0,0.82); }
+
   /* accent "in action" stage — one of each accent-driven surface, live */
   .card-tt-act { margin-left: auto; }
   .ap-stage { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; padding: 13px 14px; pointer-events: none; user-select: none; }
@@ -1258,6 +1413,14 @@
   .ap-demo-sel { font-size: 12px; color: var(--fg); padding: 2px 4px; border-radius: 3px; background: color-mix(in oklab, var(--accent) 28%, transparent); }
   .ap-demo-link { font-size: 12px; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in oklab, var(--accent) 55%, transparent); }
   .ap-demo-field { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 7px; font-size: 11px; color: var(--fg-muted); background: var(--field); border: 1px solid var(--border-focus); box-shadow: 0 0 0 3px var(--ring); }
+
+  /* density stage — list rows driven by the live --row-h/--gap/--fs-md vars */
+  .iface-stage { display: flex; flex-direction: column; gap: var(--gap, 9px); padding: 12px 14px; border-bottom: 1px solid var(--border); }
+  .iface-row { display: flex; align-items: center; gap: 9px; height: var(--row-h, 30px); padding: 0 11px; border-radius: 7px; font-size: var(--fs-md, 13px); color: var(--fg-2); background: color-mix(in oklab, var(--fg) 3.5%, transparent); border: 1px solid color-mix(in oklch, var(--border) 60%, transparent); transition: height 200ms var(--ease-page); }
+  .iface-row.on { color: var(--fg); background: color-mix(in oklab, var(--accent) 10%, transparent); border-color: color-mix(in oklab, var(--accent) 28%, transparent); }
+  .iface-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--fg-faint); }
+  .iface-dot.on { background: var(--accent); box-shadow: 0 0 6px color-mix(in oklab, var(--accent) 60%, transparent); }
+  .iface-meta { margin-left: auto; font-size: 10px; color: var(--fg-subtle); }
 
   /* live code preview — mirrors the chat renderer via the shared --code-* vars */
   .code-preview { margin-top: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-inset); overflow: hidden; }
@@ -1276,6 +1439,10 @@
   .set-expand:hover { color: var(--fg-2); border-color: var(--border-strong); background: color-mix(in oklab, var(--fg) 4%, transparent); }
   .set-expand :global(.set-expand-ic) { transition: transform 160ms var(--ease-page); }
   .set-expand :global(.set-expand-ic.flip) { transform: rotate(180deg); }
+  /* per-tab factory reset — same quiet chrome, warn tint on hover so it reads
+     as "careful" without shouting */
+  .set-reset { margin-top: 0; }
+  .set-reset:hover { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 40%, var(--border)); background: color-mix(in oklab, var(--warn) 6%, transparent); }
 
   /* expanding a collapsed list cascades the new entries in (keyed each — the
      already-visible head keeps its DOM, so only revealed items animate) */
@@ -1332,6 +1499,9 @@
   .hue-range::-webkit-slider-thumb:hover { transform: scale(1.12); }
   .hue-range:focus { outline: none; }
   .range-wrap { display: flex; align-items: center; gap: 12px; }
+  /* full-width variant — matches the hue slider's span so the two dials read as one family */
+  .range-wrap.grow { flex: 1 1 auto; max-width: 440px; }
+  .range-wrap.grow .set-range { flex: 1; width: auto; min-width: 0; }
   .range-val { font-size: 11.5px; color: var(--fg-muted); font-variant-numeric: tabular-nums; min-width: 36px; text-align: right; }
   .set-range { -webkit-appearance: none; appearance: none; width: 150px; height: 6px; border-radius: 999px; border: 1px solid var(--border); background: linear-gradient(90deg, var(--accent) var(--fill, 0%), var(--track) var(--fill, 0%)); cursor: pointer; }
   .set-range::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg-inset); box-shadow: var(--shadow-sm); cursor: pointer; transition: transform var(--dur-fast) var(--ease-page); }
@@ -1352,7 +1522,7 @@
      uniform brightness lift makes every pattern legible-to-pick WITHOUT changing
      their relative intensities or the accent hues — the honest look, just
      readable at tile scale. */
-  .bg-tile-pat { position: absolute; inset: 0; filter: brightness(1.75); }
+  .bg-tile-pat { position: absolute; inset: 0; filter: brightness(2.7); }
   .bg-tile-none { position: absolute; inset: 0; display: grid; place-items: center; color: var(--fg-faint); font-size: 18px; }
   .bg-tile-ck { position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--accent-fg); opacity: 0; transform: scale(0.5); transition: opacity var(--dur-fast), transform var(--dur-fast) var(--ease-page); }
   .bg-opt.sel .bg-tile-ck { opacity: 1; transform: none; }
@@ -1505,7 +1675,7 @@
   .bg-tile-pat[data-dots="glow"] { background-image: radial-gradient(150% 100% at 50% -12%, color-mix(in oklab, var(--accent) 8%, transparent), transparent 60%), radial-gradient(120% 90% at 84% 4%, color-mix(in oklab, var(--accent) 8%, transparent), transparent 62%); }
   .bg-tile-pat[data-dots="blueprint"] { background-image: linear-gradient(to right, color-mix(in oklab, var(--accent) 7%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--accent) 7%, transparent) 1px, transparent 1px), linear-gradient(to right, color-mix(in oklab, var(--accent) 3.5%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--accent) 3.5%, transparent) 1px, transparent 1px); background-size: 44px 44px, 44px 44px, 11px 11px, 11px 11px; -webkit-mask-image: radial-gradient(125% 105% at 50% 24%, #000 14%, transparent 80%); mask-image: radial-gradient(125% 105% at 50% 24%, #000 14%, transparent 80%); }
   .bg-tile-pat[data-dots="rings"] { background-image: repeating-radial-gradient(circle at 50% -10%, color-mix(in oklab, var(--fg) 4.5%, transparent) 0 1px, transparent 1px 16px); -webkit-mask-image: radial-gradient(130% 115% at 50% 20%, #000 20%, transparent 85%); mask-image: radial-gradient(130% 115% at 50% 20%, #000 20%, transparent 85%); }
-  .bg-tile-pat[data-dots="grain"] { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); background-size: 120px 120px; opacity: 0.08; }
+  .bg-tile-pat[data-dots="grain"] { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); background-size: 120px 120px; opacity: 0.13; }
   .bg-tile-pat[data-dots="off"] { background-image: none; }
 
   /* ── Keyboard shortcut rows ── */

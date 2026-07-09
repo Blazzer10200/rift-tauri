@@ -105,23 +105,25 @@ function getSRCtor(): SpeechRecognitionCtor | null {
   return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
 }
 
+const DEFAULT_STT_CONFIG: SttConfig = {
+  enabled: false,
+  language: "en-US",
+  append_to_draft: true,
+  continuous: true,
+  show_interim: true,
+  engine: "web_speech",
+  whisper_model: "large-v3-turbo-q5_0",
+  input_device: null,
+  initial_prompt: "",
+  vocab_text: "",
+  cleanup_enabled: true,
+  beam_size: null,
+  voice_commands: true,
+  auto_stop_secs: 0,
+};
+
 class SttStore {
-  config = $state<SttConfig>({
-    enabled: false,
-    language: "en-US",
-    append_to_draft: true,
-    continuous: true,
-    show_interim: true,
-    engine: "web_speech",
-    whisper_model: "large-v3-turbo-q5_0",
-    input_device: null,
-    initial_prompt: "",
-    vocab_text: "",
-    cleanup_enabled: true,
-    beam_size: null,
-    voice_commands: true,
-    auto_stop_secs: 0,
-  });
+  config = $state<SttConfig>({ ...DEFAULT_STT_CONFIG });
   configLoaded = $state(false);
 
   /** Web Speech API availability in the current WebView. */
@@ -339,6 +341,11 @@ class SttStore {
         if (token === this.restartToken && !this.recording) void this.start();
       }, 120);
     }
+  }
+
+  /** Every voice pref → factory defaults. Downloaded Whisper model files stay on disk. */
+  async resetConfig() {
+    await this.setConfig({ ...DEFAULT_STT_CONFIG });
   }
 
   /** Read/write the dictation target's draft. Routes to the tab the mic was

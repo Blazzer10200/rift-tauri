@@ -128,10 +128,11 @@
   color-scheme: dark;
 }
 
-/* density override */
-[data-density="compact"] { --row-h: 26px; --gap: 6px; --fs-md: 12.5px; }
-[data-density="regular"] { --row-h: 30px; --gap: 9px; }
-[data-density="comfy"]   { --row-h: 36px; --gap: 12px; --fs-md: 14px; }
+/* density override — :root prefix so these tie the (0,2,0) theme block above
+   and win by source order; bare [data-density] silently lost to it. */
+:root[data-density="compact"] { --row-h: 26px; --gap: 6px; --fs-md: 12.5px; }
+:root[data-density="regular"] { --row-h: 30px; --gap: 9px; }
+:root[data-density="comfy"]   { --row-h: 36px; --gap: 12px; --fs-md: 14px; }
 
 /* ─── Reset + base ─── */
 * { box-sizing: border-box; }

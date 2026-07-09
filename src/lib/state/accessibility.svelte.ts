@@ -71,6 +71,15 @@ class Accessibility {
     this.apply();
   }
 
+  /** All reading-comfort dials → factory defaults. Dials before master so a
+   *  later re-enable gets the first-time-on seeding again. */
+  reset() {
+    this.setFont("system");
+    this.setLineHeightBoost(false);
+    this.setDyslexiaMode(false);
+    this.setWarmTint(false);
+  }
+
   private apply() {
     if (typeof document === "undefined") return;
     const ds = document.documentElement.dataset;

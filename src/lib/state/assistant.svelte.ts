@@ -989,6 +989,14 @@ class AssistantStore {
     this.telemetry.event("plan.change", { from: prev, to: v });
   }
 
+  /** Claude-session prefs → factory defaults. Credentials stay: the API key and
+   *  spending cap are not preferences and are never touched by a reset. */
+  async resetSessionDefaults() {
+    this.setPlan("max");
+    await this.setTrustLevel("readonly");
+    await this.setUseFullConfig(true);
+  }
+
   /** Context-window ceiling the user's current plan grants. Derived so the gauge
    *  recomputes when `plan` flips. */
   get planCap(): number {

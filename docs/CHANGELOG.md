@@ -5,18 +5,15 @@
 ## Unreleased — Slash-menu skills + Settings overhaul
 
 - **Your Claude Code skills in the `/` menu** — user + project skills/commands scanned from `.claude` dirs with descriptions and argument hints; fuzzy filter with highlight, source badges, Tab-inserts-args vs Enter-runs. Menu chrome redesigned (glass panel, count header, styled scrollbar, sticky groups).
-- **Settings restructured into 5 tabs** with a search box that jumps to and flashes the matching card; redundant cards merged. **Show-don't-tell everywhere:** live code preview, accent sample strip, mini activity-stream preview, real-pipeline reply preview, collapsed option grids with animated expanders, and slider drag-bubbles showing the precise value.
+- **Settings restructured into 5 tabs** with a search box (press `/` or Ctrl+F) that jumps to and flashes the matching card; redundant cards merged. **Show-don't-tell everywhere:** live code + density preview, accent sample strip, mini activity-stream preview, classic-bubbles preview when stream view is off, real-pipeline reply preview, a live context gauge under the plan picker, collapsed option grids with animated expanders, and slider drag-bubbles.
+- **One-click Looks** — five curated accent + texture + vividness combos at the top of Appearance; every dial stays individually tunable after.
+- **Per-tab "Reset to defaults"** on Appearance, Chat, Claude, and Speech — with a confirm step; your API key, spending cap, and downloaded Whisper models are never touched.
 - **Claude tab reworked:** CLI version chip, billing route strip, contextual Pro note, warn-only tab dot, tightened copy.
-- **Fixed:** dyslexia Lexend font never applied app-wide (`.app` overrode it); sidebar scope-toggle thumb dislocating after layout shifts.
+- **Fixed:** interface density (compact/regular/comfy) silently never applied — a theme selector outranked it; dyslexia Lexend font never applied app-wide; sidebar scope-toggle thumb dislocating; background-texture picker tiles too faint to tell apart.
 
 ## v0.95.1 — Pre-open-source audit
 
-A 13-reviewer adversarial sweep of the entire codebase — both stacks, security-first — ahead of the source going public. The security surfaces (path containment, XSS sanitization, capability grants, TLS, token auth) all held under adversarial reading. What it did catch, now fixed:
-
-- **Killed helper processes are now always reaped.** The prompt-enhance, title, and AI-Health analyze timeouts killed their CLI child but never waited on it, leaking the process handle.
-- **Process kills moved off the async runtime.** Tree-killing a CLI child could block an async worker thread for seconds under antivirus contention; kills from live-turn paths now run on the blocking pool.
-- **Package metadata now tells the truth: MIT.** `package.json` still claimed UNLICENSED and the Rust manifest had no license field — both contradicted the repo's actual MIT license.
-- Housekeeping: dev-machine paths removed from stress scripts and test fixtures, infra names scrubbed from CI comments, one hot-path allocation hoisted.
+A 13-reviewer adversarial sweep ahead of the source going public. Security surfaces (path containment, XSS sanitization, capability grants, TLS, token auth) all held. Fixed: killed helper processes always reaped (enhance/title/analyze timeouts leaked handles) · process kills moved off the async runtime (AV contention could block a worker) · package metadata now says MIT (was UNLICENSED/missing) · dev-machine paths and infra names scrubbed from scripts, fixtures, CI.
 
 
 ## Known issues
