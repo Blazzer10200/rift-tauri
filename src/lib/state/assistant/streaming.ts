@@ -1087,6 +1087,12 @@ export function onStreamLine(tab: TabState, raw: string) {
         if (sr === "max_tokens" || sr === "refusal") {
           mutateStreaming(tab, (m) => ({ ...m, stopReason: sr }));
         }
+      } else if (evType != null && evType !== "message_start" && evType !== "message_stop" && evType !== "ping") {
+        // A partial-message event shape we don't recognize (a newer CLI). The
+        // message_start/stop/ping frames are deliberately no-op'd (envelope-level
+        // handling owns turn lifecycle); anything else is worth a breadcrumb so a
+        // future streaming-delta type isn't dropped without a trace.
+        console.warn("[assistant] unrecognized stream_event inner type", evType, ev);
       }
       break;
     }
@@ -1171,8 +1177,18 @@ export function onStreamLine(tab: TabState, raw: string) {
       if (typeof s === "string" && s.trim().length > 0) tab.promptSuggestion = s.trim();
       break;
     }
-    default:
+    default: {
+      // An event kind this build doesn't recognize — almost always a newer CLI
+      // emitting something we predate. Don't render it (we don't know its shape),
+      // but leave a breadcrumb so a future-CLI display gap is debuggable instead
+      // of silently vanishing. The onStreamDone blank-turn net still catches the
+      // case where unknown events were ALL a turn produced. `env` narrows to
+      // `never` here (the union is exhaustive) — read the runtime type back off
+      // an unknown cast, since the actual CLI can emit outside our closed union.
+      const unknownType = (env as { type?: unknown }).type;
+      console.warn("[assistant] unrecognized stream event type", unknownType, env);
       break;
+    }
   }
 }
 

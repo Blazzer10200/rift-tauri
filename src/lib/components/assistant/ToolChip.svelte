@@ -12,6 +12,7 @@
     Wrench, Loader2, CheckCircle2, AlertCircle, ChevronRight, ListChecks,
     Bot, HelpCircle, FlagOff, Flag, BookOpen, Sparkles, Slash, Square, SkipForward,
     GitBranch, GitCommitHorizontal, AppWindow, Bell,
+    Telescope, AlarmClock, Database, Radio, CalendarClock,
   } from "lucide-svelte";
   import { assistant, type ToolBlock } from "../../state/assistant.svelte";
   import { slide } from "svelte/transition";
@@ -238,6 +239,16 @@
     if (sn === "Monitor" || sn === "REPL") return Terminal;
     if (sn === "Artifact") return Globe;
     if (sn === "TodoWrite" || sn === "TaskCreate" || sn === "TaskUpdate" || sn === "ReportFindings") return ListChecks;
+    if (sn === "TaskGet" || sn === "TaskList") return ListChecks;
+    // CLI built-ins that used to fall to the generic Wrench — give the ones a
+    // user actually sees a real glyph (backwards-compat: any tool the CLI can
+    // emit should read as itself, not an anonymous wrench).
+    if (sn === "ToolSearch") return Telescope;
+    if (sn === "ScheduleWakeup") return AlarmClock;
+    if (sn === "PushNotification") return Bell;
+    if (sn === "CronCreate" || sn === "CronDelete" || sn === "CronList") return CalendarClock;
+    if (sn === "ListMcpResources" || sn === "ReadMcpResource" || sn === "ReadMcpResourceDir") return Database;
+    if (sn === "RemoteTrigger") return Radio;
     return Wrench;
   });
 
