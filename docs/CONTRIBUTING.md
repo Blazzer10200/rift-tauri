@@ -9,6 +9,8 @@ pre-PR checklist; [`ARCHITECTURE.md`](ARCHITECTURE.md) is the system map.
   and repro steps.
 - **Security issues** — don't open a public issue; see
   [`SECURITY.md`](SECURITY.md) for private reporting.
+- **Be respectful** — participation is governed by the
+  [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) (Contributor Covenant).
 - **Before opening a PR** — run the checks in DEVELOPING §2
   (`npm run check` + `cargo check`, `cargo test` if you touched anything
   testable), and don't bump versions — release tooling owns the three-file
