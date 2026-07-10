@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Blazzer10200/rift/releases"><img src="https://img.shields.io/github/v/release/Blazzer10200/rift?label=download&color=10b981" alt="Latest release" /></a>
+  <a href="https://github.com/Blazzer10200/rift-tauri/releases"><img src="https://img.shields.io/github/v/release/Blazzer10200/rift-tauri?label=download&color=10b981" alt="Latest release" /></a>
   <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/powered%20by-Claude%20Code-d97757?logo=claude&logoColor=white" alt="Powered by Claude Code" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%2011-0078d4" alt="Windows 11" />
@@ -32,7 +32,7 @@
 
 ## Install
 
-1. Download the latest `Rift-win-Setup.exe` from the **[releases page](https://github.com/Blazzer10200/rift/releases)** and run it.
+1. Download the latest `Rift-win-Setup.exe` from the **[releases page](https://github.com/Blazzer10200/rift-tauri/releases)** and run it.
 2. Per-user install, no admin needed. Rift self-updates from then on (background download, apply on restart, one-click consent).
 3. On first launch, connect your Claude account (the CLI's own sign-in, or an API key stored in the Windows Credential Manager — never on disk).
 
@@ -90,7 +90,7 @@ Prereqs, the release pipeline, and the contributor map live in [`docs/DEVELOPING
 
 ## Status
 
-Pre-1.0, moving fast — releases ship continuously via tag-driven CI to the [`rift`](https://github.com/Blazzer10200/rift) feed repo. Rift is built with Rift and is its maintainer's daily driver, but expect fast iteration and the occasional rough edge. See the [changelog](docs/CHANGELOG.md) for what's landing.
+Pre-1.0, moving fast — releases ship continuously via tag-driven CI straight to this repo's [releases page](https://github.com/Blazzer10200/rift-tauri/releases). Rift is built with Rift and is its maintainer's daily driver, but expect fast iteration and the occasional rough edge. See the [changelog](docs/CHANGELOG.md) for what's landing.
 
 ## License
 

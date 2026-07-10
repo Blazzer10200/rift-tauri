@@ -159,7 +159,7 @@ Rift's Assistant shells `claude` with `--mcp-config <rift.mcp.json>` + `--allowe
 
 Maintainers only. Versions bumped manually across all three files (`package.json` + `Cargo.toml` + `tauri.conf.json`) BEFORE `scripts/release.ps1` runs — preflight bails on any mismatch (and on a dirty tree, which also catches an un-committed `Cargo.lock` after a version bump).
 
-`release.ps1` drives `tauri build` → Velopack pack (`vpk`) → publish to the public `Blazzer10200/rift` repo (renamed from `rift-releases` at v0.16.2), with a SHA256 round-trip verify. **The `vpk` CLI version MUST equal the `velopack` crate version** (both pinned `=1.2.0`) — bump them together (`dotnet tool update -g vpk` + the Cargo pin).
+`release.ps1` drives `tauri build` → Velopack pack (`vpk`) → publish a GitHub release on this repo (single-repo — the separate `rift` releases repo was retired when the source went public; installed clients update from the Cloudflare R2 feed), with a SHA256 round-trip verify. **The `vpk` CLI version MUST equal the `velopack` crate version** (both pinned `=1.2.0`) — bump them together (`dotnet tool update -g vpk` + the Cargo pin).
 
 ### Ship flow + guard rails
 
@@ -184,6 +184,5 @@ Every variable below is **optional** and scoped to development or release toolin
 | `WEBVIEW2_USER_DATA_FOLDER` | dev | Isolates the dev WebView2 profile from an installed Rift so the two don't share cookies/state. |
 | `RIFT_CDP_MAX_EDGE` | dev | Overrides the 2576px screenshot long-edge clamp in `scripts/cdp/serve.cjs`. Cosmetic. |
 | `RIFT_MCP_SERVER` | internal | Set by Rift on itself when it re-spawns as the stdio MCP child for a turn. **Do not set manually.** |
-| `RELEASES_TOKEN` | CI/release | Fine-grained PAT (`Blazzer10200/rift` Contents:write) used by the tag-driven release workflow. Repo secret, never local. |
 
 CLI-side knobs (`CLAUDE_CODE_*`, `ANTHROPIC_API_KEY`) belong to the `claude` CLI, not Rift — see §3. Rift actively **strips** `ANTHROPIC_API_KEY` from the CLI's environment on every turn so the in-app keychain key (or the CLI's own browser login) is the single source of auth truth.

@@ -1,13 +1,13 @@
 # Rift release pipeline -- Velopack path (v0.4.47+).
 #
-# Builds the app, packs it with Velopack (`vpk pack`), and publishes to the
-# public `rift-releases` GitHub repo (`vpk upload github`). Installed clients
-# run Velopack's UpdateManager over the native GithubSource: check on launch +
-# every 6h, one-click download, then unattended apply-on-exit + relaunch.
+# Builds the app, packs it with Velopack (`vpk pack`), and publishes a GitHub
+# release on THIS repo (`vpk upload github` -> Blazzer10200/rift-tauri).
+# Installed clients update from the Cloudflare R2 feed (update_service.rs
+# UPDATE_FEED_URL); the GitHub release is the human-facing download page.
 # See src-tauri/src/update_service.rs (arc: git log -- docs/design/velopack-auto-update.md).
 #
-# Two-repo split: source lives in private `rift-tauri`; releases publish to
-# public `rift-releases` so unauthenticated GithubSource fetches succeed.
+# Single repo: the old separate releases repo (`rift`, renamed from
+# `rift-releases`) was retired when the source repo went public.
 #
 # CRITICAL -- vpk CLI version MUST equal the `velopack` crate version (both
 # pinned to 1.2.0). Bump together: `dotnet tool update -g vpk` + the `=x.y.z`
@@ -30,7 +30,8 @@
 # Skips the interactive dirty-tree refusal (a fresh checkout is clean) and, when
 # `GITHUB_REF_NAME` is set, asserts the pushed tag matches the bumped version --
 # a half-bumped tag can never produce a broken release. Auth comes from -Token
-# (the RELEASES_TOKEN PAT scoped to rift-releases) instead of `gh auth token`.
+# (the workflow's built-in GITHUB_TOKEN -- releases live on this same repo)
+# instead of `gh auth token`.
 
 param(
     [switch]$Force,
@@ -43,9 +44,9 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Resolve-Path "$PSScriptRoot\.."
 Set-Location $repoRoot
 
-# In CI, gh + vpk authenticate against rift-releases via the passed PAT. A GitHub
-# PAT is pure printable ASCII; a stray non-ASCII/control char (BOM, zero-width
-# space, NBSP, smart-quote) pasted into the RELEASES_TOKEN secret survives .Trim()
+# In CI, gh + vpk authenticate against this repo via the passed token. A GitHub
+# token is pure printable ASCII; a stray non-ASCII/control char (BOM, zero-width
+# space, NBSP, smart-quote) pasted into a token secret survives .Trim()
 # and (a) makes Octokit throw "Request headers must contain only ASCII characters"
 # at vpk upload AND (b) silently breaks `gh` CLI auth -- which masks the "already
 # exists" preflight and no-ops the portable-asset drop (both seen on the v0.8.8
@@ -227,7 +228,7 @@ if (-not $Ci) {
 }
 
 # --- Preflight: tag does not already exist ------------------------------
-$releaseRepo = 'Blazzer10200/rift'
+$releaseRepo = 'Blazzer10200/rift-tauri'
 try {
     $null = gh release view $tag --repo $releaseRepo --json tagName 2>&1
     if ($LASTEXITCODE -eq 0) {
@@ -300,7 +301,7 @@ if ($LASTEXITCODE -ne 0) { throw 'vpk pack failed' }
 # GithubSource(prerelease:true) reads the prerelease list, so pre-releases are
 # visible (unlike the old GH-release-API `/latest` path, which excluded them).
 Write-Host '=== vpk upload github ===' -ForegroundColor Cyan
-# In CI, -Token carries the rift-releases PAT; locally, fall back to the gh
+# In CI, -Token carries the workflow GITHUB_TOKEN; locally, fall back to the gh
 # session token.
 # $Token was already stripped to printable ASCII up top (shared with GH_TOKEN);
 # locally, fall back to the gh session token.

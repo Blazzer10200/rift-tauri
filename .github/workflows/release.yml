@@ -1,5 +1,6 @@
 # Tag-driven release. Push a `v*` tag -> this builds, packs with Velopack, and
-# publishes to the public `Blazzer10200/rift` repo. Replaces running
+# publishes a GitHub release on THIS repo (single-repo: the old separate
+# `Blazzer10200/rift` releases repo is retired). Replaces running
 # `scripts/release.ps1` by hand on a dev machine.
 #
 # Ship flow:
@@ -8,9 +9,9 @@
 #   git commit -am "release vX.Y.Z"
 #   git tag vX.Y.Z && git push origin main --tags
 #
-# Auth: needs a fine-grained PAT scoped to `rift-releases` with contents:write,
-# stored as the repo secret RELEASES_TOKEN. The default GITHUB_TOKEN only scopes
-# THIS (source) repo, so it cannot publish to the separate releases repo.
+# Auth: the built-in GITHUB_TOKEN (permissions: contents: write below) -- releases
+# publish to this same repo, so no PAT is needed. The old RELEASES_TOKEN secret
+# was retired at the single-repo consolidation.
 #
 # vpk pin: the vpk CLI version MUST equal the `velopack` crate version (=1.2.0).
 # Bump both together (this file + src-tauri/Cargo.toml).
@@ -23,14 +24,14 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  contents: write
 
 # NOTE: there is ONE self-hosted runner. A queue-stall watchdog
 # can't live here — a GitHub-HOSTED watcher needs billed minutes (suspended), and
 # a self-hosted watcher would compete with the build for the single runner (and
 # couldn't alarm at all if the runner is wedged, since neither job would run).
 # Replaced with a post-publish verify step inside the build job (below): it proves
-# the release actually landed in rift-releases. A wedged runner now surfaces as a
+# the release actually landed on this repo. A wedged runner now surfaces as a
 # release that simply never publishes — recover per the internal runner runbook.
 jobs:
   release:
@@ -69,7 +70,7 @@ jobs:
           if (Get-Command vpk -ErrorAction SilentlyContinue) { dotnet tool update -g vpk --version 1.2.0 } else { dotnet tool install -g vpk --version 1.2.0 }
 
       # The self-hosted runner doesn't ship the gh CLI (release.ps1 uses it for
-      # the rift-releases existence check + asset cleanup). Download the latest
+      # the release existence check + asset cleanup). Download the latest
       # standalone zip and prepend its bin to PATH -- no choco/winget dependency.
       - name: Ensure gh CLI on PATH
         run: |
@@ -105,12 +106,12 @@ jobs:
         run: npm test
 
       # release.ps1 -Ci: skips the dirty-tree refusal, asserts GITHUB_REF_NAME
-      # matches the bumped version, then build + pack + publish to rift-releases
-      # using the PAT.
+      # matches the bumped version, then build + pack + publish to this repo
+      # using the workflow's built-in token (contents: write above).
       - name: Release
         run: scripts/release.ps1 -Ci -Token $env:RELEASES_TOKEN
         env:
-          RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          RELEASES_TOKEN: ${{ github.token }}
           GITHUB_REF_NAME: ${{ github.ref_name }}
           # R2 dual-publish (release.ps1 §2) — fires only when all present.
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -118,26 +119,24 @@ jobs:
           R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
 
       # Post-publish verify (replaces the old hosted-ubuntu stall watchdog).
-      # Proves the release actually landed in rift-releases for THIS tag: the
+      # Proves the release actually landed on this repo for THIS tag: the
       # release exists AND carries the Velopack installer asset. Fails loudly if
       # release.ps1 reported success but the artifact didn't make it (e.g. a
       # partial publish).
       #
-      # UNAUTHENTICATED on purpose. rift-releases is PUBLIC (it's the update feed
-      # that update_service.rs reads with no creds), so a plain anonymous GET on
-      # the public API reads the release fine. The previous version passed
+      # UNAUTHENTICATED on purpose. This repo is PUBLIC, so a plain anonymous GET
+      # on the public API reads the release fine. The previous version passed
       # GH_TOKEN=RELEASES_TOKEN to `gh release view`; that fine-grained PAT can
       # PUBLISH (Contents:write, used by the Release step) but `gh`'s REST read
       # path returned HTTP 401 Bad credentials for it on v0.35.0 — false-failing a
       # release that published perfectly. Dropping the token removes that whole
       # class of auth mismatch; no credential is needed to read a public release.
-      - name: Verify published to rift
+      - name: Verify published
         run: |
           $tag  = $env:GITHUB_REF_NAME
-          # Must match the repo release.ps1 actually publishes to (Blazzer10200/rift,
-          # renamed from rift-releases v0.16.2). Was 'rift-releases' relying on a
-          # GitHub 301 redirect the REST API doesn't reliably follow. (cont.228)
-          $repo = 'Blazzer10200/rift'
+          # Must match the repo release.ps1 actually publishes to (this repo --
+          # single-repo since the `rift` releases repo was retired).
+          $repo = 'Blazzer10200/rift-tauri'
           Write-Host "Verifying $tag published to $repo (anonymous public read) ..."
           $headers = @{ 'User-Agent' = 'rift-release-verify'; 'Accept' = 'application/vnd.github+json' }
           $uri = "https://api.github.com/repos/$repo/releases/tags/$tag"

@@ -41,7 +41,7 @@ import { assistant } from "./assistant.svelte";
 
 /** Public release repo — used only to synthesize the human "View release on
  *  GitHub" link (Velopack's source doesn't return an html_url). */
-const RELEASES_REPO_URL = "https://github.com/Blazzer10200/rift";
+const RELEASES_REPO_URL = "https://github.com/Blazzer10200/rift-tauri";
 
 /** What `check_for_updates` returns from the backend (UpdateInfoDto). */
 type UpdateInfoDto = {

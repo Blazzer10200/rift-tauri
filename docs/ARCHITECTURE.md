@@ -111,7 +111,7 @@ The MCP server runs as a child process and can't touch the webview directly. For
 
 ## 8. Build & release
 
-Tag-driven CI: push a `v*` tag → `.github/workflows/release.yml` builds + packs (Velopack `vpk`) + publishes to the public `rift` repo (renamed from `rift-releases`, v0.16.2). **Version lockstep across THREE files** — `package.json` · `src-tauri/Cargo.toml` · `src-tauri/tauri.conf.json` (+ `Cargo.lock`); `release.ps1` preflight bails on mismatch. The `vpk` CLI version MUST equal the `velopack` crate version (both pinned `=1.2.0`).
+Tag-driven CI: push a `v*` tag → `.github/workflows/release.yml` builds + packs (Velopack `vpk`) + publishes a GitHub release on this repo (the separate `rift` releases repo was retired when the source went public). **Version lockstep across THREE files** — `package.json` · `src-tauri/Cargo.toml` · `src-tauri/tauri.conf.json` (+ `Cargo.lock`); `release.ps1` preflight bails on mismatch. The `vpk` CLI version MUST equal the `velopack` crate version (both pinned `=1.2.0`).
 
 ## 9. Hot-file split invariants (don't regress a load-bearing seam)
 
