@@ -2,7 +2,7 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — Settings overhaul + chat display polish
+## v0.96.0 — Settings overhaul + chat display polish
 
 - **Chat tool display sharpened** — web-search sources get per-domain favicons; test/lint icons take the pass/fail color; subagent cards get an accent-wash head; read/grep rows a subtle tint; a running shell prompt glows and active rows scan-sweep. Vertical rhythm unified — every block sits on one consistent, density-aware gap. Every Claude Code tool shows a real icon (eight ex-generic-wrench tools got their own), and any future CLI tool still renders as a clean named chip rather than vanishing. **Fixed:** a narration sentence split across a tool call ("…in p" · tool · "arallel.") no longer renders a word sliced in half.
 - **Your Claude Code skills in the `/` menu** — user + project skills/commands scanned from `.claude` dirs with descriptions and argument hints; fuzzy filter with highlight, source badges, Tab-inserts-args vs Enter-runs. Menu chrome redesigned (glass panel, sticky groups).
