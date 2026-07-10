@@ -2,6 +2,7 @@
   import { untrack, onMount } from "svelte";
   import { commandPalette } from "../state/command-palette.svelte";
   import CommandPalette from "./dialogs/CommandPalette.svelte";
+  import McpServersDialog from "./dialogs/McpServersDialog.svelte";
   import Titlebar from "./shell/Titlebar.svelte";
   import Sidebar from "./shell/Sidebar.svelte";
   import Topbar from "./shell/Topbar.svelte";
@@ -271,6 +272,8 @@
   <ToastHost />
 
   <CommandPalette />
+
+  <McpServersDialog />
 </div>
 
 <style>

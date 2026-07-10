@@ -21,6 +21,7 @@ pub mod env_checks;
 pub mod git_local;
 pub mod local_llm;
 pub mod mcp_bridge;
+pub mod mcp_list;
 pub mod mcp_server;
 pub mod news;
 pub mod nothink;
@@ -63,6 +64,9 @@ pub use local_llm::*;
 // "What's new in AI" feed (Workspace page): deterministic changelog+npm fetch +
 // opt-in AI digest in `news.rs`. Glob re-export for the __cmd__ items.
 pub use news::*;
+// `/mcp` harness view: `claude mcp list` shell-out + parser in `mcp_list.rs`.
+// Glob re-export for the __cmd__ item.
+pub use mcp_list::*;
 // R7 split (2026-06-09): workspace root state + @-mention file enumeration +
 // branch probe in `workspace.rs`. Glob re-export for the same __cmd__ reason;
 // `current_root` stays reachable as `crate::assistant::current_root` (stt).

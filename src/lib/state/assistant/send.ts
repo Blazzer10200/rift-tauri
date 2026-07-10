@@ -19,6 +19,7 @@ import { notify } from "../toast.svelte";
 import type { AssistantStore, TabState } from "../assistant.svelte";
 import type { Block, ChatMessage, ModelSel, QueueItem, TurnRecord } from "./types";
 import { effortToFlag, fableAvailable, haikuAvailable, FABLE_SUNSET_MS } from "./helpers";
+import { mcpPanel } from "../mcp-panel.svelte";
 import { finalizeInflightBlocks } from "./streaming";
 
 // One-shot per app session — the sunset warning shouldn't nag on every send.
@@ -512,23 +513,14 @@ function runSlash(store: AssistantStore, input: string): boolean {
       }
       return true;
     case "mcp": {
-      // Answered from the latest init frame (stored per-tab in streaming.ts) —
-      // no CLI round-trip, mirrors what the interactive CLI's /mcp shows.
-      const servers = store.activeTab?.mcpServers;
-      if (!servers) {
-        notify.info("No MCP status yet — send a message first; the CLI reports server health at the start of each turn.");
-        return true;
-      }
-      if (servers.length === 0) {
-        notify.info("No MCP servers configured for this session.");
-        return true;
-      }
-      const glyph = (s: string) =>
-        s === "connected" ? "✓" : s === "pending" ? "…" : s === "disabled" ? "○" : "✗";
-      store.lastNotice =
-        "MCP servers: " +
-        servers.map((s) => `${s.name} ${glyph(s.status)} ${s.status}`).join(" · ") +
-        ". Statuses refresh at the start of each turn.";
+      // Centered dialog (McpServersDialog), not a notice/toast — owner call
+      // 2026-07-10. Data = two truth layers merged (mcpStatus.ts): `claude
+      // mcp list` via the backend — the user's real harness config (user
+      // scope + project .mcp.json), health-checked now, works before any
+      // turn — overlaid with this chat's init-frame statuses (headless auth
+      // ≠ terminal auth, so the session's view wins per name).
+      mcpPanel.show();
+      void mcpPanel.refresh(store.workspace.current, store.activeTab?.mcpServers ?? null);
       return true;
     }
     case "tools":
