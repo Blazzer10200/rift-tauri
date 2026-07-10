@@ -68,7 +68,7 @@
       "allow": [{ "path": "**" }]
     },
     "dialog:allow-open",
-    "dialog:allow-confirm",
+    "dialog:allow-message",
     "clipboard-manager:allow-read-text"
   ]
 }
