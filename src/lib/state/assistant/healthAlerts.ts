@@ -12,31 +12,33 @@ import type { TurnRecord } from "./types";
 // hint once, not a nag (same pattern as send.ts's fableSunsetNoticed).
 const warned = new Set<"deadWait" | "staleCache" | "toolErrors" | "mcpInit">();
 
-// MCP statuses worth alerting on. "pending" (still starting) and "disabled"
-// (user turned it off deliberately) are healthy-ish; unknown future statuses
-// are ignored rather than false-alarmed.
+// MCP statuses that mean the rift server is genuinely dead. "pending" (still
+// starting) and "disabled" (user turned it off deliberately) are healthy-ish;
+// unknown future statuses are ignored rather than false-alarmed.
 const BAD_MCP_STATUSES = new Set(["failed", "needs-auth", "disconnected"]);
 
 /** The CLI's `system`/`init` frame (first frame of every turn) lists each MCP
- *  server's connection status. A failed `rift` server means the workspace/git
- *  tools are silently dead for the whole turn — the user would only discover
- *  it through failing tool calls. Surface it once per app session. */
+ *  server's connection status. Only the `rift` server is toast-worthy — if it
+ *  failed, the workspace/git tools are silently dead for the whole turn and
+ *  the user would only discover it through failing tool calls. User-configured
+ *  CLI servers (claude.ai connectors etc.) sit permanently `needs-auth` in
+ *  Rift's headless subprocess — that's their normal state, not a problem, so
+ *  they never toast. */
 export function checkMcpInitHealth(env: { mcp_servers?: unknown }) {
   if (warned.has("mcpInit")) return;
   const servers = Array.isArray(env.mcp_servers)
     ? (env.mcp_servers as { name?: string; status?: string }[])
     : [];
-  const bad = servers.filter((s) => typeof s?.status === "string" && BAD_MCP_STATUSES.has(s.status));
-  if (bad.length === 0) return;
+  const riftDown = servers.some(
+    (s) => s?.name === "rift" && typeof s.status === "string" && BAD_MCP_STATUSES.has(s.status),
+  );
+  if (!riftDown) return;
   warned.add("mcpInit");
-  const riftDown = bad.some((s) => s.name === "rift");
-  const names = bad.map((s) => `${s.name ?? "?"} (${s.status})`).join(", ");
   toast.push({
-    severity: riftDown ? "danger" : "warn",
-    title: riftDown ? "Rift workspace tools failed to start" : "MCP server not connected",
-    detail: riftDown
-      ? "File, search, and git tools are unavailable in this chat — try a new tab; if it persists, restart Rift."
-      : `${names} — its tools are unavailable this session.`,
+    severity: "danger",
+    title: "Rift workspace tools failed to start",
+    detail:
+      "File, search, and git tools are unavailable in this chat — try a new tab; if it persists, restart Rift.",
   });
 }
 

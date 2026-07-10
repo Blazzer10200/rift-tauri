@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/Blazzer10200/rift-tauri/releases"><img src="https://img.shields.io/github/v/release/Blazzer10200/rift-tauri?label=download&color=10b981" alt="Latest release" /></a>
-  <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/powered%20by-Claude%20Code-d97757?logo=claude&logoColor=white" alt="Powered by Claude Code" /></a>
+  <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/powered%20by-Claude%20Code-d97757" alt="Powered by Claude Code" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%2011-0078d4" alt="Windows 11" />
   <img src="https://img.shields.io/badge/Tauri%202-Rust%20%2B%20Svelte%205-f74c00" alt="Tauri 2" />
@@ -95,5 +95,7 @@ Pre-1.0, moving fast — releases ship continuously via tag-driven CI straight t
 ## License
 
 [MIT](LICENSE) © 2026 Braison Swilling (Blazzer10200)
+
+Rift is an independent open-source project — not affiliated with, sponsored by, or endorsed by Anthropic. "Claude" and "Claude Code" are trademarks of Anthropic, PBC, used here only to describe what Rift integrates with. Licenses for third-party software bundled in the installer are collected in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 <sub>Rift is an independent open-source project — not affiliated with, sponsored, or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic, PBC.</sub>

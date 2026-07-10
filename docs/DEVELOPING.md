@@ -159,6 +159,8 @@ Rift's Assistant shells `claude` with `--mcp-config <rift.mcp.json>` + `--allowe
 
 Maintainers only. Versions bumped manually across all three files (`package.json` + `Cargo.toml` + `tauri.conf.json`) BEFORE `scripts/release.ps1` runs — preflight bails on any mismatch (and on a dirty tree, which also catches an un-committed `Cargo.lock` after a version bump).
 
+When dependencies change, regenerate the bundled license notices: `python scripts/gen-third-party-notices.py` rewrites `THIRD-PARTY-NOTICES.md` (shipped inside the installer next to the exe) — commit the result.
+
 `release.ps1` drives `tauri build` → Velopack pack (`vpk`) → publish a GitHub release on this repo (single-repo — the separate `rift` releases repo was retired when the source went public; installed clients update from the Cloudflare R2 feed), with a SHA256 round-trip verify. **The `vpk` CLI version MUST equal the `velopack` crate version** (both pinned `=1.2.0`) — bump them together (`dotnet tool update -g vpk` + the Cargo pin).
 
 ### Ship flow + guard rails

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { messageToTurn, parseAskUserResult, groupNames, workLineMode, isFillerSay, classifySay, outputPeek, groupBlocks, shellFlavor, resultMeta, splitOutput, nextRevealTier, isPlanArtifact, REVEAL_COLLAPSED, REVEAL_EXPANDED } from "./streamModel";
+import { messageToTurn, parseAskUserResult, groupNames, workLineMode, isFillerSay, classifySay, outputPeek, groupBlocks, shellFlavor, resultMeta, splitOutput, nextRevealTier, isPlanArtifact, REVEAL_COLLAPSED, REVEAL_EXPANDED, REVEAL_SLACK } from "./streamModel";
 import type { StreamTool } from "./streamModel";
 import type { ChatMessage } from "$lib/state/assistant.svelte";
 
@@ -355,6 +355,10 @@ describe("outputPeek — trailing-lines preview for command output", () => {
     const out = "a\nb\n\nc\nd\ne"; // 5 non-empty lines
     expect(outputPeek(out, 3)).toEqual({ lines: ["c", "d", "e"], more: 2 });
   });
+
+  it("exactly one line past N → shows it instead of a '+1 more' indicator", () => {
+    expect(outputPeek("a\nb\nc\nd", 3)).toEqual({ lines: ["a", "b", "c", "d"], more: 0 });
+  });
 });
 
 describe("splitOutput — progressive reveal tiers", () => {
@@ -378,10 +382,29 @@ describe("splitOutput — progressive reveal tiers", () => {
     expect(r.hidden).toBe(100 - REVEAL_COLLAPSED);
   });
 
+  it("a tail within the slack shows fully — no 'Show 4 more lines' stub", () => {
+    // 16 lines vs a 12-line cap: the 4-line tail renders instead of a button.
+    const r = splitOutput(lines(REVEAL_COLLAPSED + 4), "collapsed");
+    expect(r.shown).toBe(REVEAL_COLLAPSED + 4);
+    expect(r.hidden).toBe(0);
+    // Boundary: exactly cap + slack still shows everything…
+    expect(splitOutput(lines(REVEAL_COLLAPSED + REVEAL_SLACK), "collapsed").hidden).toBe(0);
+    // …one past it caps normally.
+    const over = splitOutput(lines(REVEAL_COLLAPSED + REVEAL_SLACK + 1), "collapsed");
+    expect(over.shown).toBe(REVEAL_COLLAPSED);
+    expect(over.hidden).toBe(REVEAL_SLACK + 1);
+  });
+
   it("expanded caps at REVEAL_EXPANDED", () => {
     const r = splitOutput(lines(100), "expanded");
     expect(r.shown).toBe(REVEAL_EXPANDED);
     expect(r.hidden).toBe(100 - REVEAL_EXPANDED);
+  });
+
+  it("expanded tier absorbs a slack-sized tail too", () => {
+    const r = splitOutput(lines(REVEAL_EXPANDED + REVEAL_SLACK), "expanded");
+    expect(r.shown).toBe(REVEAL_EXPANDED + REVEAL_SLACK);
+    expect(r.hidden).toBe(0);
   });
 
   it("all shows everything, nothing hidden", () => {
@@ -392,13 +415,16 @@ describe("splitOutput — progressive reveal tiers", () => {
 });
 
 describe("nextRevealTier — step the cap up", () => {
-  it("collapsed → expanded only when there's more than the collapsed cap", () => {
-    expect(nextRevealTier("collapsed", REVEAL_COLLAPSED + 1)).toBe("expanded");
+  it("collapsed → expanded only when there's more than the cap + slack", () => {
+    expect(nextRevealTier("collapsed", REVEAL_COLLAPSED + REVEAL_SLACK + 1)).toBe("expanded");
+    // Within the slack the tier already shows everything — no next step.
+    expect(nextRevealTier("collapsed", REVEAL_COLLAPSED + REVEAL_SLACK)).toBeNull();
     expect(nextRevealTier("collapsed", REVEAL_COLLAPSED)).toBeNull();
   });
 
-  it("expanded → all only when there's more than the expanded cap", () => {
-    expect(nextRevealTier("expanded", REVEAL_EXPANDED + 1)).toBe("all");
+  it("expanded → all only when there's more than the cap + slack", () => {
+    expect(nextRevealTier("expanded", REVEAL_EXPANDED + REVEAL_SLACK + 1)).toBe("all");
+    expect(nextRevealTier("expanded", REVEAL_EXPANDED + REVEAL_SLACK)).toBeNull();
     expect(nextRevealTier("expanded", REVEAL_EXPANDED)).toBeNull();
   });
 

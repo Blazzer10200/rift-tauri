@@ -410,7 +410,8 @@ export function outputPeek(result: string | null | undefined, n = 3): { lines: s
   if (!result) return { lines: [], more: 0 };
   const all = result.replace(/\s+$/, "").split("\n");
   const nonEmpty = all.filter((l) => l.trim().length > 0);
-  if (nonEmpty.length <= n) return { lines: nonEmpty, more: 0 };
+  // +1 slack: a "+1 more line" indicator is as tall as the line it hides.
+  if (nonEmpty.length <= n + 1) return { lines: nonEmpty, more: 0 };
   return { lines: nonEmpty.slice(-n), more: nonEmpty.length - n };
 }
 
@@ -427,6 +428,10 @@ export function outputPeek(result: string | null | undefined, n = 3): { lines: s
 // long ones both cap predictably. Kept pure + exported for unit tests.
 export const REVEAL_COLLAPSED = 12; // first glance — a head tall enough to be useful
 export const REVEAL_EXPANDED = 40;  // after one "Show more" — most output fits here
+// Never hide a tail this short behind a click — a "Show 4 more lines" button
+// costs more UI than the 4 lines it hides. A tier whose remainder fits in the
+// slack just shows everything (and never offers a next tier).
+export const REVEAL_SLACK = 8;
 export type RevealTier = "collapsed" | "expanded" | "all";
 
 export function splitOutput(
@@ -437,16 +442,16 @@ export function splitOutput(
   const lines = result.replace(/\s+$/, "").split("\n");
   const total = lines.length;
   const cap = tier === "collapsed" ? REVEAL_COLLAPSED : tier === "expanded" ? REVEAL_EXPANDED : total;
-  const shown = Math.min(cap, total);
+  const shown = total <= cap + REVEAL_SLACK ? total : cap;
   return { lines, shown, hidden: Math.max(0, total - shown), total };
 }
 
 // The next tier up from the current one, given how many lines the output has.
-// collapsed → expanded (if there's more past the collapsed cap) → all. Returns
-// null when nothing more can be revealed (already showing everything).
+// collapsed → expanded (if there's more past the collapsed cap + slack) → all.
+// Returns null when nothing more can be revealed (already showing everything).
 export function nextRevealTier(tier: RevealTier, total: number): RevealTier | null {
-  if (tier === "collapsed") return total > REVEAL_COLLAPSED ? "expanded" : null;
-  if (tier === "expanded") return total > REVEAL_EXPANDED ? "all" : null;
+  if (tier === "collapsed") return total > REVEAL_COLLAPSED + REVEAL_SLACK ? "expanded" : null;
+  if (tier === "expanded") return total > REVEAL_EXPANDED + REVEAL_SLACK ? "all" : null;
   return null;
 }
 

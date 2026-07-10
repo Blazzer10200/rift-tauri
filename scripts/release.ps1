@@ -253,7 +253,9 @@ $exePath = Join-Path $targetRoot 'release/rift-tauri.exe'
 if (-not (Test-Path $exePath)) { throw "exe not produced: $exePath" }
 
 # --- Stage a clean directory for vpk pack -------------------------------
-# vpk packs every file in -p verbatim. Copy ONLY the exe + window icon.
+# vpk packs every file in -p verbatim. Copy ONLY the exe + window icon +
+# third-party license notices (OSS notice obligation for shipped binaries;
+# regenerate via scripts/gen-third-party-notices.py when deps change).
 # If a future Tauri release bundles a WebView2 redistributable, sidecar, or
 # any *.dll next to the exe, IT MUST BE ADDED HERE or it'll be missing on
 # installed clients.
@@ -262,6 +264,7 @@ if (Test-Path $staging) { Remove-Item -Recurse -Force $staging }
 New-Item -ItemType Directory -Path $staging -Force | Out-Null
 Copy-Item $exePath $staging
 Copy-Item 'src-tauri/icons/icon.ico' $staging
+Copy-Item 'THIRD-PARTY-NOTICES.md' $staging
 
 # --- vpk pack ------------------------------------------------------------
 Write-Host '=== vpk pack ===' -ForegroundColor Cyan

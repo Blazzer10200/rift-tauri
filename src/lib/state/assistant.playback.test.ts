@@ -513,6 +513,23 @@ describe("playback — usage, cost, model attribution", () => {
     expect(tab.lastError).toBeNull();
   });
 
+  it("stays silent when only user-level MCP servers are unhealthy (rift is fine)", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    const pushMock = vi.mocked(toast.push);
+    pushMock.mockClear();
+    feed(tab, [{
+      type: "system",
+      subtype: "init",
+      mcp_servers: [
+        { name: "rift", status: "connected" },
+        { name: "claude.ai Google Calendar", status: "needs-auth" },
+        { name: "claude.ai Stripe", status: "failed" },
+      ],
+    }]);
+    expect(pushMock).not.toHaveBeenCalled();
+  });
+
   it("toasts once (latched) when the init frame reports a failed rift MCP server", () => {
     const tab = freshTab();
     beginTurn(tab);
