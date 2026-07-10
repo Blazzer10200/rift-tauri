@@ -21,6 +21,10 @@
   let touched = $state(false);
   const view = $derived(splitOutput(text, tier));
   const next = $derived(nextRevealTier(tier, view.total));
+  // Collapse is only an affordance when collapsing would actually hide lines —
+  // short output (within the collapsed cap + slack) shows fully at every tier,
+  // so a Collapse button there would be a no-op.
+  const collapsible = $derived(tier !== "collapsed" && nextRevealTier("collapsed", view.total) !== null);
   const shownLines = $derived(view.lines.slice(0, view.shown));
   // Reveal-all makes the block a bounded scroll only when there's genuinely a
   // lot; short "all" output just renders at its natural height.
@@ -38,7 +42,7 @@
 
 <div class="oblock">
   <pre class="oblock-out" class:scrolls>{shownLines.join("\n")}</pre>
-  {#if next || tier !== "collapsed"}
+  {#if next || collapsible}
     <div class="oblock-acts">
       {#if next}
         <button class="oblock-btn" type="button" onclick={more}>
@@ -46,7 +50,7 @@
           Show {view.hidden} more line{view.hidden === 1 ? "" : "s"}
         </button>
       {/if}
-      {#if tier !== "collapsed"}
+      {#if collapsible}
         <button class="oblock-btn ghost" type="button" onclick={collapse}>
           <ChevronUp size={12} strokeWidth={2.2} />
           Collapse

@@ -2,6 +2,12 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## Unreleased
+
+- **Quieter startup** — the "MCP server not connected" toast no longer fires for user-level claude.ai connectors (permanently unauthenticated inside Rift's headless CLI — that's their normal state). Only a dead `rift` workspace server still warns.
+- **New `/mcp` command** — instant per-session MCP server status (name + connection state) straight from the CLI's init report; no turn, no cost. In the `/` menu under Info.
+- **No more stub reveals** — terminal output never hides a short tail behind a click: a remainder of ≤8 lines just renders (killed "Show 4 more lines"), a no-op Collapse no longer appears on short output, and the collapsed peek shows a lone extra line instead of "+1 more line".
+
 ## v0.96.0 — Settings overhaul + chat display polish
 
 - **Chat tool display sharpened** — web-search sources get per-domain favicons; test/lint icons take the pass/fail color; subagent cards get an accent-wash head; read/grep rows a subtle tint; a running shell prompt glows and active rows scan-sweep. Vertical rhythm unified — every block sits on one consistent, density-aware gap. Every Claude Code tool shows a real icon (eight ex-generic-wrench tools got their own), and any future CLI tool still renders as a clean named chip rather than vanishing. **Fixed:** a narration sentence split across a tool call ("…in p" · tool · "arallel.") no longer renders a word sliced in half.

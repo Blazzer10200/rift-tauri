@@ -126,6 +126,7 @@
     { name: "copy",      desc: "Copy last response to clipboard" },
     { name: "stop",      desc: "Halt the current turn" },
     { name: "tools",     desc: "List available workspace tools" },
+    { name: "mcp",       desc: "MCP server status for this session" },
     { name: "cost",      desc: "Show session cost" },
     { name: "usage",     desc: "Plan limits — 5-hour & weekly windows" },
     { name: "stats",     desc: "Session telemetry summary (inline)" },

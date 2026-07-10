@@ -567,6 +567,23 @@ describe("playback — usage, cost, model attribution", () => {
     expect(pushMock).not.toHaveBeenCalled();
   });
 
+  it("stores the init frame's MCP server list on the tab for /mcp", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    feed(tab, [{
+      type: "system",
+      subtype: "init",
+      mcp_servers: [
+        { name: "rift", status: "connected" },
+        { name: "claude.ai Google Calendar", status: "needs-auth" },
+      ],
+    }]);
+    expect(tab.mcpServers).toEqual([
+      { name: "rift", status: "connected" },
+      { name: "claude.ai Google Calendar", status: "needs-auth" },
+    ]);
+  });
+
   it("flags a max_tokens stop_reason on the streaming message", () => {
     const tab = freshTab();
     beginTurn(tab);

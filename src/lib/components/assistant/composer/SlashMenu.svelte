@@ -7,7 +7,7 @@
   import {
     Plus, Eraser, Cpu, RotateCcw, Copy, StopCircle,
     Wrench, Coins, Gauge, BarChart3, Terminal, ClipboardCopy, HelpCircle,
-    Palette, LogIn, Sparkles, FileCode2, SearchX, SquareSlash,
+    Palette, LogIn, Sparkles, FileCode2, SearchX, SquareSlash, Plug,
   } from "lucide-svelte";
   import { slashMatchSegments } from "./helpers";
 
@@ -39,6 +39,7 @@
     copy:      { icon: Copy,          group: "Compose" },
     stop:      { icon: StopCircle,    group: "Compose" },
     tools:     { icon: Wrench,        group: "Info" },
+    mcp:       { icon: Plug,          group: "Info" },
     cost:      { icon: Coins,        group: "Info" },
     usage:     { icon: Gauge,         group: "Info" },
     stats:     { icon: BarChart3,     group: "Info" },

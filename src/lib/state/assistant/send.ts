@@ -511,6 +511,26 @@ function runSlash(store: AssistantStore, input: string): boolean {
         notify.info("No cost recorded yet — send a message first.");
       }
       return true;
+    case "mcp": {
+      // Answered from the latest init frame (stored per-tab in streaming.ts) —
+      // no CLI round-trip, mirrors what the interactive CLI's /mcp shows.
+      const servers = store.activeTab?.mcpServers;
+      if (!servers) {
+        notify.info("No MCP status yet — send a message first; the CLI reports server health at the start of each turn.");
+        return true;
+      }
+      if (servers.length === 0) {
+        notify.info("No MCP servers configured for this session.");
+        return true;
+      }
+      const glyph = (s: string) =>
+        s === "connected" ? "✓" : s === "pending" ? "…" : s === "disabled" ? "○" : "✗";
+      store.lastNotice =
+        "MCP servers: " +
+        servers.map((s) => `${s.name} ${glyph(s.status)} ${s.status}`).join(" · ") +
+        ". Statuses refresh at the start of each turn.";
+      return true;
+    }
     case "tools":
       store.lastNotice =
         "Tools available this turn: " +
@@ -577,7 +597,7 @@ function runSlash(store: AssistantStore, input: string): boolean {
     }
     case "help":
       store.lastNotice =
-        "Slash commands: /new · /clear · /model · /retry · /copy · /stop · /tools · /cost · /usage · /openincli · /diag · /diag-clear · /help. " +
+        "Slash commands: /new · /clear · /model · /retry · /copy · /stop · /tools · /mcp · /cost · /usage · /openincli · /diag · /diag-clear · /help. " +
         "/clear wipes the current chat in place (old convo saved to History); /new opens a separate tab. /openincli copies a `claude --resume` command for the standalone CLI. " +
         "/diag exports session telemetry as JSON to clipboard. Up-arrow recalls previous prompts. " +
         "Your own Claude Code skills and commands (from ~/.claude and the project's .claude folder) show up in the / menu too — they run through the CLI.";

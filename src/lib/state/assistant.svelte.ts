@@ -276,6 +276,10 @@ export class TabState {
    *  as a ghost chip in the composer while the draft is empty; consumed on
    *  click, cleared at the next beginTurn. In-memory only — never persisted. */
   promptSuggestion = $state<string | null>(null);
+  /** MCP server statuses from the latest `system`/`init` frame — the CLI
+   *  reports them at the start of every turn. Read by the /mcp slash command.
+   *  In-memory only; null until the tab's first turn. */
+  mcpServers = $state<{ name: string; status: string }[] | null>(null);
   /** Per-tab staged attachments. Same rationale as `draft`. send() snapshots
    *  + clears on dispatch. 20MiB cumulative cap enforced by addAttachment. */
   attachments = $state<{ id: string; mime: string; dataBase64: string; sizeBytes: number }[]>([]);

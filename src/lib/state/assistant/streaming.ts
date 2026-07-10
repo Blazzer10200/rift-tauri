@@ -1167,7 +1167,19 @@ export function onStreamLine(tab: TabState, raw: string) {
       if (env.subtype === "compact_boundary") appendCliCompaction(tab, env);
       // First frame of every turn lists MCP server health — a failed rift
       // server means dead workspace tools; toast instead of staying silent.
-      if (env.subtype === "init") checkMcpInitHealth(env as { mcp_servers?: unknown });
+      // The list is also kept on the tab so /mcp can answer without a turn.
+      if (env.subtype === "init") {
+        const raw = (env as { mcp_servers?: unknown }).mcp_servers;
+        if (Array.isArray(raw)) {
+          tab.mcpServers = raw
+            .filter((s): s is { name?: unknown; status?: unknown } => typeof s === "object" && s !== null)
+            .map((s) => ({
+              name: typeof s.name === "string" ? s.name : "?",
+              status: typeof s.status === "string" ? s.status : "unknown",
+            }));
+        }
+        checkMcpInitHealth(env as { mcp_servers?: unknown });
+      }
       break;
     }
     case "prompt_suggestion": {
