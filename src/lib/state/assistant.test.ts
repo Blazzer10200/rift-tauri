@@ -12,6 +12,8 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 import { invoke } from "@tauri-apps/api/core";
 import { assistant } from "./assistant.svelte.js";
 import { recordTurnUsage } from "./assistant/streaming.js";
+import { restoreTabs } from "./assistant/tabs.js";
+import { tabsStorageKey } from "./assistant/persistence.js";
 import { shell } from "./shell.svelte.js";
 
 // Minimal turn record. TurnRecord is a private type so we build a structural
@@ -636,5 +638,96 @@ describe("deleteAllConversations — partial backend failure (orphan-tab regress
     expect((assistant as any).tabs.has("del-ok")).toBe(false);
     expect((assistant as any).tabs.has("del-fail")).toBe(true);
     expect(assistant.currentConvoId).not.toBe("del-ok");
+  });
+});
+
+// Two panes must never key the same tab — the pane {#each} in AssistantPage is
+// keyed by tabId, so a duplicate throws each_key_duplicate and blanks the whole
+// chat surface; persistTabs then poisons localStorage so it recurs on EVERY
+// load (found live 2026-07-10). These pin the three guards.
+describe("pane duplicate-key invariant", () => {
+  const invokeMock = vi.mocked(invoke);
+  // Node test env has no localStorage (persistTabs try/catches it away, but
+  // restoreTabs needs a readable record) — shim one for this block only.
+  const lsStore = new Map<string, string>();
+  const hadLS = "localStorage" in globalThis;
+  let prevWorkspace: unknown;
+
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "assistant_load_conversation") {
+        return { id: args.id, title: "t", model: "sonnet", createdAt: 1, updatedAt: 1, messages: [], cliSessionId: args.id };
+      }
+      return undefined;
+    });
+    lsStore.clear();
+    (globalThis as any).localStorage = {
+      getItem: (k: string) => lsStore.get(k) ?? null,
+      setItem: (k: string, v: string) => void lsStore.set(k, String(v)),
+      removeItem: (k: string) => void lsStore.delete(k),
+      clear: () => lsStore.clear(),
+    };
+    // effectiveRoot reads workspace.current on every pane move — stub it.
+    prevWorkspace = (assistant as any).workspace;
+    (assistant as any).workspace = { current: null, recent: [] };
+    assistant.panes = [{ tabId: null }];
+    assistant.focusedPaneIdx = 0;
+  });
+
+  afterEach(() => {
+    if (!hadLS) delete (globalThis as any).localStorage;
+    (assistant as any).workspace = prevWorkspace;
+    assistant.conversations = [] as any;
+    assistant.panes = [{ tabId: null }];
+    assistant.focusedPaneIdx = 0;
+  });
+
+  it("restoreTabs self-heals a poisoned record with the same tab in two panes", async () => {
+    assistant.conversations = [
+      { id: "dup-a", title: "a", model: "sonnet", createdAt: 1, updatedAt: 1 },
+    ] as any;
+    localStorage.setItem(tabsStorageKey(), JSON.stringify({
+      openTabs: ["dup-a"],
+      activeTabId: "dup-a",
+      panes: [{ tabId: "dup-a" }, { tabId: "dup-a" }, { tabId: null }],
+      focusedPaneIdx: 2,
+    }));
+
+    await restoreTabs(assistant as any);
+
+    const ids = assistant.panes.map((p) => p.tabId).filter(Boolean);
+    expect(ids).toEqual(["dup-a"]); // later duplicate hydrated empty
+    // Focus lands on the pane that actually shows the winner — the repoint
+    // must not re-mint the duplicate the dedup just cleared.
+    expect(assistant.panes[assistant.focusedPaneIdx]?.tabId).toBe("dup-a");
+  });
+
+  it("closeTab whose neighbor already renders in a sibling pane focuses it instead of duplicating", async () => {
+    assistant.ensureTab("ka", "ka");
+    assistant.ensureTab("kb", "kb");
+    assistant.openTabs = ["ka", "kb"];
+    assistant.currentConvoId = "kb";
+    assistant.panes = [{ tabId: "ka" }, { tabId: "kb" }];
+    assistant.focusedPaneIdx = 1;
+
+    await assistant.closeTab("kb");
+
+    expect(assistant.panes.map((p) => p.tabId)).toEqual(["ka", null]);
+    expect(assistant.focusedPaneIdx).toBe(0);
+  });
+
+  it("sentinel drop of an already-visible tab focuses its pane instead of adding a duplicate pane", () => {
+    assistant.ensureTab("sa", "sa");
+    assistant.ensureTab("sb", "sb");
+    assistant.openTabs = ["sa", "sb"];
+    assistant.currentConvoId = "sb";
+    assistant.panes = [{ tabId: "sa" }, { tabId: "sb" }];
+    assistant.focusedPaneIdx = 1;
+
+    assistant.dropTabIntoPane("sa", 2); // sentinel: "new pane at end"
+
+    expect(assistant.panes.map((p) => p.tabId)).toEqual(["sa", "sb"]);
+    expect(assistant.focusedPaneIdx).toBe(0);
   });
 });

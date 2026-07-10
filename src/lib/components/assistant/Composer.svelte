@@ -1765,9 +1765,33 @@
     margin-top: 3px;
     padding: 5px 5px 4px 6px;
     border-top: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
+    /* Width-query container for the narrow-pane ladder below. Safe: both
+       popovers (PermMenu/SettingsMenu) portal to <body>, so containment
+       can't re-anchor them. */
+    container-type: inline-size;
   }
-  .cbar-l { display: flex; align-items: center; gap: 2px; min-width: 0; }
-  .cbar-r { margin-left: auto; display: flex; align-items: center; gap: 5px; position: relative; }
+  /* overflow:hidden is the paint-over stopper: min-width:0 lets the box
+     shrink below its nowrap children, which otherwise keep painting PAST
+     its edge and over .cbar-r (the split-pane "glyph soup", 2026-07-10). */
+  .cbar-l { display: flex; align-items: center; gap: 2px; min-width: 0; overflow: hidden; }
+  .cbar-r { margin-left: auto; display: flex; align-items: center; gap: 5px; position: relative; min-width: 0; }
+
+  /* Narrow-pane ladder — split panes and small windows shed decoration
+     before anything can collide: effort text → labels/reveals → mic+attach.
+     Every control stays reachable (dictate = Ctrl+D, attach = paste/drop). */
+  @container (max-width: 440px) {
+    .pill-effort, .char-count { display: none; }
+    .pill-label { max-width: 64px; }
+  }
+  @container (max-width: 380px) {
+    .perm-label, .local-pill-label { display: none; }
+    .cbtn.reveal { display: none; }
+    .pill-label { max-width: 56px; }
+  }
+  @container (max-width: 330px) {
+    /* .cbar-l prefix beats the later `.cbtn { display:inline-flex }` rule. */
+    .cbar-l .micbtn, .cbar-l .attachbtn { display: none; }
+  }
 
   /* Flat control button — transparent base; .ic = square icon variant. */
   .cbtn {
@@ -2168,6 +2192,7 @@
   .model-pill {
     align-self: center;
     display: inline-flex; align-items: center; gap: 7px;
+    min-width: 0;
     height: 30px; padding: 0 8px;
     background: transparent;
     border: 1px solid transparent;

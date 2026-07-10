@@ -441,7 +441,8 @@
           <div class="pane-empty-mark"><MessageSquarePlus size={20}/></div>
           <div class="pane-empty-title">Empty pane</div>
           <div class="pane-empty-hint">
-            Start a fresh chat here, or drag a tab from the bar into this pane.
+            <!-- No tabs BAR exists since the redesign — chats drag in from the sidebar. -->
+            Start a fresh chat here, or drag a chat in from the sidebar.
           </div>
           <div class="pane-empty-actions">
             <button class="btn primary sm" type="button" onclick={onEmptyNew}>

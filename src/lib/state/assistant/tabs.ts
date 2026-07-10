@@ -157,6 +157,17 @@ export function setFocusedPane(host: TabsHost, idx: number) {
 function assignFocusedPane(host: TabsHost, tabId: string | null) {
   const cur = host.panes[host.focusedPaneIdx];
   if (!cur || cur.tabId === tabId) return;
+  // Two panes must never key the same tab — the pane {#each} is keyed by
+  // tabId, so a duplicate hard-crashes the chat surface AND persists via
+  // persistTabs (found live 2026-07-10: closeTab's neighbor pick landed on a
+  // tab already visible in a sibling pane). Focus the sibling instead.
+  if (tabId != null) {
+    const sib = host.panes.findIndex((p, i) => i !== host.focusedPaneIdx && p.tabId === tabId);
+    if (sib !== -1) {
+      host.focusedPaneIdx = sib;
+      return;
+    }
+  }
   const next = host.panes.slice();
   next[host.focusedPaneIdx] = { tabId };
   host.panes = next;
@@ -207,6 +218,13 @@ export function dropTabIntoPane(host: TabsHost, tabId: string, paneIdx: number) 
   } else if (paneIdx >= host.panes.length) {
     // Sentinel: "add new pane at end". Cap-respecting. Multi-pane only —
     // single-pane is handled above.
+    // Already visible in some pane → focus it; never mint a duplicate pane
+    // (same each-key invariant as assignFocusedPane).
+    const visibleIdx = host.panes.findIndex((p) => p.tabId === tabId);
+    if (visibleIdx !== -1) {
+      setFocusedPane(host, visibleIdx);
+      return;
+    }
     if (host.panes.length >= MAX_PANES) return;
     // Width-fit guard (same as addPane): refuse a 3rd+ pane that won't fit.
     if (host.panes.length >= shell.maxPanesForWidth()) {
@@ -312,9 +330,16 @@ export async function restoreTabs(host: TabsHost) {
     // Stale tab refs are pruned to null (pane survives, empty). Legacy
     // null/missing keeps single-pane default.
     if (Array.isArray(parsed.panes) && parsed.panes.length >= 1 && parsed.panes.length <= MAX_PANES) {
+      // Dedup across panes: a poisoned pre-fix record could persist the same
+      // tab in two panes — rendering that duplicate key crashes the whole
+      // chat surface on EVERY load until storage is cleared by hand. Later
+      // duplicates hydrate empty so old records self-heal here.
+      const seen = new Set<string>();
       const norm = (p: unknown): PaneState => {
         const id = (p as { tabId?: unknown })?.tabId;
-        return { tabId: typeof id === "string" && valid.includes(id) ? id : null };
+        if (typeof id !== "string" || !valid.includes(id) || seen.has(id)) return { tabId: null };
+        seen.add(id);
+        return { tabId: id };
       };
       const restored = parsed.panes.map(norm);
       // Keep at least one pane; if all restored panes are empty and we're
@@ -333,9 +358,15 @@ export async function restoreTabs(host: TabsHost) {
     if (winner) {
       // If the focused pane's tab was pruned (stale/deleted convo), point it at
       // the winner so the visible focused pane and currentConvoId agree — else
-      // the pane renders empty while a different convo is "current".
+      // the pane renders empty while a different convo is "current". When the
+      // winner already renders in a sibling pane (e.g. its duplicate was just
+      // deduped above), move focus there instead of re-minting the duplicate.
       const fp = host.panes[host.focusedPaneIdx];
-      if (fp && fp.tabId !== winner) fp.tabId = winner;
+      if (fp && fp.tabId !== winner) {
+        const sib = host.panes.findIndex((p, i) => i !== host.focusedPaneIdx && p.tabId === winner);
+        if (sib !== -1) host.focusedPaneIdx = sib;
+        else fp.tabId = winner;
+      }
       try {
         await host.loadConversation(winner);
       } catch (e) {
