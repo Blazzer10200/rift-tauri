@@ -6,6 +6,22 @@
    classes survive Svelte's per-component scoping. All tokens from src/app.css.
    ============================================================================ */
 
+/* ── Vertical rhythm ──────────────────────────────────────────────────────
+   ONE gap governs the space between sibling blocks in a turn — narration, tool
+   runs, shell blocks, plan/web/result cards all sit on the same beat so a
+   narration→tool→plan sequence reads as an even column, not a jitter of 12/13/
+   14px near-misses. Turn-level chrome (head/footer/applied) deliberately breathes
+   a little more; those keep their own explicit values below. Density-aware: the
+   compact tier tightens the rhythm, comfy opens it. */
+:root {
+  --stream-gap: 12px;              /* between-block rhythm (the common beat) */
+  --stream-gap-turn: 16px;         /* turn boundary — head/footer/applied breathe */
+  --stream-gap-between-turns: 22px;/* whole turn ↔ turn separation (largest) */
+  --stream-indent: 2px;            /* left-rule blocks (plan/exitplan) optical inset */
+}
+:root[data-density="compact"] { --stream-gap: 10px; --stream-gap-turn: 13px; --stream-gap-between-turns: 18px; }
+:root[data-density="comfy"]   { --stream-gap: 15px; --stream-gap-turn: 19px; --stream-gap-between-turns: 27px; }
+
 @keyframes blockIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes workOpen { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 @keyframes ringspin { to { transform: rotate(360deg); } }
@@ -17,7 +33,7 @@
   70% { box-shadow: 0 0 0 5px transparent; }
 }
 
-.sturn { margin: 22px 0 24px; }
+.sturn { margin: var(--stream-gap-between-turns) 0 calc(var(--stream-gap-between-turns) + 2px); }
 .sturn-head { display: flex; align-items: center; gap: 9px; padding-bottom: 11px; margin-bottom: 2px;
   border-bottom: 1px solid var(--border); font-size: 12.5px; color: var(--fg-subtle); letter-spacing: 0.003em;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
@@ -31,7 +47,7 @@
 .sturn:hover .sturn-head .sh-time { opacity: 0.9; }
 
 /* bright narration — the only high-contrast text in the turn */
-.snarr { color: var(--fg-2); margin: 13px 0; animation: blockIn var(--dur-base) var(--ease-page) both; }
+.snarr { color: var(--fg-2); margin: var(--stream-gap) 0; animation: blockIn var(--dur-base) var(--ease-page) both; }
 .snarr :global(.md-p), .snarr :global(.md-li) { color: var(--fg-2); }
 
 /* demoted connective beat (balanced narration) — a between-tools line ("now the
@@ -56,7 +72,7 @@
 }
 
 /* collapsed reasoning */
-.sthink { margin: 12px 0; }
+.sthink { margin: var(--stream-gap) 0; }
 .sthink-row { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-faint);
   background: none; border: 0; cursor: pointer; padding: 0; transition: color var(--dur-fast); }
 .sthink-row svg:first-child { color: var(--fg-faint); }
@@ -72,7 +88,7 @@
    quiet mono cluster at the right edge so the numbers stop crowding the word.
    {#key} remounts .sf-verb per word swap → verbIn gives each new word a soft
    rise instead of a hard cut. */
-.sfooter { display: flex; align-items: center; gap: 7px; margin: 15px 0 2px; font-size: 12.5px;
+.sfooter { display: flex; align-items: center; gap: 7px; margin: var(--stream-gap-turn) 0 2px; font-size: 12.5px;
   color: var(--fg-faint); font-variant-numeric: tabular-nums; animation: blockIn var(--dur-base) var(--ease-page) both; }
 .sfooter .sf-verb { color: var(--fg-muted); }
 /* The live target ("composer.svelte", "git status …") right after the verb, so
@@ -115,15 +131,21 @@
 /* head dot: solid accent, no pulse — calm "parked" not "live grinding" */
 .sturn-head.live.awaiting-head .sh-dot { animation: none; background: var(--accent); }
 
-/* tool run — one quiet line */
-.wline { margin: 12px 0; }
-.wline-head { display: inline-flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--fg-subtle);
+/* tool run — one quiet line. Quiet, but not invisible: reads/greps/lists are
+   often the BULK of a turn, so the summary sits at --fg-muted (was --fg-subtle)
+   and the lead icon-box carries a cool-neutral read tint so the row has an
+   identity at a glance without shouting. */
+.wline { margin: var(--stream-gap) 0; }
+.wline-head { display: inline-flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--fg-muted);
   background: none; border: 0; cursor: pointer; padding: 0; transition: color var(--dur-fast);
   max-width: 100%; min-width: 0; }
-.wline-head:hover { color: var(--fg-2); }
-.wline-head:hover .wline-ic { border-color: var(--border-strong); color: var(--fg-2); }
-.wline-ic { display: grid; place-items: center; width: 18px; height: 18px; border: 1px solid var(--border); border-radius: 5px;
-  color: var(--fg-muted); flex: none; transition: color var(--dur-fast), border-color var(--dur-fast); }
+.wline-head:hover { color: var(--fg); }
+.wline-head:hover .wline-ic { border-color: color-mix(in oklab, var(--info) 45%, var(--border)); color: var(--info); }
+.wline-ic { display: grid; place-items: center; width: 18px; height: 18px;
+  border: 1px solid color-mix(in oklab, var(--info) 16%, var(--border)); border-radius: 5px;
+  background: color-mix(in oklab, var(--info) 5%, transparent);
+  color: color-mix(in oklab, var(--info) 55%, var(--fg-muted)); flex: none;
+  transition: color var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast); }
 /* Long summaries (regex patterns, absolute paths) truncate instead of running
    off the right edge of the message column — full text via the head's title. */
 .wline-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -151,10 +173,18 @@
 .wline-row .wr-path { color: var(--fg-2); }
 .wline-row:has(.wr-path) { white-space: normal; overflow: visible; word-break: break-all; }
 .wline-row b { color: var(--fg-2); font-weight: 600; }
-/* in-flight tool — single active line, no box */
-.wline-active { display: inline-flex; align-items: center; gap: 8px; margin: 12px 0; font-size: 12.5px; color: var(--fg-muted);
-  max-width: 100%; min-width: 0;
+/* in-flight tool — single active line, no box. A faint accent sweep travels
+   across the row while it runs so "working on this now" reads as active
+   scanning, not a static line waiting. Boxless still — the sweep is a masked
+   pseudo-element, no border/fill added to the resting row. */
+.wline-active { position: relative; display: inline-flex; align-items: center; gap: 8px; margin: var(--stream-gap) 0; font-size: 12.5px; color: var(--fg-muted);
+  max-width: 100%; min-width: 0; overflow: hidden;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
+.wline-active::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(100deg, transparent 20%,
+    color-mix(in oklab, var(--accent) 11%, transparent) 50%, transparent 80%);
+  background-size: 220% 100%; animation: waScan 2.1s var(--ease-page) infinite; }
+@keyframes waScan { from { background-position: 130% 0; } to { background-position: -130% 0; } }
 .wline-active .wa-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; animation: streamLivePulse var(--pulse-live) ease-out infinite; }
 .wline-active .wa-text { flex: none; }
 .wline-active .wa-cap { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-faint);
@@ -178,7 +208,7 @@
 .sfooter .sf-verb { --sh-b: var(--fg-faint); --sh-h: var(--fg-muted); }
 
 /* ── file-write batch ── */
-.wbatch { margin: 12px 0; display: flex; flex-direction: column; gap: 6px; }
+.wbatch { margin: var(--stream-gap) 0; display: flex; flex-direction: column; gap: 6px; }
 .wbrow { display: flex; align-items: center; gap: 9px; font-size: 12.5px;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
 .wb-verb { color: var(--fg-muted); }
@@ -211,10 +241,11 @@
   .sturn-head, .snarr, .snarr-beat, .sfooter, .sstall-note,
   .wline-list, .wline-active, .wbrow, .splan, .sxplan, .sweb, .sresult { animation: none; }
   .sturn-head.live .sh-dot, .wline-active .wa-dot, .wb-dot.live { animation: none; }
+  .wline-active::after { animation: none; background: none; }
 }
 
 /* turn footer — inline, boxless; label varies by what the turn actually did */
-.sapplied { display: inline-flex; align-items: center; gap: 10px; margin: 16px 0 2px; font-size: 12px; color: var(--fg-subtle); }
+.sapplied { display: inline-flex; align-items: center; gap: 10px; margin: var(--stream-gap-turn) 0 2px; font-size: 12px; color: var(--fg-subtle); }
 .sapplied .ok { display: inline-flex; align-items: center; gap: 5px; color: var(--ok); font-weight: 600; }
 /* "Done" (ran tools, no file changes) — quieter than Applied, no accent claim */
 .sapplied .ran { display: inline-flex; align-items: center; gap: 5px; color: var(--fg-muted); font-weight: 600; }
@@ -255,7 +286,7 @@
 /* ── plan / todo checklist ── boxless, transparent (matches the inline diff):
    no card fill, a thin left rule instead of a full border so the page texture
    reads through it. ── */
-.splan { margin: 14px 0 14px 2px; border-left: 2px solid color-mix(in oklch, var(--border) 80%, transparent); padding-left: 11px; background: transparent;
+.splan { margin: var(--stream-gap) 0 var(--stream-gap) var(--stream-indent); border-left: 2px solid color-mix(in oklch, var(--border) 80%, transparent); padding-left: 11px; background: transparent;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
 .splan-head { display: flex; align-items: center; gap: 9px; padding: 2px 0 8px; font-size: 12px; color: var(--fg-2); }
 .splan-head > svg { color: var(--accent); flex: none; }
@@ -274,7 +305,7 @@
 .splan-ring { width: 13px; height: 13px; border-radius: 50%; border: 2px solid color-mix(in oklab, var(--accent) 30%, transparent); border-top-color: var(--accent); animation: ringspin 0.9s linear infinite; }
 
 /* ── ExitPlanMode proposal card (plan-mode deliverable, matches .splan chrome) ── */
-.sxplan { margin: 14px 0 14px 2px; border-left: 2px solid color-mix(in oklch, var(--border) 80%, transparent); padding-left: 11px; background: transparent;
+.sxplan { margin: var(--stream-gap) 0 var(--stream-gap) var(--stream-indent); border-left: 2px solid color-mix(in oklch, var(--border) 80%, transparent); padding-left: 11px; background: transparent;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
 .sxplan.pending { border-left-color: color-mix(in oklab, var(--accent) 55%, transparent); }
 .sxplan-head { display: flex; align-items: center; gap: 9px; width: 100%; padding: 2px 0 4px; font-size: 12px; color: var(--fg-2); background: none; border: none; cursor: pointer; text-align: left; }
@@ -287,19 +318,29 @@
 .sxplan-body { padding: 2px 0 6px; font-size: 13px; }
 
 /* ── web search / fetch ── */
-.sweb { display: flex; gap: 9px; margin: 12px 0; font-size: 12.5px; color: var(--fg-muted); animation: blockIn var(--dur-base) var(--ease-page) both; }
-.sweb-ic { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; background: color-mix(in oklab, var(--fg) 6%, transparent); color: var(--fg-2); flex: none; }
+.sweb { display: flex; gap: 9px; margin: var(--stream-gap) 0; font-size: 12.5px; color: var(--fg-muted); animation: blockIn var(--dur-base) var(--ease-page) both; }
+.sweb-ic { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; background: color-mix(in oklab, var(--info) 12%, transparent); color: var(--info); flex: none; }
 .sweb-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding-top: 1px; }
 .sweb-q b { color: var(--fg); font-weight: 600; }
 .sweb-q.sweb-pending { color: var(--fg-faint); font-style: italic; }
 .sweb-src { display: flex; flex-wrap: wrap; gap: 6px; }
-.sweb-chip { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-subtle); padding: 2px 8px 2px 6px; border-radius: 6px; background: color-mix(in oklch, var(--fg) 6%, transparent); border: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
-.sweb-fav { width: 7px; height: 7px; border-radius: 2px; flex: none; background: color-mix(in oklab, var(--fg) 30%, transparent); }
+/* Source chip — hover lifts it to a link-affordance (these are real domains the
+   search hit). The favicon dot is hue-seeded off the domain (see StreamWeb) so
+   each source reads distinctly instead of a row of identical grey squares. */
+.sweb-chip { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-subtle); padding: 2px 8px 2px 6px; border-radius: 6px; background: color-mix(in oklch, var(--fg) 6%, transparent); border: 1px solid color-mix(in oklch, var(--border) 60%, transparent); transition: color var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast); }
+.sweb-chip:hover { color: var(--fg-2); border-color: var(--border-strong); background: color-mix(in oklch, var(--fg) 9%, transparent); }
+.sweb-fav { width: 8px; height: 8px; border-radius: 2px; flex: none;
+  background: color-mix(in oklab, var(--fav-h, oklch(0.7 0.12 250)) 85%, transparent); }
 .sweb-more { font-size: 10.5px; color: var(--fg-faint); align-self: center; }
 
 /* ── test / type-check result ── */
-.sresult { display: flex; align-items: center; gap: 9px; margin: 12px 0; font-size: 12.5px; color: var(--fg-muted); animation: blockIn var(--dur-base) var(--ease-page) both; }
-.sr-ic { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; background: color-mix(in oklab, var(--fg) 6%, transparent); color: var(--fg-2); flex: none; }
+.sresult { display: flex; align-items: center; gap: 9px; margin: var(--stream-gap) 0; font-size: 12.5px; color: var(--fg-muted); animation: blockIn var(--dur-base) var(--ease-page) both; }
+/* Icon glyph takes the semantic hue of the outcome (green pass · red fail ·
+   neutral running) so it reads as one unit with the pill beside it, instead of
+   a grey box that fights the colored pill. Set via .sresult modifier below. */
+.sr-ic { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; background: color-mix(in oklab, var(--fg) 6%, transparent); color: var(--fg-2); flex: none; transition: color var(--dur-fast), background var(--dur-fast); }
+.sresult.ok .sr-ic { color: var(--ok); background: var(--ok-soft); }
+.sresult.bad .sr-ic { color: var(--danger); background: var(--danger-soft); }
 .sr-label { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .sr-pill { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }
 .sr-pill.ok { background: var(--ok-soft); color: var(--ok); }

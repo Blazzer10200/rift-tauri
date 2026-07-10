@@ -439,6 +439,59 @@ describe("adaptTool — shell carries its stdout; rich only when it has output",
   });
 });
 
+describe("groupBlocks — say-fragment stitching (sentence split across a tool)", () => {
+  const says = (groups: ReturnType<typeof groupBlocks>) =>
+    groups.filter((g) => g.type === "say").map((g) => (g as { text: string }).text);
+
+  it("rejoins a sentence the CLI split mid-word across a tool call", () => {
+    // "I'll do all three in p" → [tool] → "arallel." must read as one beat.
+    const groups = groupBlocks(messageToTurn(msg([
+      text("I'll do all three in p"), tool("Read"), text("arallel."),
+    ])).blocks);
+    expect(says(groups)).toEqual(["I'll do all three in parallel."]);
+  });
+
+  it("stitches across multiple interleaved tools until the sentence closes", () => {
+    const groups = groupBlocks(messageToTurn(msg([
+      text("Now"), tool("Read"), text(" let me check the "), tool("Grep"), text("config."),
+    ])).blocks);
+    expect(says(groups)).toEqual(["Now let me check the config."]);
+  });
+
+  it("does NOT merge two complete sentences (prior ends with a period)", () => {
+    const groups = groupBlocks(messageToTurn(msg([
+      text("Done."), tool("Read"), text("Next I'll build."),
+    ])).blocks);
+    expect(says(groups)).toEqual(["Done.", "Next I'll build."]);
+  });
+
+  it("does NOT merge when the fragment starts a new capitalized sentence", () => {
+    const groups = groupBlocks(messageToTurn(msg([
+      text("reading the file"), tool("Read"), text("The result is clear"),
+    ])).blocks);
+    // prior is mid-sentence but the continuation starts capital → keep separate
+    expect(says(groups)).toEqual(["reading the file", "The result is clear"]);
+  });
+
+  it("keeps a colon-terminated forward-pointing beat separate", () => {
+    const groups = groupBlocks(messageToTurn(msg([
+      text("Now the build:"), tool("Bash"), text("compiled clean."),
+    ])).blocks);
+    expect(says(groups)).toEqual(["Now the build:", "compiled clean."]);
+  });
+
+  it("a trailing newline is a paragraph break, not a stream split", () => {
+    const groups = groupBlocks(messageToTurn(msg([
+      text("First paragraph\n"), tool("Read"), text("second thought"),
+    ])).blocks);
+    // Two beats — the newline blocks the stitch (raw text keeps its newline,
+    // which the Markdown renderer collapses). The point is they stay SEPARATE.
+    expect(says(groups).length).toBe(2);
+    expect(says(groups)[0].trim()).toBe("First paragraph");
+    expect(says(groups)[1]).toBe("second thought");
+  });
+});
+
 describe("streamModel — shell flavor + detail surfacing (transcript revamp)", () => {
   const toolOf = (m: ChatMessage) => {
     const b = messageToTurn(m).blocks.find((x) => x.type === "tool");

@@ -506,8 +506,59 @@ export function messageToTurn(m: ChatMessage): TurnModel {
   return { blocks, thinking, outcome, files: changedFiles.size, meta, totalSecs };
 }
 
+// The CLI can split one narration sentence across a tool_use — the model emits
+// "I'll do all three in p", then a Read tool, then "arallel." as a *second* text
+// block. Rendered naively that's two prose beats with a word sliced in half
+// ("in p" / "arallel."). Stitch a say-fragment back onto the preceding say when
+// the earlier text stopped mid-sentence (no terminal ./!/?/: and no trailing
+// newline) and the fragment reads as a continuation (starts lowercase, or with
+// closing punctuation) — the model wrote one sentence; the tool just interrupted
+// the stream. Tools keep their order; only the narration is made whole.
+function stitchSayFragments(blocks: StreamBlock[]): StreamBlock[] {
+  const out: StreamBlock[] = [];
+  // Index into `out` of the most recent say block still open to continuation.
+  let openSayIdx = -1;
+  for (const b of blocks) {
+    if (b.type === "say") {
+      const frag = b.text;
+      const prev = openSayIdx >= 0 ? out[openSayIdx] : null;
+      if (prev && prev.type === "say" && isMidSentence(prev.text) && isContinuation(frag)) {
+        // Direct concat: the CLI splits mid-token with no lost whitespace, so
+        // "in p" + "arallel." rejoins to "in parallel." verbatim. Any real space
+        // already lives at the end of prev or the start of frag.
+        out[openSayIdx] = { type: "say", text: prev.text + frag };
+      } else {
+        out.push({ type: "say", text: frag });
+        openSayIdx = out.length - 1;
+      }
+    } else {
+      // A tool between two say blocks does NOT close the open say — the sentence
+      // may resume after it (that's the exact split this fixes).
+      out.push(b);
+    }
+  }
+  return out;
+}
+// Text that stopped mid-sentence: no sentence-terminal punctuation, no colon
+// (a colon is a real forward-pointing beat, keep it separate), no trailing
+// newline (a newline is a deliberate paragraph break, not a stream split).
+function isMidSentence(t: string): boolean {
+  if (/\n\s*$/.test(t)) return false;
+  // ends with . ! ? or : (optionally wrapped by a quote/bracket) → sentence done
+  return !/[.!?:]["'`)\]]?\s*$/.test(t);
+}
+// A fragment that reads as the tail of an interrupted sentence: begins lowercase,
+// or with closing/mid punctuation (")." , ";" …), never with a capital-letter
+// sentence start.
+function isContinuation(t: string): boolean {
+  const s = t.replace(/^\s+/, "");
+  if (s.length === 0) return false;
+  return /^[a-z0-9,;:)\]'"`.\-]/.test(s);
+}
+
 // Group consecutive tool blocks into work runs (say blocks pass through).
-export function groupBlocks(blocks: StreamBlock[]): Group[] {
+export function groupBlocks(rawBlocks: StreamBlock[]): Group[] {
+  const blocks = stitchSayFragments(rawBlocks);
   const out: Group[] = [];
   let work: StreamTool[] | null = null;
   for (const b of blocks) {

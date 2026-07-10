@@ -122,13 +122,22 @@
      on a slightly raised "chrome" fill, then the OUT below it under a labeled
      rule. The two-tone fill + the prompt glyph make input-vs-output obvious at a
      glance, which the old single-slab header didn't. */
-  .sshell { display: flex; flex-direction: column; margin: 12px 0; border-radius: var(--radius-lg);
+  .sshell { display: flex; flex-direction: column; margin: var(--stream-gap, 12px) 0; border-radius: var(--radius-lg);
     border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 2.5%, transparent); overflow: hidden;
     animation: blockIn var(--dur-base) var(--ease-page) both; }
   .sshell.bad { border-color: color-mix(in oklab, var(--danger, #f87171) 34%, var(--border)); }
-  /* the prompt glyph breathes while the command is still running */
+  /* the prompt glyph breathes while the command is still running — a soft glow
+     halo makes a live command read as genuinely in-flight (terminal cursor
+     energy), not just a dimming text. The glow is keyed to the flavor color so
+     bash/pwsh/cmd keep their identity while running. */
   .sshell.running .ssh-prompt { animation: sshPromptPulse 1.4s ease-in-out infinite; }
+  .sshell.running .ssh-prompt.bash { text-shadow: 0 0 9px color-mix(in oklab, var(--ok) 60%, transparent); }
+  .sshell.running .ssh-prompt.pwsh { text-shadow: 0 0 9px color-mix(in oklab, var(--info) 60%, transparent); }
+  .sshell.running .ssh-prompt.cmd { text-shadow: 0 0 9px color-mix(in oklab, var(--warn) 60%, transparent); }
   @keyframes sshPromptPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+  @media (prefers-reduced-motion: reduce) {
+    .sshell.running .ssh-prompt { animation: none; }
+  }
 
   /* IN row — the command line. */
   .ssh-head { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 11px;

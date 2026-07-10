@@ -7,7 +7,7 @@
   const Icon = $derived(tool.kind === "lint" ? Shield : FlaskConical);
 </script>
 
-<div class="sresult">
+<div class="sresult" class:ok={!running && !failed} class:bad={failed}>
   <span class="sr-ic"><Icon size={12} strokeWidth={2} /></span>
   <span class="sr-label">{tool.cap}</span>
   {#if running}
