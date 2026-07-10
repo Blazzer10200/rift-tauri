@@ -5,7 +5,6 @@
   import { localLlm } from "../../state/localLlm.svelte";
   import { workspace } from "../../state/workspace.svelte";
   import { notify } from "../../state/toast.svelte";
-  import type { PermissionMode } from "../../state/assistant/types";
   import { clampEffort, modelFamily } from "../../state/assistant/helpers";
   import { requestPrewarm, resetPrewarmDedup } from "../../state/assistant/prewarm";
   import { fuzzyScore, slashScore, isFileDrag, attachImageFiles, summarizeAttach, attachTextFiles, summarizeTextAttach } from "./composer/helpers";
@@ -26,7 +25,6 @@
     type ModelOpt, type ModeOpt,
   } from "./composer/modelMatrix";
   import { stt } from "../../state/stt.svelte";
-  import { uiPrefs } from "../../state/ui-prefs.svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import { tick, onMount, onDestroy, untrack } from "svelte";
 
@@ -103,11 +101,6 @@
   // to composer/LivePills.svelte (C4) — incl. the 1s `now` ticker.
 
   function setDraft(v: string) { if (tab) tab.draft = v; }
-  function setAttachments(
-    v: { id: string; mime: string; dataBase64: string; sizeBytes: number }[],
-  ) {
-    if (tab) tab.attachments = v;
-  }
 
   let ta = $state<HTMLTextAreaElement | undefined>();
   // Tracks whether the input has grown past one line — flips the well to
@@ -1140,7 +1133,6 @@
   <QueueRail
     tab={tab ?? null}
     {queue}
-    {streaming}
   />
 
   <div

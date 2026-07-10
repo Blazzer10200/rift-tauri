@@ -67,7 +67,8 @@
       "identifier": "opener:allow-reveal-item-in-dir",
       "allow": [{ "path": "**" }]
     },
-    "dialog:default",
+    "dialog:allow-open",
+    "dialog:allow-confirm",
     "clipboard-manager:allow-read-text"
   ]
 }

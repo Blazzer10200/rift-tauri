@@ -3,16 +3,12 @@
   import { workspace, WORKSPACE_IDS, type WorkspaceId } from "$lib/state/workspace.svelte";
   import { onMount, untrack } from "svelte";
 
-  import { tooltip } from "$lib/actions/tooltip";
-
   // Staggered-rise gate: a Set of workspace IDs whose direct children are
   // currently in the transient .rising state. Added on active-id change,
   // removed after the longest block settles (dur-rise + 4*stagger = 460+248).
   let risingIds = $state(new Set<string>());
 
-  // Max children we stagger — beyond 5 the delay feels sluggish.
-  const MAX_STAGGER = 5;
-  // dur-rise(460) + MAX_STAGGER*stagger(5*62=310) + 40ms buffer
+  // dur-rise(460) + max-stagger*stagger(5*62=310) + 40ms buffer
   const SETTLE_MS = 810;
 
   let prevActiveId: string | null = null;

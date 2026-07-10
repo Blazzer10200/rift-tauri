@@ -23,6 +23,9 @@
     "url": "https://github.com/Blazzer10200/rift-tauri.git"
   },
   "private": true,
+  "overrides": {
+    "cookie": "^0.7.2"
+  },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
     "@fontsource-variable/jetbrains-mono": "^5.2.8",

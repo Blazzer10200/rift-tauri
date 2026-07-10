@@ -14,10 +14,9 @@
     GitBranch, GitCommitHorizontal, AppWindow, Bell,
     Telescope, AlarmClock, Database, Radio, CalendarClock,
   } from "lucide-svelte";
-  import { assistant, type ToolBlock } from "../../state/assistant.svelte";
+  import type { ToolBlock } from "../../state/assistant.svelte";
   import { slide } from "svelte/transition";
   import { untrack } from "svelte";
-  import Markdown from "./Markdown.svelte";
   import { basename } from "./toolCaption";
   import AgentCard from "./toolchip/AgentCard.svelte";
   import TodoCard from "./toolchip/TodoCard.svelte";
@@ -324,7 +323,7 @@
     }
     if (n === "TodoWrite") {
       const todos = Array.isArray(inp.todos) ? (inp.todos as Array<Record<string, unknown>>) : [];
-      const text = todos.map((t, i) => {
+      const text = todos.map((t) => {
         const mark = t.status === "completed" ? "✓" : t.status === "in_progress" ? "▸" : "·";
         const c = typeof t.content === "string" ? t.content : "";
         return `${mark} ${c}`;

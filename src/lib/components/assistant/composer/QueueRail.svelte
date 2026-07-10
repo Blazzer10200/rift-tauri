@@ -15,11 +15,9 @@
   let {
     tab,
     queue,
-    streaming,
   }: {
     tab: { queue: QueueItem[] } | null;
     queue: QueueItem[];
-    streaming: boolean;
   } = $props();
 
   // ── Pending Rail (queue chips) ────────────────────────────────────────

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, AlertCircle, Navigation, X, Ban } from "lucide-svelte";
+  import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, AlertCircle, X, Ban } from "lucide-svelte";
   import { onDestroy } from "svelte";
   import { fade, slide } from "svelte/transition";
   const reducedMotion =
@@ -12,7 +12,7 @@
   import ToolChip from "./ToolChip.svelte";
   import PermissionBar from "./PermissionBar.svelte";
   import { isInlineDiffTool, shortToolName, parseTextBlock, reconcileSplitHeaders, mergeSplitProse, statusOf, nodeKind,
-    formatDuration, formatDurationMs, groupDurationMs, elapsedFor, summarizeGroup, shortModel,
+    formatDurationMs, groupDurationMs, elapsedFor, summarizeGroup, shortModel,
     coalesceToolGroups, numberActions, type TimelineUnit } from "./bubble/helpers";
   import BoundaryBlock from "./bubble/BoundaryBlock.svelte";
   import ModelSwitchBlock from "./bubble/ModelSwitchBlock.svelte";

@@ -8,7 +8,6 @@
   import { Check, ChevronRight, Layers, Plus } from "lucide-svelte";
   import { tick } from "svelte";
   import { assistant } from "../../../state/assistant.svelte";
-  import { uiPrefs } from "../../../state/ui-prefs.svelte";
   import { modelFamily as modelFamilyOf } from "../../../state/assistant/helpers";
   import { usage, limitZone, type ScopedLimit } from "../../../state/usage.svelte";
   import { portal } from "$lib/actions/portal";
