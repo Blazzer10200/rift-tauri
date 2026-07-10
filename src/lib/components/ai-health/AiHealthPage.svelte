@@ -6,7 +6,7 @@
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
-  import { HeartPulse, Gauge, Sparkles, ArrowRight, Wrench, Loader2, AlertTriangle, Check, Undo2, SlidersHorizontal, Wifi, Snowflake } from "lucide-svelte";
+  import { HeartPulse, Gauge, Sparkles, ArrowRight, Wrench, Loader2, AlertTriangle, Check, Undo2, SlidersHorizontal, Wifi, Snowflake, Plug } from "lucide-svelte";
   import PageHero from "../shared/PageHero.svelte";
   import { usage, type LimitWindow, type AdviceApply } from "../../state/usage.svelte";
   import { assistant, type ModelSel } from "../../state/assistant.svelte";
@@ -54,12 +54,41 @@
     // the CLI's server-side timing. Answers "is the wait Rift or the model".
     p50_non_api_overhead_ms: number | null;
     avg_cli_api_ms: number | null;
+    p90_ttft_text_recent_ms: number | null;
+    recent_turns_measured: number;
     cost_by_day: [string, number][];
+    cost_by_model: [string, number][];
     latency_p90_by_day: [string, number | null][];
     by_model: ModelPerfStats[];
     total_turns: number;
   };
   let perfStats = $state<TurnPerfStats | null>(null);
+
+  // ── Time-range picker (cont.300) ── narrows the Speed/Spend aggregates to a
+  // window BE-side (query_turn_perf window_hours). The 24h live-verdict fields
+  // are computed inside whatever window is picked (every option ⊇ 24h), so the
+  // verdict strip stays correct across ranges. Persisted per user.
+  type PerfWindow = "24h" | "7d" | "30d" | "all";
+  const PERF_WINDOW_HOURS: Record<PerfWindow, number | null> = { "24h": 24, "7d": 168, "30d": 720, all: null };
+  const PERF_WINDOW_LABEL: Record<PerfWindow, string> = {
+    "24h": "the last 24 hours", "7d": "the last 7 days", "30d": "the last 30 days", all: "all time",
+  };
+  const PW_KEY = "rift.aihealth.perfWindow.v1";
+  let perfWindow = $state<PerfWindow>("7d");
+  try {
+    const s = localStorage.getItem(PW_KEY);
+    if (s === "24h" || s === "7d" || s === "30d" || s === "all") perfWindow = s;
+  } catch { /* noop */ }
+  async function refreshPerf() {
+    try {
+      perfStats = await invoke<TurnPerfStats>("query_turn_perf", { windowHours: PERF_WINDOW_HOURS[perfWindow] });
+    } catch { /* absent panel is the degraded state */ }
+  }
+  function setPerfWindow(w: PerfWindow) {
+    perfWindow = w;
+    try { localStorage.setItem(PW_KEY, w); } catch { /* noop */ }
+    void refreshPerf();
+  }
 
   // Ticks every 30s so the "fetched Xs ago" label stays live without a render
   // on every frame. Set once on mount, cleared on destroy.
@@ -79,9 +108,7 @@
     void invoke<ConvoStat[]>("assistant_stats")
       .then((s) => { stats = s; })
       .catch((e) => { statsError = String(e); });
-    void invoke<TurnPerfStats>("query_turn_perf")
-      .then((p) => { perfStats = p; })
-      .catch(() => {});
+    void refreshPerf();
     // WS3 listener — backend emits a stage per real stream frame.
     const unlistenP = listen<{ stage: "spawned" | "thinking" | "writing" }>(
       "usage-analyze-progress",
@@ -110,13 +137,6 @@
   const fmtMs = (ms: number | null) => (ms == null ? "—" : ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`);
   // Has enough recorded turns to be worth showing (avoids a one-sample panel).
   const hasPerf = $derived(!!perfStats && perfStats.total_turns >= 3);
-  // Cost-trend bars normalise to the costliest day in the shown window.
-  const costPeak = $derived.by(() => {
-    let max = 0;
-    for (const [, c] of perfStats?.cost_by_day.slice(0, 7) ?? []) max = Math.max(max, c);
-    return max;
-  });
-  const costBarPct = (cost: number) => (costPeak > 0 ? Math.max(4, Math.round((cost / costPeak) * 100)) : 0);
 
   // ── Latency sparkline (WS4) ── per-day p90 first-reply, charted as a tiny
   // inline SVG polyline (no library). Drops null days, needs ≥2 points to draw a
@@ -168,6 +188,75 @@
     return `resets ${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}`;
   }
 
+  // ── Plan pace (cont.300) ── linear projection from elapsed window time:
+  // "at this pace you land at ~X% by reset". Claimed only when ≥15% of the
+  // window has elapsed (early extrapolation lies) and the projection is high
+  // enough to matter (<25% headroom is obvious, the line would be noise).
+  const WINDOW_LEN_MS: Record<string, number> = { "5-hour window": 5 * 3_600_000 };
+  function paceFor(k: string, w: LimitWindow): { pct: number; hot: boolean } | null {
+    if (!w.resetsAt || w.utilization <= 0) return null;
+    const len = WINDOW_LEN_MS[k] ?? 7 * 24 * 3_600_000; // weekly rows default 7d
+    const reset = Date.parse(w.resetsAt);
+    if (!Number.isFinite(reset)) return null;
+    const remaining = reset - nowTick;
+    if (remaining <= 0 || remaining >= len) return null;
+    const elapsed = len - remaining;
+    if (elapsed < len * 0.15) return null;
+    const projected = Math.round(w.utilization * (len / elapsed));
+    if (projected < 25) return null;
+    return { pct: Math.min(projected, 999), hot: projected >= 100 };
+  }
+
+  // ── Spend bars (cont.300) ── vertical per-day chart, oldest→newest. Value
+  // labels ride the peak + the newest bar; the rest stay clean.
+  const spendBars = $derived.by(() => {
+    const days = (perfStats?.cost_by_day ?? []).slice(0, 14).reverse();
+    if (days.length < 2) return null;
+    const max = Math.max(...days.map((d) => d[1]));
+    if (max <= 0) return null;
+    const total = days.reduce((a, d) => a + d[1], 0);
+    let maxSeen = false;
+    return {
+      total,
+      bars: days.map(([day, cost], i) => {
+        const isMax = !maxSeen && cost === max && (maxSeen = true);
+        return {
+          day, cost,
+          h: Math.max(4, Math.round((cost / max) * 100)),
+          dow: "SMTWTFS"[new Date(`${day}T00:00:00`).getDay()] ?? "",
+          labeled: isMax || i === days.length - 1,
+        };
+      }),
+    };
+  });
+
+  // ── Per-model rollups (cont.300) ── the advisor always saw these; now the
+  // user does too. Spend share (≠ message share) + latency by model·effort.
+  // The log holds mixed tag eras ("opus" send keys AND full "claude-fable-5"
+  // ids) — normalize to the family label and MERGE, or the same model shows
+  // as two rows.
+  const modelLabel = (m: string) => {
+    const t = m.toLowerCase();
+    if (t.includes("fable")) return "Fable";
+    if (t.includes("opus")) return "Opus";
+    if (t.includes("sonnet")) return "Sonnet";
+    if (t.includes("haiku")) return "Haiku";
+    return m.charAt(0).toUpperCase() + m.slice(1);
+  };
+  const modelSpend = $derived.by(() => {
+    const merged = new Map<string, number>();
+    for (const [m, c] of perfStats?.cost_by_model ?? []) {
+      const label = modelLabel(m);
+      merged.set(label, (merged.get(label) ?? 0) + c);
+    }
+    const rows = [...merged.entries()].sort((a, b) => b[1] - a[1]);
+    const total = rows.reduce((a, r) => a + r[1], 0);
+    if (total <= 0) return [];
+    return rows.slice(0, 4).map(([label, c]) => ({ label, share: c / total, usd: c }));
+  });
+  const modelLat = $derived.by(() =>
+    (perfStats?.by_model ?? []).filter((g) => g.turn_count >= 3).slice(0, 4));
+
   // ── This-session snapshot (live, in-memory) ── pure rollup, no Date.now /
   // full-turns bundling that snapshot() would re-do every render.
   const session = $derived(summarizeSession(assistant.telemetry.turns, assistant.telemetry.events));
@@ -206,9 +295,16 @@
   // G2 — below the sample floor the warm p90 is null (backend min_samples=8), so
   // `latencySignal` is null → the UI shows a "still learning" state, not a red
   // verdict over a handful of turns.
-  const latencyP90Source = $derived.by((): { ms: number | null; warm: boolean } => {
+  // G6 (2026-07-10) — recent-first: the live verdict must describe TODAY, not
+  // the lifetime log. The all-history warm p90 kept "API is slow right now" on
+  // screen for days after one slow afternoon (and even at boot, before any turn
+  // this session). Lifetime numbers still DISPLAY (recent:false), but only a
+  // last-24h basis may tint/alarm — see the `latencySignal` gate below.
+  const latencyP90Source = $derived.by((): { ms: number | null; warm: boolean; recent: boolean } => {
+    const recent = perfStats?.p90_ttft_text_recent_ms;
+    if (recent != null) return { ms: recent, warm: true, recent: true };
     const warm = perfStats?.p90_ttft_text_warm_ms;
-    if (warm != null) return { ms: warm, warm: true };
+    if (warm != null) return { ms: warm, warm: true, recent: false };
     // Warm p90 is null. TWO very different cases:
     //  (a) tagged data exists but is below the warm floor (warm+cold turns seen)
     //      → DON'T fall back to the all-turns p90: it's cold-poisoned, the exact
@@ -216,10 +312,13 @@
     //  (b) no tagged data at all (pure pre-WS6 legacy history) → the all-turns
     //      p90 is all we have; use it (already floored at 10 by the backend).
     const tagged = (perfStats?.warm_turns_measured ?? 0) + (perfStats?.cold_turns_measured ?? 0);
-    if (tagged > 0) return { ms: null, warm: false };
-    return { ms: perfStats?.p90_ttft_text_ms ?? null, warm: false };
+    if (tagged > 0) return { ms: null, warm: false, recent: false };
+    return { ms: perfStats?.p90_ttft_text_ms ?? null, warm: false, recent: false };
   });
   const latencySignal = $derived.by(() => {
+    // Only a recent (last-24h) basis may claim a live verdict — lifetime
+    // numbers answer "how has it been", never "how is it right now".
+    if (!latencyP90Source.recent) return null;
     const p90 = latencyP90Source.ms;
     if (p90 == null) return null;
     return p90 < 4000 ? "ok" : p90 < 9000 ? "slow" : "degraded";
@@ -228,10 +327,20 @@
   // trust a latency verdict. Distinct from "no data at all" (perfStats null).
   const latencyLearning = $derived.by(() => {
     if (!perfStats) return false;
-    // We have records but the warm signal hasn't cleared its floor AND we're not
-    // falling back to a trustworthy all-turns p90.
-    return latencySignal == null && perfStats.total_turns > 0;
+    // We have records but nothing displayable yet (below every floor). A
+    // merely-STALE lifetime value is not "learning" — it renders with a
+    // "lifetime" chip instead (see the Speed tile).
+    return latencyP90Source.ms == null && perfStats.total_turns > 0;
   });
+  // ── MCP servers (#93-4) ── the active tab's latest init-frame server list.
+  // Same source /mcp reads; null until a turn has run this session.
+  const mcpRows = $derived(assistant.activeTab?.mcpServers ?? null);
+  const mcpTint = (status: string): string =>
+    status === "connected" ? "ok"
+    : status === "needs-auth" ? "warn"
+    : status === "failed" || status === "disconnected" ? "hot"
+    : "";
+
   // G5 — is the slow first-reply the API or Rift? A large COLD p90 alongside a
   // snappy warm p90 means the wait is one-time spawn/warm-up, not steady-state.
   // A slow WARM p90 with a healthy cache points upstream (Anthropic API/queue),
@@ -420,7 +529,9 @@
       // (so it doesn't over-trust a cold-poisoned number on older history).
       signals: {
         latency: latencySignal,
-        latencyBasis: latencyP90Source.warm ? "warm" : perfStats ? "all-turns-fallback" : null,
+        latencyBasis: latencyP90Source.recent ? "recent-24h"
+          : latencyP90Source.warm ? "warm-lifetime"
+          : perfStats ? "all-turns-fallback" : null,
         cache: cacheSignal,
         rateLimitRisk,
       },
@@ -619,22 +730,17 @@
           <span class="ah-vs-dot"></span>
           <span class="ah-vs-label">{healthScore.label}</span>
           <span class="ah-vs-note">{healthScore.note}</span>
-          {#if healthScore.flagged.length > 0}
-            <span class="ah-vs-flags">
-              {#each healthScore.flagged as d (d.k)}
-                <span class="ah-vs-flag {d.tint}" aria-label="{d.k}: {d.tint === 'warn' ? 'elevated' : 'high'}, {d.v}">
-                  <span class="ah-vs-flag-k">{d.k}</span>
-                  <span class="ah-vs-flag-v">{d.v}</span>
-                </span>
-              {/each}
-            </span>
-          {:else}
-            <span class="ah-vs-dims" aria-hidden="true">
-              {#each healthScore.dims as d (d.k)}
-                <span class="ah-vs-dim {d.tint}" title="{d.k}: good"></span>
-              {/each}
-            </span>
-          {/if}
+          <!-- cont.300: every measured dimension shows as a labeled value pill
+               (was: anonymous dots when all-clear) — the strip reads as a real
+               dashboard headline instead of a mystery traffic light. -->
+          <span class="ah-vs-flags">
+            {#each healthScore.dims as d (d.k)}
+              <span class="ah-vs-flag {d.tint}" aria-label="{d.k}: {d.tint === 'ok' ? 'good' : d.tint === 'warn' ? 'elevated' : 'high'}, {d.v}">
+                <span class="ah-vs-flag-k">{d.k}</span>
+                <span class="ah-vs-flag-v">{d.v}</span>
+              </span>
+            {/each}
+          </span>
         </div>
       {/if}
 
@@ -686,7 +792,7 @@
       {/if}
 
       <!-- ── Current setup ── the live harness knobs an apply action tunes -->
-      <section class="ah-card">
+      <section class="ah-card half">
         <div class="ah-card-h"><SlidersHorizontal size={15} strokeWidth={1.9} />Your current setup</div>
         <div class="ah-cfg">
           {#each configRows as row (row.k)}
@@ -698,8 +804,33 @@
         {/if}
       </section>
 
+      <!-- ── MCP servers (#93-4) ── per-session tool-server health from the
+           latest init frame — the same data /mcp prints, as a persistent
+           surface instead of a one-shot notice. -->
+      <section class="ah-card half">
+        <div class="ah-card-h"><Plug size={15} strokeWidth={1.9} />MCP servers</div>
+        {#if !mcpRows}
+          <p class="ah-muted">No status yet this session — the CLI reports server health at the start of each turn. Send a message and check back, or run <code>/mcp</code> in the chat.</p>
+        {:else if mcpRows.length === 0}
+          <p class="ah-muted">No MCP servers configured for this session.</p>
+        {:else}
+          <p class="ah-card-sub">Tool servers your Claude CLI reported at the start of the latest turn.</p>
+          <div class="ah-cfg">
+            {#each mcpRows as s (s.name)}
+              <div class="ah-cfg-row">
+                <span class="ah-cfg-k"><span class="ah-mcp-dot {mcpTint(s.status)}" aria-hidden="true"></span>{s.name}</span>
+                <span class="ah-cfg-v">{s.status}</span>
+              </div>
+            {/each}
+          </div>
+          {#if mcpRows.some((s) => s.status === "needs-auth")}
+            <p class="ah-cfg-note">claude.ai connectors can't complete sign-in from inside Rift, so needs-auth is their normal state here — those tools simply stay off this session.</p>
+          {/if}
+        {/if}
+      </section>
+
       <!-- ── Plan limits ── -->
-      <section class="ah-card">
+      <section class="ah-card half">
         <div class="ah-card-h"><Gauge size={15} strokeWidth={1.9} />Plan limits{#if fetchedAgo && limitRows.length > 0}<span class="ah-asof">{fetchedAgo}</span>{/if}</div>
         {#if assistant.hasApiKey}
           <p class="ah-muted">Plan limits apply to Claude subscription accounts. You're on an API key — billed per token — so there are no usage windows to track here. Your speed &amp; efficiency below still apply.</p>
@@ -712,12 +843,18 @@
           <div class="ah-bars">
             {#each limitRows as row (row.k)}
               {@const u = Math.round(row.w.utilization)}
+              {@const pace = paceFor(row.k, row.w)}
               <div class="ah-bar-row">
                 <div class="ah-bar-top">
                   <span class="ah-bar-k">{row.k}</span>
                   <span class="ah-bar-v">{u}%<span class="ah-bar-reset">{fmtReset(row.w.resetsAt)}</span></span>
                 </div>
                 <div class="ah-track"><div class="ah-fill {zone(u)}" style:width="{Math.min(100, u)}%"></div></div>
+                {#if pace}
+                  <div class="ah-pace" class:hot={pace.hot}>
+                    {pace.hot ? "at this pace you'll hit the cap before it resets" : `on pace for ~${pace.pct}% by reset`}
+                  </div>
+                {/if}
               </div>
             {/each}
           </div>
@@ -745,7 +882,7 @@
       </section>
 
       <!-- ── All-time usage ── -->
-      <section class="ah-card">
+      <section class="ah-card half">
         <div class="ah-card-h"><Wrench size={15} strokeWidth={1.9} />Where your usage goes</div>
         {#if statsError}
           <p class="ah-muted">Couldn't load your history: {statsError}</p>
@@ -766,11 +903,26 @@
 
           {#if modelsShown.length > 0}
             <div class="ah-models">
+              <span class="ah-models-h">Messages by model</span>
               {#each modelsShown as m (m.model)}
                 <div class="ah-model-row">
                   <span class="ah-model-k">{m.label}</span>
                   <div class="ah-track sm"><div class="ah-fill ok" style:width="{Math.round(m.share * 100)}%"></div></div>
                   <span class="ah-model-v">{Math.round(m.share * 100)}%</span>
+                </div>
+              {/each}
+            </div>
+          {/if}
+          {#if modelSpend.length > 0}
+            <!-- cont.300: dollar share ≠ message share — Opus can be 30% of
+                 messages and 90% of spend. The actionable split. -->
+            <div class="ah-models">
+              <span class="ah-models-h">Spend by model · {PERF_WINDOW_LABEL[perfWindow]}</span>
+              {#each modelSpend as m (m.label)}
+                <div class="ah-model-row">
+                  <span class="ah-model-k">{m.label}</span>
+                  <div class="ah-track sm"><div class="ah-fill warn" style:width="{Math.round(m.share * 100)}%"></div></div>
+                  <span class="ah-model-v">{fmtUsd(m.usd)}</span>
                 </div>
               {/each}
             </div>
@@ -783,10 +935,21 @@
            middle of your replies (median), "slower" = your slow tail (≈1 in 10,
            p90). Tooltips are banned app-wide (2026-06-15), so the meaning lives
            in the labels + the footnote, not on hover. -->
-      {#if hasPerf && perfStats}
+      {#if perfStats && (hasPerf || perfWindow !== "all")}
         <section class="ah-card">
-          <div class="ah-card-h"><Gauge size={15} strokeWidth={1.9} />Speed &amp; efficiency</div>
-          <p class="ah-card-sub">How fast Claude responds and how efficiently it reuses your conversation — measured across your last {fmtNum(perfStats.total_turns)} replies.</p>
+          <div class="ah-card-h"><Gauge size={15} strokeWidth={1.9} />Speed &amp; efficiency
+            <span class="ah-range" role="group" aria-label="Time range">
+              {#each ["24h", "7d", "30d", "all"] as const as w (w)}
+                <button type="button" class="ah-range-b" class:active={perfWindow === w} onclick={() => setPerfWindow(w)}>
+                  {w === "all" ? "All" : w}
+                </button>
+              {/each}
+            </span>
+          </div>
+          {#if perfStats.total_turns < 3}
+          <p class="ah-muted">Not enough replies in {PERF_WINDOW_LABEL[perfWindow]} to measure — widen the range.</p>
+          {:else}
+          <p class="ah-card-sub">How fast Claude responds and how efficiently it reuses your conversation — {fmtNum(perfStats.total_turns)} replies over {PERF_WINDOW_LABEL[perfWindow]}{latencyP90Source.recent ? " · live verdict from the last 24 hours" : ""}.</p>
           <div class="ah-tiles">
             <div class="ah-tile">
               <div class="ah-tile-v">{fmtMs(perfStats.p50_ttft_text_ms)}</div>
@@ -797,7 +960,7 @@
                    reflects steady-state speed, not a one-time spawn cost. -->
               <div class="ah-tile {latencyTint}">
                 <div class="ah-tile-v">{fmtMs(latencyP90Source.ms)}</div>
-                <div class="ah-tile-k">on a slow reply{#if latencyVerdict}<span class="ah-verdict {latencyTint}">{latencyVerdict}</span>{/if}</div>
+                <div class="ah-tile-k">on a slow reply{#if latencyVerdict}<span class="ah-verdict {latencyTint}">{latencyVerdict}</span>{:else if !latencyP90Source.recent}<span class="ah-verdict">lifetime</span>{/if}</div>
               </div>
             {:else if latencyLearning}
               <!-- G3: perf data exists but warm sample is below the floor. -->
@@ -851,14 +1014,15 @@
             </div>
           {/if}
 
-          {#if perfStats.cost_by_day.length > 1}
-            <div class="ah-trend">
-              <span class="ah-trend-h">Spend per day</span>
-              {#each perfStats.cost_by_day.slice(0, 7) as [day, cost] (day)}
-                <div class="ah-trend-row">
-                  <span class="ah-trend-k">{day}</span>
-                  <div class="ah-track sm"><div class="ah-fill ok" style:width="{costBarPct(cost)}%"></div></div>
-                  <span class="ah-trend-v">{fmtUsd(cost)}</span>
+          {#if modelLat.length > 0}
+            <!-- cont.300: by_model always existed in the aggregate (the advisor
+                 reads it) — now the user sees it too. -->
+            <div class="ah-mlat">
+              <span class="ah-mlat-h">By model</span>
+              {#each modelLat as g (`${g.model}:${g.effort ?? ""}`)}
+                <div class="ah-mlat-row">
+                  <span class="ah-mlat-k">{modelLabel(g.model)}{g.effort ? ` · ${g.effort}` : ""}</span>
+                  <span class="ah-mlat-v">typical {fmtMs(g.p50_ttft_text_ms)} · slow {fmtMs(g.p90_ttft_text_ms)} · {fmtNum(g.turn_count)} replies{g.dominant_cause ? ` · mostly ${g.dominant_cause}` : ""}</span>
                 </div>
               {/each}
             </div>
@@ -869,12 +1033,36 @@
             <strong>Slow reply</strong> is one of your slower ones (about 1 in 10).
             <strong>Conversation reused</strong> is how much of the chat Claude remembers without re-reading it — higher means faster, cheaper replies.
           </p>
+          {/if}
+        </section>
+      {/if}
+
+      <!-- ── Spend per day (cont.300) ── extracted from the Speed card into a
+           real bar chart: per-day columns, peak + newest labeled, range-driven. -->
+      {#if spendBars}
+        <section class="ah-card half">
+          <div class="ah-card-h"><Wrench size={15} strokeWidth={1.9} />Spend per day</div>
+          <p class="ah-card-sub">{fmtUsd(spendBars.total)} over {PERF_WINDOW_LABEL[perfWindow]}.</p>
+          <div class="ah-spendchart" role="img" aria-label="Daily spend, {spendBars.bars.length} days, total {fmtUsd(spendBars.total)}">
+            {#each spendBars.bars as b (b.day)}
+              <div class="ah-sc-col">
+                <!-- Label rides ABOVE the bar absolutely — in-flow it would be
+                     part of the column's flex math and shrink the tallest bar
+                     below its true height (the exact bug it once caused). -->
+                <div class="ah-sc-barwrap" style:height="{b.h}%">
+                  {#if b.labeled}<span class="ah-sc-v">{fmtUsd(b.cost)}</span>{/if}
+                  <div class="ah-sc-bar"></div>
+                </div>
+                <span class="ah-sc-d">{b.dow}</span>
+              </div>
+            {/each}
+          </div>
         </section>
       {/if}
 
       <!-- ── This session ── only shown once this session has recorded turns -->
       {#if session.totalTurns > 0}
-      <section class="ah-card">
+      <section class="ah-card half">
         <div class="ah-card-h"><HeartPulse size={15} strokeWidth={1.9} />This session</div>
           <div class="ah-tiles sm">
             <div class="ah-tile"><div class="ah-tile-v">{fmtNum(session.totalTurns)}</div><div class="ah-tile-k">replies</div></div>
@@ -897,7 +1085,19 @@
 <style>
   .sb-main { display: flex; flex-direction: column; height: 100%; min-height: 0; }
   .ah-scroll { flex: 1; min-height: 0; overflow-y: auto; }
-  .ah-wrap { max-width: 820px; margin: 0 auto; padding: 18px 40px 28px; display: flex; flex-direction: column; gap: 14px; }
+  /* cont.300: dashboard grid. Narrow = the classic single column; ≥1160px
+     viewport = two-column card grid (`.half` cards pair up, everything else
+     spans). Desktop app — use the desktop's width. */
+  .ah-wrap {
+    max-width: 820px; margin: 0 auto; padding: 18px 40px 28px;
+    display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px;
+    align-items: stretch;
+  }
+  .ah-wrap > :global(*) { grid-column: 1 / -1; min-width: 0; }
+  @media (min-width: 1160px) {
+    .ah-wrap { max-width: 1180px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .ah-wrap > :global(.half) { grid-column: span 1; }
+  }
 
   /* Staggered rise-in for the dashboard cards — reuses the shared `enter` motion
      (app.css) so the page assembles top-down instead of flashing in all at once.
@@ -946,18 +1146,16 @@
   .ah-vs-label { font-size: 13px; font-weight: 680; letter-spacing: -0.01em; flex: none; }
   .ah-vs-note { font-size: var(--fs-sm); color: var(--fg-muted); min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.35; }
   /* All-clear: three dimension dots stand in for "nothing to flag". */
-  .ah-vs-dims { display: inline-flex; gap: 5px; margin-left: auto; flex: none; }
-  .ah-vs-dim { width: 7px; height: 7px; border-radius: 999px; background: var(--fg-faint); }
-  .ah-vs-dim.ok { background: var(--accent); }
-  .ah-vs-dim.warn { background: var(--warn); }
-  .ah-vs-dim.hot { background: var(--danger); }
-  /* Problem dimensions: labeled value pills inline on the right of the strip —
-     the one place the flagged metric is stated (no separate chip row). */
+  /* Every measured dimension as a labeled value pill (cont.300 — the old
+     anonymous all-clear dots told the user nothing). ok pills stay quiet;
+     warn/hot pills carry their tint. */
   .ah-vs-flags { display: inline-flex; gap: 7px; margin-left: auto; flex: none; flex-wrap: wrap; justify-content: flex-end; }
   .ah-vs-flag { display: inline-flex; align-items: baseline; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: var(--fs-sm); background: var(--bg-inset); box-shadow: inset 0 0 0 1px var(--ghost-border); }
+  .ah-vs-flag.ok { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent); }
   .ah-vs-flag.warn { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 36%, transparent); }
   .ah-vs-flag.hot { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 38%, transparent); }
   .ah-vs-flag-k { color: var(--fg-muted); }
+  .ah-vs-flag.ok .ah-vs-flag-k { color: var(--accent); }
   .ah-vs-flag.warn .ah-vs-flag-k { color: var(--warn); }
   .ah-vs-flag.hot .ah-vs-flag-k { color: var(--danger); }
   .ah-vs-flag-v { font-weight: 680; font-variant-numeric: tabular-nums; }
@@ -1006,6 +1204,79 @@
   .ah-cfg-k { font-size: var(--fs-sm); color: var(--fg-muted); }
   .ah-cfg-v { font-size: var(--fs-sm); font-weight: 640; color: var(--fg); font-variant-numeric: tabular-nums; }
   .ah-cfg-note { font-size: 11.5px; color: var(--fg-subtle); margin: 11px 0 0; line-height: 1.45; }
+
+  /* ── cont.300 additions ─────────────────────────────────────────────── */
+  /* Range picker — compact segmented control in the card header. */
+  .ah-range {
+    margin-left: auto; display: inline-flex; gap: 2px; padding: 2px;
+    border-radius: 8px; background: var(--surface-hover);
+    box-shadow: inset 0 0 0 1px var(--ghost-border);
+  }
+  .ah-range-b {
+    border: 0; background: transparent; color: var(--fg-subtle);
+    font: inherit; font-size: 11px; font-weight: 620; letter-spacing: 0.01em;
+    padding: 3px 9px; border-radius: 6px; cursor: pointer;
+    transition: background 120ms ease-out, color 120ms ease-out;
+  }
+  .ah-range-b:hover { color: var(--fg); }
+  .ah-range-b.active { background: var(--surface); color: var(--fg); box-shadow: inset 0 0 0 1px var(--border); }
+
+  /* Plan pace projection — quiet forecast line under a limit bar. */
+  .ah-pace { font-size: 11px; color: var(--fg-subtle); margin-top: 4px; }
+  .ah-pace.hot { color: var(--danger); font-weight: 600; }
+
+  /* Spend bar chart — per-day columns, baseline-aligned. */
+  .ah-spendchart {
+    display: flex; align-items: flex-end; gap: 5px;
+    height: 96px; margin-top: 12px; padding-top: 14px;
+  }
+  .ah-sc-col {
+    flex: 1; min-width: 0; height: 100%;
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+    position: relative;
+    /* Reserve the day-letter strip OUT of the bar's %-height math. */
+    padding-bottom: 14px;
+  }
+  .ah-sc-barwrap {
+    position: relative;
+    width: 100%; max-width: 26px;
+    display: flex; align-items: stretch;
+    transition: height 240ms var(--ease-page);
+  }
+  .ah-sc-bar {
+    width: 100%; border-radius: 4px 4px 2px 2px;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 78%, transparent), color-mix(in oklab, var(--accent) 34%, transparent));
+    min-height: 3px;
+  }
+  .ah-sc-v {
+    position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+    margin-bottom: 3px;
+    font-size: 10px; font-weight: 640; color: var(--fg-muted);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .ah-sc-d {
+    position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+    font-size: 9.5px; color: var(--fg-faint); line-height: 1;
+  }
+
+  /* By-model latency rows (Speed card). */
+  .ah-mlat { margin-top: 13px; display: flex; flex-direction: column; gap: 1px; }
+  .ah-mlat-h, .ah-models-h { font-size: 10.5px; font-weight: 680; letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg-subtle); margin-bottom: 4px; display: block; }
+  .ah-mlat-row { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px solid var(--ghost-border); }
+  .ah-mlat-row:last-child { border-bottom: none; }
+  .ah-mlat-k { font-size: var(--fs-sm); color: var(--fg-muted); flex: none; }
+  .ah-mlat-v { font-size: var(--fs-sm); color: var(--fg); font-variant-numeric: tabular-nums; text-align: right; min-width: 0; }
+  .ah-models + .ah-models { margin-top: 12px; }
+
+  /* MCP server status dot — same ok/warn/hot vocabulary as the verdict strip. */
+  .ah-mcp-dot {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    margin-right: 7px; vertical-align: middle;
+    background: var(--fg-faint);
+  }
+  .ah-mcp-dot.ok { background: var(--accent); }
+  .ah-mcp-dot.warn { background: var(--warn); }
+  .ah-mcp-dot.hot { background: var(--danger); }
 
   .ah-card { border-radius: var(--radius-xl); padding: 15px 20px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
   .ah-card-h { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 660; letter-spacing: -0.01em; margin-bottom: 12px; color: var(--fg); }

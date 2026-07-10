@@ -275,6 +275,17 @@ pub struct TurnPerfStats {
     /// (not a problem to fix). None below the sample floor.
     #[serde(default)]
     pub p90_ttft_text_cold_ms: Option<u64>,
+    /// p90 first-reply over WARM turns that STARTED in the last 24h — the
+    /// "how is it running right now" basis. The lifetime warm p90 answers a
+    /// different question; driving a "right now" banner off it keeps one slow
+    /// afternoon on screen for weeks (found live 2026-07-10). None below 3
+    /// recent samples.
+    #[serde(default)]
+    pub p90_ttft_text_recent_ms: Option<u64>,
+    /// Count of warm turns with a first-reply measurement in the last 24h —
+    /// the recent verdict's honest denominator.
+    #[serde(default)]
+    pub recent_turns_measured: usize,
     /// Aggregate cache-hit rate: Σcache_read / Σ(cache_read + input).
     pub cache_hit_rate: Option<f64>,
     /// Σ output tokens across all turns (a rough throughput proxy).
@@ -292,6 +303,10 @@ pub struct TurnPerfStats {
     pub avg_cli_api_ms: Option<u64>,
     /// Per-day cost buckets (UTC "YYYY-MM-DD" → usd), most-recent first, ≤30 days.
     pub cost_by_day: Vec<(String, f64)>,
+    /// Per-model spend (model tag → Σ usd), highest first. Message share ≠
+    /// dollar share — this is the honest "where the money goes" split.
+    #[serde(default)]
+    pub cost_by_model: Vec<(String, f64)>,
     /// Per-day p90 first-reply latency (UTC "YYYY-MM-DD" → ms), most-recent
     /// first, ≤14 days. Drives the trend sparkline. p90 with min_samples=1 so a
     /// single-turn day still shows a point (direction, not clinical accuracy).
@@ -330,11 +345,33 @@ fn percentile(sorted: &[u64], pct: f64, min_samples: usize) -> Option<u64> {
     sorted.get(idx).copied()
 }
 
+/// The "right now" window for the recent latency verdict. 24h: wide enough to
+/// have samples on a normal dev day, narrow enough that yesterday's slow
+/// afternoon ages out of the banner overnight.
+const RECENT_WINDOW_MS: u64 = 24 * 60 * 60 * 1000;
+
 /// Read `turns.ndjson` (+ `.old` if present) and compute the aggregate. Skips
 /// malformed lines rather than failing — a partial write at the tail must not
 /// blank the whole panel.
 fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    aggregate_at(lines, now_ms, None)
+}
+
+/// `aggregate` with an injected clock (tests pin the recent window) and an
+/// optional display window: records older than `window_ms` are skipped from
+/// EVERY aggregate (the AI Health range picker), not just the recent verdict.
+fn aggregate_at(
+    lines: impl Iterator<Item = String>,
+    now_ms: u64,
+    window_ms: Option<u64>,
+) -> TurnPerfStats {
     use std::collections::BTreeMap;
+    let recent_cutoff = now_ms.saturating_sub(RECENT_WINDOW_MS);
+    let window_cutoff = window_ms.map(|w| now_ms.saturating_sub(w));
 
     let mut ttft_text: Vec<u64> = Vec::new();
     // Warm/cold split of first-reply (drives the warm-aware latency signal). A
@@ -342,6 +379,8 @@ fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
     // untagged history stays in the all-turns `ttft_text` fallback.
     let mut ttft_text_warm: Vec<u64> = Vec::new();
     let mut ttft_text_cold: Vec<u64> = Vec::new();
+    // Warm first-replies inside the recent window — the "right now" basis.
+    let mut ttft_text_recent: Vec<u64> = Vec::new();
     let mut durations: Vec<u64> = Vec::new();
     // Non-API overhead per turn = duration_ms - cli_api_ms (Rift wall-clock minus
     // the model's own API time, as the CLI measures it). What Rift adds: IPC, tool
@@ -355,6 +394,7 @@ fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
     let mut input_sum: u64 = 0;
     let mut total_output: u64 = 0;
     let mut cost_by_day: BTreeMap<String, f64> = BTreeMap::new();
+    let mut cost_by_model: BTreeMap<String, f64> = BTreeMap::new();
     // Per-day first-reply latencies (for the trend sparkline) and per-(model,
     // effort) latency+duration vecs (for the breakdown).
     let mut ttft_by_day: BTreeMap<String, Vec<u64>> = BTreeMap::new();
@@ -368,14 +408,30 @@ fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
             continue;
         }
         let Ok(rec) = serde_json::from_str::<TurnPerf>(trimmed) else { continue };
+        // Display-window filter — a record outside the picked range contributes
+        // to NOTHING (totals, days, groups), as if the log started at the cutoff.
+        if let Some(cut) = window_cutoff {
+            if rec.ts_start_ms < cut {
+                continue;
+            }
+        }
         total += 1;
+        // Per-model spend — powers "where the money goes" (cost share by model).
+        if let (Some(model), Some(cost)) = (rec.model.as_deref(), rec.cost_usd) {
+            *cost_by_model.entry(model.to_string()).or_default() += cost;
+        }
         if let Some(v) = rec.ttft_text_ms {
             ttft_text.push(v);
             // Warm/cold split — only when the turn was tagged (post-WS6). An
             // untagged record contributes to the all-turns fallback only.
             match rec.was_cold {
                 Some(true) => ttft_text_cold.push(v),
-                Some(false) => ttft_text_warm.push(v),
+                Some(false) => {
+                    ttft_text_warm.push(v);
+                    if rec.ts_start_ms >= recent_cutoff {
+                        ttft_text_recent.push(v);
+                    }
+                }
                 None => {}
             }
         }
@@ -427,6 +483,7 @@ fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
     ttft_text.sort_unstable();
     ttft_text_warm.sort_unstable();
     ttft_text_cold.sort_unstable();
+    ttft_text_recent.sort_unstable();
     let warm_turns_measured = ttft_text_warm.len();
     let cold_turns_measured = ttft_text_cold.len();
     durations.sort_unstable();
@@ -447,6 +504,10 @@ fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
 
     // Most-recent first, last 30 days.
     let cost_by_day: Vec<(String, f64)> = cost_by_day.into_iter().rev().take(30).collect();
+
+    // Highest spender first; ties keep name order (BTreeMap iteration).
+    let mut cost_by_model: Vec<(String, f64)> = cost_by_model.into_iter().collect();
+    cost_by_model.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     // Per-day p90 latency, most-recent first, ≤14 days. min_samples=1: a
     // single-turn day still yields a point (trend direction, not clinical p90).
@@ -500,11 +561,17 @@ fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
         cold_turns_measured,
         // Cold p90 is informational context — a single cold turn is a real point.
         p90_ttft_text_cold_ms: percentile(&ttft_text_cold, 0.90, 1),
+        // Recent floor is 3 (not the lifetime 8): a 24h window on a normal dev
+        // day holds a handful of turns; requiring 8 would leave the "right now"
+        // verdict permanently dark for most users.
+        p90_ttft_text_recent_ms: percentile(&ttft_text_recent, 0.90, 3),
+        recent_turns_measured: ttft_text_recent.len(),
         cache_hit_rate,
         total_output_tokens: total_output,
         p50_non_api_overhead_ms: percentile(&non_api_overhead, 0.50, 1),
         avg_cli_api_ms,
         cost_by_day,
+        cost_by_model,
         latency_p90_by_day,
         by_model,
         total_turns: total,
@@ -513,7 +580,9 @@ fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
 
 /// Synchronous read+aggregate. Reads the rotated `.old` first (older history)
 /// then the live file so day buckets accumulate across a rotation boundary.
-pub fn query_turn_perf_sync() -> TurnPerfStats {
+/// `window_hours` narrows every aggregate to turns started inside the window
+/// (AI Health's 24h/7d/30d range picker); None = full log, as ever.
+pub fn query_turn_perf_sync(window_hours: Option<u32>) -> TurnPerfStats {
     use std::io::{BufRead, BufReader};
 
     let mut all: Vec<String> = Vec::new();
@@ -526,7 +595,11 @@ pub fn query_turn_perf_sync() -> TurnPerfStats {
             }
         }
     }
-    aggregate(all.into_iter())
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    aggregate_at(all.into_iter(), now_ms, window_hours.map(|h| h as u64 * 3_600_000))
 }
 
 #[cfg(test)]
@@ -621,6 +694,92 @@ mod tests {
             cli_api_ms: None,
         };
         serde_json::to_string(&r).unwrap()
+    }
+
+    // Like `rec_cold` but with an explicit start stamp so the recent-window
+    // split can be pinned against the injected `aggregate_at` clock.
+    fn rec_cold_at(ttft: u64, was_cold: bool, ts_start_ms: u64) -> String {
+        let r = TurnPerf {
+            ts_start_ms,
+            ttft_thinking_ms: None,
+            ttft_text_ms: Some(ttft),
+            duration_ms: Some(ttft * 2),
+            input_tokens: Some(100),
+            output_tokens: Some(100),
+            cache_read_tokens: None,
+            cache_create_tokens: None,
+            cost_usd: Some(0.01),
+            cache_hit_rate: None,
+            session_id: "s".into(),
+            result_subtype: Some("success".into()),
+            model: Some("opus".into()),
+            effort: Some("deep".into()),
+            send_effort: None,
+            thinking_on: None,
+            ttft_first_line_ms: None,
+            pre_text_tool_ms: None,
+            was_cold: Some(was_cold),
+            dominant_cause: None,
+            cli_ttft_ms: None,
+            cli_api_ms: None,
+        };
+        serde_json::to_string(&r).unwrap()
+    }
+
+    #[test]
+    fn recent_p90_reads_only_the_last_24h_of_warm_turns() {
+        let now = 1_700_000_000_000u64;
+        let old = now - RECENT_WINDOW_MS - 60_000; // just outside the window
+        let fresh = now - 60_000; // inside
+        let lines = vec![
+            // A slow stretch older than the window — must NOT drive "right now".
+            rec_cold_at(30_000, false, old),
+            rec_cold_at(28_000, false, old),
+            rec_cold_at(27_000, false, old),
+            // Today's pace: three fast warm turns + one cold (cold is excluded).
+            rec_cold_at(1_000, false, fresh),
+            rec_cold_at(1_200, false, fresh),
+            rec_cold_at(1_400, false, fresh),
+            rec_cold_at(9_000, true, fresh),
+        ];
+        let s = aggregate_at(lines.into_iter(), now, None);
+        assert_eq!(s.recent_turns_measured, 3);
+        assert_eq!(s.p90_ttft_text_recent_ms, Some(1_400));
+        // Lifetime warm p90 keeps its own floor (8) — 6 warm turns → None.
+        assert_eq!(s.p90_ttft_text_warm_ms, None);
+    }
+
+    #[test]
+    fn display_window_excludes_old_records_from_every_aggregate() {
+        let now = 1_700_000_000_000u64;
+        let old = now - (8 * 24 * 3_600_000); // 8 days back
+        let fresh = now - 3_600_000; // 1h back
+        let lines = vec![
+            rec_cold_at(20_000, false, old),
+            rec_cold_at(1_000, false, fresh),
+            rec_cold_at(1_200, false, fresh),
+        ];
+        // 7-day window: the 8-day-old record vanishes from totals AND groups.
+        let s = aggregate_at(lines.into_iter(), now, Some(7 * 24 * 3_600_000));
+        assert_eq!(s.total_turns, 2);
+        assert_eq!(s.warm_turns_measured, 2);
+        assert_eq!(s.by_model.len(), 1);
+        assert_eq!(s.by_model[0].turn_count, 2);
+        // Per-model spend counted only inside the window (2 × $0.01).
+        assert_eq!(s.cost_by_model.len(), 1);
+        assert!((s.cost_by_model[0].1 - 0.02).abs() < 1e-9);
+    }
+
+    #[test]
+    fn recent_p90_floors_at_three_samples() {
+        let now = 1_700_000_000_000u64;
+        let lines = vec![
+            rec_cold_at(1_000, false, now - 1_000),
+            rec_cold_at(1_200, false, now - 2_000),
+        ];
+        let s = aggregate_at(lines.into_iter(), now, None);
+        assert_eq!(s.recent_turns_measured, 2);
+        assert_eq!(s.p90_ttft_text_recent_ms, None, "2 samples is below the recent floor");
     }
 
     #[test]

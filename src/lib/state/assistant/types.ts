@@ -174,6 +174,11 @@ export type ChatMessage = {
   /** Creation time (ms epoch) — stamped at send/turn-start since 2026-07-02.
    *  Absent on older persisted convos; UI hides the hover timestamp then. */
   ts?: number | null;
+  /** Wall-clock of the whole turn (ms), from the CLI result frame's
+   *  duration_ms — spawn to result, tool waits included. Drives "Worked for
+   *  Ns"; the old summed thinking+tool secs under-reported badly (a pure-text
+   *  turn read "Worked for 0s"). Absent on pre-field convos → legacy sum. */
+  turnDurationMs?: number | null;
   // Terminal stop reason when noteworthy: "max_tokens" (response truncated at
   // the output cap) or "refusal" (model declined). Null/absent for normal
   // completions. Drives the truncation/refusal notice in MessageBubble.

@@ -642,7 +642,9 @@
                 </div>
                 <button class="st link" type="button" onclick={() => workspace.setActive("ai-health")} use:tooltip={"Open AI Health — cost breakdown"}>
                   <div class="st-top"><DollarSign size={13} /><b>{fmtCost(totals.cost)}</b>{@render trendChip(trends?.cost ?? null, true)}</div>
-                  <span>spent</span>
+                  <!-- "est. spend", matching AI Health — on a subscription nothing
+                       is literally spent; this is API-equivalent value. -->
+                  <span>est. spend</span>
                 </button>
                 <div class="st">
                   <div class="st-top"><Flame size={13} /><b>{strk.current}d</b></div>

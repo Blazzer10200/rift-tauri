@@ -130,11 +130,17 @@ fn find_by_name(root: &std::path::Path, name: &str) -> Option<std::path::PathBuf
 /// (p50/p90 latency, cache-hit rate, cost-by-day) off the async executor so the
 /// file parse never stalls a Tauri worker. Returns a zero-filled aggregate when
 /// no turns have been recorded yet (first launch) rather than erroring.
+/// `window_hours` narrows the aggregate to the AI Health range picker's window
+/// (24/168/720); absent = full log (backward compatible).
 #[tauri::command]
-pub async fn query_turn_perf() -> Result<crate::diagnostics::perf::TurnPerfStats, String> {
-    tokio::task::spawn_blocking(crate::diagnostics::perf::query_turn_perf_sync)
-        .await
-        .map_err(|e| format!("query_turn_perf: {e}"))
+pub async fn query_turn_perf(
+    window_hours: Option<u32>,
+) -> Result<crate::diagnostics::perf::TurnPerfStats, String> {
+    tokio::task::spawn_blocking(move || {
+        crate::diagnostics::perf::query_turn_perf_sync(window_hours)
+    })
+    .await
+    .map_err(|e| format!("query_turn_perf: {e}"))
 }
 
 /// Phase 4 — snapshot of the process-global metrics registry (counters +

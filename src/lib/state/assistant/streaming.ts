@@ -1131,6 +1131,12 @@ export function onStreamLine(tab: TabState, raw: string) {
         mutateStreaming(tab, (m) => ({ ...m, costUsd: turnCost }));
         if (tab.currentTurnRecord) tab.currentTurnRecord.costUsd = turnCost;
       }
+      // Wall-clock of the turn (CLI-measured, tool waits included) — drives
+      // the honest "Worked for Ns" header instead of the thinking+tool sum.
+      const wallMs = (env as { duration_ms?: unknown }).duration_ms;
+      if (typeof wallMs === "number" && wallMs > 0) {
+        mutateStreaming(tab, (m) => ({ ...m, turnDurationMs: wallMs }));
+      }
       const resultUsage = (env as { usage?: Record<string, unknown> }).usage;
       if (resultUsage) recordTurnUsage(tab, resultUsage, true);
       if (env.subtype && env.subtype !== "success") {

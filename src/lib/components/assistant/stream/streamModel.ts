@@ -504,11 +504,20 @@ export function messageToTurn(m: ChatMessage): TurnModel {
   else if (tools.length > 0) outcome = "ran"; // tools, but nothing mutating
   else outcome = "text"; // a plain answer
 
+  // "Worked for Ns" — prefer the CLI's wall-clock for the whole turn (result
+  // frame duration_ms; spawn→result, tool waits included). The summed
+  // thinking+tool secs under-report badly — a pure-text turn shows "Worked
+  // for 0s" over a 30s reply. Sum kept only for pre-field history.
+  const wallSecs = typeof m.turnDurationMs === "number" && m.turnDurationMs > 0
+    ? m.turnDurationMs / 1000
+    : null;
+  const shownSecs = wallSecs ?? totalSecs;
+
   // Footer time·cost line — shown for any turn that did work (not pure text).
   const cost = typeof m.costUsd === "number" && m.costUsd > 0 ? `$${m.costUsd.toFixed(2)}` : null;
-  const meta = outcome === "text" ? null : { time: fmtDur(totalSecs), cost };
+  const meta = outcome === "text" ? null : { time: fmtDur(shownSecs), cost };
 
-  return { blocks, thinking, outcome, files: changedFiles.size, meta, totalSecs };
+  return { blocks, thinking, outcome, files: changedFiles.size, meta, totalSecs: shownSecs };
 }
 
 // The CLI can split one narration sentence across a tool_use — the model emits
