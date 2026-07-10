@@ -24,6 +24,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # The runner service's bare PATH has no cargo — release.yml gets it from
+      # this same action. Without it every step 127'd (masked by the `|| true`
+      # below since 2026-07-07).
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked || true
 
