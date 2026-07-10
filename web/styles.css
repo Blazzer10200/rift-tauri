@@ -143,8 +143,7 @@ a { color: inherit; }
 }
 .footer-inner a { text-decoration: none; transition: color 0.15s ease; }
 .footer-inner a:hover { color: var(--text); }
-.footer-claude { display: inline-flex; align-items: center; gap: 7px; }
-.footer-claude svg { width: 13px; height: 13px; flex: none; fill: #d97757; }
+.footer-claude { display: inline-flex; align-items: center; }
 
 /* Responsive */
 @media (max-width: 720px) {
