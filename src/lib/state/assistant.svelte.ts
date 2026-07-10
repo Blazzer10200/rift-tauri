@@ -16,38 +16,19 @@ import { browserDock } from "./browserDock.svelte";
 // here so external callers like `import type { Block } from "$lib/state/assistant.svelte"`
 // keep working. See `docs/design/assistant-svelte-split.md`.
 export type {
-  WorkspaceState,
-  AuthStatus,
-  ClaudeInstall,
   ToolBlock,
-  TextBlock,
   ThinkingBlock,
-  BoundaryBlock,
-  ImageBlock,
   Block,
   ChatMessage,
-  ConversationMeta,
-  ThinkingEffort,
   ModelSel,
-  PaneState,
   QueueItem,
 } from "./assistant/types";
-export { MAX_PANES } from "./assistant/types";
 import type {
   WorkspaceState,
   AuthStatus,
-  ToolBlock,
-  ThinkingBlock,
-  BoundaryBlock,
-  ImageBlock,
   Block,
   ChatMessage,
   ConversationMeta,
-  ConversationRecord,
-  ContentBlock,
-  StreamDelta,
-  StreamEvent,
-  StreamEnvelope,
   ThinkingEffort,
   ModelSel,
   PermissionMode,
@@ -61,8 +42,7 @@ import type {
 } from "./assistant/types";
 import { MAX_PANES } from "./assistant/types";
 
-// M1 split (2026-05-26): helpers lifted to `./assistant/helpers`. Re-export
-// the one externally-imported symbol so call sites stay unchanged.
+// M1 split (2026-05-26): helpers lifted to `./assistant/helpers`.
 import {
   loadModel,
   saveModel,
@@ -76,12 +56,10 @@ import {
   loadPlan,
   savePlan,
   planContextCap,
-  messagesHaveContextSignals,
   migrateThinkingPins,
   ctxWindowForModelId,
   isStaleTurnEpoch,
 } from "./assistant/helpers";
-export { messagesHaveContextSignals } from "./assistant/helpers";
 
 // cont.276: stream/done/error listener bodies extracted for testability —
 // init() registers 1-line thunks onto these (see listeners.ts header).
@@ -131,7 +109,6 @@ import {
 // the class (M5b — gated on M6 tabs lifecycle extraction).
 import {
   refreshConversations as persistRefresh,
-  buildSaveRecord as persistBuildRecord,
   flushNow as persistFlushNow,
   scheduleSave as persistSchedule,
   renameConversation as persistRename,
@@ -1444,12 +1421,6 @@ class AssistantStore {
   loadCustomCommands() { return wsLoadCustomCommands(this); }
 
   refreshConversations() { return persistRefresh(this); }
-
-  // M5: deriveTitle + buildSaveRecord moved to ./assistant/persistence. Kept
-  // as private thunk for any in-class callers that still reference it.
-  private buildSaveRecord(convoId: string, tab: TabState): ConversationRecord {
-    return persistBuildRecord(this, convoId, tab);
-  }
 
   flushNow() { persistFlushNow(this); }
 

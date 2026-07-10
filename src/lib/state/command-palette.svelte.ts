@@ -2,8 +2,6 @@
 // closes. `targetSettingsSection` is the deep-link channel — Settings page
 // watches it and pulls to the requested section, then clears.
 
-import type { WorkspaceId } from "./workspace.svelte";
-
 // "chat" = conversation display prefs; "claude" = session/plan/API-key tab.
 type Section = "appearance" | "chat" | "claude" | "speech" | "about";
 

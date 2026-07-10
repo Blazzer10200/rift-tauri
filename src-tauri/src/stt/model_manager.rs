@@ -28,9 +28,6 @@ pub struct ModelInfo {
     pub on_disk_bytes: Option<u64>,
     pub downloaded: bool,
     pub path: Option<PathBuf>,
-    /// Expected sha256 (lowercase hex). `None` means "skip verify" — true for
-    /// every entry today until we pin upstream hashes.
-    pub sha256: Option<String>,
 }
 
 /// On-disk catalogue of every model Rift knows how to fetch. To add another:
@@ -108,7 +105,6 @@ pub fn known_models() -> Vec<ModelInfo> {
                 on_disk_bytes,
                 downloaded,
                 path: Some(path),
-                sha256: m.sha256.map(String::from),
             }
         })
         .collect()

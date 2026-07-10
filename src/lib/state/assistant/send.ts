@@ -15,7 +15,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { accessibility } from "../accessibility.svelte";
-import { toast, notify } from "../toast.svelte";
+import { notify } from "../toast.svelte";
 import type { AssistantStore, TabState } from "../assistant.svelte";
 import type { Block, ChatMessage, ModelSel, QueueItem, TurnRecord } from "./types";
 import { effortToFlag, fableAvailable, haikuAvailable, FABLE_SUNSET_MS } from "./helpers";

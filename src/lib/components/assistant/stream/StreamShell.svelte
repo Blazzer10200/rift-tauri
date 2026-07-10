@@ -6,7 +6,7 @@
   import { tooltip } from "$lib/actions/tooltip";
   import OutputBlock from "./OutputBlock.svelte";
 
-  let { tool, streaming = false }: { tool: StreamTool; streaming?: boolean } = $props();
+  let { tool }: { tool: StreamTool } = $props();
 
   const running = $derived(tool.status === "pending");
   const failed = $derived(tool.status === "error");

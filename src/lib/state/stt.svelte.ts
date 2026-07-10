@@ -50,7 +50,6 @@ export type ModelInfo = {
   on_disk_bytes: number | null;
   downloaded: boolean;
   path: string | null;
-  sha256: string | null;
 };
 
 export type DownloadProgress = {
