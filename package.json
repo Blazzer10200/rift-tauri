@@ -28,6 +28,8 @@
     "@fontsource-variable/jetbrains-mono": "^5.2.8",
     "@fontsource-variable/lexend": "^5.2.11",
     "@shikijs/engine-javascript": "^3.23.0",
+    "@shikijs/langs": "^3.23.0",
+    "@shikijs/themes": "^3.23.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2",
     "@tauri-apps/plugin-dialog": "^2.7.1",

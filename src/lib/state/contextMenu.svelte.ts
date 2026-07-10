@@ -96,7 +96,7 @@ const TYPO_MAP: Record<string, string> = {
 
 /** Deterministic auto-correction: common typos, sentence-start + standalone
  *  "i" capitalization, collapse runs of spaces. Pure — returns corrected text. */
-export function autoCorrect(text: string): string {
+function autoCorrect(text: string): string {
   if (!text) return text;
   let out = text.replace(/\b([A-Za-z][A-Za-z']*)\b/g, (m) => {
     const rep = TYPO_MAP[m.toLowerCase()];

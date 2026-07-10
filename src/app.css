@@ -103,8 +103,6 @@
 
   /* density (compact default; overridden below by data-density) */
   --row-h: 28px;
-  --row-pad-y: 4px;
-  --row-pad-x: 10px;
   --gap: 8px;
 
   /* type system */
@@ -357,46 +355,6 @@ input.slider-zoom::-webkit-slider-thumb { transform: scale(1.35); }
 }
 /* form fields inside dialogs */
 .field { display: flex; flex-direction: column; margin-bottom: 12px; }
-.field-sub { color: var(--fg-faint); font-weight: 400; }
-.input-row { display: flex; gap: 6px; align-items: center; }
-.input-row .input { flex: 1; }
-.input-btngrp { display: inline-flex; gap: 4px; }
-
-/* stepper */
-.stepper {
-  display: flex; align-items: center;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-elev-1);
-  gap: 0;
-}
-.step {
-  display: inline-flex; align-items: center; gap: 8px;
-  color: var(--fg-faint);
-  font-size: var(--fs-xs);
-}
-.step-dot {
-  width: 20px; height: 20px;
-  border-radius: 50%;
-  background: var(--bg-elev-2);
-  color: var(--fg-muted);
-  border: 1px solid var(--border);
-  display: inline-flex; align-items: center; justify-content: center;
-  font-size: 11px; font-weight: 600;
-}
-.step[data-active="true"] { color: var(--fg); }
-.step[data-active="true"] .step-dot {
-  background: var(--accent); color: var(--accent-fg); border-color: var(--accent);
-}
-.step[data-done="true"] .step-dot {
-  background: var(--ok-soft); color: var(--ok); border-color: var(--ok);
-}
-.step-line {
-  flex: 1; height: 1px; background: var(--border); margin: 0 10px;
-}
-
-/* focus ring helper */
-.focusable:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); border-radius: var(--radius-sm); }
 
 /* animations (respect reduced motion) */
 @media (prefers-reduced-motion: no-preference) {

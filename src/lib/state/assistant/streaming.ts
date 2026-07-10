@@ -102,7 +102,7 @@ export function beginTurn(tab: TabState) {
  *  can't reach this — onStreamLine's parent_tool_use_id branch returns first.
  *  The backend idle-drain is the real gate: an idle tab only sees these frames
  *  when a genuine continuation turn is running. */
-export function maybeBeginContinuation(tab: TabState, env: StreamEnvelope): boolean {
+function maybeBeginContinuation(tab: TabState, env: StreamEnvelope): boolean {
   if (tab.streaming) return false;
   const isInit = env.type === "system" && (env as { subtype?: string }).subtype === "init";
   const isContentfulAssistant =
@@ -514,7 +514,7 @@ function unescapeJsonString(raw: string): string | null {
 
 /** Bounded extraction of completed (plus one trailing incomplete) caption
  *  fields from partial input JSON. Never throws; {} until something usable. */
-export function extractFormingFields(json: string): Record<string, string> {
+function extractFormingFields(json: string): Record<string, string> {
   const win = json.length > FORM_SCAN_CAP ? json.slice(0, FORM_SCAN_CAP) : json;
   const out: Record<string, string> = {};
   for (const m of win.matchAll(FORM_FIELD_RE)) {

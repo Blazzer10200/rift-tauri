@@ -111,7 +111,7 @@ const hostOf = (u: string) => { try { return new URL(u).host; } catch { return u
 // garbage in the transcript. Display + copy both want clean text.
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
-export function stripAnsi(s: string): string {
+function stripAnsi(s: string): string {
   return s.replace(ANSI_RE, "");
 }
 

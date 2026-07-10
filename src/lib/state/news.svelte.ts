@@ -49,7 +49,7 @@ const ALLOWED_TAGS = new Set(["model", "claude-code", "api", "company"]);
 /** Re-validate the AI digest JSON — never trust the model's raw output. Clamps
  *  summary length, allow-lists tag, drops items missing title/url or with a
  *  non-http(s) url. Mirrors AI Health's `normalizeApply` doctrine. */
-export function normalizeNews(raw: string): DigestItem[] {
+function normalizeNews(raw: string): DigestItem[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);

@@ -1017,13 +1017,13 @@ const DECENSOR_MAP: Record<string, string> = {
 // punctuation tolerated since both engines like to append periods.
 const SEND_CMD_RE = /(?:^|\s)send (?:it|that|message)[.,!?]*\s*$/i;
 const SCRATCH_CMD_RE = /(?:^|\s)(?:scratch|strike) that[.,!?]*\s*$/i;
-export function applyInlineCommands(t: string): string {
+function applyInlineCommands(t: string): string {
   return t
     .replace(/(?:^|\s)new paragraph[.,]?(?=\s|$)/gi, "\n\n")
     .replace(/(?:^|\s)new line[.,]?(?=\s|$)/gi, "\n");
 }
 
-export function decensor(text: string): string {
+function decensor(text: string): string {
   if (!text.includes("*")) return text;
   return text.replace(/\b([a-zA-Z])(\*{2,})([a-zA-Z]*)/g, (match, first: string, stars: string, tail: string) => {
     const key = `${first.toLowerCase()}${1 + stars.length + tail.length}`;

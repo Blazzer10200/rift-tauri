@@ -89,7 +89,7 @@
   --pulse-live:   1.6s;    /* shared breathing period for live status dots */
 
   /* ── density (compact default) ── */
-  --row-h: 28px; --row-pad-y: 4px; --row-pad-x: 10px; --gap: 8px;
+  --row-h: 28px; --gap: 8px;
 
   /* ── type ── */
   --font-ui:   "Inter Variable", "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
