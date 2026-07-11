@@ -2,6 +2,12 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## Unreleased
+
+- **Changing model or reasoning before you send no longer costs a cold start** — the standby Claude process now re-warms in the background the moment you change the picker or dial, instead of the change being discovered at send time (which paid the full process spawn inside your reply wait).
+- **Conversation titles work again** — title generation still pinned Haiku, which Anthropic removed in June, so every auto-title had been quietly failing since. Titles now run on Sonnet at minimal reasoning (just as fast and cheap).
+- **Honest per-effort speed stats** — turns with thinking off were being attributed to whatever effort tier was parked on the dial in AI Health's per-model latency groups; they now report as the Low they actually ran at (this also stops a needless process respawn when the parked tier changes while thinking is off).
+
 ## v0.99.0 — One background, no picker
 
 - **Background textures simplified away** — the 12-variant texture system and the one-click Looks presets are gone (the extra textures stopped earning their place). The app keeps the single default dots field; Appearance is now just Accent color + Interface & code. Anyone who had picked another texture falls back to dots automatically; the old preference key is cleaned up on launch.

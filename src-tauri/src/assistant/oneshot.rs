@@ -494,9 +494,11 @@ Examples: 'Run this bash command: echo hi' -> Bash Echo Command Test; \
 Output ONLY the title.";
 
 /// One-shot conversation-title generator. Same headless `claude -p` path as
-/// `assistant_enhance_prompt` (no session, no tools, neutral cwd) but on Haiku —
-/// titling is a cheap judgment, unlike the Sonnet rewrite — and
-/// returns a short Title-Case phrase and emits no stream events — the frontend
+/// `assistant_enhance_prompt` (no session, no tools, neutral cwd) but at
+/// `--effort low` on the default model — titling is a cheap judgment, unlike
+/// the medium-effort rewrite. (Originally pinned `--model haiku`; Haiku 4.5 was
+/// pulled by Anthropic 2026-06-26, so that pin silently failed every title.)
+/// Returns a short Title-Case phrase and emits no stream events — the frontend
 /// fires this after the first assistant turn and patches the conversation
 /// title in place. Cheap enough (sub-100-token completion) to run per convo.
 #[tauri::command]
@@ -522,7 +524,10 @@ pub async fn assistant_generate_title(prompt: String) -> Result<String, String> 
         .arg("--output-format").arg("stream-json")
         .arg("--verbose")
         .arg("--include-partial-messages")
-        .arg("--model").arg("haiku")
+        .arg("--model").arg(DEFAULT_MODEL)
+        // Minimal reasoning — a title needs judgment, not deliberation. Without
+        // an explicit flag the CLI defaults to `--effort high` (slow + costly).
+        .arg("--effort").arg("low")
         // A title is tens of tokens — pennies-fraction cap.
         .arg("--max-budget-usd").arg("0.05")
         .arg("--strict-mcp-config")
@@ -638,7 +643,7 @@ pub async fn assistant_generate_title(prompt: String) -> Result<String, String> 
         });
     }
     // Sanitize: first line only, strip wrapping quotes, cap length. A
-    // well-behaved Haiku returns exactly the phrase, but guard against a
+    // well-behaved model returns exactly the phrase, but guard against a
     // stray quote or trailing newline.
     let title = acc
         .trim()

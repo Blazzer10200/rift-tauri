@@ -676,11 +676,11 @@ pub async fn assistant_prewarm(
     // omits it, preserving the original single-call-site behaviour.
     is_first_turn: Option<bool>,
 ) -> Result<(), String> {
-    // A spare for a session that already has a live warm child is pure waste —
-    // bail before doing any work (cheap registry read, no child lock).
-    if warm_pool::get(&session_id).is_some() {
-        return Ok(());
-    }
+    // A live warm child no longer bails here wholesale: only a KEY MATCH makes
+    // a spare redundant, and the key needs resolve_spawn's output — so
+    // run_or_prewarm's prewarm branch owns match→no-op / stale→drain+respawn
+    // (key-aware prewarm, 2026-07-11). Falling through on a parked child costs
+    // one resolve (no spawn) on the rare re-fire; the FE dedups by signature.
     // Cost guard: don't speculatively spawn (and re-run the user's SessionStart
     // hooks + handshake) when the plan's rolling window is nearly spent. None =
     // unknown (API-key users, no fetch yet) → allow; only skip on a KNOWN-hot
@@ -771,6 +771,32 @@ async fn run_or_prewarm(
     // the warm pool with NO first turn. The real `assistant_send` that follows
     // reuses it via `dispatch_turn`'s existing warm path.
     if prewarm {
+        // Key-aware (2026-07-11): a spare parked under a MATCHING key makes this
+        // a no-op; one parked under a STALE key (picker/dial changed after it
+        // spawned) would only be discovered at send → drain it NOW and respawn
+        // below, so the cold start hides behind typing time instead of landing
+        // in the send critical path. Never touch a mid-turn child. The brief
+        // check→kill gap vs a racing send is safe: a send that reuses the child
+        // first self-heals via the DeadOnReuse cold-retry path, and the spawn
+        // below still settles ownership through insert_if_absent.
+        if let Some(arc) = warm_pool::get(&session_id) {
+            let (matches, busy) = {
+                let g = match arc.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+                (g.key == key, g.turn_in_progress.load(std::sync::atomic::Ordering::Acquire))
+            };
+            if matches || busy {
+                return Ok(());
+            }
+            let old_pid = warm_pool::pid_of(&session_id);
+            warm_pool::remove_if(&session_id, &arc);
+            if let Some(p) = old_pid {
+                kill_child_tree_async(p).await;
+            }
+            // metric-only (no emit_dispatch): dispatch outcomes feed the FE
+            // warm-hit rate, whose denominator must stay real turn dispatches.
+            crate::metric!("warm_pool.prewarm_drain");
+            log::info!("prewarm: drained stale-key spare for {session_id} (picker changed before send) — respawning warm");
+        }
         return prewarm_spawn(app, window_label, session_id, key, cmd, mcp_guard, model);
     }
 
@@ -1245,7 +1271,9 @@ async fn resolve_spawn(
         const SAFE_BUILTINS: &str = "BashOutput,CronList,EnterPlanMode,Glob,Grep,KillBash,KillShell,LSP,PushNotification,Read,ReportFindings,ScheduleWakeup,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,TodoWrite,ToolSearch,WebFetch,WebSearch";
         // UI-presentation tools (ask_user / open_browser / notify) are safe to
         // auto-approve: scheme-allowlisted, length-capped, no workspace writes.
-        const SAFE_MCP: &str = "mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__ask_user,mcp__rift__open_browser,mcp__rift__notify";
+        // The browser-dock readers (page text / console) are read-only eyes on
+        // the pane the user is already looking at — same no-prompt tier.
+        const SAFE_MCP: &str = "mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__ask_user,mcp__rift__open_browser,mcp__rift__notify,mcp__rift__read_browser_page,mcp__rift__read_browser_console";
         // Local git tools (git_local.rs). Read set is non-mutating → safe to
         // auto-approve even in prompting modes. Write set is admitted in
         // non-prompting variants but deliberately OMITTED from the prompting
@@ -1583,7 +1611,12 @@ async fn resolve_spawn(
         local_llm_enabled: cfg.local_llm_enabled,
         local_llm_fp,
         thinking_on,
-        effort_level: effort_level.to_string(),
+        // Key on the flag actually SENT (thinking-off wires `--effort low`
+        // whatever tier is parked): keying on the tier respawned two
+        // identical-argv children on a parked-tier change while thinking was
+        // off, and misattributed thinking-off turns to the parked tier in the
+        // per-(model,effort) perf groups (perf.rs by_group).
+        effort_level: send_effort_flag(thinking_on, effort_level).to_string(),
         trust_level: trust_level.clone(),
         addendum_ptr: addendum.as_ptr() as usize,
         // Mirror the arg-build filter (turn.rs ~1021) so a stored-but-invalid
@@ -2016,8 +2049,8 @@ fn prewarm_spawn(
         pid: turn_pid,
     }));
     // #76 dup-prewarm race: register ONLY if this session has no warm child yet.
-    // The top-of-`assistant_prewarm` `get().is_some()` guard is non-atomic across the
-    // `resolve_spawn().await` gap, so two overlapping prewarms for one session can both
+    // The key-aware guard in `run_or_prewarm`'s prewarm branch is non-atomic
+    // across the spawn gap, so two overlapping prewarms for one session can both
     // reach here. `insert_if_absent` decides the winner under a single registry lock;
     // the loser tree-kills the child it just spawned (the parked `claude` + its MCP
     // grandchild) instead of leaking it — a bare `insert` would silently displace the

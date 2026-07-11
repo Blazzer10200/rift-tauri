@@ -138,7 +138,8 @@ pub(super) struct SpawnKey {
     pub thinking_on: bool,
     /// `--effort` is baked at spawn (NOT re-readable per-turn over stream-json,
     /// red-team M4) → effort change MUST respawn. Silent wrong-effort is worse
-    /// than a cold turn.
+    /// than a cold turn. Holds the flag actually SENT (thinking-off ⇒ "low"
+    /// whatever tier is parked), so identical-argv spawns share a key.
     pub effort_level: String,
     /// Git-tools trust gates the `--allowed-tools` argv (git-write tools are
     /// appended only at `standard`) AND the MCP child's RIFT_TRUST_LEVEL env —
@@ -232,8 +233,8 @@ pub(super) fn insert(session_id: &str, child: Arc<Mutex<WarmChild>>) {
 }
 
 /// Atomic "insert only if the session has no warm child yet" (#76 races). The
-/// presence checks upstream (`assistant_prewarm`'s `get().is_some()`, dispatch's
-/// `get()==None` cold fall-through) all run before an async gap, so two spawns
+/// presence checks upstream (`run_or_prewarm`'s key-aware prewarm guard,
+/// dispatch's `get()==None` cold fall-through) all run before an async gap, so two spawns
 /// for one session can both reach registration; an unconditional map insert
 /// would silently displace the first Arc with no kill — leaking a ~450MB
 /// `claude` child + its MCP grandchild (invisible to idle-evict AND the

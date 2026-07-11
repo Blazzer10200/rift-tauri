@@ -5,7 +5,8 @@
 // hook tax measured in the cont.214 spike. The spare registers in the backend
 // warm pool under the tab's already-minted cliSessionId; the real send reuses it
 // via the normal warm path when the SpawnKey matches (a picker change before
-// send just cold-respawns, never worse than no pre-warm).
+// send re-fires here and the backend drains + respawns the stale spare, so the
+// cold start hides behind typing time — never worse than no pre-warm).
 //
 // Design (persistent-process model — see warm-pool-cold-start-diagnosis.md):
 //  - ONE spare per call, keyed to the current picker signature.
@@ -17,8 +18,8 @@
 //    full tools). Only an API-key/sandboxed no-folder chat (tool-less +
 //    conversational) is skipped.
 //  - debounced; deduped per (sessionId, signature) so a reactive re-tick or a
-//    settled picker doesn't re-spawn. A signature change re-arms (the old spare
-//    would mismatch at send anyway → backend drains it).
+//    settled picker doesn't re-spawn. A signature change re-arms; the backend's
+//    key-aware prewarm drains the stale spare + parks a fresh one (match = no-op).
 //  - best-effort + silent: a failed prewarm just means the first turn is cold,
 //    exactly as today. Never surfaces an error to the user.
 
@@ -54,7 +55,10 @@ function signatureOf(
   return [
     sessionId,
     store.effectiveModel,
-    effortToFlag(store.thinkingEffort, store.effectiveModel),
+    // Mirror the backend key: thinking-off wires `--effort low` whatever tier
+    // is parked, so fold it here too — a parked-tier change while thinking is
+    // off must not re-arm a prewarm for an identical spawn.
+    store.thinkingEnabled ? effortToFlag(store.thinkingEffort, store.effectiveModel) : "low",
     String(store.thinkingEnabled),
     store.permissionMode,
     root,
