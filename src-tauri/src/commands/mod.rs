@@ -6,10 +6,12 @@
 
 pub mod assistant;
 pub mod browser;
+pub mod elevation;
 pub mod update;
 
 pub use assistant::*;
 pub use browser::*;
+pub use elevation::*;
 pub use update::*;
 
 /// Open a path in VS Code, optionally at a line (`-g path:line`). The opener

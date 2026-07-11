@@ -18,6 +18,7 @@ pub mod browser;
 pub mod certs;
 pub mod commands;
 pub mod diagnostics;
+pub mod elevation;
 pub mod job_object;
 pub mod secrets;
 pub mod state;
@@ -136,6 +137,17 @@ pub fn run() {
     // (the installer passes `--veloapp-*` args). In all other cases this is a
     // near-instant no-op. Must run before Tauri spins up. See update_service.rs.
     velopack::VelopackApp::build().run();
+
+    // Administrator elevation reconciliation. When "always run as administrator"
+    // is on, a non-elevated launch hands off to an elevated instance (via the
+    // per-user Scheduled Task, no UAC prompt) and exits here; the elevated
+    // instance continues. Off (the default) = an immediate no-op. MUST run after
+    // the RIFT_MCP_SERVER early return above (an MCP child must never relaunch)
+    // and after Velopack (so update/install hooks are handled first). See
+    // `elevation.rs`.
+    if elevation::bootstrap() == elevation::Boot::Exit {
+        return;
+    }
 
     // Prime the corporate-root PEM before the first claude spawn so the file
     // exists on disk by the time any cli_install::claude_command() is called.
@@ -285,6 +297,9 @@ pub fn run() {
             commands::browser_read_console,
             commands::browser_console_counts,
             commands::resolve_workspace_path,
+            commands::elevation_status,
+            commands::elevation_relaunch_as_admin,
+            commands::elevation_set_always,
             stt::stt_get_config,
             stt::stt_set_config,
             stt::stt_start_recording,

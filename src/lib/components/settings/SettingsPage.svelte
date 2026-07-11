@@ -22,6 +22,7 @@
   import { onboarding } from "../../state/onboarding.svelte";
   import { betaNotice } from "../../state/betaNotice.svelte";
   import { environment } from "../../state/environment.svelte";
+  import { elevation } from "../../state/elevation.svelte";
   import { scrubUser } from "$lib/utils/redact";
   import { tooltip } from "$lib/actions/tooltip";
   import { sliderBubble } from "$lib/actions/sliderBubble";
@@ -78,6 +79,8 @@
     { tab: "claude",     anchor: "card-session",   card: "Claude session",    title: "Use my full Claude Code config", kw: "claude.md hooks mcp skills settings piggyback sandbox" },
     { tab: "claude",     anchor: "card-session",   card: "Claude session",    title: "Git tools",           kw: "read-only standard commit push trust" },
     { tab: "claude",     anchor: "card-session",   card: "Claude session",    title: "Plan",                kw: "free pro max context window 200k 1m gauge subscription" },
+    { tab: "claude",     anchor: "card-admin",     card: "Administrator access", title: "Relaunch as administrator", kw: "admin elevated elevation uac privileges run as administrator sudo" },
+    { tab: "claude",     anchor: "card-admin",     card: "Administrator access", title: "Always run as administrator", kw: "admin elevated elevation uac no prompt scheduled task startup" },
     { tab: "claude",     anchor: "card-api",       card: "API key & spending", title: "API-key fallback",   kw: "anthropic console token sk-ant billing keychain" },
     { tab: "claude",     anchor: "card-api",       card: "API key & spending", title: "Per-turn cost cap",  kw: "budget dollar limit spend guard" },
     { tab: "speech",     anchor: "card-engine",    card: "Engine",             title: "Speech-to-text",     kw: "voice mic dictation stt enable" },
@@ -440,6 +443,7 @@
     void diagnostics.init().catch((e) => console.warn("diagnostics.init failed", e));
     void cliUpdate.maybeCheck();
     void environment.refresh(); // fresh probe each time Settings opens — tools may have just been installed
+    void elevation.refresh(); // reflect current admin state + always-elevated pref
 
     asstNowTick = Date.now();
     const iv = setInterval(() => { asstNowTick = Date.now(); }, 30_000);
@@ -859,6 +863,42 @@
             <div class="st-note">Pro reaches 1M only once usage credits are enabled at <code>claude.ai/settings/usage</code> — otherwise it behaves like 200K.</div>
           {/if}
         </div>
+
+        {#if elevation.supported}
+          <div class="card" id="card-admin">
+            <div class="card-tt">Administrator access</div>
+            <div class="card-sub">Run Rift elevated so the assistant's tools inherit admin rights — no per-action UAC prompts, just like launching VS Code as administrator.</div>
+            <div class="ctl-row tight">
+              <div>
+                <div class="ctl-t">Status</div>
+                <div class="ctl-s">
+                  {#if elevation.elevated}
+                    Running as <strong>Administrator</strong>. Commands the assistant runs are elevated — no per-action prompts.
+                  {:else}
+                    Running as a <strong>standard user</strong>. Elevated actions each trigger a Windows UAC prompt.
+                  {/if}
+                </div>
+              </div>
+              {#if elevation.elevated}
+                <span class="admin-live"><ShieldCheck size={14} /> Administrator</span>
+              {:else}
+                <button class="st-btn" type="button" disabled={elevation.busy} onclick={() => void elevation.relaunchAsAdmin()}>
+                  {#if elevation.busy}<Loader2 size={14} class="st-spin" /> Relaunching…{:else}<ShieldCheck size={14} /> Relaunch as administrator{/if}
+                </button>
+              {/if}
+            </div>
+            <div class="ctl-row tight no-line">
+              <div>
+                <div class="ctl-t">Always run as administrator</div>
+                <div class="ctl-s">Rift launches elevated every time with no UAC prompt (via a per-user scheduled task). Convenient — but every tool the assistant runs then has full admin rights. Turn it off anytime; the task is removed.</div>
+              </div>
+              <button class="rift-toggle" class:on={elevation.alwaysElevated} role="switch" aria-checked={elevation.alwaysElevated} aria-label="Always run as administrator" disabled={elevation.busy} type="button" onclick={() => void elevation.setAlwaysElevated(!elevation.alwaysElevated)}><span class="rift-toggle-knob"></span></button>
+            </div>
+            {#if elevation.error}
+              <div class="st-note">{elevation.error}</div>
+            {/if}
+          </div>
+        {/if}
 
           <div class="card" id="card-api">
             <div class="card-tt">API key &amp; spending</div>
@@ -1618,4 +1658,9 @@
   .set-textarea { width: 100%; padding: 8px 10px; background: var(--field); border: 1px solid var(--field-border); border-radius: var(--radius); color: var(--fg); font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.5; resize: vertical; min-height: 60px; }
   .set-textarea:focus { outline: none; border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--ring); }
   .set-textarea:disabled { opacity: 0.55; cursor: not-allowed; }
+  /* Live "Administrator" indicator in the elevation card — accent-tinted, matches
+     the app's positive/active color rather than the status-bar amber alert tone. */
+  .admin-live { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); font-weight: 600;
+    color: var(--accent); white-space: nowrap; }
+  .admin-live :global(svg) { color: var(--accent); }
 </style>

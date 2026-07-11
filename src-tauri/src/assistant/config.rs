@@ -76,6 +76,13 @@ pub(super) struct AssistantConfig {
     pub(super) local_llm_base_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) local_llm_model: Option<String>,
+    /// When true, Rift launches itself with administrator privileges (Windows).
+    /// Backed by a per-user Scheduled Task so no UAC prompt fires on launch — see
+    /// `crate::elevation`. `None`/false = normal (standard-user) launch. The task
+    /// existence is the real source of truth; this flag drives the boot
+    /// reconciliation + the Settings toggle state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) always_elevated: Option<bool>,
 }
 
 pub(super) const RECENT_ROOTS_MAX: usize = 10;
@@ -462,6 +469,24 @@ pub fn assistant_set_use_full_config(value: bool) -> Result<(), String> {
     let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
     let mut cfg = load_config();
     cfg.use_full_config = Some(value);
+    save_config(&cfg)
+}
+
+/// Read the always-elevated preference (default false). Pure accessor used by
+/// the boot-time elevation reconciliation (`crate::elevation::bootstrap`) and
+/// the `elevation_status` command — not a Tauri command itself.
+pub fn get_always_elevated() -> bool {
+    load_config().always_elevated.unwrap_or(false)
+}
+
+/// Persist the always-elevated preference. The scheduled task (created/removed
+/// by `crate::elevation`) is the real launcher; this flag drives boot
+/// reconciliation and the Settings toggle. Serialized on `CONFIG_WRITE_LOCK`
+/// like every other setter.
+pub fn set_always_elevated(value: bool) -> Result<(), String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let mut cfg = load_config();
+    cfg.always_elevated = Some(value);
     save_config(&cfg)
 }
 

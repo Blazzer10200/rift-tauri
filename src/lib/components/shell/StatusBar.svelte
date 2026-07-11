@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { GitBranch } from "lucide-svelte";
+  import { GitBranch, ShieldCheck } from "lucide-svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { usage, limitZone } from "$lib/state/usage.svelte";
   import { workspace } from "$lib/state/workspace.svelte";
+  import { elevation } from "$lib/state/elevation.svelte";
   import { commandPalette } from "$lib/state/command-palette.svelte";
   import UsagePanel from "../assistant/composer/UsagePanel.svelte";
   import { tooltip } from "$lib/actions/tooltip";
@@ -52,8 +53,14 @@
     workspace.setActive("settings");
   }
 
+  function openAdminSettings() {
+    commandPalette.requestSettingsSection("claude");
+    workspace.setActive("settings");
+  }
+
   onMount(() => {
     void usage.refreshRateLimits(assistant.auth?.cliVersion ?? null);
+    void elevation.refresh();
     const h = setInterval(() => void usage.refreshRateLimits(assistant.auth?.cliVersion ?? null), 300_000);
     return () => clearInterval(h);
   });
@@ -78,6 +85,13 @@
   {/if}
   <span class="sb-sep"></span>
   <span class="sb-item sb-date">{today}</span>
+
+  {#if elevation.elevated}
+    <span class="sb-sep"></span>
+    <button class="sb-item sb-btn sb-admin" type="button" onclick={openAdminSettings} use:tooltip={"Running as Administrator — tools run elevated, no per-action UAC prompts"}>
+      <ShieldCheck size={11} /> Admin
+    </button>
+  {/if}
 
   {#if limits.length}
     <span class="sb-usage">
@@ -117,6 +131,11 @@
   .sb-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in oklch, var(--ok) 18%, transparent); }
   .sb-dot.off { background: var(--fg-faint); box-shadow: none; }
   .sb-date { color: var(--fg-subtle); }
+  /* Elevated = a heightened-privilege state — amber-tinted so it's noticeable
+     without reading as an error. */
+  .sb-admin { color: var(--warn); font-weight: 600; }
+  .sb-admin:hover { color: var(--warn); }
+  .sb-admin :global(svg) { color: var(--warn); }
   .sb-sep { width: 1px; height: 11px; background: var(--border); }
   .sb-usage { margin-left: auto; display: inline-flex; align-items: center; gap: 16px; position: relative; -webkit-app-region: no-drag; }
   .rl { display: inline-flex; align-items: center; gap: 7px; color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
