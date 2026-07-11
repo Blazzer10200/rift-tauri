@@ -26,6 +26,10 @@ class BrowserDock {
   // Last successfully loaded page — closing the dock destroys the native
   // webview, so this powers the empty-state "Reopen <host>" affordance.
   lastUrl = $state<string | null>(null);
+  // "Read by assistant" indicator — set from the tool stream (streaming.ts)
+  // when a read_browser_* tool fires. The token re-triggers the chip on
+  // back-to-back reads of the same kind.
+  assistantRead = $state<{ kind: "page" | "console"; token: number } | null>(null);
 
   init() {
     if (typeof window === "undefined") return;
@@ -57,6 +61,10 @@ class BrowserDock {
     if (!/^https?:\/\//i.test(url)) return; // never persist about:blank etc.
     this.lastUrl = url;
     try { localStorage.setItem(LAST_URL_KEY, url); } catch { /* noop */ }
+  }
+
+  noteAssistantRead(kind: "page" | "console") {
+    this.assistantRead = { kind, token: (this.assistantRead?.token ?? 0) + 1 };
   }
 
   setWidth(w: number) {

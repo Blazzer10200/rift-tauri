@@ -8,7 +8,7 @@
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { onDestroy, onMount, untrack } from "svelte";
-  import { Globe, RotateCw, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Copy, ExternalLink, MoreHorizontal } from "lucide-svelte";
+  import { Globe, RotateCw, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Copy, ExternalLink, MoreHorizontal, Sparkles, CircleAlert } from "lucide-svelte";
   import { portal } from "$lib/actions/portal";
   import { workspace } from "../../state/workspace.svelte";
   import { browserDock } from "../../state/browserDock.svelte";
@@ -56,6 +56,28 @@
   // True while the address input is focused — don't overwrite what the user is
   // typing with the synced live URL.
   let inputFocused = $state(false);
+
+  // Favicon of the current page as a data: URI (`browser://icon`) — the app
+  // CSP blocks external image URLs, so the backend inlines the bytes.
+  let favicon = $state<string | null>(null);
+  // Console badge: error/warn tally polled alongside the URL sync.
+  let consoleCounts = $state<{ errors: number; warns: number }>({ errors: 0, warns: 0 });
+  let consoleBusy = $state(false);
+  let consoleFlash = $state<"ok" | "fail" | null>(null);
+  let consoleFlashTimer: ReturnType<typeof setTimeout> | null = null;
+  // "Read by assistant" chip — driven by browserDock.assistantRead (set from
+  // the tool stream when a read_browser_* tool fires), auto-fades.
+  let aiRead = $state<"page" | "console" | null>(null);
+  let aiReadTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastAiReadToken = 0;
+  $effect(() => {
+    const r = browserDock.assistantRead;
+    if (!r || r.token === lastAiReadToken) return;
+    lastAiReadToken = r.token;
+    aiRead = r.kind;
+    if (aiReadTimer) clearTimeout(aiReadTimer);
+    aiReadTimer = setTimeout(() => (aiRead = null), 2600);
+  });
 
   function normalizeUrl(raw: string): string {
     const t = raw.trim();
@@ -188,6 +210,49 @@
     }
   }
 
+  async function syncConsoleCounts() {
+    if (!opened) return;
+    try {
+      consoleCounts = await invoke<{ errors: number; warns: number }>("browser_console_counts");
+    } catch { /* dock closed mid-poll */ }
+  }
+
+  function flashConsole(kind: "ok" | "fail") {
+    consoleFlash = kind;
+    if (consoleFlashTimer) clearTimeout(consoleFlashTimer);
+    consoleFlashTimer = setTimeout(() => (consoleFlash = null), 1500);
+  }
+
+  // Console twin of addToChat: drop the current page's console buffer into the
+  // composer as a labelled, sentinel-neutralized context block.
+  async function addConsoleToChat() {
+    if (!opened || consoleBusy) return;
+    consoleBusy = true;
+    try {
+      const s = await invoke<{ url: string; entries: { level: string; text: string; ts: number }[]; dropped: number }>(
+        "browser_read_console",
+      );
+      if (!s.entries.length) { flashConsole("fail"); return; }
+      const lines = s.entries
+        .map((e) => `[${e.level}] ${e.text}`)
+        .join("\n")
+        .replace(/\[End console output\]/gi, "[End console output​]")
+        .replace(/\[Console output:/gi, "[Console output​:");
+      const safeUrl = (s.url || "").replace(/[[\]\r\n]/g, " ").slice(0, 2048);
+      const block = `[Console output: ${safeUrl}]\n${lines}\n[End console output]`;
+      const cur = assistant.composerDraft;
+      const next = cur ? `${cur}\n\n${block}` : block;
+      if (next.length > 200_000) { flashConsole("fail"); return; }
+      assistant.composerDraft = next;
+      flashConsole("ok");
+    } catch (e) {
+      console.warn("browser_read_console:", e);
+      flashConsole("fail");
+    } finally {
+      consoleBusy = false;
+    }
+  }
+
   // Keep the address bar honest: the native webview navigates on its own (link
   // clicks, redirects) without notifying us, so poll its real URL while the
   // dock is actually visible. Cheap (a `wv.url()` read) and paused otherwise.
@@ -247,6 +312,7 @@
   let ro: ResizeObserver | null = null;
   let urlPoll: ReturnType<typeof setInterval> | null = null;
   let unlistenLoad: UnlistenFn | null = null;
+  let unlistenIcon: UnlistenFn | null = null;
   let mounted = true;
   onDestroy(() => { mounted = false; });
   onMount(async () => {
@@ -256,7 +322,10 @@
     }
     window.addEventListener("resize", syncBounds);
     urlPoll = setInterval(() => {
-      if (opened && workspace.activeId === "chat" && !document.hidden) void syncAddress();
+      if (opened && workspace.activeId === "chat" && !document.hidden) {
+        void syncAddress();
+        void syncConsoleCounts();
+      }
     }, 1200);
     // Native page-load phases → drive the spinner + keep the address honest on
     // link clicks / redirects / back-forward (faster than the 1.2s poll).
@@ -264,6 +333,9 @@
       const { phase, url } = e.payload;
       if (phase === "started") {
         loading = true;
+        // New document — stale favicon + console tallies must not linger.
+        favicon = null;
+        consoleCounts = { errors: 0, warns: 0 };
         armLoadWatchdog();
       } else {
         loading = false;
@@ -272,8 +344,14 @@
       }
       if (!inputFocused && url) address = url;
     });
-    if (!mounted) { u(); return; }
+    const ui = await listen<{ page: string; icon: string }>("browser://icon", (e) => {
+      const icon = e.payload?.icon ?? "";
+      // Only data:image/* ever renders — anything else keeps the glyph.
+      if (/^data:image\//.test(icon)) favicon = icon;
+    });
+    if (!mounted) { u(); ui(); return; }
     unlistenLoad = u;
+    unlistenIcon = ui;
   });
 
   onDestroy(() => {
@@ -281,7 +359,10 @@
     if (urlPoll) clearInterval(urlPoll);
     if (flashTimer) clearTimeout(flashTimer);
     if (loadWatchdog) clearTimeout(loadWatchdog);
+    if (consoleFlashTimer) clearTimeout(consoleFlashTimer);
+    if (aiReadTimer) clearTimeout(aiReadTimer);
     unlistenLoad?.();
+    unlistenIcon?.();
     window.removeEventListener("resize", syncBounds);
     // Closing the dock destroys the native webview (no lingering surface).
     void invoke("browser_close");
@@ -300,7 +381,13 @@
       <RotateCw size={15} />
     </button>
 
-    <span class="wb-glyph" class:wb-glyph-busy={loading}><Globe size={15} /></span>
+    <span class="wb-glyph" class:wb-glyph-busy={loading}>
+      {#if !loading && favicon}
+        <img class="wb-fav" src={favicon} alt="" onerror={() => (favicon = null)} />
+      {:else}
+        <Globe size={15} />
+      {/if}
+    </span>
     <input
       bind:this={addressEl}
       class="wb-address"
@@ -312,6 +399,31 @@
       onfocus={(e) => { inputFocused = true; e.currentTarget.select(); }}
       onblur={() => (inputFocused = false)}
     />
+    {#if aiRead}
+      <span
+        class="wb-airead"
+        role="status"
+        title={aiRead === "console" ? "The assistant just read this page's console" : "The assistant just read this page"}
+      >
+        <Sparkles size={12} />
+        <span>{aiRead === "console" ? "Console read" : "Page read"}</span>
+      </span>
+    {/if}
+    {#if opened && (consoleCounts.errors > 0 || consoleCounts.warns > 0)}
+      <button
+        class="wb-console"
+        class:wb-console-warnonly={consoleCounts.errors === 0}
+        class:wb-console-ok={consoleFlash === "ok"}
+        class:wb-console-fail={consoleFlash === "fail"}
+        type="button"
+        onclick={addConsoleToChat}
+        disabled={consoleBusy}
+        title="{consoleCounts.errors} console errors, {consoleCounts.warns} warnings — click to add the console output to the chat"
+      >
+        <CircleAlert size={13} />
+        <span>{consoleCounts.errors > 0 ? consoleCounts.errors : consoleCounts.warns}</span>
+      </button>
+    {/if}
     <button
       class="wb-add"
       class:wb-add-done={added}
@@ -333,6 +445,8 @@
     <button class="wb-btn wb-btn-close" type="button" onclick={() => browserDock.toggle()} title="Close browser panel" aria-label="Close browser panel">
       <X size={15} />
     </button>
+
+    {#if loading}<span class="wb-progress" aria-hidden="true"></span>{/if}
   </div>
 
   {#if menuOpen}
@@ -356,7 +470,7 @@
     {:else if !opened}
       <div class="wb-empty">
         <Globe size={40} />
-        <p>Browse inside Rift — then <strong>Add to chat</strong> to let the assistant read the page you're on.</p>
+        <p>Browse inside Rift — the assistant can open pages here, read them, and check the console for errors. <strong>Add to chat</strong> shares the page you're on.</p>
         {#if browserDock.lastUrl}
           <button
             class="wb-resume"
@@ -380,8 +494,10 @@
     display: flex; flex-direction: column;
     height: 100%; min-height: 0;
     background: transparent;
+    container-type: inline-size;
   }
   .wb-bar {
+    position: relative;
     display: flex; align-items: center; gap: 6px;
     padding: 8px 10px;
     border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
@@ -413,6 +529,88 @@
   .wb-btn:hover:not(:disabled) { color: var(--fg); border-color: var(--accent); }
   .wb-btn:disabled { opacity: 0.4; cursor: default; }
   .wb-btn-close:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }
+
+  .wb-fav { width: 15px; height: 15px; border-radius: 3px; display: block; }
+
+  /* Loading: thin accent comet sweeping the bar's bottom edge. */
+  .wb-progress {
+    position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+    overflow: hidden; pointer-events: none;
+  }
+  .wb-progress::before {
+    content: ""; position: absolute; inset: 0; width: 40%;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: wb-sweep 1.1s ease-in-out infinite;
+  }
+  @keyframes wb-sweep {
+    from { transform: translateX(-100%); }
+    to { transform: translateX(350%); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .wb-progress::before { animation: none; width: 100%; opacity: 0.5; }
+  }
+
+  /* "Read by assistant" — accent shimmer pill, appears on each AI read so the
+     user always sees when the model looked at the page. */
+  .wb-airead {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 24px; padding: 0 9px; flex: none;
+    border: 1px solid color-mix(in oklab, var(--accent) 55%, var(--border));
+    border-radius: 999px;
+    color: var(--accent);
+    font-size: 11px; font-weight: 600; white-space: nowrap;
+    background:
+      linear-gradient(110deg,
+        color-mix(in oklab, var(--accent) 10%, transparent) 30%,
+        color-mix(in oklab, var(--accent) 26%, transparent) 50%,
+        color-mix(in oklab, var(--accent) 10%, transparent) 70%);
+    background-size: 200% 100%;
+    animation: wb-shimmer 1.5s linear infinite, wb-airead-in 0.18s ease;
+  }
+  @keyframes wb-shimmer {
+    from { background-position: 120% 0; }
+    to { background-position: -80% 0; }
+  }
+  @keyframes wb-airead-in {
+    from { opacity: 0; transform: translateY(2px); }
+  }
+  @media (prefers-reduced-motion: reduce) { .wb-airead { animation: none; } }
+
+  /* Console badge — danger when errors, warn tint when warnings only. */
+  .wb-console {
+    display: inline-flex; align-items: center; gap: 4px;
+    height: 30px; padding: 0 8px; flex: none;
+    border: 1px solid color-mix(in oklab, var(--danger) 55%, var(--border));
+    border-radius: 8px;
+    background: color-mix(in oklab, var(--danger) 14%, transparent);
+    color: var(--danger);
+    font: inherit; font-size: 12px; font-weight: 600;
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  }
+  .wb-console:hover:not(:disabled) { background: color-mix(in oklab, var(--danger) 24%, transparent); }
+  .wb-console:disabled { opacity: 0.6; cursor: default; }
+  .wb-console-warnonly {
+    border-color: color-mix(in oklab, var(--warn) 55%, var(--border));
+    background: var(--warn-soft);
+    color: var(--warn);
+  }
+  .wb-console-warnonly:hover:not(:disabled) { background: color-mix(in oklab, var(--warn) 24%, transparent); }
+  .wb-console-ok, .wb-console-ok.wb-console-warnonly {
+    border-color: var(--ok);
+    background: color-mix(in oklab, var(--ok) 16%, transparent);
+    color: var(--ok);
+  }
+  .wb-console-fail, .wb-console-fail.wb-console-warnonly {
+    border-color: var(--danger);
+    background: color-mix(in oklab, var(--danger) 16%, transparent);
+    color: var(--danger);
+  }
+
+  /* Narrow dock: labels give way, icons stay. */
+  @container (max-width: 470px) {
+    .wb-add span, .wb-airead span { display: none; }
+  }
 
   /* Add-page-to-chat — the AI affordance, given accent weight to read as the
      primary action in the bar. */

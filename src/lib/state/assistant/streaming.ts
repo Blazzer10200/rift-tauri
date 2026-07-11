@@ -657,6 +657,12 @@ function finalizeFormedTool(tab: TabState, block: { id: string; name: string; in
 }
 
 function appendToolUse(tab: TabState, block: { id: string; name: string; input?: Record<string, unknown> }) {
+  // The dock's "read by assistant" chip. MUST sit above the formed-tool early
+  // return below — live-streamed tools are pre-formed from stream_events, so
+  // for them this envelope call is the only guaranteed once-per-tool hook.
+  if (block.name === "mcp__rift__read_browser_page" || block.name === "mcp__rift__read_browser_console") {
+    browserDock.noteAssistantRead(block.name.endsWith("console") ? "console" : "page");
+  }
   if (tab.seenToolUseIds.has(block.id)) {
     // Already live-formed from stream_events — the envelope finalizes input.
     finalizeFormedTool(tab, block);

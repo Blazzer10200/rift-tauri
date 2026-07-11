@@ -16,6 +16,8 @@
 //! Ops:
 //!   * `ask_user`     — park until the user answers in the chat UI (≤10 min).
 //!   * `open_browser` — show an http/https URL in the in-app browser dock.
+//!   * `read_browser_page`    — rendered text of the current dock page.
+//!   * `read_browser_console` — console buffer of the current dock page.
 //!   * `notify`       — toast in Rift's corner.
 
 use std::sync::OnceLock;
@@ -229,6 +231,8 @@ async fn dispatch(app: &AppHandle, req: Request) -> Response {
     match req.op.as_str() {
         "ask_user" => ask_user_op(app, req).await,
         "open_browser" => open_browser_op(app, req),
+        "read_browser_page" => read_browser_page_op(app, req).await,
+        "read_browser_console" => read_browser_console_op(app, req).await,
         "notify" => notify_op(app, req),
         other => err(format!("unknown op `{other}`")),
     }
@@ -271,7 +275,10 @@ async fn ask_user_op(app: &AppHandle, req: Request) -> Response {
     // missing/closed label (it just matches zero webviews), so without this
     // pre-check the event silently drops, nobody resolves the oneshot, and the
     // task parks for the full 600s timeout — stalling the MCP stdio loop.
-    if app.get_webview_window(window.as_str()).is_none() {
+    // get_window, NOT get_webview_window: with the browser dock's child webview
+    // attached, "main" is a multi-webview window and get_webview_window
+    // returns None for it — the old check false-failed whenever the dock was open.
+    if app.get_window(window.as_str()).is_none() {
         return err("ask_user: target window is not available");
     }
     // RR7: guarded registration — if this bridge task is aborted mid-await
@@ -336,8 +343,8 @@ fn open_browser_op(app: &AppHandle, req: Request) -> Response {
     let window = window_of(&req);
     // Same reason as ask_user's pre-check: emit_to returns Ok(()) for a
     // missing/closed label, so without this the tool reports "opened" for a
-    // dock nobody saw.
-    if app.get_webview_window(&window).is_none() {
+    // dock nobody saw. get_window — multiwebview-safe, see ask_user.
+    if app.get_window(&window).is_none() {
         return err("open_browser: target window is not available");
     }
     let _ = app.emit_to(
@@ -349,6 +356,49 @@ fn open_browser_op(app: &AppHandle, req: Request) -> Response {
         }),
     );
     ok_with(serde_json::json!({ "opened": url }))
+}
+
+/// Read the dock page's rendered text back to the MCP child. Read-only. Also
+/// pings the frontend (`assistant://browser-read`) so the dock can flash a
+/// "read by assistant" indicator — the user should always be able to tell
+/// when the model looked at the page they're browsing.
+async fn read_browser_page_op(app: &AppHandle, req: Request) -> Response {
+    let window = window_of(&req);
+    let session_id = session_id_or_warn(req.session_id, "read_browser_page");
+    match crate::browser::read_page(app).await {
+        Ok(p) => {
+            let _ = app.emit_to(
+                window.as_str(),
+                "assistant://browser-read",
+                serde_json::json!({ "kind": "page", "url": p.url, "session_id": session_id }),
+            );
+            match serde_json::to_value(&p) {
+                Ok(v) => ok_with(v),
+                Err(e) => err(format!("read_browser_page: serialize: {e}")),
+            }
+        }
+        Err(e) => err(format!("read_browser_page: {e}")),
+    }
+}
+
+/// Console-buffer twin of `read_browser_page_op` — the indicator says console.
+async fn read_browser_console_op(app: &AppHandle, req: Request) -> Response {
+    let window = window_of(&req);
+    let session_id = session_id_or_warn(req.session_id, "read_browser_console");
+    match crate::browser::read_console(app).await {
+        Ok(s) => {
+            let _ = app.emit_to(
+                window.as_str(),
+                "assistant://browser-read",
+                serde_json::json!({ "kind": "console", "url": s.url, "session_id": session_id }),
+            );
+            match serde_json::to_value(&s) {
+                Ok(v) => ok_with(v),
+                Err(e) => err(format!("read_browser_console: serialize: {e}")),
+            }
+        }
+        Err(e) => err(format!("read_browser_console: {e}")),
+    }
 }
 
 /// Surface a toast in Rift's corner via `assistant://notify`. Length-capped
@@ -372,7 +422,8 @@ fn notify_op(app: &AppHandle, req: Request) -> Response {
     };
     let window = window_of(&req);
     // Mirror open_browser: don't report "shown" for a toast no window rendered.
-    if app.get_webview_window(&window).is_none() {
+    // get_window — multiwebview-safe, see ask_user.
+    if app.get_window(&window).is_none() {
         return err("notify: target window is not available");
     }
     let _ = app.emit_to(

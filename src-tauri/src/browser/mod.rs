@@ -126,6 +126,9 @@ pub fn open(app: &AppHandle, url: &str, x: f64, y: f64, w: f64, h: f64) -> Resul
         // Match the app's page bg (oklch(0.142) → #090a0b) so the pre-first-paint
         // flash reads as the app's dark surface, not a white/black blast.
         .background_color(tauri::webview::Color(9, 10, 11, 255))
+        // Console capture rides every document this webview ever loads —
+        // read_console / console_counts drain the buffer it maintains.
+        .initialization_script(CONSOLE_CAPTURE_JS)
         .on_page_load(|webview, payload| {
             let phase = match payload.event() {
                 tauri::webview::PageLoadEvent::Started => "started",
@@ -139,6 +142,9 @@ pub fn open(app: &AppHandle, url: &str, x: f64, y: f64, w: f64, h: f64) -> Resul
                 "browser://load",
                 serde_json::json!({ "phase": phase, "url": payload.url().to_string() }),
             );
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished) {
+                spawn_icon_probe(webview.app_handle().clone());
+            }
         });
     let wv = match window.add_child(
         builder,
@@ -284,23 +290,7 @@ pub async fn read_page(app: &AppHandle) -> Result<PageContent, String> {
         }})()"#
     );
 
-    // `eval_with_callback` wants `Fn` (may be retained), but a oneshot sender is
-    // single-use — guard it in a Mutex<Option<_>> and take on first fire.
-    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
-    let slot = Mutex::new(Some(tx));
-    wv.eval_with_callback(js, move |json| {
-        if let Ok(mut g) = slot.lock() {
-            if let Some(tx) = g.take() {
-                let _ = tx.send(json);
-            }
-        }
-    })
-    .map_err(|e| format!("eval: {e}"))?;
-
-    let json = tokio::time::timeout(Duration::from_secs(5), rx)
-        .await
-        .map_err(|_| "timed out reading page".to_string())?
-        .map_err(|_| "page read was cancelled".to_string())?;
+    let json = eval_json(&wv, &js, Duration::from_secs(5)).await?;
 
     #[derive(serde::Deserialize)]
     struct Raw {
@@ -312,20 +302,50 @@ pub async fn read_page(app: &AppHandle) -> Result<PageContent, String> {
     }
     let raw: Raw =
         serde_json::from_str(&json).map_err(|e| format!("decode page snapshot: {e}"))?;
-    // Use the webview-reported URL (trusted navigation state), NOT the page's
-    // own `location.href` — a hostile page can spoof the latter to a
-    // `javascript:`/`data:` string that downstream consumers might treat as a
-    // real navigable URL. Re-fetch the webview by label rather than reusing the
-    // handle captured before the up-to-5s await: it may have been closed +
-    // recreated during the eval, making the old handle's url() stale. (RR11)
-    let url = app
-        .get_webview(LABEL)
+    // RR8 + RR11 both live in current_dock_url — see its doc.
+    let url = current_dock_url(app);
+    Ok(PageContent {
+        title: raw.title.chars().take(1024).collect(),
+        url,
+        text: raw.text,
+        truncated: raw.truncated,
+        full_len: raw.full_len,
+    })
+}
+
+/// Run `js` in the dock webview and await its JSON-serialized result (wry
+/// hands `eval_with_callback` a JSON string). The callback wants `Fn` (may be
+/// retained), but a oneshot sender is single-use — guarded in a
+/// Mutex<Option<_>>, taken on first fire. Shared by read_page, the console
+/// readers, and the favicon probe.
+async fn eval_json(wv: &tauri::Webview, js: &str, timeout: Duration) -> Result<String, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+    let slot = Mutex::new(Some(tx));
+    wv.eval_with_callback(js, move |json| {
+        if let Ok(mut g) = slot.lock() {
+            if let Some(tx) = g.take() {
+                let _ = tx.send(json);
+            }
+        }
+    })
+    .map_err(|e| format!("eval: {e}"))?;
+    tokio::time::timeout(timeout, rx)
+        .await
+        .map_err(|_| "timed out waiting for the page to answer".to_string())?
+        .map_err(|_| "page eval was cancelled".to_string())
+}
+
+/// The dock webview's URL as reported by the webview itself (trusted
+/// navigation state — a hostile page can spoof `location.href` to a
+/// `javascript:`/`data:` string, so never read it from page JS). Re-fetches
+/// the webview by label so a close+recreate during a caller's prior await
+/// can't leave a stale handle (RR11). RR8: capped at 2048 chars — a hostile
+/// page can drive navigation to a multi-megabyte data:/blob: URL that would
+/// bloat every snapshot consumer (frontend, prompt context).
+fn current_dock_url(app: &AppHandle) -> String {
+    app.get_webview(LABEL)
         .and_then(|w| w.url().ok())
         .map(|u| u.to_string())
-        // RR8: cap like the title — a hostile page can drive navigation to a
-        // multi-megabyte data:/blob: URL; an uncapped string bloats every
-        // snapshot consumer (frontend, prompt context). 2048 is generous for
-        // any real URL.
         .map(|s| {
             if s.len() > 2048 {
                 let mut end = 2048;
@@ -337,14 +357,288 @@ pub async fn read_page(app: &AppHandle) -> Result<PageContent, String> {
                 s
             }
         })
-        .unwrap_or_default();
-    Ok(PageContent {
-        title: raw.title.chars().take(1024).collect(),
-        url,
-        text: raw.text,
-        truncated: raw.truncated,
-        full_len: raw.full_len,
+        .unwrap_or_default()
+}
+
+// ---- Console capture -------------------------------------------------------
+
+/// Injected at document creation on every navigation (main frame). Wraps
+/// console.* + uncaught errors + unhandled rejections into a capped ring
+/// buffer that the drain/counts evals read. This is page-world JS — a hostile
+/// page can tamper with its own buffer — so the drain script AND the Rust
+/// side both re-cap and re-validate everything on the way out.
+const CONSOLE_CAPTURE_JS: &str = r#"(function () {
+  if (window.__riftConsole) return;
+  var st = { buf: [], dropped: 0 };
+  window.__riftConsole = st;
+  var MAX = 300, MAXLEN = 2000;
+  function push(level, text) {
+    try {
+      text = String(text);
+      if (text.length > MAXLEN) text = text.slice(0, MAXLEN) + "…";
+      if (st.buf.length >= MAX) { st.buf.shift(); st.dropped++; }
+      st.buf.push({ level: level, text: text, ts: Date.now() });
+    } catch (e) {}
+  }
+  function fmt(args) {
+    var out = [];
+    for (var i = 0; i < args.length; i++) {
+      var a = args[i];
+      if (typeof a === "string") { out.push(a); continue; }
+      if (a instanceof Error) { out.push(a.stack || String(a)); continue; }
+      try { out.push(JSON.stringify(a)); } catch (e) { out.push(String(a)); }
+    }
+    return out.join(" ");
+  }
+  ["log", "info", "warn", "error", "debug"].forEach(function (level) {
+    var orig = console[level];
+    console[level] = function () {
+      push(level, fmt(arguments));
+      if (orig) { try { orig.apply(console, arguments); } catch (e) {} }
+    };
+  });
+  window.addEventListener("error", function (e) {
+    var loc = e.filename ? " (" + e.filename + ":" + e.lineno + ")" : "";
+    push("error", (e.message || "uncaught error") + loc);
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var r = e.reason, msg;
+    try { msg = r && r.stack ? String(r.stack) : String(r); } catch (err) { msg = "(unserializable)"; }
+    push("error", "Unhandled promise rejection: " + msg);
+  });
+})();"#;
+
+/// Non-destructive drain of the capture buffer. Re-caps entry count + text
+/// length in-page so a tampered buffer can't marshal an unbounded payload.
+const CONSOLE_DRAIN_JS: &str = r#"(function () {
+  var out = [], dropped = 0;
+  try {
+    var st = window.__riftConsole;
+    if (st && st.buf) {
+      dropped = Math.max(0, Math.floor(Number(st.dropped) || 0));
+      var start = Math.max(0, st.buf.length - 300);
+      dropped += start;
+      for (var i = start; i < st.buf.length; i++) {
+        var x = st.buf[i] || {};
+        out.push({ level: String(x.level).slice(0, 8), text: String(x.text).slice(0, 2000), ts: Number(x.ts) || 0 });
+      }
+    }
+  } catch (e) {}
+  return { entries: out, dropped: dropped };
+})()"#;
+
+/// Error/warning tally only — polled by the frontend badge every ~1.2s, so it
+/// must stay far lighter than a full drain.
+const CONSOLE_COUNTS_JS: &str = r#"(function () {
+  var errors = 0, warns = 0;
+  try {
+    var st = window.__riftConsole;
+    if (st && st.buf) {
+      for (var i = 0; i < st.buf.length; i++) {
+        var l = st.buf[i] && st.buf[i].level;
+        if (l === "error") errors++; else if (l === "warn") warns++;
+      }
+    }
+  } catch (e) {}
+  return { errors: errors, warns: warns };
+})()"#;
+
+#[derive(Serialize, serde::Deserialize)]
+pub struct ConsoleEntry {
+    #[serde(default)]
+    pub level: String,
+    #[serde(default)]
+    pub text: String,
+    #[serde(default)]
+    pub ts: f64,
+}
+
+#[derive(Serialize)]
+pub struct ConsoleSnapshot {
+    pub url: String,
+    pub entries: Vec<ConsoleEntry>,
+    /// Entries evicted by the ring buffer before this read.
+    pub dropped: u64,
+}
+
+#[derive(Serialize)]
+pub struct ConsoleCounts {
+    pub errors: u64,
+    pub warns: u64,
+}
+
+/// Console messages logged by the current dock page since it loaded (the
+/// capture buffer resets per document). Feeds both the `read_browser_console`
+/// MCP tool and the dock's "add console to chat" action.
+pub async fn read_console(app: &AppHandle) -> Result<ConsoleSnapshot, String> {
+    let wv = app
+        .get_webview(LABEL)
+        .ok_or("no page open — enter a URL first")?;
+    let json = eval_json(&wv, CONSOLE_DRAIN_JS, Duration::from_secs(5)).await?;
+    #[derive(serde::Deserialize)]
+    struct Raw {
+        #[serde(default)]
+        entries: Vec<ConsoleEntry>,
+        #[serde(default)]
+        dropped: f64,
+    }
+    let raw: Raw =
+        serde_json::from_str(&json).map_err(|e| format!("decode console snapshot: {e}"))?;
+    // Page-world data — re-validate levels + re-cap counts/text server-side.
+    let entries = raw
+        .entries
+        .into_iter()
+        .take(300)
+        .map(|mut e| {
+            if !matches!(e.level.as_str(), "log" | "info" | "warn" | "error" | "debug") {
+                e.level = "log".into();
+            }
+            if e.text.chars().count() > 2000 {
+                e.text = e.text.chars().take(2000).collect();
+            }
+            e
+        })
+        .collect();
+    Ok(ConsoleSnapshot {
+        url: current_dock_url(app),
+        entries,
+        dropped: raw.dropped.max(0.0) as u64,
     })
+}
+
+/// Error/warning tally for the dock badge. A closed dock is zeros, not an
+/// error — the frontend polls this blindly.
+pub async fn console_counts(app: &AppHandle) -> Result<ConsoleCounts, String> {
+    let Some(wv) = app.get_webview(LABEL) else {
+        return Ok(ConsoleCounts { errors: 0, warns: 0 });
+    };
+    let json = eval_json(&wv, CONSOLE_COUNTS_JS, Duration::from_secs(3)).await?;
+    #[derive(serde::Deserialize)]
+    struct Raw {
+        #[serde(default)]
+        errors: f64,
+        #[serde(default)]
+        warns: f64,
+    }
+    let raw: Raw = serde_json::from_str(&json).map_err(|e| format!("decode console counts: {e}"))?;
+    Ok(ConsoleCounts { errors: raw.errors.max(0.0) as u64, warns: raw.warns.max(0.0) as u64 })
+}
+
+// ---- Favicon ----------------------------------------------------------------
+
+/// The page's declared icon (or origin /favicon.ico fallback), resolved
+/// relative to the document so relative hrefs work.
+const ICON_PROBE_JS: &str = r#"(function () {
+  try {
+    var sel = "link[rel~='icon'], link[rel='shortcut icon'], link[rel='apple-touch-icon']";
+    var l = document.querySelector(sel);
+    var href = l && l.href ? String(l.href) : new URL("/favicon.ico", location.href).href;
+    return href.slice(0, 65536);
+  } catch (e) { return ""; }
+})()"#;
+
+/// Cap on a fetched favicon body (or an inline data: URI). Generous for any
+/// real icon while bounding what a hostile page can push at the UI.
+const ICON_MAX_BYTES: usize = 256 * 1024;
+
+/// After a page finishes loading, resolve its favicon to a `data:` URI and
+/// emit `browser://icon`. The app webview's CSP (`img-src 'self' … data:`)
+/// blocks external image URLs, so the bytes must arrive inline: a page's
+/// inline data: icon passes through, an http(s) href is fetched here (same
+/// host the user is already browsing — never a third-party favicon service,
+/// which would leak browse history). Fire-and-forget: any failure just means
+/// the address bar keeps its fallback glyph.
+fn spawn_icon_probe(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let Some(wv) = app.get_webview(LABEL) else { return };
+        let Ok(json) = eval_json(&wv, ICON_PROBE_JS, Duration::from_secs(4)).await else {
+            return;
+        };
+        let Ok(serde_json::Value::String(href)) = serde_json::from_str(&json) else { return };
+        if let Some(data_uri) = resolve_icon(&href).await {
+            let _ = app.emit_to(
+                HOST_WINDOW,
+                "browser://icon",
+                serde_json::json!({ "page": current_dock_url(&app), "icon": data_uri }),
+            );
+        }
+    });
+}
+
+/// Icon href → `data:` URI the CSP will render, or None to keep the fallback
+/// glyph. data:image/* passes through; http(s) is fetched (5s timeout, size
+/// cap, image content-type or magic-byte sniff); every other scheme is out.
+async fn resolve_icon(href: &str) -> Option<String> {
+    if href.is_empty() || href.len() > ICON_MAX_BYTES {
+        return None;
+    }
+    if href.starts_with("data:image/") {
+        return Some(href.to_string());
+    }
+    if !href.starts_with("http://") && !href.starts_with("https://") {
+        return None;
+    }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .ok()?;
+    let resp = client.get(href).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    // favicon.ico served as octet-stream (or with no type at all) is everywhere
+    // — fall through to the magic-byte sniff rather than rejecting.
+    if !(ct.starts_with("image/") || ct == "application/octet-stream" || ct.is_empty()) {
+        return None;
+    }
+    let bytes = resp.bytes().await.ok()?;
+    if bytes.is_empty() || bytes.len() > ICON_MAX_BYTES {
+        return None;
+    }
+    let mime: String = if ct.starts_with("image/") {
+        ct
+    } else {
+        sniff_image_mime(&bytes)?.to_string()
+    };
+    use base64::Engine as _;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Some(format!("data:{mime};base64,{b64}"))
+}
+
+/// Magic-byte sniff for icon bodies served without an image/* content-type.
+/// None = not a recognizable image, don't render it.
+fn sniff_image_mime(b: &[u8]) -> Option<&'static str> {
+    if b.len() >= 4 && b[..4] == [0x00, 0x00, 0x01, 0x00] {
+        return Some("image/x-icon");
+    }
+    if b.len() >= 8 && b[..8] == [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A] {
+        return Some("image/png");
+    }
+    if b.len() >= 3 && b[..3] == [0xFF, 0xD8, 0xFF] {
+        return Some("image/jpeg");
+    }
+    if b.len() >= 6 && (&b[..6] == b"GIF87a" || &b[..6] == b"GIF89a") {
+        return Some("image/gif");
+    }
+    if b.len() >= 12 && &b[..4] == b"RIFF" && &b[8..12] == b"WEBP" {
+        return Some("image/webp");
+    }
+    if let Ok(s) = std::str::from_utf8(&b[..b.len().min(256)]) {
+        if s.trim_start().starts_with("<svg") || s.contains("<svg") {
+            return Some("image/svg+xml");
+        }
+    }
+    None
 }
 
 #[cfg(test)]
@@ -382,5 +676,35 @@ mod tests {
         }
         // Not a URL at all → parse error, never silently accepted.
         assert!(parse_url("not a url").is_err());
+    }
+
+    #[test]
+    fn sniff_image_mime_detects_common_formats() {
+        assert_eq!(sniff_image_mime(&[0x00, 0x00, 0x01, 0x00, 0x01]), Some("image/x-icon"));
+        assert_eq!(
+            sniff_image_mime(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0x00]),
+            Some("image/png")
+        );
+        assert_eq!(sniff_image_mime(&[0xFF, 0xD8, 0xFF, 0xE0]), Some("image/jpeg"));
+        assert_eq!(sniff_image_mime(b"GIF89a......"), Some("image/gif"));
+        assert_eq!(sniff_image_mime(b"RIFF\x00\x00\x00\x00WEBP"), Some("image/webp"));
+        assert_eq!(sniff_image_mime(b"<svg xmlns='x'/>"), Some("image/svg+xml"));
+        assert_eq!(sniff_image_mime(b"MZ not an image"), None);
+        assert_eq!(sniff_image_mime(b""), None);
+    }
+
+    #[tokio::test]
+    async fn resolve_icon_passes_data_uris_and_rejects_junk() {
+        // Inline data: icons pass through untouched (CSP renders them as-is).
+        let ok = resolve_icon("data:image/png;base64,iVBORw0KGgo=").await;
+        assert_eq!(ok.as_deref(), Some("data:image/png;base64,iVBORw0KGgo="));
+        // Non-image / non-web schemes never reach a fetch.
+        assert!(resolve_icon("javascript:alert(1)").await.is_none());
+        assert!(resolve_icon("file:///c/icon.png").await.is_none());
+        assert!(resolve_icon("data:text/html,<script>1</script>").await.is_none());
+        assert!(resolve_icon("").await.is_none());
+        // Oversized inline icon is dropped, not truncated into a broken image.
+        let huge = format!("data:image/png;base64,{}", "A".repeat(ICON_MAX_BYTES));
+        assert!(resolve_icon(&huge).await.is_none());
     }
 }

@@ -71,3 +71,13 @@ pub async fn browser_reload(app: AppHandle) -> Result<(), String> {
 pub async fn browser_read_page(app: AppHandle) -> Result<crate::browser::PageContent, String> {
     crate::browser::read_page(&app).await
 }
+
+#[tauri::command]
+pub async fn browser_read_console(app: AppHandle) -> Result<crate::browser::ConsoleSnapshot, String> {
+    crate::browser::read_console(&app).await
+}
+
+#[tauri::command]
+pub async fn browser_console_counts(app: AppHandle) -> Result<crate::browser::ConsoleCounts, String> {
+    crate::browser::console_counts(&app).await
+}

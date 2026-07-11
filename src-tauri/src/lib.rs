@@ -282,6 +282,8 @@ pub fn run() {
             commands::browser_forward,
             commands::browser_reload,
             commands::browser_read_page,
+            commands::browser_read_console,
+            commands::browser_console_counts,
             commands::resolve_workspace_path,
             stt::stt_get_config,
             stt::stt_set_config,
