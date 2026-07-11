@@ -10,7 +10,6 @@ const STREAM_MODE_KEY = "rift.ui.stream-mode.v1";
 const NARRATION_KEY = "rift.ui.narration.v1";
 const COMMAND_OUTPUT_KEY = "rift.ui.command-output.v1";
 const TOOL_DETAIL_KEY = "rift.ui.tool-detail.v1";
-const DOTFIELD_KEY = "rift.ui.dotfield.v1";
 const VIVIDNESS_KEY = "rift.ui.vividness.v1";
 
 // How much of the model's between-tool narration to surface in the live stream.
@@ -66,27 +65,6 @@ const PRESET_MAP: Record<DensityPreset, { toolDetail: ToolDetail; narration: Nar
   verbose:  { toolDetail: "detailed", narration: "chatty",   commandOutput: "full" },
 };
 
-// Background texture driving `.app[data-dots]` (variant CSS lives in AppShell).
-// "dots" = the default base field (no override); "off" hides it entirely.
-export type DotField =
-  | "dots" | "dense" | "margins" | "grid" | "blueprint" | "lines" | "diagonal" | "crosshatch"
-  | "rings" | "glow" | "grain" | "off";
-export const DOT_FIELDS: { id: DotField; label: string }[] = [
-  { id: "dots", label: "Dots" },
-  { id: "dense", label: "Dense" },
-  { id: "margins", label: "Margins" },
-  { id: "grid", label: "Grid" },
-  { id: "blueprint", label: "Blueprint" },
-  { id: "lines", label: "Lines" },
-  { id: "diagonal", label: "Diagonal" },
-  { id: "crosshatch", label: "Crosshatch" },
-  { id: "rings", label: "Rings" },
-  { id: "glow", label: "Glow" },
-  { id: "grain", label: "Grain" },
-  { id: "off", label: "Off" },
-];
-const DOT_FIELD_IDS = new Set<string>(DOT_FIELDS.map((d) => d.id));
-
 // Accent chroma range for the vividness dial (drives --accent-c). Default 0.15
 // matches app.css; floor stays > 0 so the accent never goes fully grey.
 export const VIVIDNESS_MIN = 0.05;
@@ -113,10 +91,6 @@ class UiPrefs {
   railPinned = $state(false);
   accentHue = $state(163);
   vividness = $state(DEFAULT_VIVIDNESS);
-  dotField = $state<DotField>("dots");
-  // Transient hover-preview from the settings texture picker — overrides the
-  // rendered field while non-null, never persisted.
-  previewField = $state<DotField | null>(null);
   code = $state<CodePrefs>({ ...DEFAULT_CODE });
   // Stream mode = the redesigned boxless turn render (the spec's default tool
   // display, redesign-port.md §"Net-new"). Default ON; only an explicit opt-out
@@ -150,8 +124,8 @@ class UiPrefs {
       if (Number.isFinite(c)) this.vividness = Math.min(VIVIDNESS_MAX, Math.max(VIVIDNESS_MIN, c));
     }
 
-    const dotRaw = localStorage.getItem(DOTFIELD_KEY);
-    if (dotRaw !== null && DOT_FIELD_IDS.has(dotRaw)) this.dotField = dotRaw as DotField;
+    // Texture picker retired 2026-07-11 — single fixed dots field now.
+    localStorage.removeItem("rift.ui.dotfield.v1");
 
     try {
       const c = JSON.parse(localStorage.getItem(CODE_KEY) ?? "null");
@@ -212,10 +186,9 @@ class UiPrefs {
     this.setVividness(DEFAULT_VIVIDNESS);
   }
 
-  /** Appearance tab → factory defaults: accent, texture, density, code rendering. */
+  /** Appearance tab → factory defaults: accent, density, code rendering. */
   resetAppearance() {
     this.resetAccent();
-    this.setDotField("dots");
     this.setDensity("compact");
     this.setCode({ ...DEFAULT_CODE });
   }
@@ -226,18 +199,6 @@ class UiPrefs {
     this.setToolDetail("balanced");
     this.setNarration("balanced");
     this.setCommandOutput("peek");
-  }
-
-  // dotField drives `.app[data-dots]` via a template binding in AppShell — no
-  // DOM write needed here beyond persisting the choice.
-  setDotField(d: DotField) {
-    this.dotField = d;
-    localStorage.setItem(DOTFIELD_KEY, d);
-  }
-
-  /** Live try-before-you-buy from the picker; null = show the committed field. */
-  setPreviewField(d: DotField | null) {
-    this.previewField = d;
   }
 
   setCode(patch: Partial<CodePrefs>) {

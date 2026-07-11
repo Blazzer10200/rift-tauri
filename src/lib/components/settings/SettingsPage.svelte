@@ -18,7 +18,7 @@
   import { stt } from "../../state/stt.svelte";
   import { accessibility } from "../../state/accessibility.svelte";
   import { commandPalette } from "../../state/command-palette.svelte";
-  import { uiPrefs, ACCENTS, DOT_FIELDS, TOOL_DETAILS, DENSITY_PRESETS, VIVIDNESS_MIN, VIVIDNESS_MAX, type DotField } from "../../state/ui-prefs.svelte";
+  import { uiPrefs, ACCENTS, TOOL_DETAILS, DENSITY_PRESETS, VIVIDNESS_MIN, VIVIDNESS_MAX } from "../../state/ui-prefs.svelte";
   import { onboarding } from "../../state/onboarding.svelte";
   import { betaNotice } from "../../state/betaNotice.svelte";
   import { environment } from "../../state/environment.svelte";
@@ -45,7 +45,7 @@
 
   type Section = "appearance" | "chat" | "claude" | "speech" | "about";
   const ST_SECTIONS: { id: Section; label: string; icon: typeof Cog; sub: string; dot?: "ok" | "warn" }[] = [
-    { id: "appearance", label: "Appearance", icon: Palette,       sub: "Accent color, texture, density, and code rendering — every change applies instantly." },
+    { id: "appearance", label: "Appearance", icon: Palette,       sub: "Accent color, density, and code rendering — every change applies instantly." },
     { id: "chat",       label: "Chat",       icon: MessageSquare, sub: "How conversations read — stream layout, detail level, and reading comfort." },
     { id: "claude",     label: "Claude",     icon: Sparkles,      sub: "Your Claude session, plan, and API-key fallback." },
     { id: "speech",     label: "Speech",     icon: Mic,           sub: "Voice-to-text input — Web Speech (online) or Whisper (on-device, accent-tuned)." },
@@ -61,10 +61,8 @@
   // to the always-rendered Engine card so a jump never lands nowhere.
   type SearchEntry = { tab: Section; anchor: string; card: string; title: string; kw: string };
   const SEARCH_INDEX: SearchEntry[] = [
-    { tab: "appearance", anchor: "card-looks",     card: "Looks",             title: "One-click looks",     kw: "theme preset vibe blueprint ember monochrome curated" },
     { tab: "appearance", anchor: "card-accent",    card: "Accent color",      title: "Accent color",        kw: "theme hue swatch color highlight" },
     { tab: "appearance", anchor: "card-accent",    card: "Accent color",      title: "Vividness",           kw: "saturation intensity accent" },
-    { tab: "appearance", anchor: "card-texture",   card: "Background texture", title: "Background texture", kw: "pattern dots grid blueprint wallpaper glow" },
     { tab: "appearance", anchor: "card-interface", card: "Interface & code",  title: "Interface density",   kw: "spacing compact comfy regular rows" },
     { tab: "appearance", anchor: "card-interface", card: "Interface & code",  title: "Code font size",      kw: "monospace px code blocks" },
     { tab: "appearance", anchor: "card-interface", card: "Interface & code",  title: "Tab width",           kw: "indentation spaces code" },
@@ -151,9 +149,6 @@
     else if (ev.key === "Enter") { ev.preventDefault(); jumpTo(searchResults[searchIdx]); }
     else if (ev.key === "Escape") { searchQ = ""; }
   }
-  // If the page unmounts mid-hover (palette nav etc.) pointerleave never fires —
-  // drop any texture hover-preview so the app can't get stuck on it.
-  $effect(() => () => uiPrefs.setPreviewField(null));
   const activeMeta = $derived(ST_SECTIONS.find((s) => s.id === activeSec) ?? ST_SECTIONS[0]);
 
   // Switching tabs resets the scroll position.
@@ -163,27 +158,6 @@
   }
 
   const vivPct = $derived(Math.round(((uiPrefs.vividness - VIVIDNESS_MIN) / (VIVIDNESS_MAX - VIVIDNESS_MIN)) * 100));
-
-  // ── One-click looks — curated accent + vividness + texture combos.
-  // Same pattern as the Chat density presets: a look just drives the three
-  // dials below it, so everything stays individually tunable afterwards.
-  type Look = { id: string; label: string; hue: number; viv: number; dot: DotField };
-  const LOOKS: Look[] = [
-    { id: "stock",     label: "Emerald Ink", hue: 163, viv: 0.15, dot: "dots" },
-    { id: "blueprint", label: "Blueprint",   hue: 230, viv: 0.16, dot: "blueprint" },
-    { id: "haze",      label: "Violet Haze", hue: 275, viv: 0.18, dot: "glow" },
-    { id: "ember",     label: "Ember",       hue: 55,  viv: 0.19, dot: "grain" },
-    { id: "mono",      label: "Monochrome",  hue: 220, viv: 0.05, dot: "off" },
-  ];
-  const dotLabel = (d: DotField) => DOT_FIELDS.find((f) => f.id === d)?.label ?? d;
-  function lookOn(lk: Look): boolean {
-    return uiPrefs.accentHue === lk.hue && Math.abs(uiPrefs.vividness - lk.viv) < 0.003 && uiPrefs.dotField === lk.dot;
-  }
-  function applyLook(lk: Look) {
-    uiPrefs.setAccentHue(lk.hue);
-    uiPrefs.setVividness(lk.viv);
-    uiPrefs.setDotField(lk.dot);
-  }
 
   // Command-palette deep-link: open the requested tab, then clear (one-shot).
   $effect(() => {
@@ -248,7 +222,7 @@
   // they can't drift from the store's own initial values. About has no reset —
   // it's info and actions, not preferences.
   const RESET_COPY: Partial<Record<Section, string>> = {
-    appearance: "Accent, texture, density, and code rendering go back to the stock emerald look.",
+    appearance: "Accent, density, and code rendering go back to the stock emerald look.",
     chat: "Stream layout, detail dials, and reading comfort go back to their defaults.",
     claude: "Full config on, git tools read-only, plan Max. Your API key and spending cap are kept.",
     speech: "All voice-input settings return to factory defaults. Downloaded Whisper models stay on disk.",
@@ -445,10 +419,6 @@
     const sel = items.find(isSel);
     return sel ? [...head.slice(0, count - 1), sel] : head;
   }
-  let texturesExpanded = $state(false);
-  const texturesShown = $derived(
-    texturesExpanded ? DOT_FIELDS : headWithSelected(DOT_FIELDS, 3, (d) => d.id === uiPrefs.dotField),
-  );
   let langsExpanded = $state(false);
   const langsShown = $derived(
     langsExpanded ? STT_LANGS : headWithSelected(STT_LANGS, 3, (l) => l.id === stt.config.language),
@@ -561,23 +531,6 @@
     {#if activeSec === "appearance"}
       <div class="set-surface"><div class="set-col">
 
-          <div class="card" id="card-looks">
-            <div class="card-tt">Looks</div>
-            <div class="card-sub">Curated accent + texture combos — one click sets everything below, and each dial still fine-tunes after.</div>
-            <div class="look-grid">
-              {#each LOOKS as lk (lk.id)}
-                <button type="button" class="look" data-active={lookOn(lk)} style="--lk-h: {lk.hue}; --lk-c: {lk.viv};" onclick={() => applyLook(lk)} aria-pressed={lookOn(lk)}>
-                  <span class="look-dot"></span>
-                  <span class="look-body">
-                    <span class="look-name">{lk.label}</span>
-                    <span class="look-sub">{lk.dot === "off" ? "no texture" : dotLabel(lk.dot)}</span>
-                  </span>
-                  {#if lookOn(lk)}<span class="look-ck"><Check size={11} strokeWidth={3} /></span>{/if}
-                </button>
-              {/each}
-            </div>
-          </div>
-
           <div class="card" id="card-accent">
             <div class="card-tt">Accent color <span class="ap-dot" style="background: oklch(0.72 var(--accent-c) var(--accent-h));"></span>
               <button class="st-btn card-tt-act" type="button" onclick={() => uiPrefs.resetAccent()} use:tooltip={"Back to the stock emerald look"}><RotateCcw size={13} /> Reset</button>
@@ -615,32 +568,6 @@
                   <span class="ap-demo-field">focus ring</span>
                 </div>
               </div>
-          </div>
-
-          <div class="card" id="card-texture">
-            <div class="card-tt">Background texture</div>
-            <div class="card-sub">A faint pattern behind the workspace — hover a tile to preview it live on this page. Blueprint and Glow follow your accent color.</div>
-            <div class="bg-grid">
-              {#each texturesShown as df, ti (df.id)}
-                <button class="bg-opt" class:sel={uiPrefs.dotField === df.id} type="button" style="--ti: {ti}"
-                  onclick={() => { uiPrefs.setDotField(df.id); uiPrefs.setPreviewField(null); }}
-                  onpointerenter={() => uiPrefs.setPreviewField(df.id)}
-                  onpointerleave={() => uiPrefs.setPreviewField(null)}
-                  onfocus={() => uiPrefs.setPreviewField(df.id)}
-                  onblur={() => uiPrefs.setPreviewField(null)}
-                  aria-pressed={uiPrefs.dotField === df.id}>
-                  <span class="bg-tile">
-                    {#if df.id === "off"}<span class="bg-tile-none">—</span>{:else}<span class="bg-tile-pat" data-dots={df.id}></span>{/if}
-                    <span class="bg-tile-ck"><Check size={11} strokeWidth={3} /></span>
-                  </span>
-                  <span class="bg-name">{df.label}</span>
-                </button>
-              {/each}
-            </div>
-            <button class="set-expand" type="button" aria-expanded={texturesExpanded} onclick={() => (texturesExpanded = !texturesExpanded)}>
-              {texturesExpanded ? "Show less" : `Show all ${DOT_FIELDS.length} textures`}
-              <ChevronDown size={13} class={texturesExpanded ? "set-expand-ic flip" : "set-expand-ic"} />
-            </button>
           </div>
 
           <div class="card" id="card-interface">
@@ -1425,20 +1352,6 @@
   :where(.cf-bubble p) { line-height: 1.6; }
   :where(.cf-bubble code) { background: var(--code-bg); color: var(--code-fg); }
 
-  /* ── One-click looks — each tile tinted by its OWN hue (not the live accent) ── */
-  .look-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 8px; }
-  .look { position: relative; display: flex; align-items: center; gap: 9px; padding: 9px 11px; border-radius: 10px; cursor: pointer; text-align: left; font: inherit;
-    border: 1px solid color-mix(in oklab, oklch(0.72 var(--lk-c) var(--lk-h)) 22%, var(--border));
-    background: linear-gradient(135deg, oklch(0.72 var(--lk-c) var(--lk-h) / 0.1), transparent 72%), var(--field);
-    transition: transform var(--dur-fast) var(--ease-page), border-color var(--dur-fast), box-shadow var(--dur-fast); }
-  .look:hover { transform: translateY(-2px); border-color: color-mix(in oklab, oklch(0.72 var(--lk-c) var(--lk-h)) 45%, var(--border)); }
-  .look[data-active="true"] { border-color: oklch(0.72 var(--lk-c) var(--lk-h)); box-shadow: 0 0 14px -4px oklch(0.72 var(--lk-c) var(--lk-h) / 0.5); }
-  .look-dot { width: 14px; height: 14px; border-radius: 50%; flex: none; background: oklch(0.72 var(--lk-c) var(--lk-h)); box-shadow: 0 0 0 1px var(--border-strong), 0 0 8px -1px oklch(0.72 var(--lk-c) var(--lk-h) / 0.6); }
-  .look-body { min-width: 0; }
-  .look-name { display: block; font-size: 12px; font-weight: 600; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .look-sub { display: block; font-size: 10px; color: var(--fg-subtle); margin-top: 1px; }
-  .look-ck { position: absolute; top: -5px; right: -5px; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; background: oklch(0.72 var(--lk-c) var(--lk-h)); color: rgba(0,0,0,0.82); }
-
   /* accent "in action" stage — one of each accent-driven surface, live */
   .card-tt-act { margin-left: auto; }
   .ap-stage { display: flex; align-items: center; flex-wrap: wrap; gap: 16px; padding: 13px 14px; pointer-events: none; user-select: none; }
@@ -1482,7 +1395,7 @@
 
   /* expanding a collapsed list cascades the new entries in (keyed each — the
      already-visible head keeps its DOM, so only revealed items animate) */
-  .bg-opt, .anim-reveal { animation: reveal-in 240ms var(--ease-page) both; animation-delay: calc(min(var(--ti, 0), 16) * 22ms); }
+  .anim-reveal { animation: reveal-in 240ms var(--ease-page) both; animation-delay: calc(min(var(--ti, 0), 16) * 22ms); }
   @keyframes reveal-in {
     from { opacity: 0; transform: translateY(7px) scale(0.985); }
     to   { opacity: 1; transform: none; }
@@ -1544,27 +1457,6 @@
   .set-range::-webkit-slider-thumb:hover { transform: scale(1.14); }
   .set-range:focus { outline: none; }
   .set-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--ring); }
-
-  /* background-texture picker */
-  .bg-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
-  .bg-opt { display: flex; flex-direction: column; gap: 8px; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
-  /* Tile backdrop = the real window color so intensity reads exactly as it will
-     behind the workspace (was a hardcoded near-black that skewed the preview). */
-  .bg-tile { position: relative; aspect-ratio: 1.75; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); background-color: var(--bg); transition: transform var(--dur-fast) var(--ease-page), border-color var(--dur-fast), box-shadow var(--dur-fast); }
-  .bg-opt:hover .bg-tile { transform: translateY(-2px); border-color: var(--border-strong); }
-  .bg-opt.sel .bg-tile { border-color: transparent; box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent); }
-  /* The tile patterns mirror the real texture's (very faint) ink 1:1. In a small
-     preview tile that's borderline invisible for the dot/grid family, so a
-     uniform brightness lift makes every pattern legible-to-pick WITHOUT changing
-     their relative intensities or the accent hues — the honest look, just
-     readable at tile scale. */
-  .bg-tile-pat { position: absolute; inset: 0; filter: brightness(2.7); }
-  .bg-tile-none { position: absolute; inset: 0; display: grid; place-items: center; color: var(--fg-faint); font-size: 18px; }
-  .bg-tile-ck { position: absolute; top: 6px; right: 6px; width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--accent-fg); opacity: 0; transform: scale(0.5); transition: opacity var(--dur-fast), transform var(--dur-fast) var(--ease-page); }
-  .bg-opt.sel .bg-tile-ck { opacity: 1; transform: none; }
-  .bg-name { font-size: 11.5px; color: var(--fg-muted); text-align: center; transition: color var(--dur-fast); }
-  .bg-opt:hover .bg-name { color: var(--fg-2); }
-  .bg-opt.sel .bg-name { color: var(--fg-2); font-weight: 550; }
 
   /* keyboard shortcut rows (spec flex variant) */
   .keys { display: inline-flex; gap: 4px; }
@@ -1696,26 +1588,6 @@
   .st-about-t { font-size: var(--fs-sm); font-weight: 600; display: block; color: var(--fg); }
   .st-about-s { font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 2px; display: block; }
   .st-about-row:hover { background: var(--surface-hover); }
-
-  /* ── Appearance: background-texture preview tiles ──
-     TRUE preview — the exact ink/accent percentages and masks the real
-     `.app[data-dots]::before` uses (AppShell.svelte), so what you see in the
-     tile is what lands behind the workspace. Only the scale is condensed to fit
-     a ~135px tile (the app canvas is ~10× wider) so the pattern reads at all;
-     intensity and mask geometry are 1:1 with the live texture. Keep in lockstep
-     with AppShell — if a real texture's ink % changes, mirror it here. */
-  .bg-tile-pat[data-dots="dots"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 4.5%, transparent) 0.8px, transparent 1.5px); background-size: 13px 13px; -webkit-mask-image: radial-gradient(125% 105% at 50% 24%, #000 16%, transparent 80%); mask-image: radial-gradient(125% 105% at 50% 24%, #000 16%, transparent 80%); }
-  .bg-tile-pat[data-dots="dense"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 4%, transparent) 0.7px, transparent 1.3px); background-size: 8px 8px; -webkit-mask-image: radial-gradient(125% 105% at 50% 24%, #000 16%, transparent 80%); mask-image: radial-gradient(125% 105% at 50% 24%, #000 16%, transparent 80%); }
-  .bg-tile-pat[data-dots="margins"] { background-image: radial-gradient(circle, color-mix(in oklab, var(--fg) 6.5%, transparent) 0.8px, transparent 1.5px); background-size: 13px 13px; -webkit-mask-image: linear-gradient(to right, #000, transparent 24% 76%, #000), linear-gradient(to bottom, #000, transparent 28% 72%, #000); mask-image: linear-gradient(to right, #000, transparent 24% 76%, #000), linear-gradient(to bottom, #000, transparent 28% 72%, #000); }
-  .bg-tile-pat[data-dots="grid"] { background-image: linear-gradient(to right, color-mix(in oklab, var(--fg) 4%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--fg) 4%, transparent) 1px, transparent 1px); background-size: 15px 15px; -webkit-mask-image: radial-gradient(125% 105% at 50% 24%, #000 14%, transparent 80%); mask-image: radial-gradient(125% 105% at 50% 24%, #000 14%, transparent 80%); }
-  .bg-tile-pat[data-dots="lines"] { background-image: linear-gradient(to bottom, color-mix(in oklab, var(--fg) 4%, transparent) 1px, transparent 1px); background-size: 100% 14px; }
-  .bg-tile-pat[data-dots="diagonal"] { background-image: repeating-linear-gradient(45deg, color-mix(in oklab, var(--fg) 3.5%, transparent) 0 1px, transparent 1px 12px); }
-  .bg-tile-pat[data-dots="crosshatch"] { background-image: repeating-linear-gradient(45deg, color-mix(in oklab, var(--fg) 5.5%, transparent) 0 1px, transparent 1px 13px), repeating-linear-gradient(-45deg, color-mix(in oklab, var(--fg) 5.5%, transparent) 0 1px, transparent 1px 13px); -webkit-mask-image: radial-gradient(128% 108% at 50% 26%, #000 22%, transparent 86%); mask-image: radial-gradient(128% 108% at 50% 26%, #000 22%, transparent 86%); }
-  .bg-tile-pat[data-dots="glow"] { background-image: radial-gradient(150% 100% at 50% -12%, color-mix(in oklab, var(--accent) 8%, transparent), transparent 60%), radial-gradient(120% 90% at 84% 4%, color-mix(in oklab, var(--accent) 8%, transparent), transparent 62%); }
-  .bg-tile-pat[data-dots="blueprint"] { background-image: linear-gradient(to right, color-mix(in oklab, var(--accent) 7%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--accent) 7%, transparent) 1px, transparent 1px), linear-gradient(to right, color-mix(in oklab, var(--accent) 3.5%, transparent) 1px, transparent 1px), linear-gradient(to bottom, color-mix(in oklab, var(--accent) 3.5%, transparent) 1px, transparent 1px); background-size: 44px 44px, 44px 44px, 11px 11px, 11px 11px; -webkit-mask-image: radial-gradient(125% 105% at 50% 24%, #000 14%, transparent 80%); mask-image: radial-gradient(125% 105% at 50% 24%, #000 14%, transparent 80%); }
-  .bg-tile-pat[data-dots="rings"] { background-image: repeating-radial-gradient(circle at 50% -10%, color-mix(in oklab, var(--fg) 4.5%, transparent) 0 1px, transparent 1px 16px); -webkit-mask-image: radial-gradient(130% 115% at 50% 20%, #000 20%, transparent 85%); mask-image: radial-gradient(130% 115% at 50% 20%, #000 20%, transparent 85%); }
-  .bg-tile-pat[data-dots="grain"] { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); background-size: 120px 120px; opacity: 0.13; }
-  .bg-tile-pat[data-dots="off"] { background-image: none; }
 
   /* ── Keyboard shortcut rows ── */
   .kbd-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid color-mix(in oklch, var(--border) 55%, transparent); font-size: 13px; color: var(--fg-2); }
