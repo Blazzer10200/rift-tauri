@@ -2,6 +2,10 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## Unreleased
+
+- **One background, no picker** — the 12-variant background-texture system and the one-click Looks presets are gone (owner call: the extra textures stopped earning their place). The app keeps the single default dots field; Appearance is now just Accent color + Interface & code. Anyone who had picked another texture falls back to dots automatically; the old preference key is cleaned up on launch.
+
 ## v0.98.1 — Aurora hotfix
 
 - **Home aurora no longer renders as a hard-edged rectangle** — the v0.98.0 gradient was still visibly green where its container clipped it, which read as a misplaced glowing box on real windows (JPEG-compressed dev screenshots hid the edge). The ellipse now fades to fully transparent inside its own bounds, slightly softer and calmer.
