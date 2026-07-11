@@ -2,6 +2,10 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.98.1 — Aurora hotfix
+
+- **Home aurora no longer renders as a hard-edged rectangle** — the v0.98.0 gradient was still visibly green where its container clipped it, which read as a misplaced glowing box on real windows (JPEG-compressed dev screenshots hid the edge). The ellipse now fades to fully transparent inside its own bounds, slightly softer and calmer.
+
 ## v0.98.0 — Visual identity pass
 
 - **One continuous top strip** — the sidebar's Rift row, the page title, and the window controls now sit in a single aligned 40px band: the sidebar divider and resize handle start *below* the band, and update banners span the full window *above* it (previously a banner shoved only the title row down and broke the line).

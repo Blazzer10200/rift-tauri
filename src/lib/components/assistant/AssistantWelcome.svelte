@@ -339,23 +339,26 @@
   /* spec-margined children, so the .wel-inner column gap is dropped here. */
   .wel-inner.home-launchpad { position: relative; gap: 0; max-width: 680px; text-align: left; }
   /* Aurora — a faint accent wash drifting behind the greeting so the home
-     surface reads designed, not flat black. Sits under content (z -1). */
+     surface reads designed, not flat black. Sits under content (z -1).
+     EXPLICIT radii + a 100%-fade endpoint keep the ellipse fully inside the
+     box — the v0.98.0 farthest-corner gradient was still ~4% green where the
+     box clipped it, which rendered as a hard-edged rectangle on real windows. */
   .wel-inner.home-launchpad::before {
     content: "";
     position: absolute;
-    top: -170px; left: -180px;
-    width: 640px; height: 440px;
-    background: radial-gradient(ellipse at 32% 42%,
-      color-mix(in oklab, var(--accent) 11%, transparent),
-      color-mix(in oklab, var(--accent) 4%, transparent) 45%,
-      transparent 70%);
+    top: -240px; left: -220px;
+    width: 1000px; height: 720px;
+    background: radial-gradient(470px 320px at 50% 46%,
+      color-mix(in oklab, var(--accent) 8%, transparent),
+      color-mix(in oklab, var(--accent) 3%, transparent) 55%,
+      transparent 100%);
     pointer-events: none;
     z-index: -1;
-    animation: aurora-drift 16s ease-in-out infinite alternate;
+    animation: aurora-drift 18s ease-in-out infinite alternate;
   }
   @keyframes aurora-drift {
-    from { transform: translate3d(0, 0, 0) scale(1); }
-    to   { transform: translate3d(70px, 26px, 0) scale(1.14); }
+    from { transform: translate3d(0, 0, 0); }
+    to   { transform: translate3d(48px, 20px, 0) scale(1.05); }
   }
   @media (prefers-reduced-motion: reduce) { .wel-inner.home-launchpad::before { animation: none; } }
   .wel-inner.home-launchpad > :nth-child(4) { animation-delay: 200ms; }
