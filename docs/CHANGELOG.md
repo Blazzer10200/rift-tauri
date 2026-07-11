@@ -2,9 +2,9 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased
+## v0.99.0 — One background, no picker
 
-- **One background, no picker** — the 12-variant background-texture system and the one-click Looks presets are gone (owner call: the extra textures stopped earning their place). The app keeps the single default dots field; Appearance is now just Accent color + Interface & code. Anyone who had picked another texture falls back to dots automatically; the old preference key is cleaned up on launch.
+- **Background textures simplified away** — the 12-variant texture system and the one-click Looks presets are gone (the extra textures stopped earning their place). The app keeps the single default dots field; Appearance is now just Accent color + Interface & code. Anyone who had picked another texture falls back to dots automatically; the old preference key is cleaned up on launch.
 
 ## v0.98.1 — Aurora hotfix
 
