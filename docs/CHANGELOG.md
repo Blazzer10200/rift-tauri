@@ -2,8 +2,14 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased
+## v0.100.0 — The assistant gets eyes on the browser
 
+- **The assistant can now read the page in the browser dock** — a new `read_browser_page` tool returns the title, URL, and rendered post-JavaScript text of whatever the dock is showing (including logged-in pages plain web fetching can't reach). "Open my dev server and check the page" now means it actually looks.
+- **…and the browser console** — `read_browser_console` captures console output, uncaught errors, and unhandled promise rejections from the dock page. "Why is the preview blank?" answers itself. Both tools are read-only and the page content is treated as untrusted data end to end.
+- **Console badge in the dock bar** — a live error/warning count on the current page; click it to drop the console output into the composer (the console twin of Add to chat).
+- **Real favicons + a loading sweep** — the address bar shows the page's actual icon (fetched straight from the site you're on, never a third-party favicon service) and a thin accent sweep runs under the bar while a page loads.
+- **"Read by assistant" chip** — whenever the assistant reads the dock page or console, a shimmer pill flashes in the bar, so you always see when it looked.
+- **Fix: assistant UI tools no longer false-fail while the dock is open** — `ask_user` / `open_browser` / `notify` checked for the window in a way that broke whenever the dock's embedded webview existed ("target window is not available"); the check is now multiwebview-safe.
 - **Changing model or reasoning before you send no longer costs a cold start** — the standby Claude process now re-warms in the background the moment you change the picker or dial, instead of the change being discovered at send time (which paid the full process spawn inside your reply wait).
 - **Conversation titles work again** — title generation still pinned Haiku, which Anthropic removed in June, so every auto-title had been quietly failing since. Titles now run on Sonnet at minimal reasoning (just as fast and cheap).
 - **Honest per-effort speed stats** — turns with thinking off were being attributed to whatever effort tier was parked on the dial in AI Health's per-model latency groups; they now report as the Low they actually ran at (this also stops a needless process respawn when the parked tier changes while thinking is off).
@@ -11,29 +17,6 @@
 ## v0.99.0 — One background, no picker
 
 - **Background textures simplified away** — the 12-variant texture system and the one-click Looks presets are gone (the extra textures stopped earning their place). The app keeps the single default dots field; Appearance is now just Accent color + Interface & code. Anyone who had picked another texture falls back to dots automatically; the old preference key is cleaned up on launch.
-
-## v0.98.1 — Aurora hotfix
-
-- **Home aurora no longer renders as a hard-edged rectangle** — the v0.98.0 gradient was still visibly green where its container clipped it, which read as a misplaced glowing box on real windows (JPEG-compressed dev screenshots hid the edge). The ellipse now fades to fully transparent inside its own bounds, slightly softer and calmer.
-
-## v0.98.0 — Visual identity pass
-
-- **One continuous top strip** — the sidebar's Rift row, the page title, and the window controls now sit in a single aligned 40px band: the sidebar divider and resize handle start *below* the band, and update banners span the full window *above* it (previously a banner shoved only the title row down and broke the line).
-- **The composer visibly breathes while Claude works** — the old streaming glow never actually painted (the well's `overflow: hidden` clipped the halo pseudo-element to nothing). Rebuilt: a real outer halo on the card's own shadow, a breathe that never drops below half brightness, and a model-tinted **comet arc orbiting the frame** (~3.4s, masked conic gradient). Reduced-motion gets a steady ring.
-- **Every project wears its own color** — a stable identity hue hashed from the project name (`projectHue`, unit-tested): workspace card monograms, project-switcher tiles, and the All-projects sidebar chips (now with a colored dot) all agree.
-- **Home aurora** — a faint accent wash drifts behind the greeting; the first screen is no longer flat black. Follows your accent color.
-- **Turn receipt is a pill** — "✓ Done · 39s · $1.88" renders as a quiet capsule, tinted by outcome (green for Applied, red for failed).
-- **Workspace activity loads as a skeleton** — shimmer bars in the chart's shape instead of a spinner in a void (only visible on genuinely slow loads).
-- **CDP wrapper hardening (dev tooling)** — a timed-out screenshot could leave the dev webview wedged at an emulated size (the real window rendered zoomed with cut-off edges); the override clear now verifies-and-retries, and `POST /reset-viewport` is the recovery.
-
-## v0.97.0 — Split panes hardened + AI Health dashboard + /mcp dialog
-
-Duplicate-pane crash fixed (self-heals poisoned saves); AI Health became a real dashboard (range picker, spend charts, per-model speed, pace forecast) with honest 24h "slow right now" verdicts; `/mcp` opens a full harness-wide server dialog; "Worked for Ns" is real wall-clock; short terminal tails render without stub reveals.
-
-## v0.96.0 — Settings overhaul + chat display polish
-
-Settings restructured into 5 searchable tabs with live previews and one-click Looks; About tab + update dialog rebuilt; skills in the `/` menu; tool display sharpened; dead code swept.
-
 
 ## Known issues
 - **Voice profanity on Web Speech:** fully-masked words (`******`) can't be recovered from Azure's servers — real fix is the on-device **Whisper** engine (built, not yet shipped).
