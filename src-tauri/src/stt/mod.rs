@@ -1,20 +1,24 @@
 //! Speech-to-text — engine routing + config persistence.
 //!
-//! Two engines coexist:
+//! Three engines coexist:
 //!   * `web_speech` — legacy. Recognition runs in the WebView via the Web
 //!     Speech API (Edge's Azure-backed recogniser). No Rust audio path; Rust
 //!     only persists settings.
-//!   * `whisper`    — local Whisper Large v3 Turbo via whisper-rs on CUDA,
-//!     gated by webrtc-vad, optionally polished by Claude Haiku. Rust owns
-//!     mic capture (cpal), inference, and event emission. Default after the
-//!     user's first successful Whisper transcription.
+//!   * `whisper`    — local Whisper via whisper-rs (optional feature; needs
+//!     LLVM at build time so it does NOT ship in release builds). Multilingual
+//!     path with initial_prompt / beam-search knobs.
+//!   * `parakeet`   — local Parakeet TDT 0.6B v3 via parakeet-rs / ONNX
+//!     Runtime (`parakeet` feature, default-on — ships in releases). English
+//!     + 25 EU languages, ~10x whisper's speed, DirectML on any GPU.
 //!
-//! Sub-modules ([`audio`], [`vad`], [`whisper`], [`cleanup`], [`model_manager`])
-//! are scaffolded as stubs in Phase 1 and wired in subsequent phases.
+//! The local engines share one Rust pipeline: cpal mic capture → webrtc-vad
+//! gating → rolling-window partials → final transcribe → optional Claude
+//! cleanup polish.
 
 pub mod audio;
 pub mod cleanup;
 pub mod model_manager;
+pub mod parakeet;
 pub mod vad;
 pub mod whisper;
 
@@ -52,12 +56,16 @@ pub struct SttConfig {
     #[serde(default = "default_true")]
     pub show_interim: bool,
 
-    /// Engine selector. `"web_speech"` (default, legacy) or `"whisper"` (local).
+    /// Engine selector. `"web_speech"` (default, legacy), `"whisper"` or
+    /// `"parakeet"` (local).
     #[serde(default = "default_engine")]
     pub engine: String,
     /// Whisper model id. See `model_manager::known_models()`.
     #[serde(default = "default_whisper_model")]
     pub whisper_model: String,
+    /// Parakeet model id. See `model_manager::known_models()`.
+    #[serde(default = "default_parakeet_model")]
+    pub parakeet_model: String,
     /// Input device name (cpal). `None` = system default.
     #[serde(default)]
     pub input_device: Option<String>,
@@ -103,6 +111,9 @@ fn default_engine() -> String {
 fn default_whisper_model() -> String {
     "large-v3-turbo-q5_0".to_string()
 }
+fn default_parakeet_model() -> String {
+    "parakeet-tdt-0.6b-v3-int8".to_string()
+}
 fn default_initial_prompt() -> String {
     DEFAULT_INITIAL_PROMPT.to_string()
 }
@@ -117,6 +128,7 @@ impl Default for SttConfig {
             show_interim: true,
             engine: default_engine(),
             whisper_model: default_whisper_model(),
+            parakeet_model: default_parakeet_model(),
             input_device: None,
             initial_prompt: default_initial_prompt(),
             vocab_text: String::new(),
@@ -175,21 +187,76 @@ pub fn stt_set_config(config: SttConfig) -> Result<(), String> {
 }
 
 // ============================================================================
-// Whisper session orchestration
+// Local-engine session orchestration (whisper + parakeet)
 // ============================================================================
 //
 // Two managed Tauri state slots:
-//   * `WhisperCache` — Option<WhisperEngine>. The loaded model survives across
+//   * `EngineCache` — Option<LoadedEngine>. The loaded model survives across
 //     record sessions; only swapped when the user picks a different model.
-//   * `WhisperSession` — Option<ActiveSession>. The currently-recording
+//   * `SttSession` — Option<ActiveSession>. The currently-recording
 //     session. Holding the mic stream + rolling-window task.
 //
 // `cpal::Stream` is `!Send`, so it lives on a dedicated `std::thread` that
 // blocks on a `mpsc` channel. Dropping the sender (or sending `()`) drops the
 // Stream, which stops mic capture. Tokio sees none of this.
 
-pub struct WhisperCache(pub AsyncMutex<Option<whisper::WhisperEngine>>);
-pub struct WhisperSession(pub AsyncMutex<Option<ActiveSession>>);
+/// A loaded local inference engine. Whisper takes prompt/language/beam
+/// decode knobs; Parakeet has none (vocabulary correction rides the Claude
+/// cleanup pass instead), so it ignores them.
+#[derive(Clone)]
+pub enum LoadedEngine {
+    Whisper(whisper::WhisperEngine),
+    Parakeet(parakeet::ParakeetEngine),
+}
+
+impl LoadedEngine {
+    fn model_id(&self) -> &str {
+        match self {
+            LoadedEngine::Whisper(e) => &e.model_id,
+            LoadedEngine::Parakeet(e) => &e.model_id,
+        }
+    }
+
+    /// Transcribe 16 kHz mono f32 samples. Blocking — call from spawn_blocking.
+    fn transcribe(
+        &self,
+        samples: &[f32],
+        initial_prompt: &str,
+        language: Option<&str>,
+        beam_size: Option<u8>,
+    ) -> Result<String, String> {
+        match self {
+            LoadedEngine::Whisper(e) => e.transcribe(samples, initial_prompt, language, beam_size),
+            LoadedEngine::Parakeet(e) => e.transcribe(samples),
+        }
+    }
+
+    /// Rolling-partial cadence — Parakeet transcribes a 3 s window in tens of
+    /// ms, so it can afford a much livelier tick than Whisper.
+    fn partial_tick_ms(&self) -> u64 {
+        match self {
+            LoadedEngine::Whisper(_) => 1000,
+            LoadedEngine::Parakeet(_) => 400,
+        }
+    }
+
+    /// Audio span each rolling partial re-transcribes. Whisper can only afford
+    /// the most-recent 3 s — which makes partials a sliding snippet that
+    /// rewrites itself as words fall out of the window (visible chop). Parakeet
+    /// is fast enough to re-transcribe the WHOLE utterance every tick, so the
+    /// partial grows stably like typing; capped at 60 s to bound tick cost
+    /// (past the cap the preview slides again, but the stop-time final still
+    /// covers the full 5-min ring).
+    fn partial_window_secs(&self) -> f32 {
+        match self {
+            LoadedEngine::Whisper(_) => 3.0,
+            LoadedEngine::Parakeet(_) => 60.0,
+        }
+    }
+}
+
+pub struct EngineCache(pub AsyncMutex<Option<LoadedEngine>>);
+pub struct SttSession(pub AsyncMutex<Option<ActiveSession>>);
 
 pub struct ActiveSession {
     ring: audio::AudioRing,
@@ -198,7 +265,7 @@ pub struct ActiveSession {
     /// cache at stop-time — a second start racing during this session's model
     /// load can overwrite that cache with a DIFFERENT model/quantization, and
     /// re-reading it at stop would silently finalize with the wrong engine.
-    engine: whisper::WhisperEngine,
+    engine: LoadedEngine,
     initial_prompt: String,
     language: Option<String>,
     beam_size: Option<u8>,
@@ -341,13 +408,16 @@ fn workspace_context() -> String {
 pub async fn stt_start_recording(
     app: AppHandle,
     window: tauri::Window,
-    cache: tauri::State<'_, WhisperCache>,
-    session: tauri::State<'_, WhisperSession>,
+    cache: tauri::State<'_, EngineCache>,
+    session: tauri::State<'_, SttSession>,
     model: Option<String>,
 ) -> Result<(), String> {
     let win = window.label().to_string();
     let cfg = load_config();
-    let model_id = model.unwrap_or(cfg.whisper_model.clone());
+    let model_id = model.unwrap_or_else(|| match cfg.engine.as_str() {
+        "parakeet" => cfg.parakeet_model.clone(),
+        _ => cfg.whisper_model.clone(),
+    });
 
     // Refuse if already recording — caller must stop first.
     {
@@ -373,6 +443,7 @@ pub async fn stt_start_recording(
         .path
         .clone()
         .ok_or_else(|| "model path missing".to_string())?;
+    let model_engine = model_info.engine;
 
     // Load or reuse engine. Reload only when the requested model differs.
     // Load happens OUTSIDE the cache lock so stt_stop_recording isn't blocked
@@ -380,15 +451,22 @@ pub async fn stt_start_recording(
     let engine = {
         let cached = {
             let slot = cache.0.lock().await;
-            slot.as_ref().filter(|e| e.model_id == model_id).cloned()
+            slot.as_ref().filter(|e| e.model_id() == model_id).cloned()
         };
         match cached {
             Some(e) => e,
             None => {
                 emit_state(&app, &win, "loading_model", Some(model_id.clone()));
                 let model_id_owned = model_id.clone();
-                let loaded = tokio::task::spawn_blocking(move || {
-                    whisper::WhisperEngine::load(&model_path, &model_id_owned)
+                let loaded = tokio::task::spawn_blocking(move || match model_engine {
+                    model_manager::EngineKind::Whisper => {
+                        whisper::WhisperEngine::load(&model_path, &model_id_owned)
+                            .map(LoadedEngine::Whisper)
+                    }
+                    model_manager::EngineKind::Parakeet => {
+                        parakeet::ParakeetEngine::load(&model_path, &model_id_owned)
+                            .map(LoadedEngine::Parakeet)
+                    }
                 })
                 .await
                 .map_err(|e| format!("model load task join: {e}"))??;
@@ -529,8 +607,8 @@ pub async fn stt_stop_recording(
     app: AppHandle,
     // Retained for the command's DI signature but no longer read: the final
     // transcribe uses the session's own stored engine, not the shared cache.
-    _cache: tauri::State<'_, WhisperCache>,
-    session: tauri::State<'_, WhisperSession>,
+    _cache: tauri::State<'_, EngineCache>,
+    session: tauri::State<'_, SttSession>,
 ) -> Result<String, String> {
     let mut active = {
         let mut slot = session.0.lock().await;
@@ -590,24 +668,30 @@ pub async fn stt_stop_recording(
     Ok(final_text)
 }
 
-/// Rolling-window partial-emit loop. Ticks every 1 s; peeks the most-recent
-/// 3 s of audio, runs VAD, transcribes if speech is present, emits the result
-/// as `stt://partial` only when it differs from the previous emission (avoids
-/// flooding the frontend w/ identical text).
+/// Rolling-window partial-emit loop. Ticks on the engine's cadence (1 s
+/// whisper / 400 ms parakeet); peeks the most-recent 3 s of audio, runs VAD,
+/// transcribes if speech is present, emits the result as `stt://partial` only
+/// when it differs from the previous emission (avoids flooding the frontend
+/// w/ identical text).
 async fn rolling_window_loop(
     app: AppHandle,
     win: String,
     ring: audio::AudioRing,
-    engine: whisper::WhisperEngine,
+    engine: LoadedEngine,
     initial_prompt: String,
     language: Option<String>,
     beam_size: Option<u8>,
     cancel: CancellationToken,
 ) {
-    const TICK_MS: u64 = 1000;
-    const WINDOW_SECS: f32 = 3.0;
+    // VAD gate span — only the recent tail decides "is anyone talking",
+    // independent of how much context the engine re-transcribes. Keeps the
+    // gate cheap and stops inference ~3 s into a pause (the frozen partial is
+    // the correct display for silence).
+    const GATE_SECS: f32 = 3.0;
+    let window_secs = engine.partial_window_secs();
+    let tick_ms = engine.partial_tick_ms();
     let mut last_emitted = String::new();
-    let mut ticker = tokio::time::interval(std::time::Duration::from_millis(TICK_MS));
+    let mut ticker = tokio::time::interval(std::time::Duration::from_millis(tick_ms));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
@@ -615,13 +699,18 @@ async fn rolling_window_loop(
             _ = cancel.cancelled() => return,
             _ = ticker.tick() => {}
         }
-        let samples = audio::peek_window(&ring, WINDOW_SECS);
-        if samples.is_empty() {
+        let gate = audio::peek_window(&ring, GATE_SECS);
+        if gate.is_empty() {
             continue;
         }
-        if !vad::window_has_speech(&samples) {
+        if !vad::window_has_speech(&gate) {
             continue;
         }
+        let samples = if window_secs > GATE_SECS {
+            audio::peek_window(&ring, window_secs)
+        } else {
+            gate
+        };
         let engine_c = engine.clone();
         let prompt_c = initial_prompt.clone();
         let lang_c = language.clone();
@@ -683,12 +772,22 @@ pub fn stt_get_input_devices() -> Result<Vec<String>, String> {
     audio::list_input_devices()
 }
 
-/// Build-time query — true if the Whisper FFI backend was compiled in. The
-/// Settings UI uses this to gate the "engine: whisper" option and to show
-/// the "install LLVM and rebuild" hint when it's false.
+/// Build-time query — which local backends were compiled in. The Settings UI
+/// uses this to gate the engine options and to show the "install LLVM and
+/// rebuild" hint for Whisper when it's absent. Parakeet ships by default;
+/// Whisper needs an LLVM opt-in build.
+#[derive(Clone, Serialize)]
+pub struct BackendAvailability {
+    pub whisper: bool,
+    pub parakeet: bool,
+}
+
 #[tauri::command]
-pub fn stt_backend_available() -> bool {
-    whisper::backend_available()
+pub fn stt_backend_available() -> BackendAvailability {
+    BackendAvailability {
+        whisper: whisper::backend_available(),
+        parakeet: parakeet::backend_available(),
+    }
 }
 
 #[tauri::command]

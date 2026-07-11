@@ -151,7 +151,10 @@
   function autosize() {
     if (!ta) return;
     ta.style.height = "auto";
-    const h = Math.min(ta.scrollHeight, 340);
+    // Dictation ghost renders outside the textarea value — take whichever
+    // mirror is taller so in-flight speech reserves its own lines.
+    const want = Math.max(ta.scrollHeight, ghostEl?.scrollHeight ?? 0);
+    const h = Math.min(want, 340);
     ta.style.height = h + "px";
     multiline = h > 40;
     // Only allow the inner scrollbar once content actually hits the cap —
@@ -799,12 +802,24 @@
   const silenceCountdown = $derived(
     stt.targetTabId === tabId ? stt.silenceRemaining : null,
   );
+  // In-flight spoken words for THIS pane — rendered as a dim ghost tail after
+  // the solid draft; they "turn white" when the final transcript commits.
+  let ghostEl = $state<HTMLDivElement | null>(null);
+  const dictGhost = $derived(
+    stt.targetTabId === tabId && (stt.recording || stt.transcribing) ? stt.ghostTail : "",
+  );
+  $effect(() => {
+    const _g = dictGhost;
+    void _g;
+    void tick().then(autosize);
+  });
   // Dictation availability — gates both the mic button render and the Ctrl+D
   // shortcut so they stay in lockstep.
   const micAvailable = $derived(
     stt.config.enabled &&
       ((stt.config.engine === "web_speech" && stt.supported) ||
-        (stt.config.engine === "whisper" && stt.backendAvailable)),
+        (stt.config.engine === "whisper" && stt.backends.whisper) ||
+        (stt.config.engine === "parakeet" && stt.backends.parakeet)),
   );
   async function toggleMic() {
     if (micBusy) return;
@@ -1281,6 +1296,11 @@
         {:else if attachments.length > 0 && draft.length === 0}
           <span class="placeholder-ghost static" aria-hidden="true">Ask about the image…</span>
         {/if}
+        {#if dictGhost}
+          <!-- Mirror overlay: invisible copy of the committed draft positions
+               the ghost tail exactly where the caret would land. -->
+          <div class="dict-ghost" bind:this={ghostEl} aria-hidden="true"><span class="dg-committed">{draft}{#if draft.length > 0 && !/\s$/.test(draft)}{" "}{/if}</span><span class="dg-tail" class:pending={stt.transcribing}>{dictGhost}</span></div>
+        {/if}
         {#if enhancing}
           <span class="magic-aura" aria-hidden="true"></span>
           <div class="magic-text" aria-hidden="true">{draft}</div>
@@ -1349,21 +1369,24 @@
             class="cbtn ic micbtn"
             class:recording={stt.recording}
             class:transcribing={stt.transcribing}
-            class:mic-error={!!stt.lastError}
+            class:mic-error={!!stt.lastError && !stt.recording && !stt.transcribing}
             type="button"
             onclick={toggleMic}
             disabled={micBusy || stt.transcribing}
             use:tooltip={
               stt.recording ? "Stop recording" :
               stt.transcribing ? "Transcribing…" :
+              stt.currentState === "loading_model" ? "Loading model…" :
               stt.lastError ? stt.lastError :
-              stt.config.engine === "whisper"
-                ? "Dictate — Whisper (local) · Ctrl+D or hold Space"
-                : "Dictate — Web Speech · Ctrl+D or hold Space"
+              stt.config.engine === "parakeet"
+                ? "Dictate — Parakeet (local) · Ctrl+D or hold Space"
+                : stt.config.engine === "whisper"
+                  ? "Dictate — Whisper (local) · Ctrl+D or hold Space"
+                  : "Dictate — Web Speech · Ctrl+D or hold Space"
             }
             aria-label={stt.recording ? "Stop recording" : stt.lastError ? `Start recording (last error: ${stt.lastError})` : "Start recording"}
           >
-            {#if stt.transcribing}
+            {#if stt.transcribing || (micBusy && !stt.recording)}
               <Loader2 size={15} class="mic-spin" />
             {:else if stt.recording}
               <span
@@ -2156,6 +2179,28 @@
   }
 
   /* Dictation: gentle text pulse while Claude polishes the final transcript. */
+  /* Dictation ghost — mirror div over the textarea. The committed-draft span
+     is invisible but occupies space, so the ghost tail wraps exactly where the
+     caret sits. Ghost text reads one ladder-step down (--fg-subtle); it turns
+     "white" by committing into the textarea, not by restyling. */
+  .dict-ghost {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    padding: 8px 10px 6px;
+    font: inherit;
+    font-size: var(--fs-md);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .composer.hero .dict-ghost { font-size: 14.5px; line-height: 1.55; padding: 11px 12px 11px 14px; }
+  .dg-committed { visibility: hidden; }
+  .dg-tail { color: var(--fg-subtle); }
+  .dg-tail.pending { animation: dictate-polish 1.2s ease-in-out infinite; }
+
   .textarea-wrap.polishing textarea {
     animation: dictate-polish 1.2s ease-in-out infinite;
   }
@@ -2193,6 +2238,7 @@
   .du-btn:hover { color: var(--fg); background: color-mix(in oklch, var(--surface-hover) 70%, transparent); border-color: var(--border-strong); }
   @media (prefers-reduced-motion: reduce) {
     .textarea-wrap.polishing textarea { animation: none; }
+    .dg-tail.pending { animation: none; opacity: 0.7; }
   }
 
   /* Word-materialize reveal (.ew) moved to composer/EnhanceBar.svelte (C5). */

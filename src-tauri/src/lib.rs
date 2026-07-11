@@ -164,8 +164,8 @@ pub fn run() {
         .manage(std::sync::Arc::new(assistant::PermissionRegistry::new()))
         .manage(std::sync::Arc::new(update_service::UpdateService::new()))
         .manage(stt::DownloadCancel(std::sync::Mutex::new(None)))
-        .manage(stt::WhisperCache(tokio::sync::Mutex::new(None)))
-        .manage(stt::WhisperSession(tokio::sync::Mutex::new(None)))
+        .manage(stt::EngineCache(tokio::sync::Mutex::new(None)))
+        .manage(stt::SttSession(tokio::sync::Mutex::new(None)))
         .setup(|app| {
             // Window starts hidden (`visible: false` in tauri.conf.json) so we
             // can position it before the user sees it.

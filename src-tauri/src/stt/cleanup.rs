@@ -176,10 +176,64 @@ pub async fn polish_with_ctx(raw: &str, ctx: &str) -> Result<String, String> {
 
     let cleaned = String::from_utf8_lossy(&out_buf).trim().to_string();
     if cleaned.is_empty() {
-        Ok(raw.to_string())
-    } else {
-        Ok(cleaned)
+        return Ok(raw.to_string());
     }
+    // Faithfulness guard — despite the fenced prompt, the model occasionally
+    // ANSWERS the dictation instead of cleaning it (observed live: garbled
+    // audio → "I'm here — no request came through…"). A reply shares almost no
+    // vocabulary with the raw transcript; a legitimate polish keeps most of it.
+    if !output_is_faithful(raw, &cleaned) {
+        log::warn!("[stt] cleanup output rejected (not a cleanup of the transcript), returning raw");
+        crate::diagnostics::emit_with_fields(
+            crate::diagnostics::DiagStage::Log,
+            crate::diagnostics::DiagLevel::Warn,
+            Some("stt"), Some(file!()),
+            "cleanup output rejected as unfaithful",
+            serde_json::json!({ "ran": true, "source": "raw", "reason": "unfaithful_output" }),
+        );
+        return Ok(raw.to_string());
+    }
+    Ok(cleaned)
+}
+
+/// True when `cleaned` still looks like a cleanup of `raw` rather than a reply
+/// to it: most raw words survive, and the length didn't balloon. Word overlap
+/// is measured raw→cleaned (cleanup may ADD punctuation/restored profanity but
+/// should rarely DROP words); masked tokens (`f***`) are excluded since
+/// restoration legitimately rewrites them.
+fn output_is_faithful(raw: &str, cleaned: &str) -> bool {
+    let norm = |s: &str| -> Vec<String> {
+        s.split_whitespace()
+            .map(|w| {
+                w.chars()
+                    .filter(|c| c.is_alphanumeric())
+                    .collect::<String>()
+                    .to_lowercase()
+            })
+            .filter(|w| !w.is_empty())
+            .collect()
+    };
+    let raw_words = norm(raw);
+    if raw_words.is_empty() {
+        return true;
+    }
+    let cleaned_set: std::collections::HashSet<String> = norm(cleaned).into_iter().collect();
+    let considered: Vec<&String> = raw_words
+        .iter()
+        .filter(|w| !w.contains('*'))
+        .collect();
+    if considered.is_empty() {
+        return true;
+    }
+    let kept = considered
+        .iter()
+        .filter(|w| cleaned_set.contains(w.as_str()))
+        .count();
+    let overlap = kept as f32 / considered.len() as f32;
+    // Length sanity: a polish stays in the transcript's ballpark; a reply or
+    // hallucinated essay usually doesn't.
+    let len_ok = cleaned.len() <= raw.len() * 3 + 80;
+    overlap >= 0.5 && len_ok
 }
 
 /// Append the workspace context (capped) to the cleanup instruction so Haiku
@@ -199,6 +253,34 @@ fn build_system_prompt(ctx: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn faithful_polish_accepted() {
+        let raw = "okay so lets fix the login bug then ship it";
+        let cleaned = "Okay, so let's fix the login bug, then ship it.";
+        assert!(output_is_faithful(raw, cleaned));
+    }
+
+    #[test]
+    fn reply_rejected() {
+        let raw = "k once youre done with that leave it to you";
+        let cleaned = "I'm here — no request came through in that message. What would you like me to work on?";
+        assert!(!output_is_faithful(raw, cleaned));
+    }
+
+    #[test]
+    fn masked_profanity_restoration_accepted() {
+        let raw = "what the f*** is going on with this build";
+        let cleaned = "What the fuck is going on with this build?";
+        assert!(output_is_faithful(raw, cleaned));
+    }
+
+    #[test]
+    fn ballooned_output_rejected() {
+        let raw = "write me a poem about rust";
+        let long = format!("{} {}", "Here is a poem.", "verse ".repeat(60));
+        assert!(!output_is_faithful(raw, &long));
+    }
 
     #[test]
     fn empty_context_yields_bare_prompt() {

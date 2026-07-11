@@ -1,6 +1,6 @@
 // Speech-to-text state.
 //
-// Two engines, same public surface (composer wires `recording` /
+// Three engines, same public surface (composer wires `recording` /
 // `transcribing` / `lastError` / `start` / `stop` / `cancel` / `consume`
 // without caring which engine is active):
 //
@@ -8,12 +8,15 @@
 //     SpeechRecognition (Azure-backed when online). 100% in-browser, no
 //     backend round-trips. Settings persisted via `stt_get/set_config`.
 //
-//   • engine="whisper" — Rust-side cpal mic capture, webrtc-vad gating,
-//     whisper.cpp inference, optional Claude cleanup polish. Driven over
-//     Tauri IPC (`stt_start_recording` / `stt_stop_recording`); partial +
-//     final text arrives via `stt://partial` / `stt://final` events. The
-//     same `composeDraft` path feeds them into the composer so the live-
-//     typing UX matches Web Speech's interim/final segment behaviour.
+//   • engine="whisper" / engine="parakeet" — Rust-side cpal mic capture,
+//     webrtc-vad gating, local inference (whisper.cpp / Parakeet TDT via
+//     ONNX Runtime), optional Claude cleanup polish. Driven over Tauri IPC
+//     (`stt_start_recording` / `stt_stop_recording`); partial + final text
+//     arrives via `stt://partial` / `stt://final` events.
+//
+// Interim speech renders as `ghostTail` (dim, display-only, in the composer
+// overlay); only finalized text is committed into the draft — spoken words
+// "turn white" when the transcript lands.
 //
 // Switching engines mid-session is allowed — `setConfig({engine})` aborts
 // any in-flight recording before the new engine takes over.
@@ -23,7 +26,12 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { assistant } from "./assistant.svelte";
 import { notify } from "./toast.svelte";
 
-export type SttEngine = "web_speech" | "whisper";
+export type SttEngine = "web_speech" | "whisper" | "parakeet";
+
+/** Engines whose audio pipeline lives in Rust (cpal capture + local inference). */
+export function isLocalEngine(e: SttEngine): boolean {
+  return e === "whisper" || e === "parakeet";
+}
 
 export type SttConfig = {
   enabled: boolean;
@@ -33,6 +41,7 @@ export type SttConfig = {
   show_interim: boolean;
   engine: SttEngine;
   whisper_model: string;
+  parakeet_model: string;
   input_device: string | null;
   initial_prompt: string;
   vocab_text: string;
@@ -45,6 +54,7 @@ export type SttConfig = {
 export type ModelInfo = {
   id: string;
   display_name: string;
+  engine: "whisper" | "parakeet";
   filename: string;
   approx_size_bytes: number;
   on_disk_bytes: number | null;
@@ -112,6 +122,7 @@ const DEFAULT_STT_CONFIG: SttConfig = {
   show_interim: true,
   engine: "web_speech",
   whisper_model: "large-v3-turbo-q5_0",
+  parakeet_model: "parakeet-tdt-0.6b-v3-int8",
   input_device: null,
   initial_prompt: "",
   vocab_text: "",
@@ -127,9 +138,9 @@ class SttStore {
 
   /** Web Speech API availability in the current WebView. */
   supported = $state(false);
-  /** True if the Whisper Rust backend was compiled in (default: false until
-   *  the user installs LLVM + rebuilds with `--features whisper-rs`). */
-  backendAvailable = $state(false);
+  /** Which local Rust backends were compiled in. Parakeet ships in release
+   *  builds; Whisper needs an LLVM opt-in build (`--features whisper-rs`). */
+  backends = $state<{ whisper: boolean; parakeet: boolean }>({ whisper: false, parakeet: false });
   recording = $state(false);
   /** True while we've stopped but final results may still arrive. */
   transcribing = $state(false);
@@ -154,6 +165,12 @@ class SttStore {
   silenceRemaining = $state<number | null>(null);
   /** True while the cleanup polish of a finished dictation is in flight. */
   polishing = $state(false);
+  /** Uncommitted interim speech — rendered by the composer as ghost text after
+   *  the solid draft, NOT written into it. Committed (turned solid) when the
+   *  final transcript lands; cleared on cancel/consume. Whisper/Parakeet: the
+   *  whole utterance stays ghost until stop. Web Speech: finals commit as you
+   *  speak, only the in-flight interim segment is ghost. */
+  ghostTail = $state("");
   /** Restore-point after a cleanup polish: full draft before/after, so the user
    *  can flip back to the raw transcript. Cleared on typing or timeout. */
   polishUndo = $state<{ committed: string; original: string } | null>(null);
@@ -214,6 +231,7 @@ class SttStore {
     // awaited swap).
     this.polishGuard++;
     this.polishing = false;
+    this.ghostTail = "";
     this.stopWebMeter();
   }
 
@@ -231,9 +249,11 @@ class SttStore {
     }
 
     try {
-      this.backendAvailable = await invoke<boolean>("stt_backend_available");
+      this.backends = await invoke<{ whisper: boolean; parakeet: boolean }>(
+        "stt_backend_available",
+      );
     } catch {
-      this.backendAvailable = false;
+      this.backends = { whisper: false, parakeet: false };
     }
 
     // Subscribe to backend events. Always subscribe — engine can be flipped
@@ -263,6 +283,10 @@ class SttStore {
           if (ev.payload.state === "recording") {
             this.recording = true;
             this.transcribing = false;
+            // The session is live — any earlier transient error (e.g. a raced
+            // double-start) is stale. Leaving it set kept the mic painted red
+            // through a perfectly healthy recording.
+            this.lastError = null;
           }
           if (ev.payload.state === "idle") {
             this.recording = false;
@@ -364,7 +388,7 @@ class SttStore {
   consume() {
     this.cancelRequested = true;
     this.cancelPolish(); // stop any shimmer + invalidate an in-flight polish
-    if (this.config.engine === "whisper") {
+    if (isLocalEngine(this.config.engine)) {
       // Fire-and-forget — the backend's drop-on-stop preserves any in-flight
       // partials but stops emitting new ones.
       void invoke("stt_stop_recording").catch(() => {});
@@ -382,6 +406,7 @@ class SttStore {
     this.polishUndo = null;
     this.consumed = true;
     this.lastTranscript = "";
+    this.ghostTail = "";
     this.recording = false;
     this.transcribing = false;
     this.recognition = null;
@@ -399,10 +424,18 @@ class SttStore {
       return false;
     }
     if (this.recording) return true;
+    // A start is already in flight (model load / capture init) — treat the
+    // second call as success instead of racing a duplicate into the backend
+    // ("stt session already active" painted the mic red mid-recording).
+    if (this.whisperStartInvoked) return true;
     // Bind BEFORE reading baseDraft so we capture the target pane's draft.
     this.targetTabId = tabId ?? assistant.currentConvoId;
     this.lastError = null;
+    this.ghostTail = "";
     this.baseDraft = this.config.append_to_draft ? this.readDraft() : "";
+    // Replace mode: the old draft dies at the moment dictation starts — the
+    // ghost tail must not render appended after text that's about to vanish.
+    if (!this.config.append_to_draft) this.writeDraft("");
     this.finalText = "";
     this.segments = [];
     this.pendingSend = false;
@@ -412,15 +445,19 @@ class SttStore {
     this.cancelRequested = false;
     this.clearTranscribeTimer();
 
-    if (this.config.engine === "whisper") {
-      if (!this.backendAvailable) {
-        this.lastError =
-          "Whisper backend not built. Install LLVM + rebuild with --features whisper-rs (see Settings → Speech for details).";
+    if (isLocalEngine(this.config.engine)) {
+      const isWhisper = this.config.engine === "whisper";
+      if (isWhisper ? !this.backends.whisper : !this.backends.parakeet) {
+        this.lastError = isWhisper
+          ? "Whisper backend not built. Install LLVM + rebuild with --features whisper-rs (see Settings → Speech for details)."
+          : "Parakeet backend not built into this binary. Rebuild with the default feature set (see Settings → Speech).";
         this.failToast();
         return false;
       }
       try {
-        await invoke("stt_start_recording", { model: this.config.whisper_model });
+        await invoke("stt_start_recording", {
+          model: isWhisper ? this.config.whisper_model : this.config.parakeet_model,
+        });
         // `recording` flips to true once the `stt://state: recording` event arrives.
         this.whisperStartInvoked = true;
         this.startSilenceWatch();
@@ -484,7 +521,7 @@ class SttStore {
 
   private async stopInner(): Promise<string> {
     this.clearSilenceWatch();
-    if (this.config.engine === "whisper") {
+    if (isLocalEngine(this.config.engine)) {
       if (!this.recording && !this.transcribing && !this.whisperStartInvoked) return this.lastTranscript;
       this.whisperStartInvoked = false;
       try {
@@ -526,7 +563,8 @@ class SttStore {
     this.clearSilenceWatch();
     this.segments = [];
     this.pendingSend = false;
-    if (this.config.engine === "whisper") {
+    this.ghostTail = "";
+    if (isLocalEngine(this.config.engine)) {
       // Include whisperStartInvoked: cancel can fire in the gap between
       // stt_start_recording returning and the `recording` state event landing —
       // recording is still false then, so without this the backend keeps
@@ -694,11 +732,14 @@ class SttStore {
     if (!this.config.show_interim) return;
     const t = decensor(text);
     this.lastTranscript = t;
-    this.writeDraft(this.composeDraft(t, ""));
+    // Ghost only — the draft stays untouched until the final commits, so the
+    // spoken words render dimmed and "turn white" when the transcript lands.
+    this.ghostTail = t;
   }
 
   private onBackendFinal(text: string, raw?: string, cleaned?: boolean) {
     this.clearSilenceWatch();
+    this.ghostTail = "";
     if (this.consumed || this.cancelRequested) return;
     let t = decensor(text);
     let send = false;
@@ -713,11 +754,11 @@ class SttStore {
     }
     this.finalText = t;
     this.lastTranscript = t;
-    const committed = this.composeDraft(t, "");
+    const committed = this.composeDraft(t);
     this.writeDraft(committed);
     // The Whisper path polishes backend-side — arm the raw-transcript undo.
     if (cleaned && raw && raw.trim() !== text.trim()) {
-      this.setPolishUndo(committed, this.composeDraft(decensor(raw.trim()), ""));
+      this.setPolishUndo(committed, this.composeDraft(decensor(raw.trim())));
     }
     this.recording = false;
     this.transcribing = false;
@@ -818,8 +859,11 @@ class SttStore {
         interim += txt;
       }
     }
-    const composed = this.composeDraft(this.finalText, interim);
-    this.writeDraft(composed);
+    // Finals commit solid into the draft; the in-flight interim rides the
+    // ghost tail (display-only) until the recogniser finalises it.
+    const composed = this.composeDraft(this.finalText);
+    if (this.readDraft() !== composed) this.writeDraft(composed);
+    this.ghostTail = interim.trim();
     this.lastTranscript = this.finalText;
     // "send it" — draft is committed above; the composer's effect fires it.
     if (this.pendingSend) {
@@ -881,8 +925,9 @@ class SttStore {
       .trim();
   }
 
-  private composeDraft(final: string, interim: string): string {
-    const tail = [final, interim].filter((s) => s.length > 0).join(" ").trim();
+  /** Committed text only — interim speech renders via `ghostTail`, never here. */
+  private composeDraft(text: string): string {
+    const tail = text.trim();
     if (!this.baseDraft) return tail;
     const sep = /\s$/.test(this.baseDraft) ? "" : " ";
     return this.baseDraft + sep + tail;
@@ -912,13 +957,14 @@ class SttStore {
   }
 
   private onEnd() {
+    this.ghostTail = "";
     // #175: commit only if neither user-cancel nor composer-consume fired.
     const commit = !this.cancelRequested && !this.consumed;
     if (commit) {
       // #40d: onResult already streamed the final text into the draft — only
       // rewrite if there's an actual delta, so the textarea doesn't flash the
       // whole phrase back in at stop.
-      const composed = this.composeDraft(this.finalText, "");
+      const composed = this.composeDraft(this.finalText);
       if (this.readDraft() !== composed) this.writeDraft(composed);
       // Session ended normally with text committed → any mid-session transient
       // (e.g. a no-speech during a pause) is stale; don't leave the mic red
@@ -954,7 +1000,7 @@ class SttStore {
     // to fix there.
     const hasMask = raw.includes("*");
     if (!this.config.cleanup_enabled || (raw.split(/\s+/).length < 3 && !hasMask)) return;
-    const committed = this.composeDraft(raw, "");
+    const committed = this.composeDraft(raw);
     // Non-blocking: the raw transcript is already committed to the draft and
     // is immediately editable/sendable. The cleanup pass is cosmetic, so it must
     // NOT raise `transcribing` (that disables the mic + blocks the composer,
@@ -980,7 +1026,7 @@ class SttStore {
         !this.cancelRequested &&
         this.readDraft() === committed
       ) {
-        const polished = this.composeDraft(cleaned, "");
+        const polished = this.composeDraft(cleaned);
         this.writeDraft(polished);
         this.finalText = cleaned;
         this.lastTranscript = cleaned;

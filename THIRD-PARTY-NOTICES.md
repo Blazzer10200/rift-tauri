@@ -17,16 +17,26 @@ dependencies change. Do not edit by hand._
   - Copyright the cpal authors
 - **dunce** 1.0.5 (as CC0-1.0 OR MIT-0 OR Apache-2.0)
   - Copyright the dunce authors (Kornel <kornel@geekhood.net>)
+- **esaxx-rs** 0.1.10
+  - Copyright the esaxx-rs authors (Nicolas Patry <patry.nicolas@protonmail.com>)
+- **hound** 3.5.1
+  - Copyright the hound authors (Ruud van Asseldonk <dev@veniogames.com>)
 - **moxcms** 0.8.1 (as BSD-3-Clause OR Apache-2.0)
   - Copyright 2024 Radzivon Bartoshyk
   - Copyright (c) Radzivon Bartoshyk. All rights reserved.
 - **pxfm** 0.1.29 (as BSD-3-Clause OR Apache-2.0)
   - Copyright 2024 Radzivon Bartoshyk
   - Copyright (c) Radzivon Bartoshyk. All rights reserved.
+- **ryu** 1.0.23 (as Apache-2.0 OR BSL-1.0)
+  - Copyright the ryu authors (David Tolnay <dtolnay@gmail.com>)
+- **spm_precompiled** 0.1.4
+  - Copyright the spm_precompiled authors (Nicolas Patry <patry.nicolas@protonmail.com>)
 - **sync_wrapper** 1.0.2
   - Copyright the sync_wrapper authors (Actyx AG <developer@actyx.io>)
 - **tao** 0.35.2
   - Copyright the tao authors (Tauri Programme within The Commons Conservancy, The winit contributors)
+- **tokenizers** 0.23.1
+  - Copyright the tokenizers authors (Anthony MOI <m.anthony.moi@gmail.com>, Nicolas Patry <patry.nicolas@protonmail.com>)
 - **zopfli** 0.8.3
   - Copyright 2011 Google Inc.
 
@@ -82,6 +92,8 @@ dependencies change. Do not edit by hand._
 
 - **adler2** 2.0.1 (as 0BSD OR MIT OR Apache-2.0)
   - Copyright (C) Jonas Schievink <jonasschievink@gmail.com>
+- **ahash** 0.8.12 (as MIT OR Apache-2.0)
+  - Copyright (c) 2018 Tom Kaitchuck
 - **aho-corasick** 1.1.4 (as Unlicense OR MIT)
   - Copyright (c) 2015 Andrew Gallant
 - **anstream** 1.0.0 (as MIT OR Apache-2.0)
@@ -101,6 +113,8 @@ dependencies change. Do not edit by hand._
 - **atomic-waker** 1.1.2 (as Apache-2.0 OR MIT)
   - Copyright (c) 2016 Alex Crichton
   - Copyright (c) 2017 The Tokio Authors
+- **base64** 0.13.1 (as MIT/Apache-2.0)
+  - Copyright (c) 2015 Alice Maz
 - **base64** 0.22.1 (as MIT OR Apache-2.0)
   - Copyright (c) 2015 Alice Maz
 - **bit-set** 0.8.0 (as Apache-2.0 OR MIT)
@@ -133,6 +147,8 @@ dependencies change. Do not edit by hand._
   - Copyright the cargo-platform authors
 - **cargo_metadata** 0.19.2
   - Copyright the cargo_metadata authors (Oliver Schneider <git-spam-no-reply9815368754983@oli-obk.de>)
+- **castaway** 0.2.4
+  - Copyright (c) 2021 Stephen M. Coakley
 - **cfb** 0.7.3
   - Copyright (c) 2017 Matthew D. Steele
 - **cfg-if** 1.0.4 (as MIT OR Apache-2.0)
@@ -143,6 +159,8 @@ dependencies change. Do not edit by hand._
   - Copyright (c) 2014, Kang Seonghoon.
 - **colorchoice** 1.0.5 (as MIT OR Apache-2.0)
   - Copyright (c) Individual contributors
+- **compact_str** 0.9.1
+  - Copyright (c) 2021 Parker Timmerman
 - **const-oid** 0.10.2 (as Apache-2.0 OR MIT)
   - Copyright (c) 2020-2026 The RustCrypto Project Developers
 - **cookie** 0.18.1 (as MIT OR Apache-2.0)
@@ -158,6 +176,10 @@ dependencies change. Do not edit by hand._
 - **crossbeam-channel** 0.5.15 (as MIT OR Apache-2.0)
   - Copyright (c) 2019 The Crossbeam Project Developers
   - Copyright (c) 2009 The Go Authors. All rights reserved.
+- **crossbeam-deque** 0.8.7 (as MIT OR Apache-2.0)
+  - Copyright (c) 2019 The Crossbeam Project Developers
+- **crossbeam-epoch** 0.9.20 (as MIT OR Apache-2.0)
+  - Copyright (c) 2019 The Crossbeam Project Developers
 - **crossbeam-utils** 0.8.21 (as MIT OR Apache-2.0)
   - Copyright (c) 2019 The Crossbeam Project Developers
 - **crypto-common** 0.1.7 (as MIT OR Apache-2.0)
@@ -168,12 +190,22 @@ dependencies change. Do not edit by hand._
   - Copyright the ctor authors (Matt Mastracci <matthew@mastracci.com>)
 - **ctor-proc-macro** 0.0.7 (as Apache-2.0 OR MIT)
   - Copyright the ctor-proc-macro authors (Matt Mastracci <matthew@mastracci.com>)
+- **daachorse** 1.0.1 (as MIT OR Apache-2.0)
+  - Copyright the daachorse authors (Koichi Akabe <vbkaisetsu@gmail.com>, Shunsuke Kanda <shnsk.knd@gmail.com>)
+- **darling** 0.20.11
+  - Copyright (c) 2017 Ted Driggs
 - **darling** 0.23.0
+  - Copyright (c) 2017 Ted Driggs
+- **darling_core** 0.20.11
   - Copyright (c) 2017 Ted Driggs
 - **darling_core** 0.23.0
   - Copyright (c) 2017 Ted Driggs
+- **darling_macro** 0.20.11
+  - Copyright (c) 2017 Ted Driggs
 - **darling_macro** 0.23.0
   - Copyright (c) 2017 Ted Driggs
+- **dary_heap** 0.3.9 (as MIT OR Apache-2.0)
+  - Copyright the dary_heap authors (Han Mertens <hanmertens@outlook.com>)
 - **dasp_sample** 0.11.0 (as MIT OR Apache-2.0)
   - Copyright the dasp_sample authors (mitchmindtree <mitchell.nordine@gmail.com>)
 - **deranged** 0.5.8 (as MIT OR Apache-2.0)
@@ -181,6 +213,12 @@ dependencies change. Do not edit by hand._
   - Copyright (c) 2024 Jacob Pratt et al.
 - **derivative** 2.2.0 (as MIT/Apache-2.0)
   - Copyright (c) 2016 Martin Carton
+- **derive_builder** 0.20.2 (as MIT OR Apache-2.0)
+  - Copyright (c) 2016 rust-derive-builder contributors
+- **derive_builder_core** 0.20.2 (as MIT OR Apache-2.0)
+  - Copyright (c) 2016 rust-derive-builder contributors
+- **derive_builder_macro** 0.20.2 (as MIT OR Apache-2.0)
+  - Copyright (c) 2016 rust-derive-builder contributors
 - **derive_more** 2.1.1
   - Copyright (c) 2016 Jelte Fennema
 - **derive_more-impl** 2.1.1
@@ -202,6 +240,8 @@ dependencies change. Do not edit by hand._
   - Copyright the dtoa authors (David Tolnay <dtolnay@gmail.com>)
 - **dyn-clone** 1.0.20 (as MIT OR Apache-2.0)
   - Copyright the dyn-clone authors (David Tolnay <dtolnay@gmail.com>)
+- **either** 1.16.0 (as MIT OR Apache-2.0)
+  - Copyright (c) 2015
 - **env_filter** 1.0.1 (as MIT OR Apache-2.0)
   - Copyright (c) Individual contributors
 - **env_logger** 0.11.10 (as MIT OR Apache-2.0)
@@ -210,6 +250,8 @@ dependencies change. Do not edit by hand._
   - Copyright (c) 2016--2023
 - **erased-serde** 0.4.10 (as MIT OR Apache-2.0)
   - Copyright the erased-serde authors (David Tolnay <dtolnay@gmail.com>)
+- **eyre** 0.6.12 (as MIT OR Apache-2.0)
+  - Copyright the eyre authors (David Tolnay <dtolnay@gmail.com>, Jane Lusby <jlusby42@gmail.com>)
 - **fastrand** 2.4.1 (as Apache-2.0 OR MIT)
   - Copyright the fastrand authors (Stjepan Glavina <stjepang@gmail.com>)
 - **fdeflate** 0.3.7 (as MIT OR Apache-2.0)
@@ -298,6 +340,8 @@ dependencies change. Do not edit by hand._
   - Copyright (c) The rust-url developers
 - **image** 0.25.10 (as MIT OR Apache-2.0)
   - Copyright the image authors (The image-rs Developers)
+- **indenter** 0.3.4 (as MIT OR Apache-2.0)
+  - Copyright the indenter authors (Jane Lusby <jlusby@yaah.dev>)
 - **indexmap** 1.9.3 (as Apache-2.0 OR MIT)
   - Copyright (c) 2016--2017
 - **indexmap** 2.14.0 (as Apache-2.0 OR MIT)
@@ -308,6 +352,8 @@ dependencies change. Do not edit by hand._
   - Copyright 2017 Juniper Networks, Inc.
 - **is_terminal_polyfill** 1.70.2 (as MIT OR Apache-2.0)
   - Copyright (c) Individual contributors
+- **itertools** 0.14.0 (as MIT OR Apache-2.0)
+  - Copyright (c) 2015
 - **itoa** 1.0.18 (as MIT OR Apache-2.0)
   - Copyright the itoa authors (David Tolnay <dtolnay@gmail.com>)
 - **jiff** 0.2.24 (as Unlicense OR MIT)
@@ -329,22 +375,41 @@ dependencies change. Do not edit by hand._
   - Copyright (c) 2016 The Rust Project Developers
 - **log** 0.4.29 (as MIT OR Apache-2.0)
   - Copyright (c) 2014 The Rust Project Developers
+- **macro_rules_attribute** 0.2.2 (as Apache-2.0 OR MIT OR Zlib)
+  - Copyright 2019 Daniel Henry-Mantilla <daniel.henry.mantilla@gmail.com>
+  - Copyright (c) 2019 Daniel Henry-Mantilla <daniel.henry.mantilla@gmail.com>
+- **macro_rules_attribute-proc_macro** 0.2.2 (as Apache-2.0 OR MIT OR Zlib)
+  - Copyright 2019 Daniel Henry-Mantilla <daniel.henry.mantilla@gmail.com>
+  - Copyright (c) 2019 Daniel Henry-Mantilla <daniel.henry.mantilla@gmail.com>
 - **markup5ever** 0.38.0 (as MIT OR Apache-2.0)
   - Copyright (c) 2014 The html5ever Project Developers
+- **matrixmultiply** 0.3.10 (as MIT/Apache-2.0)
+  - Copyright (c) 2016 - 2023 Ulrik Sverdrup "bluss"
+  - Copyright (c) 2021 DutchGhost [constparse.rs]
 - **memchr** 2.8.0 (as Unlicense OR MIT)
   - Copyright (c) 2015 Andrew Gallant
 - **mime** 0.3.17 (as MIT OR Apache-2.0)
   - Copyright (c) 2014 Sean McArthur
+- **minimal-lexical** 0.2.1 (as MIT/Apache-2.0)
+  - Copyright (c) 2009 The Go Authors. All rights reserved.
 - **miniz_oxide** 0.8.9 (as MIT OR Zlib OR Apache-2.0)
   - Copyright 2013-2014 RAD Game Tools and Valve Software
   - Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC
   - Copyright (c) 2017 Frommi
 - **mio** 1.2.0
   - Copyright (c) 2014 Carl Lerche and other MIO contributors
+- **monostate** 0.1.18 (as MIT OR Apache-2.0)
+  - Copyright the monostate authors (David Tolnay <dtolnay@gmail.com>)
+- **monostate-impl** 0.1.18 (as MIT OR Apache-2.0)
+  - Copyright the monostate-impl authors (David Tolnay <dtolnay@gmail.com>)
 - **muda** 0.19.1 (as Apache-2.0 OR MIT)
   - Copyright (c) 2022-2022 Tauri Programme within The Commons Conservancy
+- **ndarray** 0.17.2 (as MIT OR Apache-2.0)
+  - Copyright (c) 2015 - 2021 Ulrik Sverdrup "bluss",
 - **new_debug_unreachable** 1.0.6
   - Copyright (c) 2015 Jonathan Reem
+- **nom** 7.1.3
+  - Copyright (c) 2014-2019 Geoffroy Couprie
 - **normpath** 1.5.1 (as MIT OR Apache-2.0)
   - Copyright (c) 2020 dylni (https://github.com/dylni)
   - Copyright (c) 2020 Nikolai Vazquez
@@ -360,12 +425,26 @@ dependencies change. Do not edit by hand._
   - Copyright the once_cell authors (Aleksey Kladov <aleksey.kladov@gmail.com>)
 - **once_cell_polyfill** 1.70.2 (as MIT OR Apache-2.0)
   - Copyright (c) Individual contributors
+- **onig** 6.5.3
+  - > Copyright (c) 2015 Will Speak <will@willspeak.me>, Ivan Ivashchenko
+- **onig_sys** 69.9.3
+  - > Copyright (c) 2015 Will Speak <will@willspeak.me>, Ivan Ivashchenko
 - **open** 5.3.4
   - Copyright © `2015` `Sebastian Thiel`
+- **ort** 2.0.0-rc.12 (as MIT OR Apache-2.0)
+  - Copyright (c) 2023-2026 pyke.io
+  - Copyright (c) 2020 Nicolas Bigaouette
+- **ort-sys** 2.0.0-rc.12 (as MIT OR Apache-2.0)
+  - Copyright (c) 2023-2026 pyke.io
+  - Copyright (c) 2020 Nicolas Bigaouette
+- **parakeet-rs** 0.3.6 (as MIT OR Apache-2.0)
+  - Copyright (c) 2025 Enes Altun
 - **parking_lot** 0.12.5 (as MIT OR Apache-2.0)
   - Copyright (c) 2016 The Rust Project Developers
 - **parking_lot_core** 0.9.12 (as MIT OR Apache-2.0)
   - Copyright (c) 2016 The Rust Project Developers
+- **paste** 1.0.15 (as MIT OR Apache-2.0)
+  - Copyright the paste authors (David Tolnay <dtolnay@gmail.com>)
 - **percent-encoding** 2.3.2 (as MIT OR Apache-2.0)
   - Copyright (c) 2013-2025 The rust-url developers
 - **phf** 0.13.1
@@ -387,6 +466,9 @@ dependencies change. Do not edit by hand._
 - **powerfmt** 0.2.0 (as MIT OR Apache-2.0)
   - Copyright 2023 Jacob Pratt et al.
   - Copyright (c) 2023 Jacob Pratt et al.
+- **ppv-lite86** 0.2.21 (as MIT OR Apache-2.0)
+  - Copyright 2019 The CryptoCorrosion Contributors
+  - Copyright (c) 2019 The CryptoCorrosion Contributors
 - **precomputed-hash** 0.1.1
   - Copyright (c) 2017 Emilio Cobos Álvarez
 - **primal-check** 0.3.4 (as MIT OR Apache-2.0)
@@ -400,11 +482,28 @@ dependencies change. Do not edit by hand._
 - **rand** 0.10.1 (as MIT OR Apache-2.0)
   - Copyright 2018 Developers of the Rand project
   - Copyright (c) 2014 The Rust Project Developers
+- **rand** 0.9.5 (as MIT OR Apache-2.0)
+  - Copyright 2018 Developers of the Rand project
+  - Copyright (c) 2014 The Rust Project Developers
+- **rand_chacha** 0.9.0 (as MIT OR Apache-2.0)
+  - Copyright 2018 Developers of the Rand project
+  - Copyright (c) 2014 The Rust Project Developers
 - **rand_core** 0.10.1 (as MIT OR Apache-2.0)
   - Copyright (c) 2018-2026 The Rand Project Developers
+- **rand_core** 0.9.5 (as MIT OR Apache-2.0)
+  - Copyright 2018 Developers of the Rand project
+  - Copyright (c) 2014 The Rust Project Developers
 - **raw-window-handle** 0.6.2 (as MIT OR Apache-2.0 OR Zlib)
   - Copyright (c) 2019 Osspial
   - Copyright (c) 2020 Osspial
+- **rawpointer** 0.2.1 (as MIT/Apache-2.0)
+  - Copyright (c) 2015
+- **rayon** 1.12.0 (as MIT OR Apache-2.0)
+  - Copyright (c) 2010 The Rust Project Developers
+- **rayon-cond** 0.4.0 (as Apache-2.0/MIT)
+  - Copyright (c) 2018 Josh Stone
+- **rayon-core** 1.13.0 (as MIT OR Apache-2.0)
+  - Copyright (c) 2010 The Rust Project Developers
 - **realfft** 3.5.0
   - Copyright the realfft authors (HEnquist <henrik.enquist@gmail.com>)
 - **regex** 1.12.3 (as MIT OR Apache-2.0)
@@ -435,6 +534,8 @@ dependencies change. Do not edit by hand._
   - Copyright (c) 2023 Dirkjan Ochtman <dirkjan@ochtman.nl>
 - **rustls-platform-verifier** 0.7.0 (as MIT OR Apache-2.0)
   - Copyright (c) 2022 1Password
+- **rustversion** 1.0.22 (as MIT OR Apache-2.0)
+  - Copyright the rustversion authors (David Tolnay <dtolnay@gmail.com>)
 - **same-file** 1.0.6 (as Unlicense/MIT)
   - Copyright (c) 2017 Andrew Gallant
 - **schannel** 0.1.29
@@ -500,6 +601,8 @@ dependencies change. Do not edit by hand._
   - Copyright 2022 Kirill Chibisov
 - **stable_deref_trait** 1.2.1 (as MIT OR Apache-2.0)
   - Copyright (c) 2017 Robert Grosse
+- **static_assertions** 1.1.0 (as MIT OR Apache-2.0)
+  - Copyright (c) 2017 Nikolai Vazquez
 - **strength_reduce** 0.2.4 (as MIT OR Apache-2.0)
   - Copyright (c) 2015 The RustFFT Developers
 - **string_cache** 0.9.0 (as MIT OR Apache-2.0)
@@ -603,8 +706,12 @@ dependencies change. Do not edit by hand._
   - Copyright the unic-ucd-ident authors (The UNIC Project Developers)
 - **unic-ucd-version** 0.9.0 (as MIT/Apache-2.0)
   - Copyright the unic-ucd-version authors (The UNIC Project Developers)
+- **unicode-normalization-alignments** 0.1.12 (as MIT/Apache-2.0)
+  - Copyright (c) 2015 The Rust Project Developers
 - **unicode-segmentation** 1.13.2 (as MIT OR Apache-2.0)
   - Copyright (c) 2015 The Rust Project Developers
+- **unicode_categories** 0.1.1 (as MIT OR Apache-2.0)
+  - Copyright (c) 2015 The unicode-categories Developers
 - **ureq** 3.3.0 (as MIT OR Apache-2.0)
   - Copyright (c) 2019 Martin Algesten
 - **ureq-proto** 0.6.0 (as MIT OR Apache-2.0)
@@ -716,6 +823,9 @@ dependencies change. Do not edit by hand._
   - Copyright (c) 2020-2023 Ngo Iok Ui & Tauri Programme within The Commons Conservancy
 - **xml** 1.3.0
   - Copyright (c) 2014 Vladimir Matveev
+- **zerocopy** 0.8.48 (as BSD-2-Clause OR Apache-2.0 OR MIT)
+  - Copyright 2023 The Fuchsia Authors
+  - Copyright 2019 The Fuchsia Authors.
 - **zeroize** 1.8.2 (as Apache-2.0 OR MIT)
   - Copyright (c) 2018-2021 The RustCrypto Project Developers
 - **zip** 8.6.0

@@ -1,6 +1,6 @@
 [package]
 name = "rift-tauri"
-version = "0.101.0"
+version = "0.102.0"
 description = "Rift — local-workspace coding assistant powered by Claude"
 authors = ["Blazzer"]
 license = "MIT"
@@ -27,9 +27,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 #
 # Until then, `engine: "whisper"` returns a clean error telling the user
 # what to install; `engine: "web_speech"` keeps working as before.
-default = []
+default = ["parakeet"]
 whisper-rs = ["dep:whisper-rs"]
 whisper-cuda = ["whisper-rs", "whisper-rs/cuda"]
+# Parakeet TDT 0.6B v3 via parakeet-rs (ONNX Runtime, prebuilt binaries — no
+# LLVM needed, so unlike whisper-rs this SHIPS in release builds by default).
+# `directml` EP = GPU accel on any Windows GPU w/ automatic CPU fallback.
+# ort's copy-dylibs drops onnxruntime.dll (+ DirectML helpers) into
+# target/<profile>/ — release.ps1 stages those next to the exe for Velopack.
+parakeet = ["dep:parakeet-rs"]
 # Enables the RIFT_UPDATE_FEED local-feed escape hatch in a RELEASE build, so
 # the full auto-update apply chain (download -> swap -> relaunch) can be tested
 # locally against a packed local feed without burning a real GitHub release.
@@ -136,6 +142,11 @@ webrtc-vad = "0.4"
 # for the install + opt-in instructions. Marked `optional = true` so the
 # default `cargo build` works on machines without LLVM/Clang installed.
 whisper-rs = { version = "0.14", default-features = false, optional = true }
+
+# Speech-to-text — Parakeet engine (default-on `parakeet` feature). Pure Rust
+# over `ort` (ONNX Runtime 1.24, auto-downloaded prebuilt binaries at build
+# time). Model files fetched by model_manager from HF istupakov/…-onnx.
+parakeet-rs = { version = "0.3.6", features = ["directml"], optional = true }
 
 [target.'cfg(windows)'.dependencies]
 # #61 GUI stale-PATH: CLI discovery reads the registry PATH (HKCU\Environment +

@@ -15,7 +15,7 @@
   import { updates } from "../../state/updates.svelte";
   import { cliUpdate, cmpSemver, CLI_RECOMMENDED_VERSION } from "../../state/cliUpdate.svelte";
   import { assistant as assistantStore } from "../../state/assistant.svelte";
-  import { stt } from "../../state/stt.svelte";
+  import { stt, isLocalEngine, type ModelInfo } from "../../state/stt.svelte";
   import { accessibility } from "../../state/accessibility.svelte";
   import { commandPalette } from "../../state/command-palette.svelte";
   import { uiPrefs, ACCENTS, TOOL_DETAILS, DENSITY_PRESETS, VIVIDNESS_MIN, VIVIDNESS_MAX } from "../../state/ui-prefs.svelte";
@@ -49,7 +49,7 @@
     { id: "appearance", label: "Appearance", icon: Palette,       sub: "Accent color, density, and code rendering — every change applies instantly." },
     { id: "chat",       label: "Chat",       icon: MessageSquare, sub: "How conversations read — stream layout, detail level, and reading comfort." },
     { id: "claude",     label: "Claude",     icon: Sparkles,      sub: "Your Claude session, plan, and API-key fallback." },
-    { id: "speech",     label: "Speech",     icon: Mic,           sub: "Voice-to-text input — Web Speech (online) or Whisper (on-device, accent-tuned)." },
+    { id: "speech",     label: "Speech",     icon: Mic,           sub: "Voice-to-text input — Web Speech (online), Parakeet (on-device, fast) or Whisper (on-device, multilingual)." },
     { id: "about",      label: "About",      icon: Info,          sub: "Build info, keyboard shortcuts, local tools, and support diagnostics." },
   ];
 
@@ -84,8 +84,9 @@
     { tab: "claude",     anchor: "card-api",       card: "API key & spending", title: "API-key fallback",   kw: "anthropic console token sk-ant billing keychain" },
     { tab: "claude",     anchor: "card-api",       card: "API key & spending", title: "Per-turn cost cap",  kw: "budget dollar limit spend guard" },
     { tab: "speech",     anchor: "card-engine",    card: "Engine",             title: "Speech-to-text",     kw: "voice mic dictation stt enable" },
-    { tab: "speech",     anchor: "card-engine",    card: "Engine",             title: "Recognition engine", kw: "web speech whisper on-device azure" },
+    { tab: "speech",     anchor: "card-engine",    card: "Engine",             title: "Recognition engine", kw: "web speech whisper parakeet on-device azure" },
     { tab: "speech",     anchor: "card-engine",    card: "Web Speech",         title: "Language",           kw: "english spanish french german locale bcp-47" },
+    { tab: "speech",     anchor: "card-engine",    card: "Parakeet",           title: "Parakeet model",     kw: "download on-device offline fast nvidia tdt local" },
     { tab: "speech",     anchor: "card-engine",    card: "Whisper",            title: "Whisper model",      kw: "download tiny base small medium accuracy" },
     { tab: "speech",     anchor: "card-engine",    card: "Whisper",            title: "Input device",       kw: "microphone capture audio" },
     { tab: "speech",     anchor: "card-engine",    card: "Whisper",            title: "Vocabulary priming", kw: "jargon names initial prompt style" },
@@ -290,10 +291,13 @@
   const toolsInstalled = $derived(LOCAL_TOOLS.filter((t) => environment[t.key]));
   const toolsMissing = $derived(LOCAL_TOOLS.filter((t) => !environment[t.key]));
 
-  const STT_ENGINES: { id: "web_speech" | "whisper"; label: string; sub: string }[] = [
+  const STT_ENGINES: { id: "web_speech" | "whisper" | "parakeet"; label: string; sub: string }[] = [
     { id: "web_speech", label: "Web Speech", sub: "Edge · Azure when online" },
-    { id: "whisper",    label: "Whisper",    sub: "On-device · accent-tuned" },
+    { id: "parakeet",   label: "Parakeet",   sub: "On-device · fast · any GPU" },
+    { id: "whisper",    label: "Whisper",    sub: "On-device · multilingual" },
   ];
+  const parakeetModels = $derived(stt.models.filter((m) => m.engine === "parakeet"));
+  const whisperModels = $derived(stt.models.filter((m) => m.engine === "whisper"));
   function fmtMB(b: number): string { return (b / 1_000_000).toFixed(0) + " MB"; }
   function fmtPct(d: number, t: number): string { return t > 0 ? Math.round((d / t) * 100) + "%" : "0%"; }
 
@@ -963,23 +967,23 @@
               <button class="rift-toggle" class:on={stt.config.enabled} role="switch" aria-checked={stt.config.enabled} aria-label="Enable speech-to-text" type="button" onclick={() => void stt.setConfig({ enabled: !stt.config.enabled })}><span class="rift-toggle-knob"></span></button>
             </div>
             <div class="ctl-row stack">
-              <div><div class="ctl-t">Recognition engine</div><div class="ctl-s">Web Speech is zero-install via Edge / Azure. Whisper runs on-device with stronger accent tolerance and vocabulary priming.</div></div>
-              <div class="set-pick-grid set-pick-grid-2">
+              <div><div class="ctl-t">Recognition engine</div><div class="ctl-s">Web Speech is zero-install via Edge / Azure. Parakeet runs on-device — fast, private, works offline. Whisper is the on-device multilingual option with vocabulary priming.</div></div>
+              <div class="set-pick-grid set-pick-grid-3">
                 {#each STT_ENGINES as eng (eng.id)}
-                  <button type="button" class="set-pick" data-active={stt.config.engine === eng.id} disabled={!stt.config.enabled || (eng.id === "whisper" && !stt.backendAvailable)} onclick={() => void stt.setConfig({ engine: eng.id })}>
+                  <button type="button" class="set-pick" data-active={stt.config.engine === eng.id} disabled={!stt.config.enabled || (eng.id === "whisper" && !stt.backends.whisper) || (eng.id === "parakeet" && !stt.backends.parakeet)} onclick={() => void stt.setConfig({ engine: eng.id })}>
                     <span class="set-pick-label">{eng.label}</span>
                     <span class="set-pick-sub mono">{eng.sub}</span>
                   </button>
                 {/each}
               </div>
             </div>
-            {#if !stt.backendAvailable}
+            {#if !stt.backends.whisper}
               <div class="st-info">
                 <div class="st-info-t">On-device Whisper isn't included in this build.</div>
-                <div class="st-info-s">Web Speech is selected for you and works right now — no setup, no download. It transcribes through your browser engine while you're online.</div>
+                <div class="st-info-s">{#if stt.backends.parakeet}Parakeet covers on-device dictation without it — Whisper only adds broad multilingual support.{:else}Web Speech is selected for you and works right now — no setup, no download. It transcribes through your browser engine while you're online.{/if}</div>
                 <details class="st-dev">
                   <summary>Build Whisper into Rift yourself</summary>
-                  <div class="st-dev-body">For offline, accent-tuned transcription you can compile Rift from source with Whisper enabled:
+                  <div class="st-dev-body">For offline multilingual transcription you can compile Rift from source with Whisper enabled:
                     <ol>
                       <li>Install LLVM — <code>winget install LLVM.LLVM</code> (run as administrator)</li>
                       <li>Optional, for GPU acceleration — install the NVIDIA CUDA Toolkit</li>
@@ -1017,54 +1021,70 @@
             </div>
           {/if}
 
+          {#snippet modelRows(models: ModelInfo[], activeId: string, pick: (id: string) => void)}
+            {#each models as m (m.id)}
+              {@const prog = stt.modelDownloads[m.id]}
+              {@const isActive = activeId === m.id}
+              {@const isDownloading = prog && (prog.phase === "start" || prog.phase === "progress")}
+              <div class="set-model-row" data-active={isActive}>
+                <div class="set-model-meta">
+                  <div class="set-model-name">{m.display_name}</div>
+                  <div class="set-model-sub mono">
+                    {m.filename}
+                    {#if m.downloaded && m.on_disk_bytes !== null} · {fmtMB(m.on_disk_bytes)} on disk{:else} · ~{fmtMB(m.approx_size_bytes)}{/if}
+                  </div>
+                  {#if isDownloading && prog}
+                    <div class="set-progress" role="progressbar" aria-label={`Downloading ${m.display_name}`} aria-valuemin="0" aria-valuemax={prog.total > 0 ? prog.total : undefined} aria-valuenow={prog.downloaded}>
+                      <div class="set-progress-fill" style="width: {fmtPct(prog.downloaded, prog.total)}"></div>
+                    </div>
+                    <div class="set-progress-label mono">{fmtMB(prog.downloaded)} / {fmtMB(prog.total)} · {fmtPct(prog.downloaded, prog.total)}</div>
+                  {/if}
+                </div>
+                <div class="set-model-actions">
+                  {#if isDownloading}
+                    <button type="button" class="st-btn" onclick={() => void stt.cancelDownload()}>Cancel</button>
+                  {:else if m.downloaded}
+                    {#if !isActive}
+                      <button type="button" class="st-btn" onclick={() => pick(m.id)}>Use</button>
+                    {:else}
+                      <span class="st-pill ok"><span class="dot"></span>Active</span>
+                    {/if}
+                    <button type="button" class="st-btn danger-btn" onclick={() => void stt.deleteModel(m.id)} use:tooltip={"Delete model"} aria-label="Delete"><Trash2 size={14} /></button>
+                  {:else}
+                    <button type="button" class="st-btn primary" disabled={!stt.config.enabled} onclick={() => void stt.downloadModel(m.id)}>Download</button>
+                  {/if}
+                </div>
+              </div>
+            {/each}
+            {#if models.length === 0}<div class="st-note">Loading model catalog…</div>{/if}
+          {/snippet}
+
+          {#if stt.config.engine === "parakeet"}
+            <div class="card">
+              <div class="card-tt">Parakeet model</div>
+              <div class="card-sub">One download, then dictation runs fully on this machine — offline, uncensored, GPU-accelerated on any card.</div>
+              <div class="set-model-list">
+                {@render modelRows(parakeetModels, stt.config.parakeet_model, (id) => void stt.setConfig({ parakeet_model: id }))}
+              </div>
+            </div>
+          {/if}
+
           {#if stt.config.engine === "whisper"}
             <div class="card">
               <div class="card-tt">Whisper model</div>
               <div class="card-sub">Bigger models hear more accurately but download larger and transcribe slower.</div>
               <div class="set-model-list">
-                  {#each stt.models as m (m.id)}
-                    {@const prog = stt.modelDownloads[m.id]}
-                    {@const isActive = stt.config.whisper_model === m.id}
-                    {@const isDownloading = prog && (prog.phase === "start" || prog.phase === "progress")}
-                    <div class="set-model-row" data-active={isActive}>
-                      <div class="set-model-meta">
-                        <div class="set-model-name">{m.display_name}</div>
-                        <div class="set-model-sub mono">
-                          {m.filename}
-                          {#if m.downloaded && m.on_disk_bytes !== null} · {fmtMB(m.on_disk_bytes)} on disk{:else} · ~{fmtMB(m.approx_size_bytes)}{/if}
-                        </div>
-                        {#if isDownloading && prog}
-                          <div class="set-progress" role="progressbar" aria-label={`Downloading ${m.display_name}`} aria-valuemin="0" aria-valuemax={prog.total > 0 ? prog.total : undefined} aria-valuenow={prog.downloaded}>
-                            <div class="set-progress-fill" style="width: {fmtPct(prog.downloaded, prog.total)}"></div>
-                          </div>
-                          <div class="set-progress-label mono">{fmtMB(prog.downloaded)} / {fmtMB(prog.total)} · {fmtPct(prog.downloaded, prog.total)}</div>
-                        {/if}
-                      </div>
-                      <div class="set-model-actions">
-                        {#if isDownloading}
-                          <button type="button" class="st-btn" onclick={() => void stt.cancelDownload()}>Cancel</button>
-                        {:else if m.downloaded}
-                          {#if !isActive}
-                            <button type="button" class="st-btn" onclick={() => void stt.setConfig({ whisper_model: m.id })}>Use</button>
-                          {:else}
-                            <span class="st-pill ok"><span class="dot"></span>Active</span>
-                          {/if}
-                          <button type="button" class="st-btn danger-btn" onclick={() => void stt.deleteModel(m.id)} use:tooltip={"Delete model"} aria-label="Delete"><Trash2 size={14} /></button>
-                        {:else}
-                          <button type="button" class="st-btn primary" disabled={!stt.config.enabled} onclick={() => void stt.downloadModel(m.id)}>Download</button>
-                        {/if}
-                      </div>
-                    </div>
-                  {/each}
-                  {#if stt.models.length === 0}<div class="st-note">Loading model catalog…</div>{/if}
+                {@render modelRows(whisperModels, stt.config.whisper_model, (id) => void stt.setConfig({ whisper_model: id }))}
               </div>
             </div>
+          {/if}
 
+          {#if isLocalEngine(stt.config.engine)}
             <div class="card">
               <div class="card-tt">Capture &amp; cleanup</div>
-              <div class="card-sub">Which microphone Whisper hears, and how the transcript gets polished.</div>
+              <div class="card-sub">Which microphone the recorder hears, and how the transcript gets polished.</div>
               <div class="ctl-row tight">
-                <div><div class="ctl-t">Input device</div><div class="ctl-s">Microphone used by Whisper capture. System default is usually correct.</div></div>
+                <div><div class="ctl-t">Input device</div><div class="ctl-s">Microphone used for capture. System default is usually correct.</div></div>
                 <div class="ctl-actions set-mic-r">
                   <div class="set-mic-select">
                     <Select
@@ -1082,12 +1102,16 @@
                 <div><div class="ctl-t">Clean up transcript</div><div class="ctl-s">Polishes the final transcript with Claude — fixes punctuation, capitalizes proper nouns. Adds a short tail after you stop.</div></div>
                 <button class="rift-toggle" class:on={stt.config.cleanup_enabled} role="switch" aria-checked={stt.config.cleanup_enabled} aria-label="Clean up transcript with Claude" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ cleanup_enabled: !stt.config.cleanup_enabled })}><span class="rift-toggle-knob"></span></button>
               </div>
-              <div class="ctl-row tight">
-                <div><div class="ctl-t">Beam search</div><div class="ctl-s">Higher-accuracy decode (beam width 5) instead of greedy — sharper on technical terms, ~2-4× slower. GPU recommended.</div></div>
-                <button class="rift-toggle" class:on={(stt.config.beam_size ?? 1) > 1} role="switch" aria-checked={(stt.config.beam_size ?? 1) > 1} aria-label="Use beam search decoding" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ beam_size: (stt.config.beam_size ?? 1) > 1 ? null : 5 })}><span class="rift-toggle-knob"></span></button>
-              </div>
+              {#if stt.config.engine === "whisper"}
+                <div class="ctl-row tight">
+                  <div><div class="ctl-t">Beam search</div><div class="ctl-s">Higher-accuracy decode (beam width 5) instead of greedy — sharper on technical terms, ~2-4× slower. GPU recommended.</div></div>
+                  <button class="rift-toggle" class:on={(stt.config.beam_size ?? 1) > 1} role="switch" aria-checked={(stt.config.beam_size ?? 1) > 1} aria-label="Use beam search decoding" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ beam_size: (stt.config.beam_size ?? 1) > 1 ? null : 5 })}><span class="rift-toggle-knob"></span></button>
+                </div>
+              {/if}
             </div>
+          {/if}
 
+          {#if stt.config.engine === "whisper"}
             <div class="card">
               <div class="card-tt">Vocabulary priming</div>
               <div class="card-sub">Teach Whisper your project names and jargon so it stops guessing.</div>
@@ -1103,7 +1127,7 @@
           {/if}
 
           {#if stt.config.engine === "web_speech" && !stt.supported}
-            <div class="st-warn">Your WebView doesn't expose <code>SpeechRecognition</code>, so Web Speech can't run here.{#if stt.backendAvailable} Switch to the Whisper engine above — it runs on-device and needs no browser support.{:else} On-device Whisper isn't built into this release either; see the note under <strong>Engine</strong> for how to enable it.{/if}</div>
+            <div class="st-warn">Your WebView doesn't expose <code>SpeechRecognition</code>, so Web Speech can't run here.{#if stt.backends.parakeet} Switch to the Parakeet engine above — it runs on-device and needs no browser support.{:else} No on-device engine is built into this binary either; see the note under <strong>Engine</strong>.{/if}</div>
           {/if}
           {#if stt.lastError}<div class="st-warn">{stt.lastError}</div>{/if}
 
@@ -1636,6 +1660,7 @@
   /* ── Speech: pick grid / models / textarea (lifted from legacy) ── */
   .set-pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; width: 100%; }
   .set-pick-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .set-pick-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .set-pick { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 11px; background: var(--field); border: 1px solid var(--field-border); border-radius: var(--radius); color: var(--fg); font: inherit; font-size: var(--fs-sm); cursor: pointer; text-align: left; transition: background 100ms, border-color 100ms; }
   .set-pick:hover { background: var(--surface-hover); }
   .set-pick[data-active="true"] { border-color: color-mix(in oklab, var(--accent) 45%, var(--border)); background: var(--accent-soft); color: var(--accent); }

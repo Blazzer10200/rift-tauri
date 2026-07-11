@@ -266,6 +266,19 @@ Copy-Item $exePath $staging
 Copy-Item 'src-tauri/icons/icon.ico' $staging
 Copy-Item 'THIRD-PARTY-NOTICES.md' $staging
 
+# ort runtime DLLs (Parakeet STT, default-on feature): ort's `copy-dylibs`
+# drops onnxruntime.dll + DirectML helpers next to the exe at build time —
+# they must ship or parakeet model load fails on installed clients.
+$ortDlls = Get-ChildItem (Join-Path $targetRoot 'release') -File -Filter '*.dll' |
+    Where-Object { $_.Name -match '^(onnxruntime.*|DirectML.*)\.dll$' }
+foreach ($dll in $ortDlls) {
+    Write-Host "  staging ort dll: $($dll.Name)" -ForegroundColor DarkGray
+    Copy-Item $dll.FullName $staging
+}
+if (-not $ortDlls) {
+    Write-Host '  note: no onnxruntime/DirectML DLLs found next to exe (static ort link?) — verify Parakeet works on a clean install' -ForegroundColor Yellow
+}
+
 # --- vpk pack ------------------------------------------------------------
 Write-Host '=== vpk pack ===' -ForegroundColor Cyan
 $packArgs = @(
