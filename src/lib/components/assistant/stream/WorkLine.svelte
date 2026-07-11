@@ -3,6 +3,8 @@
   import { fmtDur, groupNames, resultMeta, workLineMode, VERB_PAST, VERB_ING, type StreamTool, type TKind } from "./streamModel";
   import { uiPrefs } from "$lib/state/ui-prefs.svelte";
   import OutputBlock from "./OutputBlock.svelte";
+  import GrepResult from "./GrepResult.svelte";
+  import ReadResult from "./ReadResult.svelte";
 
   let { tools }: { tools: StreamTool[] } = $props();
   // Detailed tier auto-opens the per-tool list; minimal/balanced start collapsed
@@ -27,11 +29,17 @@
   const anyActive = $derived(tools.some((t) => t.status === "pending"));
   const summary = $derived(groupNames(tools));
 
-  // MCP rows carry their real response (streamModel forwards it) — the actual
-  // reply renders under the row via OutputBlock so "Called X" shows what X said,
-  // progressively revealable instead of a fixed tail peek.
-  const hasMcpOut = (t: StreamTool) =>
-    t.kind === "mcp" && typeof t.result === "string" && t.result.trim().length > 0;
+  // Read/grep/MCP rows carry their real response (streamModel forwards it) —
+  // the body renders under the row so "Read X" / "Searched Y" / "Called Z"
+  // shows what actually came back: syntax-highlighted code (ReadResult),
+  // clickable path:line rows (GrepResult), or the raw reply (OutputBlock).
+  const hasBody = (t: StreamTool) =>
+    (t.kind === "mcp" || t.kind === "read" || t.kind === "grep") &&
+    typeof t.result === "string" && t.result.trim().length > 0;
+  const strOf = (t: StreamTool, k: string) =>
+    typeof t.input?.[k] === "string" ? (t.input[k] as string) : null;
+  const numOf = (t: StreamTool, k: string) =>
+    typeof t.input?.[k] === "number" ? (t.input[k] as number) : null;
 </script>
 
 {#if anyActive && tools.length === 1}
@@ -58,9 +66,15 @@
             {:else if meta}<span class="wr-meta">→ {meta}</span>{/if}
             {#if t.durSecs >= 1}<span class="wr-dur">{fmtDur(t.durSecs)}</span>{/if}
           </div>
-          {#if hasMcpOut(t)}
+          {#if hasBody(t)}
             <div class="wr-out">
-              <OutputBlock text={t.result ?? ""} start={mode === "expanded" ? "expanded" : "collapsed"} live={t.status === "pending"} />
+              {#if t.kind === "read" && t.name !== "list_dir"}
+                <ReadResult text={t.result ?? ""} path={t.path ?? null} offset={numOf(t, "offset")} />
+              {:else if t.kind === "grep"}
+                <GrepResult text={t.result ?? ""} pattern={strOf(t, "pattern")} bare={t.name === "Glob"} />
+              {:else}
+                <OutputBlock text={t.result ?? ""} start={mode === "expanded" ? "expanded" : "collapsed"} live={t.status === "pending"} />
+              {/if}
             </div>
           {/if}
         {/each}

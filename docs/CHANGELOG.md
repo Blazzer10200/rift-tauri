@@ -2,23 +2,21 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.100.0 — The assistant gets eyes on the browser
+## v0.101.0 — One terminal, everywhere
 
-- **The assistant can now read the page in the browser dock** — a new `read_browser_page` tool returns the title, URL, and rendered post-JavaScript text of whatever the dock is showing (including logged-in pages plain web fetching can't reach). "Open my dev server and check the page" now means it actually looks.
-- **…and the browser console** — `read_browser_console` captures console output, uncaught errors, and unhandled promise rejections from the dock page. "Why is the preview blank?" answers itself. Both tools are read-only and the page content is treated as untrusted data end to end.
-- **Console badge in the dock bar** — a live error/warning count on the current page; click it to drop the console output into the composer (the console twin of Add to chat).
-- **Real favicons + a loading sweep** — the address bar shows the page's actual icon (fetched straight from the site you're on, never a third-party favicon service) and a thin accent sweep runs under the bar while a page loads.
-- **"Read by assistant" chip** — whenever the assistant reads the dock page or console, a shimmer pill flashes in the bar, so you always see when it looked.
-- **Fix: assistant UI tools no longer false-fail while the dock is open** — `ask_user` / `open_browser` / `notify` checked for the window in a way that broke whenever the dock's embedded webview existed ("target window is not available"); the check is now multiwebview-safe.
-- **Changing model or reasoning before you send no longer costs a cold start** — the standby Claude process now re-warms in the background the moment you change the picker or dial, instead of the change being discovered at send time (which paid the full process spawn inside your reply wait).
-- **Conversation titles work again** — title generation still pinned Haiku, which Anthropic removed in June, so every auto-title had been quietly failing since. Titles now run on Sonnet at minimal reasoning (just as fast and cheap).
-- **Honest per-effort speed stats** — turns with thinking off were being attributed to whatever effort tier was parked on the dial in AI Health's per-model latency groups; they now report as the Low they actually ran at (this also stops a needless process respawn when the parked tier changes while thinking is off).
-
-## v0.99.0 — One background, no picker
-
-- **Background textures simplified away** — the 12-variant texture system and the one-click Looks presets are gone (the extra textures stopped earning their place). The app keeps the single default dots field; Appearance is now just Accent color + Interface & code. Anyone who had picked another texture falls back to dots automatically; the old preference key is cleaned up on launch.
+- **Every tool block now shares one anatomy** — the live stream and saved history render commands, file reads, searches, and results through the same header and output components, so the whole transcript finally reads as one family instead of two drifting designs.
+- **Real terminal colors** — shell output renders its actual ANSI colors (cargo greens, npm warnings, red errors) instead of keyword-guessed tinting. Plain uncolored lines still get a conservative ok/warn/error tint.
+- **Shell blocks feel alive** — the command line is syntax-highlighted, a live timer ticks with a blinking cursor while a command runs, output prints in with a subtle cascade, and a truthful exit receipt closes it out (`✓ ok · 9s · 17 lines`). The old pill that claimed "exit 1" on every failure now honestly says `failed`.
+- **Long output folds around the middle** — first lines + last lines with an "N lines hidden" divider, so the summary or error at the END stays visible without expanding. Click the divider to unfold.
+- **Test and lint runs are first-class** — vitest / cargo test / pytest / svelte-check / eslint commands render with real pass/fail count pills and auto-expand their failure output. (Previously a dead-end pill with no way to see *which* test failed.)
+- **Search results are navigable** — grep/glob output parses into `path:line` rows with the match highlighted; click a row to open the file in your editor, reveal it, or copy the path.
+- **File reads are readable** — Read results render syntax-highlighted with real line numbers matching the file, like a proper code block.
+- **The model's thinking renders as Markdown** in the live stream (history already did — the live view was the outlier).
+- **A light rail line** now runs down each working turn so multi-step work reads as one connected sequence.
+- **Run Rift as administrator (opt-in)** — Settings → Administrator access: relaunch elevated for one session (single UAC prompt), or "always run as administrator" via a per-user scheduled task (prompt-free launches). The assistant's tools then inherit admin rights — no more per-action UAC walls. Off by default; a status-bar "Admin" badge shows when elevated.
 
 ## Known issues
+- **While elevated, dragging files from Explorer into the window doesn't work** (Windows blocks lower→higher integrity drag-drop); the attach button / file picker still works fine.
 - **Voice profanity on Web Speech:** fully-masked words (`******`) can't be recovered from Azure's servers — real fix is the on-device **Whisper** engine (built, not yet shipped).
 - **Dismissed ask-cards** render "(no answer recorded)" instead of a "Dismissed" state — cosmetic, fix planned.
 

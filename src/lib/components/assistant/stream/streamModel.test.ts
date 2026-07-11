@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { messageToTurn, parseAskUserResult, groupNames, workLineMode, isFillerSay, classifySay, outputPeek, groupBlocks, shellFlavor, resultMeta, splitOutput, nextRevealTier, isPlanArtifact, REVEAL_COLLAPSED, REVEAL_EXPANDED, REVEAL_SLACK } from "./streamModel";
+import { messageToTurn, parseAskUserResult, groupNames, workLineMode, isFillerSay, classifySay, outputPeek, groupBlocks, shellFlavor, resultMeta, splitOutput, nextRevealTier, isPlanArtifact, REVEAL_COLLAPSED, REVEAL_EXPANDED, REVEAL_SLACK, stripAnsi, ansiLines, classifyShellLine, shellCheckKind, parseCheckSummary, parseGrepLine, parseReadOutput, splitOutputFold, FOLD_TAIL } from "./streamModel";
 import type { StreamTool } from "./streamModel";
 import type { ChatMessage } from "$lib/state/assistant.svelte";
 
@@ -140,11 +140,11 @@ describe("streamModel — edit diff counts + input passthrough", () => {
     expect(t.del).toBe(2);
   });
 
-  it("read tool carries no diff input (counts stay null)", () => {
+  it("read tool has no diff counts; input flows through for ReadResult", () => {
     const [t] = toolsOf([tool("Read", "done", { file_path: "/a/foo.ts" })]);
     expect(t.add).toBeNull();
     expect(t.del).toBeNull();
-    expect(t.input ?? null).toBeNull();
+    expect(t.input).toEqual({ file_path: "/a/foo.ts" });
   });
 
   it("diff counts are stable across re-renders of the same tool id (memo)", () => {
@@ -251,7 +251,9 @@ describe("groupNames — names on the collapsed work row", () => {
   });
 
   it("shell falls back to the count summary (command text isn't a target name)", () => {
-    const ts = toolsOf([tool("Bash", "done", { command: "npm run check" })]);
+    // NB: a check/test-runner command would upgrade to lint/test kind now —
+    // a plain command exercises the shell fallback this test is about.
+    const ts = toolsOf([tool("Bash", "done", { command: "git status" })]);
     expect(groupNames(ts)).toBe("Ran 1 command");
   });
 
@@ -644,5 +646,170 @@ describe("S128 — CLI tool-name compat (kinds + captions)", () => {
     const t2 = toolOf(msg([done]))!;
     expect(t2.forming).toBeUndefined();
     expect(t2.add).toBe(1);
+  });
+});
+
+describe("ansiLines — SGR color segments (carried across lines) + stripAnsi", () => {
+  it("plain text passes through with null cls", () => {
+    expect(ansiLines("hello\nworld")).toEqual([
+      [{ text: "hello", cls: null }],
+      [{ text: "world", cls: null }],
+    ]);
+  });
+
+  it("maps fg color + resets on 0", () => {
+    expect(ansiLines("\x1b[31mred\x1b[0m plain")[0]).toEqual([
+      { text: "red", cls: "a-red" },
+      { text: " plain", cls: null },
+    ]);
+  });
+
+  it("carries color state across lines (real terminals do)", () => {
+    const lines = ansiLines("\x1b[32mline1\nline2\x1b[0m");
+    expect(lines[0][0]).toEqual({ text: "line1", cls: "a-green" });
+    expect(lines[1][0]).toEqual({ text: "line2", cls: "a-green" });
+  });
+
+  it("bright fg + bold compose; bare \x1b[m resets", () => {
+    expect(ansiLines("\x1b[1;91mboom\x1b[m ok")[0]).toEqual([
+      { text: "boom", cls: "a-red a-bold" },
+      { text: " ok", cls: null },
+    ]);
+  });
+
+  it("stripAnsi scrubs SGR sequences", () => {
+    expect(stripAnsi("\x1b[31;1mred\x1b[0m")).toBe("red");
+  });
+});
+
+describe("classifyShellLine — conservative semantic tone", () => {
+  it("strong signals only; '0 errors' reads ok, not err", () => {
+    expect(classifyShellLine("✓ built in 2.1s")).toBe("ok");
+    expect(classifyShellLine("0 errors and 0 warnings")).toBe("ok");
+    expect(classifyShellLine("error[E0308]: mismatched types")).toBe("err");
+    expect(classifyShellLine("warning: unused variable `x`")).toBe("warn");
+    expect(classifyShellLine("Compiling rift v0.100.0")).toBe("out");
+  });
+});
+
+describe("shellCheckKind — test/lint command classification", () => {
+  it("test runners", () => {
+    expect(shellCheckKind("npx vitest run")).toBe("test");
+    expect(shellCheckKind("cargo test --workspace")).toBe("test");
+    expect(shellCheckKind("npm run test")).toBe("test");
+  });
+  it("linters / type-checkers", () => {
+    expect(shellCheckKind("cargo check --manifest-path src-tauri/Cargo.toml")).toBe("lint");
+    expect(shellCheckKind("cargo clippy -- -D warnings")).toBe("lint");
+    expect(shellCheckKind("npm run check")).toBe("lint");
+    expect(shellCheckKind("npx svelte-check --tsconfig ./tsconfig.json")).toBe("lint");
+  });
+  it("ordinary commands stay null", () => {
+    expect(shellCheckKind("git checkout main")).toBeNull();
+    expect(shellCheckKind("ls -la")).toBeNull();
+    expect(shellCheckKind(null)).toBeNull();
+  });
+});
+
+describe("parseCheckSummary — pass/fail counts from runner output", () => {
+  it("vitest summary line (ignores the Test Files line)", () => {
+    const out = " Test Files  1 failed | 3 passed (4)\n Tests  2 failed | 40 passed (42)\n";
+    expect(parseCheckSummary(out)).toEqual({ pass: 40, fail: 2 });
+  });
+  it("cargo test — sums multiple result lines", () => {
+    const out = "test result: ok. 12 passed; 0 failed; 0 ignored\n...\ntest result: FAILED. 3 passed; 2 failed; 0 ignored";
+    expect(parseCheckSummary(out)).toEqual({ pass: 15, fail: 2 });
+  });
+  it("pytest banner", () => {
+    expect(parseCheckSummary("========= 1 failed, 3 passed in 0.12s =========")).toEqual({ pass: 3, fail: 1 });
+  });
+  it("svelte-check error count (fail-only shape)", () => {
+    expect(parseCheckSummary("svelte-check found 2 errors and 0 warnings in 1 file")).toEqual({ pass: null, fail: 2 });
+  });
+  it("unrecognizable output → null (caller falls back to status pills)", () => {
+    expect(parseCheckSummary("compiled fine, nothing to see")).toBeNull();
+    expect(parseCheckSummary(null)).toBeNull();
+  });
+});
+
+describe("parseGrepLine — path:line:content rows", () => {
+  it("unix relative path", () => {
+    expect(parseGrepLine("src/lib/a.ts:42: const x = 1")).toEqual({ path: "src/lib/a.ts", line: 42, text: " const x = 1" });
+  });
+  it("windows drive-letter absolute path (colon in drive survives)", () => {
+    expect(parseGrepLine("C:\\AI Workflow\\x.rs:7:fn main() {}")).toEqual({ path: "C:\\AI Workflow\\x.rs", line: 7, text: "fn main() {}" });
+  });
+  it("content containing colons stays intact", () => {
+    expect(parseGrepLine("a.ts:3:let x: number = 1")).toEqual({ path: "a.ts", line: 3, text: "let x: number = 1" });
+  });
+  it("non-match lines → null", () => {
+    expect(parseGrepLine("no colons here")).toBeNull();
+    expect(parseGrepLine("Found 3 matches")).toBeNull();
+  });
+});
+
+describe("parseReadOutput — CLI gutter sniff vs raw file content", () => {
+  it("strips a cat -n style arrow gutter and reports the real start line", () => {
+    expect(parseReadOutput("   120→import x\n   121→export y")).toEqual({ start: 120, code: "import x\nexport y" });
+  });
+  it("tab-separated gutter works too", () => {
+    expect(parseReadOutput("     1\tfoo\n     2\tbar")).toEqual({ start: 1, code: "foo\nbar" });
+  });
+  it("raw content (rift MCP read_file) → null so the caller numbers from offset", () => {
+    expect(parseReadOutput("just code\nno gutter at all")).toBeNull();
+    expect(parseReadOutput("")).toBeNull();
+  });
+});
+
+describe("splitOutputFold — head+tail reveal", () => {
+  const long = Array.from({ length: 50 }, (_, i) => `l${i}`).join("\n");
+  it("long output folds around a hidden middle, tail preserved", () => {
+    const v = splitOutputFold(long, "collapsed");
+    expect(v.head).toBe(REVEAL_COLLAPSED - FOLD_TAIL);
+    expect(v.tail).toBe(FOLD_TAIL);
+    expect(v.hidden).toBe(50 - REVEAL_COLLAPSED);
+    expect(v.total).toBe(50);
+  });
+  it("short output shows fully — no fold", () => {
+    const v = splitOutputFold("a\nb\nc", "collapsed");
+    expect(v.head).toBe(3);
+    expect(v.tail).toBe(0);
+    expect(v.hidden).toBe(0);
+  });
+  it("'all' tier never hides anything", () => {
+    const v = splitOutputFold(long, "all");
+    expect(v.hidden).toBe(0);
+    expect(v.head).toBe(50);
+  });
+});
+
+describe("adaptTool — test/lint upgrade + raw ANSI on shell results", () => {
+  const toolOf = (m: ChatMessage): StreamTool | null => {
+    const b = messageToTurn(m).blocks.find((x) => x.type === "tool");
+    return b && b.type === "tool" ? b.tool : null;
+  };
+
+  it("a vitest command upgrades to kind 'test' with parsed counts", () => {
+    const tb = { ...tool("Bash", "done", { command: "npx vitest run" }), result: " Tests  2 failed | 40 passed (42)" };
+    const t = toolOf(msg([tb]))!;
+    expect(t.kind).toBe("test");
+    expect(t.fail).toBe(2);
+    expect(t.pass).toBe(40);
+  });
+
+  it("cargo check upgrades to 'lint'; plain shell keeps kind + RAW ansi result", () => {
+    const lint = toolOf(msg([tool("Bash", "done", { command: "cargo check" })]))!;
+    expect(lint.kind).toBe("lint");
+    const tb = { ...tool("Bash", "done", { command: "ls" }), result: "\x1b[32mok\x1b[0m" };
+    const t = toolOf(msg([tb]))!;
+    expect(t.kind).toBe("shell");
+    expect(t.result).toBe("\x1b[32mok\x1b[0m"); // raw — OutputBlock renders the color
+  });
+
+  it("read/grep rows carry input through for the structured renderers", () => {
+    const read = { ...tool("Read", "done", { file_path: "/a/b.ts", offset: 40 }), result: "x" };
+    expect(toolOf(msg([read]))!.input).toEqual({ file_path: "/a/b.ts", offset: 40 });
+    const grep = { ...tool("Grep", "done", { pattern: "foo" }), result: "a.ts:1:foo" };
+    expect(toolOf(msg([grep]))!.input).toEqual({ pattern: "foo" });
   });
 });

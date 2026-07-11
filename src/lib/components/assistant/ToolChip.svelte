@@ -9,7 +9,7 @@
 
   import {
     FileText, FolderTree, Search, FilePen, FilePlus, Terminal, Globe,
-    Wrench, Loader2, CheckCircle2, AlertCircle, ChevronRight, ListChecks,
+    Wrench, Loader2, ListChecks,
     Bot, HelpCircle, FlagOff, Flag, BookOpen, Sparkles, Slash, Square, SkipForward,
     GitBranch, GitCommitHorizontal, AppWindow, Bell,
     Telescope, AlarmClock, Database, Radio, CalendarClock,
@@ -21,6 +21,11 @@
   import AgentCard from "./toolchip/AgentCard.svelte";
   import TodoCard from "./toolchip/TodoCard.svelte";
   import AskUserCard from "./toolchip/AskUserCard.svelte";
+  import BlockHeader from "./stream/BlockHeader.svelte";
+  import OutputBlock from "./stream/OutputBlock.svelte";
+  import ReadResult from "./stream/ReadResult.svelte";
+  import GrepResult from "./stream/GrepResult.svelte";
+  import { stripAnsi } from "./stream/streamModel";
 
   import { tooltip } from "$lib/actions/tooltip";
   const reducedMotion =
@@ -351,17 +356,31 @@
     return "plain";
   });
 
-  // Char cap alongside the line cap — a huge single-line result (minified
-  // JSON, base64, one-line Bash stdout) has lines.length===1 and would
-  // otherwise sail through the 60-line cap untruncated.
-  const RESULT_CHAR_CAP = 20000;
-  const resultLines = $derived.by(() => {
-    if (!tool.result) return null;
-    const capped = tool.result.length > RESULT_CHAR_CAP;
-    const src = capped ? tool.result.slice(0, RESULT_CHAR_CAP) : tool.result;
-    const lines = src.split("\n");
-    if (lines.length <= 60 && !capped) return { shown: lines, more: 0 };
-    return { shown: lines.slice(0, 60), more: lines.length > 60 ? lines.length - 60 : capped ? 1 : 0 };
+  // Error text — the one result shape still rendered by a local <pre> (the
+  // shared OutputBlock/ReadResult/GrepResult bodies handle every success shape).
+  const ERROR_CHAR_CAP = 20000;
+  const errorText = $derived.by(() => {
+    if (!tool.result) return "";
+    const s = stripAnsi(tool.result);
+    return s.length > ERROR_CHAR_CAP ? s.slice(0, ERROR_CHAR_CAP) + "\n… truncated" : s;
+  });
+
+  // Structured-body inputs (ReadResult gutter offset, GrepResult highlight).
+  const readPath = $derived(
+    typeof tool.input?.file_path === "string" ? (tool.input.file_path as string)
+    : typeof tool.input?.path === "string" ? (tool.input.path as string) : null,
+  );
+  const readOffset = $derived(typeof tool.input?.offset === "number" ? (tool.input.offset as number) : null);
+  const grepPattern = $derived(typeof tool.input?.pattern === "string" ? (tool.input.pattern as string) : null);
+
+  // Copy affordance in the shared header — shell copies as a session snippet
+  // ($ cmd + output); everything else copies the (ANSI-stripped) result.
+  const copyText = $derived.by<(() => string) | null>(() => {
+    if (tool.status === "pending" || !tool.result) return null;
+    if (resultStyle === "terminal" && shellCommand) {
+      return () => `$ ${shellCommand}\n${stripAnsi(tool.result ?? "")}`;
+    }
+    return () => stripAnsi(tool.result ?? "");
   });
 
   // ── Shell terminal — badge + prompt prefix + per-line tone ──────────────
@@ -374,20 +393,8 @@
         || /\$env:|\$PSVersionTable|-ErrorAction|\bOut-Null\b|\bWrite-Host\b/.test(c)) return "pwsh";
     return "bash";
   });
-  // Conservative tone classifier — only strong, unambiguous signals get a
-  // color; everything else stays neutral `out`. Runs only on terminal-style
-  // results (Bash family), never on grep/list output.
-  function classifyShellLine(line: string): "out" | "ok" | "err" | "warn" {
-    if (/^\s*(✓|✔)/.test(line) || /\b0 (errors?|warnings?|issues?|problems?)\b/i.test(line)
-        || /\b(passed|succeeded|success)\b/i.test(line)) return "ok";
-    if (/^\s*(✗|✖|×)/.test(line) || /\b(error|errors|failed|fatal|panic|exception|traceback)\b/i.test(line)) return "err";
-    if (/\b(warn|warning|warnings|deprecated)\b/i.test(line)) return "warn";
-    return "out";
-  }
-  const termLines = $derived.by(() => {
-    if (!resultLines) return [];
-    return resultLines.shown.map((c, i) => ({ i, c, t: classifyShellLine(c) }));
-  });
+  // (Line-tone classification + ANSI color live in the shared OutputBlock now —
+  // streamModel.ts::classifyShellLine/ansiLines, one implementation for both trees.)
 
   // ── Agent card data ──────────────────────────────────────────────────
   const agentSubtype = $derived(
@@ -458,32 +465,32 @@
   {:else if isAskUser}
     <AskUserCard {tool} {expanded} />
   {:else}
-    <button class="chip-head" type="button" onclick={() => (expanded = !expanded)} aria-expanded={expanded} use:tooltip={expanded ? "Collapse" : "Expand details"}>
-      <span class="chip-chev" class:open={expanded}><ChevronRight size={11} /></span>
-      <span class="chip-icon"><Icon size={12} /></span>
-      {#if variant === "timeline" && caption}
-        <span class="chip-cap">{caption}</span>
-      {:else}
-        <span class="chip-tool">{toolLabel}</span>
-        <span class="chip-sep">·</span>
-        <span class="chip-sum mono">{summary}</span>
-      {/if}
-      {#if !expanded && inlinePreview}
-        <span class="chip-preview mono" use:tooltip={tool.result ?? ""}>{inlinePreview}</span>
-      {/if}
-      {#if durationLabel}
-        <span class="chip-duration mono" use:tooltip={"Wall-clock duration"}>{durationLabel}</span>
-      {/if}
-      <span class="chip-status">
-        {#if tool.status === "pending"}
-          <Loader2 size={11} class="chip-spin" />
-        {:else if tool.status === "error"}
-          <AlertCircle size={11} />
+    <BlockHeader
+      expandable={true}
+      {expanded}
+      onToggle={() => (expanded = !expanded)}
+      pill={tool.status === "pending" ? { text: "running…", tone: "running" } : tool.status === "error" ? { text: "failed", tone: "bad" } : null}
+      {durationLabel}
+      {copyText}
+    >
+      {#snippet lead()}
+        <span class="chip-icon"><Icon size={12} /></span>
+      {/snippet}
+      {#snippet title()}
+        {#if variant === "timeline" && caption}
+          <span class="chip-cap">{caption}</span>
         {:else}
-          <CheckCircle2 size={11} />
+          <span class="chip-tool">{toolLabel}</span>
+          <span class="chip-sep">·</span>
+          <span class="chip-sum mono">{summary}</span>
         {/if}
-      </span>
-    </button>
+      {/snippet}
+      {#snippet meta()}
+        {#if !expanded && inlinePreview}
+          <span class="chip-preview mono" use:tooltip={tool.result ?? ""}>{inlinePreview}</span>
+        {/if}
+      {/snippet}
+    </BlockHeader>
   {/if}
 
   {#if expanded && !isCard}
@@ -503,43 +510,29 @@
       {/if}
 
       <div class="field-label">{tool.isError ? "error" : "result"}</div>
-      {#if !resultLines}
+      {#if !tool.result}
         <div class="result-pending">
           <Loader2 size={11} class="chip-spin" />
           <span>running…</span>
         </div>
       {:else if tool.isError}
-        <pre class="result error">{resultLines.shown.join("\n")}{#if resultLines.more}
-… +{resultLines.more} more lines{/if}</pre>
+        <pre class="result error">{errorText}</pre>
       {:else if resultStyle === "terminal"}
-        <div class="terminal" data-shell={shellKind}>
+        <div class="body-frame" data-shell={shellKind}>
           {#if shellCommand}
             <div class="terminal-cmd">
               <span class="term-badge" data-shell={shellKind}>{shellKind === "pwsh" ? "PowerShell" : "bash"}</span>
               <span class="term-cmd-text mono">{shellCommand}</span>
             </div>
           {/if}
-          <div class="terminal-out">
-            {#if termLines.length === 0}<div class="term-line out">(no output)</div>{/if}
-            {#each termLines as tl (tl.i)}
-              <div class="term-line {tl.t}">{tl.c}</div>
-            {/each}
-          </div>
-          {#if resultLines.more}<div class="more">+{resultLines.more} more lines</div>{/if}
+          <OutputBlock text={tool.result} tone="shell" fold="head-tail" start="collapsed" />
         </div>
       {:else if resultStyle === "code"}
-        <pre class="result code">{resultLines.shown.join("\n")}{#if resultLines.more}
-… +{resultLines.more} more lines{/if}</pre>
-      {:else if resultStyle === "list"}
-        <ul class="list">
-          {#each resultLines.shown as line, i (i)}
-            <li>{line}</li>
-          {/each}
-          {#if resultLines.more}<li class="more-line">+{resultLines.more} more</li>{/if}
-        </ul>
+        <div class="body-frame"><ReadResult text={tool.result} path={readPath} offset={readOffset} /></div>
+      {:else if resultStyle === "list" && shortName(tool.name) !== "list_dir"}
+        <div class="body-frame"><GrepResult text={tool.result} pattern={grepPattern} bare={shortName(tool.name) === "Glob"} /></div>
       {:else}
-        <pre class="result">{resultLines.shown.join("\n")}{#if resultLines.more}
-… +{resultLines.more} more lines{/if}</pre>
+        <div class="body-frame"><OutputBlock text={tool.result} tone="plain" start="collapsed" /></div>
       {/if}
     </div>
   {/if}
@@ -576,7 +569,7 @@
      Previously transparent-until-hover, which left tool calls visually flat
      against the text. Hover brightens the lane + lifts the accent to the
      model hue. */
-  .chip[data-variant="timeline"]:not(.as-card) .chip-head {
+  .chip[data-variant="timeline"]:not(.as-card) :global(.bh) {
     padding: 3px 8px;
     min-height: 22px;
     border-radius: 8px;
@@ -586,14 +579,11 @@
        model-hue bar to signal interactivity. */
     transition: background 140ms ease-out, transform 140ms ease-out, box-shadow 140ms ease-out;
   }
-  .chip[data-variant="timeline"]:not(.as-card) .chip-head:hover {
+  .chip[data-variant="timeline"]:not(.as-card) :global(.bh:hover:not(:disabled)) {
     background: color-mix(in oklch, var(--surface-hover) 80%, transparent);
     box-shadow: inset 2px 0 0 color-mix(in oklch, var(--border) 90%, transparent);
     transform: translateX(1px);
   }
-  /* Rail-bullet already shows status — kill the redundant right-edge pill
-     in timeline variant. Duration badge stays (slowness signal). */
-  .chip[data-variant="timeline"]:not(.as-card) .chip-status { display: none; }
   /* Chip-tool name gets a bit more weight; summary stays muted for hierarchy. */
   .chip[data-variant="timeline"]:not(.as-card) .chip-tool {
     color: var(--fg);
@@ -626,31 +616,15 @@
     border-color: color-mix(in oklab, var(--danger) 38%, var(--border));
     opacity: 1;
   }
-  .chip-head {
-    display: flex; align-items: center; gap: 5px;
-    width: 100%;
+  /* Head chrome — layout + the meta cluster (pill/duration/copy/chevron) live
+     in the shared BlockHeader; only the chip-specific container fill is here. */
+  .chip :global(.bh) {
+    gap: 5px;
     padding: 3px 8px;
-    background: transparent;
-    border: 0;
-    color: var(--fg-2);
-    cursor: pointer;
-    font: inherit;
-    font-size: 11px;
-    text-align: left;
+    font-size: var(--fs-xs);
     min-height: 22px;
   }
-  .chip-head:hover { background: var(--surface-hover); }
-  .chip-chev {
-    display: inline-flex;
-    color: var(--fg-muted);
-    transition: transform 140ms ease-out, color 140ms ease-out;
-    flex-shrink: 0;
-  }
-  .chip-chev.open { transform: rotate(90deg); }
-  /* ui-audit #12: the chevron IS the expand affordance — let hover light it
-     up so chips read as openable, not static log lines. */
-  .chip-head:hover .chip-chev { color: var(--accent); }
-  .chip-head:hover .chip-chev:not(.open) { transform: translateX(2px); }
+  .chip :global(.bh:hover:not(:disabled)) { background: var(--surface-hover); }
   .chip-icon {
     display: inline-flex;
     color: var(--fg-2);
@@ -680,14 +654,14 @@
     font-weight: 600;
     color: var(--fg-2);
     flex-shrink: 0;
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     letter-spacing: 0.01em;
   }
   .chip-cap {
     flex: 1; min-width: 0;
     color: var(--fg);
     font-weight: 500;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .chip[data-status="error"] .chip-cap { color: oklch(0.85 0.10 22); }
@@ -695,12 +669,12 @@
   .chip-sum {
     flex: 1; min-width: 0;
     color: var(--fg-muted);
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .chip-preview {
     color: var(--fg-subtle);
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     flex-shrink: 1;
     min-width: 0;
     overflow: hidden;
@@ -708,28 +682,7 @@
     white-space: nowrap;
     max-width: 28ch;
   }
-  /* Neutral duration residue — informational, not a warning. Was warn-orange,
-     which made a normal 1.2s Read look like an alert. Quiet muted pill now;
-     genuine slowness reads from the number itself, not an alarm color. */
-  .chip-duration {
-    font-size: 10px;
-    padding: 1px 5px;
-    border-radius: 999px;
-    background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
-    color: var(--fg-muted);
-    border: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
-    font-variant-numeric: tabular-nums;
-    flex-shrink: 0;
-    font-weight: 600;
-  }
-  .chip-status {
-    display: inline-flex;
-    flex-shrink: 0;
-  }
-  .chip[data-status="pending"] .chip-status { color: var(--accent); }
-  .chip[data-status="error"] .chip-status { color: var(--danger); }
-  .chip[data-status="done"] .chip-status { color: var(--ok); }
-  .chip-status :global(.chip-spin) { animation: chip-spin 1s linear infinite; }
+  /* (Duration pill + status affordance render in BlockHeader's meta cluster.) */
   @keyframes chip-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
 
   .chip-body {
@@ -757,7 +710,7 @@
     column-gap: 10px;
     row-gap: 3px;
     margin: 0 0 2px;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     line-height: 1.45;
   }
   .kv dt {
@@ -778,7 +731,7 @@
   }
   .kv dd.mono {
     font-family: var(--font-mono, monospace);
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     color: var(--fg);
   }
 
@@ -790,7 +743,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     font-family: var(--font-mono, monospace);
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     line-height: 1.5;
     white-space: pre-wrap;
     word-wrap: break-word;
@@ -811,10 +764,11 @@
     animation: chip-spin 1s linear infinite;
   }
 
-  /* Result — terminal style (Bash, remote_bash, BashOutput). Neutral-gray
-     surface shared with every other block (no accent tint), so terminals,
-     reads, edits and the live stream blocks all read as one family. */
-  .terminal {
+  /* Result body frame — ONE neutral-gray surface for every result shape
+     (terminal via OutputBlock, code via ReadResult, matches via GrepResult,
+     plain via OutputBlock), so history bodies and the live stream blocks all
+     read as one family. */
+  .body-frame {
     background: color-mix(in oklab, var(--fg) 2%, transparent);
     border: 1px solid var(--border);
     border-radius: var(--radius-xl);
@@ -827,7 +781,7 @@
     from { opacity: 0; transform: translateY(5px); }
     to   { opacity: 1; transform: translateY(0); }
   }
-  @media (prefers-reduced-motion: reduce) { .terminal { animation: none; } }
+  @media (prefers-reduced-motion: reduce) { .body-frame { animation: none; } }
   /* Command head — shell badge + the $/PS>-prefixed command. */
   .terminal-cmd {
     display: flex; align-items: center; gap: 10px;
@@ -855,83 +809,10 @@
     font-size: 11px; color: var(--fg);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .terminal[data-shell="bash"] .term-cmd-text::before { content: "$ "; color: var(--fg-faint); }
-  .terminal[data-shell="pwsh"] .term-cmd-text::before { content: "PS> "; color: var(--info); }
-  .terminal-out {
-    margin: 0;
-    padding: 8px 10px;
-    font-family: var(--font-mono, monospace);
-    font-size: 10.5px;
-    line-height: 1.6;
-    color: oklch(0.88 0.025 130);
-    max-height: 320px;
-    overflow: auto;
-  }
-  .term-line {
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-  .term-line.out  { color: oklch(0.88 0.025 130); }
-  .term-line.ok   { color: var(--ok); }
-  .term-line.err  { color: var(--danger); }
-  .term-line.warn { color: var(--warn); }
-  .terminal .more {
-    padding: 4px 11px;
-    font-size: 10px;
-    color: var(--fg-muted);
-    border-top: 1px solid color-mix(in oklch, var(--border) 40%, transparent);
-    background: color-mix(in oklab, var(--fg) 4%, transparent);
-    font-style: italic;
-  }
+  .body-frame[data-shell="bash"] .term-cmd-text::before { content: "$ "; color: var(--fg-faint); }
+  .body-frame[data-shell="pwsh"] .term-cmd-text::before { content: "PS> "; color: var(--info); }
 
-  /* Result — code style (Read). Neutral-gray surface, same family as the
-     terminal + every other block (accent tint removed). */
-  .result.code {
-    background: color-mix(in oklab, var(--fg) 2%, transparent);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-xl);
-    padding: 9px 13px;
-    max-height: 320px;
-    box-shadow: none;
-    animation: tool-rise var(--dur-rise) var(--ease-page) both;
-  }
-
-  /* Result — list style (Grep, Glob, list_dir). Neutral-gray, same family. */
-  .list {
-    list-style: none;
-    margin: 0;
-    padding: 5px 0;
-    background: color-mix(in oklab, var(--fg) 2%, transparent);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-xl);
-    max-height: 320px;
-    overflow: auto;
-    font-family: var(--font-mono, monospace);
-    font-size: 10.5px;
-    line-height: 1.55;
-    box-shadow: none;
-    animation: tool-rise var(--dur-rise) var(--ease-page) both;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .result.code, .list { animation: none; }
-  }
-  .list li {
-    padding: 1px 10px;
-    color: var(--fg-2);
-    white-space: pre-wrap;
-    word-wrap: break-word;
-  }
-  .list li:hover { background: var(--surface-hover); color: var(--fg); }
-  .list .more-line {
-    margin-top: 3px;
-    border-top: 1px solid color-mix(in oklch, var(--border) 40%, transparent);
-    padding-top: 4px;
-    color: var(--fg-muted);
-    font-style: italic;
-  }
-  .list .more-line:hover { background: transparent; color: var(--fg-muted); }
-
-  /* Result — plain text fallback. */
+  /* Result — error text (the one shape still rendered locally). */
   .result {
     margin: 0;
     padding: 7px 10px;
@@ -939,7 +820,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     font-family: var(--font-mono, monospace);
-    font-size: 10.5px;
+    font-size: var(--fs-xs);
     line-height: 1.5;
     white-space: pre-wrap;
     word-wrap: break-word;

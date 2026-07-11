@@ -31,6 +31,11 @@
 
   const turn = $derived(messageToTurn(message));
   const groups = $derived(groupBlocks(turn.blocks));
+  // Light timeline rail — a thin connecting line down the turn body so a
+  // multi-step turn reads as one sequence (history's spine, minus the bullet
+  // chrome; stream stays boxless). Pure-text answers skip it — indenting prose
+  // under a rail would claim structure that isn't there.
+  const railed = $derived(groups.some((g) => g.type === "work") || !!turn.thinking);
 
   // Newer CLI emits one TaskCreate per item, so a plan tool block carries no
   // `todos[]` — its own `items` is empty. The store aggregates the whole plan in
@@ -236,6 +241,7 @@
     {#if turnTime}<span class="sh-time" use:tooltip={"When this turn ran"}>{turnTime}</span>{/if}
   </div>
 
+  <div class="sturn-body" class:railed class:live={streaming}>
   {#if turn.thinking && !turn.thinking.active}
     <StreamThinking active={turn.thinking.active} durSecs={turn.thinking.durSecs} text={turn.thinking.text} />
   {/if}
@@ -289,6 +295,7 @@
       {/each}
     {/if}
   {/each}
+  </div>
 
   {#if streaming && !thinkingNow}
     <!-- While a pure reasoning pass is live the HEAD already shows "Thinking… Xs"

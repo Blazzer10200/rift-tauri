@@ -67,6 +67,88 @@ export function shellFlavor(name: string, command: string | null): ShellFlavor {
   return "bash";
 }
 
+/** A shell command that IS a test/lint run gets the richer `test`/`lint` kind —
+ *  pass/fail pill + expandable failure body (StreamResult) instead of a bare
+ *  terminal block. Conservative: only unambiguous runner names match. */
+export function shellCheckKind(command: string | null): "test" | "lint" | null {
+  if (!command) return null;
+  if (/\b(?:vitest|jest|pytest|playwright test)\b/.test(command)
+      || /\bcargo test\b/.test(command) || /\bgo test\b/.test(command)
+      || /\b(?:npm|pnpm|yarn|bun) (?:run )?test\b/.test(command)) return "test";
+  if (/\b(?:svelte-check|eslint|ruff|tsc|pyright|mypy)\b/.test(command)
+      || /\bcargo (?:clippy|check)\b/.test(command)
+      || /\b(?:npm|pnpm|yarn|bun) run (?:check|lint)\b/.test(command)) return "lint";
+  return null;
+}
+
+/** Parse pass/fail counts out of common runner output (vitest, cargo test,
+ *  pytest, svelte-check, eslint, rustc, ruff). Null when nothing recognizable —
+ *  the caller falls back to status-only pills. Only called for test/lint kinds,
+ *  so loose patterns (bare "error:") can't misfire on ordinary shell output. */
+export function parseCheckSummary(result: string | null | undefined): { pass: number | null; fail: number | null } | null {
+  if (!result) return null;
+  const txt = stripAnsi(result);
+  // cargo test — sum every "test result:" line (one per test binary + doc-tests)
+  const cargo = [...txt.matchAll(/test result: \w+\. (\d+) passed; (\d+) failed/g)];
+  if (cargo.length > 0) {
+    let pass = 0, fail = 0;
+    for (const m of cargo) { pass += Number(m[1]); fail += Number(m[2]); }
+    return { pass, fail };
+  }
+  // vitest — " Tests  2 failed | 12 passed (14)"
+  const vit = /^\s*Tests\s+(?:(\d+) failed\s*\|\s*)?(\d+) passed\b/m.exec(txt);
+  if (vit) return { pass: Number(vit[2]), fail: vit[1] ? Number(vit[1]) : 0 };
+  // pytest — "==== 2 failed, 10 passed in 1.32s ===="
+  const py = /^=+ (.+?) =+$/m.exec(txt);
+  if (py && /\b(passed|failed)\b/.test(py[1])) {
+    const f = /(\d+) failed/.exec(py[1]);
+    const p = /(\d+) passed/.exec(py[1]);
+    if (f || p) return { pass: p ? Number(p[1]) : 0, fail: f ? Number(f[1]) : 0 };
+  }
+  // svelte-check — "svelte-check found 3 errors and 1 warning in 2 files"
+  const sc = /svelte-check found (\d+) errors?/.exec(txt);
+  if (sc) return { pass: null, fail: Number(sc[1]) };
+  // eslint — "✖ 4 problems (2 errors, 2 warnings)"
+  const es = /✖ \d+ problems? \((\d+) errors?/.exec(txt);
+  if (es) return { pass: null, fail: Number(es[1]) };
+  // rustc/clippy diagnostics — "error[E0308]: …" / "error: …" heads
+  const re = txt.match(/^error(?:\[E\d+\])?: /gm);
+  if (re) return { pass: null, fail: re.length };
+  // ruff — "Found 12 errors."
+  const rf = /Found (\d+) errors?\./.exec(txt);
+  if (rf) return { pass: null, fail: Number(rf[1]) };
+  return null;
+}
+
+/** One grep output line shaped `path:line:content` → structured row. Handles
+ *  Windows drive-letter absolute paths (`C:\…` / `C:/…`). Null for anything
+ *  else (headers, separators, bare text). */
+export type GrepRow = { path: string; line: number; text: string };
+export function parseGrepLine(l: string): GrepRow | null {
+  const m = /^([A-Za-z]:[\\/][^:\n]*|[^:\n]+?):(\d+):(.*)$/.exec(l);
+  if (!m) return null;
+  return { path: m[1], line: Number(m[2]), text: m[3] };
+}
+
+/** Sniff + strip the CLI Read tool's `cat -n`-style gutter (`   12→…` or
+ *  `   12\t…`). ≥90% of non-empty lines must carry it — otherwise the text is
+ *  raw file content (rift's MCP read_file) and we return null so the caller
+ *  numbers from its own offset. */
+export function parseReadOutput(text: string): { start: number; code: string } | null {
+  const lines = text.split("\n");
+  const GUT = /^\s*(\d+)[\t→]/;
+  let matched = 0, nonEmpty = 0;
+  let first: number | null = null;
+  for (const l of lines) {
+    if (!l.trim()) continue;
+    nonEmpty++;
+    const m = GUT.exec(l);
+    if (m) { matched++; if (first === null) first = Number(m[1]); }
+  }
+  if (nonEmpty === 0 || first === null || matched / nonEmpty < 0.9) return null;
+  return { start: first, code: lines.map((l) => l.replace(GUT, "")).join("\n") };
+}
+
 type StreamBlock =
   | { type: "say"; text: string }
   | { type: "tool"; tool: StreamTool };
@@ -111,8 +193,76 @@ const hostOf = (u: string) => { try { return new URL(u).host; } catch { return u
 // garbage in the transcript. Display + copy both want clean text.
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
-function stripAnsi(s: string): string {
+export function stripAnsi(s: string): string {
   return s.replace(ANSI_RE, "");
+}
+
+// ── ANSI SGR → styled segments ──────────────────────────────────────────────
+// Shell results keep their raw ANSI (adaptTool no longer strips the shell/test/
+// lint kinds) so OutputBlock can render real terminal color instead of guessing
+// tone from keywords. Only the common SGR subset maps: fg colors 30-37/90-97,
+// bold/dim, reset. Anything else (bg, cursor moves, 38;5;n extended color) is
+// stripped, never thrown on.
+export type AnsiSeg = { text: string; cls: string | null };
+// eslint-disable-next-line no-control-regex
+const SGR_RE = /\x1b\[([0-9;]*)m/g;
+const ANSI_FG: Record<number, string> = {
+  30: "a-black", 31: "a-red", 32: "a-green", 33: "a-yellow",
+  34: "a-blue", 35: "a-magenta", 36: "a-cyan", 37: "a-white",
+  90: "a-black", 91: "a-red", 92: "a-green", 93: "a-yellow",
+  94: "a-blue", 95: "a-magenta", 96: "a-cyan", 97: "a-white",
+};
+
+/** Split text into per-line styled segments, carrying SGR state across lines
+ *  (a color set on line 1 legitimately paints line 2). Line indices align with
+ *  `text.split("\n")` so callers can slice by reveal tier. */
+export function ansiLines(text: string): AnsiSeg[][] {
+  const lines = text.split("\n");
+  if (!text.includes("\x1b")) return lines.map((l) => (l ? [{ text: l, cls: null }] : []));
+  let fg: string | null = null, bold = false, dim = false;
+  const out: AnsiSeg[][] = [];
+  for (const line of lines) {
+    const segs: AnsiSeg[] = [];
+    const push = (raw: string) => {
+      const t = raw.replace(ANSI_RE, ""); // scrub non-SGR escapes
+      if (!t) return;
+      const cls = [fg, bold ? "a-bold" : null, dim ? "a-dim" : null].filter(Boolean).join(" ");
+      segs.push({ text: t, cls: cls || null });
+    };
+    let last = 0;
+    SGR_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = SGR_RE.exec(line))) {
+      if (m.index > last) push(line.slice(last, m.index));
+      const codes = (m[1] === "" ? "0" : m[1]).split(";").map(Number);
+      for (let i = 0; i < codes.length; i++) {
+        const c = codes[i];
+        if (c === 0) { fg = null; bold = false; dim = false; }
+        else if (c === 1) bold = true;
+        else if (c === 2) dim = true;
+        else if (c === 22) { bold = false; dim = false; }
+        else if (c === 39) fg = null;
+        else if (c === 38 || c === 48) break; // extended color — params follow, skip rest
+        else if (ANSI_FG[c]) fg = ANSI_FG[c];
+      }
+      last = SGR_RE.lastIndex;
+    }
+    if (last < line.length) push(line.slice(last));
+    out.push(segs);
+  }
+  return out;
+}
+
+// Conservative semantic tone for a shell line — only strong, unambiguous
+// signals get a color; everything else stays neutral. Complements real ANSI
+// color: many tools don't colorize consistently, so a plain-text "0 errors"
+// still reads green. (Moved from ToolChip.svelte so both trees share it.)
+export function classifyShellLine(line: string): "out" | "ok" | "err" | "warn" {
+  if (/^\s*(✓|✔)/.test(line) || /\b0 (errors?|warnings?|issues?|problems?)\b/i.test(line)
+      || /\b(passed|succeeded|success)\b/i.test(line)) return "ok";
+  if (/^\s*(✗|✖|×)/.test(line) || /\b(error|errors|failed|fatal|panic|exception|traceback)\b/i.test(line)) return "err";
+  if (/\b(warn|warning|warnings|deprecated)\b/i.test(line)) return "warn";
+  return "out";
 }
 
 export function fmtDur(t: number): string {
@@ -324,9 +474,14 @@ function planItems(tb: ToolBlock): PlanItem[] {
 }
 
 function adaptTool(tb: ToolBlock): StreamTool {
-  const kind = nameToKind(tb.name);
   const durSecs = typeof tb.durationMs === "number" ? tb.durationMs / 1000 : 0;
   const inp = tb.input ?? {};
+  const cmd = typeof inp.command === "string" ? inp.command : null;
+  let kind = nameToKind(tb.name);
+  if (kind === "shell") {
+    const ck = shellCheckKind(cmd);
+    if (ck) kind = ck;
+  }
   const path = pathOf(inp);
   const t: StreamTool = {
     id: tb.id, kind, name: shortName(tb.name), cap: caption(tb),
@@ -359,21 +514,28 @@ function adaptTool(tb: ToolBlock): StreamTool {
     t.input = inp;
     t.result = tb.result ?? null;
   }
-  if (kind === "shell") {
+  if (kind === "shell" || kind === "test" || kind === "lint") {
     // Carry the full stdout/stderr through so the live stream can show the
     // command's in-and-out (gated by the `commandOutput` pref at render time).
-    // ANSI-stripped: PowerShell/cargo color codes render as literal `[31;1m`
-    // garbage otherwise (observed on failed pwsh output).
-    t.result = tb.result != null ? stripAnsi(tb.result) : null;
-    t.flavor = shellFlavor(t.name, typeof inp.command === "string" ? inp.command : null);
+    // RAW — ANSI kept: OutputBlock's SGR parser renders real terminal color at
+    // display time; copy paths stripAnsi themselves. Input carried so the
+    // untrimmed command survives (cap truncates at 70 for the head).
+    t.result = tb.result ?? null;
+    t.flavor = shellFlavor(t.name, cmd);
+    t.input = inp;
+    if (kind !== "shell") {
+      const sum = parseCheckSummary(tb.result);
+      if (sum) { t.pass = sum.pass; t.fail = sum.fail; }
+    }
   }
   if (kind === "read" || kind === "grep" || kind === "mcp") {
     // Forward the result for detail surfacing: read/grep rows show honest
-    // line/match counts, MCP rows can expand to the actual response. The data
-    // was always on the block — dropping it here made "show me what happened"
-    // impossible downstream.
+    // line/match counts + expandable bodies, MCP rows the actual response. The
+    // data was always on the block — dropping it here made "show me what
+    // happened" impossible downstream. Input carried for the structured
+    // renderers (Read offset / grep pattern).
     t.result = tb.result != null ? stripAnsi(tb.result) : null;
-    if (kind === "mcp") t.input = inp;
+    t.input = inp;
   }
   return t;
 }
@@ -453,6 +615,24 @@ export function nextRevealTier(tier: RevealTier, total: number): RevealTier | nu
   if (tier === "collapsed") return total > REVEAL_COLLAPSED + REVEAL_SLACK ? "expanded" : null;
   if (tier === "expanded") return total > REVEAL_EXPANDED + REVEAL_SLACK ? "all" : null;
   return null;
+}
+
+// Head+tail fold: same tier budget as splitOutput, but the visible lines split
+// into a head AND a tail around a "N lines hidden" divider — the END of shell
+// output (summary / exit message / the actual error) is usually the interesting
+// part, and a head-only cap hides exactly that.
+export const FOLD_TAIL = 5;
+export function splitOutputFold(
+  result: string | null | undefined,
+  tier: RevealTier,
+): { lines: string[]; head: number; tail: number; hidden: number; total: number } {
+  if (!result) return { lines: [], head: 0, tail: 0, hidden: 0, total: 0 };
+  const lines = result.replace(/\s+$/, "").split("\n");
+  const total = lines.length;
+  const cap = tier === "collapsed" ? REVEAL_COLLAPSED : tier === "expanded" ? REVEAL_EXPANDED : total;
+  if (total <= cap + REVEAL_SLACK) return { lines, head: total, tail: 0, hidden: 0, total };
+  const tail = Math.min(FOLD_TAIL, cap - 1);
+  return { lines, head: cap - tail, tail, hidden: total - cap, total };
 }
 
 // Map one live assistant ChatMessage → the StreamTurn render model.

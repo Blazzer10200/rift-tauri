@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { ChevronRight, Check, Copy, X } from "lucide-svelte";
   import { slide } from "svelte/transition";
-  import { fmtDur, outputPeek, type StreamTool } from "./streamModel";
+  import { fmtDur, outputPeek, stripAnsi, type StreamTool } from "./streamModel";
   import { uiPrefs } from "$lib/state/ui-prefs.svelte";
   import { tooltip } from "$lib/actions/tooltip";
+  import { highlightSync, whenReady } from "$lib/state/highlighter.svelte";
   import OutputBlock from "./OutputBlock.svelte";
+  import BlockHeader from "./BlockHeader.svelte";
 
   let { tool }: { tool: StreamTool } = $props();
 
@@ -19,6 +20,36 @@
   // Terminal prompt glyph per shell — the "IN" marker. `$` reads as a POSIX
   // prompt (bash), `PS>` as PowerShell, `>` as cmd.exe.
   const promptGlyph = $derived(flavor === "pwsh" ? "PS>" : flavor === "cmd" ? ">" : "$");
+  // Full untrimmed command (cap truncates at 70) — copy + tooltip want the real thing.
+  const fullCmd = $derived(
+    typeof tool.input?.command === "string" ? (tool.input.command as string) : (tool.cap ?? ""),
+  );
+
+  // Live elapsed — anchored to mount (the block mounts the instant the tool
+  // starts streaming, so mount ≈ spawn). Ticks the pill once a second while
+  // running; a static "running…" told the user nothing about a slow command.
+  const t0 = Date.now();
+  let now = $state(t0);
+  $effect(() => {
+    if (!running) return;
+    now = Date.now();
+    const h = setInterval(() => { now = Date.now(); }, 1000);
+    return () => clearInterval(h);
+  });
+  const elapsed = $derived(Math.max(0, Math.round((now - t0) / 1000)));
+
+  // Shiki-highlighted command line — same singleton Markdown uses. The full
+  // <pre> wrapper is stripped down to the inner spans so it can sit inline in
+  // the head. Falls back to plain text until the highlighter warms up.
+  let hlReady = $state(false);
+  void whenReady().then(() => { hlReady = true; });
+  const cmdHtml = $derived.by(() => {
+    if (!hlReady) return null;
+    const lang = flavor === "pwsh" ? "powershell" : flavor === "cmd" ? "bat" : "bash";
+    const html = highlightSync(tool.cap ?? "", lang);
+    if (!html) return null;
+    return html.replace(/^<pre[^>]*><code[^>]*>/, "").replace(/<\/code><\/pre>\s*$/, "");
+  });
 
   // "full" auto-expands (live in-and-out); "peek"/"minimal" start collapsed.
   // While a command is still running in "full" mode, keep it open so the user
@@ -30,72 +61,46 @@
     open = mode === "full";
   });
 
-  const peek = $derived(mode === "peek" ? outputPeek(tool.result, 3) : { lines: [], more: 0 });
+  // Peek renders dim trailing lines — strip ANSI there (the full body gets the
+  // real colors via OutputBlock's SGR parser instead).
+  const peek = $derived(
+    mode === "peek" ? outputPeek(tool.result != null ? stripAnsi(tool.result) : null, 3) : { lines: [], more: 0 },
+  );
   function toggle() { touched = true; open = !open; }
+
+  // Exit-status footer data — honest: we only know ok/failed (no structured
+  // exit code crosses the tool-result envelope), plus duration + line count.
+  const outLineCount = $derived.by(() => {
+    if (!hasOut || tool.result == null) return 0;
+    return stripAnsi(tool.result).replace(/\s+$/, "").split("\n").length;
+  });
 
   // Copy the command + its output as one shell-session snippet — what you'd
   // paste into an issue or a terminal to reproduce.
-  let copied = $state(false);
-  let copyFailed = $state(false);
-  let copyTimer: ReturnType<typeof setTimeout> | null = null;
-  $effect(() => () => { if (copyTimer) clearTimeout(copyTimer); });
-  async function copyAll(e: MouseEvent) {
-    e.stopPropagation();
-    const cmd = tool.cap ?? "";
-    const body = typeof tool.result === "string" ? tool.result.replace(/\s+$/, "") : "";
-    if (copyTimer) clearTimeout(copyTimer);
-    try {
-      await navigator.clipboard.writeText(body ? `$ ${cmd}\n${body}` : `$ ${cmd}`);
-      copied = true;
-      copyFailed = false;
-      copyTimer = setTimeout(() => { copied = false; copyTimer = null; }, 1200);
-    } catch (err) {
-      console.warn("shell copy failed", err);
-      copied = false;
-      copyFailed = true;
-      copyTimer = setTimeout(() => { copyFailed = false; copyTimer = null; }, 1200);
-    }
-  }
+  const copyText = () => {
+    const body = tool.result != null ? stripAnsi(tool.result).replace(/\s+$/, "") : "";
+    return body ? `${promptGlyph} ${fullCmd}\n${body}` : `${promptGlyph} ${fullCmd}`;
+  };
 </script>
 
 <div class="sshell" class:bad={failed} class:running>
-  <!-- ── IN: the command line. A terminal prompt glyph (flavor-colored) + the
-       command in monospace reads unmistakably as "what was run", distinct from
-       the output below. The whole row toggles the output. ── -->
-  <button
-    class="ssh-head"
-    type="button"
-    onclick={toggle}
-    disabled={!hasOut && mode === "minimal"}
-    aria-expanded={open}
+  <!-- IN: prompt glyph + command (Shiki-tinted) + the shared meta cluster. -->
+  <BlockHeader
+    expandable={hasOut && mode !== "minimal"}
+    expanded={open}
+    onToggle={toggle}
+    pill={running ? { text: fmtDur(elapsed), tone: "running" } : failed ? { text: "failed", tone: "bad" } : null}
+    durationLabel={!running && tool.durSecs >= 1 ? fmtDur(tool.durSecs) : null}
+    copyText={running ? null : copyText}
   >
-    <span class="ssh-prompt {flavor}" use:tooltip={flavor === "pwsh" ? "Ran in PowerShell" : flavor === "cmd" ? "Ran in cmd.exe" : "Ran in bash"} aria-hidden="true">{promptGlyph}</span>
-    <code class="ssh-cmd">{tool.cap}</code>
-    <span class="ssh-meta">
-      {#if running}
-        <span class="ssh-pill running">running…</span>
-      {:else if failed}
-        <span class="ssh-pill bad">exit 1</span>
-      {/if}
-      {#if tool.durSecs >= 1 && !running}<span class="ssh-dur">{fmtDur(tool.durSecs)}</span>{/if}
-      {#if !running}
-        <span
-          class="ssh-copy"
-          class:copied
-          class:failed={copyFailed}
-          role="button"
-          tabindex="0"
-          aria-label={copyFailed ? "Copy failed" : "Copy command and output"}
-          use:tooltip={copyFailed ? "Copy failed" : "Copy command + output"}
-          onclick={copyAll}
-          onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); copyAll(e as unknown as MouseEvent); } }}
-        >{#if copied}<Check size={11} strokeWidth={2.5} />{:else if copyFailed}<X size={11} strokeWidth={2.5} />{:else}<Copy size={11} />{/if}</span>
-      {/if}
-      {#if hasOut && mode !== "minimal"}
-        <ChevronRight size={13} class={"ssh-chev" + (open ? " open" : "")} />
-      {/if}
-    </span>
-  </button>
+    {#snippet lead()}
+      <span class="ssh-prompt {flavor}" use:tooltip={flavor === "pwsh" ? "Ran in PowerShell" : flavor === "cmd" ? "Ran in cmd.exe" : "Ran in bash"} aria-hidden="true">{promptGlyph}</span>
+    {/snippet}
+    {#snippet title()}
+      <code class="ssh-cmd" title={fullCmd}>{#if cmdHtml}{@html cmdHtml}{:else}{tool.cap}{/if}</code>
+      {#if running}<span class="ssh-cursor" aria-hidden="true"></span>{/if}
+    {/snippet}
+  </BlockHeader>
 
   {#if hasOut && mode !== "minimal"}
     {#if mode === "peek" && !open}
@@ -111,7 +116,15 @@
       <!-- OUT: the command's output, under a labeled rule so IN vs OUT is clear. -->
       <div class="ssh-outwrap" transition:slide={{ duration: 140 }}>
         <div class="ssh-outlabel"><span>output</span>{#if failed}<span class="ssh-outlabel-bad">error</span>{/if}</div>
-        <OutputBlock text={tool.result ?? ""} start={mode === "full" ? "expanded" : "collapsed"} live={running} />
+        <OutputBlock text={tool.result ?? ""} start={mode === "full" ? "expanded" : "collapsed"} live={running} tone="shell" fold="head-tail" />
+        {#if !running}
+          <div class="ssh-exit" class:bad={failed}>
+            <span class="ssh-exit-mark">{failed ? "✗" : "✓"}</span>
+            <span>{failed ? "failed" : "ok"}</span>
+            {#if tool.durSecs >= 1}<span class="ssh-exit-pip">·</span><span>{fmtDur(tool.durSecs)}</span>{/if}
+            <span class="ssh-exit-pip">·</span><span>{outLineCount} line{outLineCount === 1 ? "" : "s"}</span>
+          </div>
+        {/if}
       </div>
     {/if}
   {/if}
@@ -121,15 +134,14 @@
   /* A shell block reads as a mini terminal: an IN row (prompt glyph + command)
      on a slightly raised "chrome" fill, then the OUT below it under a labeled
      rule. The two-tone fill + the prompt glyph make input-vs-output obvious at a
-     glance, which the old single-slab header didn't. */
+     glance. Meta cluster (pill/duration/copy/chevron) comes from BlockHeader. */
   .sshell { display: flex; flex-direction: column; margin: var(--stream-gap, 12px) 0; border-radius: var(--radius-lg);
     border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 2.5%, transparent); overflow: hidden;
     animation: blockIn var(--dur-base) var(--ease-page) both; }
   .sshell.bad { border-color: color-mix(in oklab, var(--danger, #f87171) 34%, var(--border)); }
   /* the prompt glyph breathes while the command is still running — a soft glow
      halo makes a live command read as genuinely in-flight (terminal cursor
-     energy), not just a dimming text. The glow is keyed to the flavor color so
-     bash/pwsh/cmd keep their identity while running. */
+     energy). The glow is keyed to the flavor color. */
   .sshell.running .ssh-prompt { animation: sshPromptPulse 1.4s ease-in-out infinite; }
   .sshell.running .ssh-prompt.bash { text-shadow: 0 0 9px color-mix(in oklab, var(--ok) 60%, transparent); }
   .sshell.running .ssh-prompt.pwsh { text-shadow: 0 0 9px color-mix(in oklab, var(--info) 60%, transparent); }
@@ -137,51 +149,51 @@
   @keyframes sshPromptPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
   @media (prefers-reduced-motion: reduce) {
     .sshell.running .ssh-prompt { animation: none; }
+    .ssh-cursor { animation: none; }
   }
 
-  /* IN row — the command line. */
-  .ssh-head { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 11px;
-    text-align: left; font: inherit; cursor: pointer; min-width: 0; color: var(--fg-2);
+  /* IN row container chrome — layout/cluster mechanics live in BlockHeader. */
+  .sshell :global(.bh) { padding: 8px 11px; gap: 9px;
     background: color-mix(in oklab, var(--fg) 3.5%, transparent);
     transition: background var(--dur-fast); }
-  .ssh-head:hover:not(:disabled) { background: color-mix(in oklab, var(--fg) 6%, transparent); }
-  .ssh-head:disabled { cursor: default; }
+  .sshell :global(.bh:hover:not(:disabled)) { background: color-mix(in oklab, var(--fg) 6%, transparent); }
+
   /* Prompt glyph — the "IN" marker, tinted per shell (bash green · pwsh blue ·
      cmd amber) so the flavor reads without a separate badge. */
-  .ssh-prompt { flex: none; font-family: var(--font-mono); font-size: 12px; font-weight: 700;
+  .ssh-prompt { flex: none; font-family: var(--font-mono); font-size: var(--fs-sm); font-weight: 700;
     line-height: 1; letter-spacing: 0.02em; cursor: default; user-select: none; }
   .ssh-prompt.bash { color: var(--ok); }
   .ssh-prompt.pwsh { color: var(--info); }
   .ssh-prompt.cmd { color: var(--warn); }
-  /* The command itself — the star of the IN row: brighter + heavier than the
-     old caption so "what ran" is unmistakable. */
-  .ssh-cmd { flex: 1; min-width: 0; font-size: var(--fs-sm); font-weight: 560; font-family: var(--font-mono);
+  /* The command itself — Shiki spans supply the tint; plain fallback stays
+     bright so "what ran" is unmistakable either way. */
+  .ssh-cmd { min-width: 0; font-size: var(--fs-sm); font-weight: 560; font-family: var(--font-mono);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--fg); }
-  /* right-side status cluster — pill · duration · copy · expand */
-  .ssh-meta { flex: none; display: inline-flex; align-items: center; gap: 7px; }
-  .ssh-pill { flex: none; font-size: 10px; font-weight: 650; padding: 1px 7px; border-radius: 999px;
-    font-family: var(--font-mono); letter-spacing: 0.02em; }
-  .ssh-pill.running { color: var(--accent); background: var(--accent-soft); }
-  .ssh-pill.bad { color: var(--danger, #f87171); background: var(--danger-soft, color-mix(in oklab, red 14%, transparent)); }
-  .ssh-dur { flex: none; font-size: var(--fs-xs); color: var(--fg-faint); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
-  /* Copy command+output — hidden until the row is hovered, like msg-acts. */
-  .ssh-copy { flex: none; display: inline-grid; place-items: center; width: 20px; height: 20px;
-    border-radius: 5px; color: var(--fg-faint); opacity: 0; transition: opacity var(--dur-fast), color var(--dur-fast), background var(--dur-fast); }
-  .ssh-head:hover .ssh-copy, .ssh-copy:focus-visible { opacity: 1; }
-  .ssh-copy:hover { color: var(--fg-2); background: var(--surface-hover); }
-  .ssh-copy.copied { color: var(--ok); opacity: 1; }
-  .ssh-copy.failed { color: var(--danger); opacity: 1; }
-  :global(.ssh-head .ssh-chev) { flex: none; color: var(--fg-faint); transition: transform var(--dur-fast); }
-  :global(.ssh-head .ssh-chev.open) { transform: rotate(90deg); }
+  .ssh-cmd :global(span) { background: transparent !important; }
+  /* Blinking block cursor while the command runs — terminal energy. */
+  .ssh-cursor { flex: none; width: 7px; height: 13px; margin-left: 1px; border-radius: 1.5px;
+    background: color-mix(in oklab, var(--accent) 80%, transparent);
+    animation: sshBlink 1.06s steps(1) infinite; }
+  @keyframes sshBlink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
 
   /* OUT — the command's output, on the base (darker) fill so it recedes behind
-     the raised IN row. The line-capping / "Show more" tiers live in OutputBlock. */
+     the raised IN row. The line-capping / fold tiers live in OutputBlock. */
   .ssh-outwrap { border-top: 1px solid var(--border); }
   /* "output" boundary label — a tiny uppercase rule so IN vs OUT is spelled out,
      not just implied by the fill shift. */
   .ssh-outlabel { display: flex; align-items: center; gap: 7px; padding: 5px 11px 2px;
     font-size: 8.5px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: var(--fg-faint); }
   .ssh-outlabel-bad { color: var(--danger); }
+
+  /* Exit-status footer — a slim truthful receipt: ✓/✗ · duration · line count.
+     (We deliberately don't invent an exit CODE — the envelope doesn't carry one.) */
+  .ssh-exit { display: flex; align-items: center; gap: 6px; padding: 4px 11px 6px;
+    border-top: 1px solid color-mix(in oklch, var(--border) 45%, transparent);
+    font-family: var(--font-mono); font-size: 10px; color: var(--fg-faint);
+    font-variant-numeric: tabular-nums; }
+  .ssh-exit .ssh-exit-mark { color: var(--ok); font-weight: 700; }
+  .ssh-exit.bad .ssh-exit-mark { color: var(--danger); }
+  .ssh-exit-pip { opacity: 0.5; }
 
   .ssh-peekwrap { border-top: 1px solid var(--border); }
   .ssh-peek { padding: 2px 11px 7px;

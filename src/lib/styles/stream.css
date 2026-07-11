@@ -34,8 +34,22 @@
 }
 
 .sturn { margin: var(--stream-gap-between-turns) 0 calc(var(--stream-gap-between-turns) + 2px); }
+/* Light timeline rail — one thin spine down the turn body so narration + tool
+   blocks read as a connected sequence (history's rail energy, no bullet chrome
+   — stream stays boxless). Only when the turn actually did work; pure-text
+   answers render unindented. Live turns tint the tail toward the accent. */
+.sturn-body.railed { position: relative; padding-left: 13px; }
+.sturn-body.railed::before { content: ""; position: absolute; left: 1px; top: 6px; bottom: 6px;
+  width: 2px; border-radius: 2px;
+  background: linear-gradient(to bottom,
+    color-mix(in oklch, var(--border) 95%, transparent),
+    color-mix(in oklch, var(--border) 35%, transparent)); }
+.sturn-body.railed.live::before {
+  background: linear-gradient(to bottom,
+    color-mix(in oklch, var(--border) 95%, transparent) 55%,
+    color-mix(in oklab, var(--accent) 40%, transparent)); }
 .sturn-head { display: flex; align-items: center; gap: 9px; padding-bottom: 11px; margin-bottom: 2px;
-  border-bottom: 1px solid var(--border); font-size: 12.5px; color: var(--fg-subtle); letter-spacing: 0.003em;
+  border-bottom: 1px solid var(--border); font-size: var(--fs-sm); color: var(--fg-subtle); letter-spacing: 0.003em;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
 .sturn-head .sh-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex: none; }
 .sturn-head.live .sh-dot { background: var(--accent); animation: streamLivePulse var(--pulse-live) ease-out infinite; }
@@ -60,7 +74,7 @@
   padding-left: 12px;
   position: relative;
   color: var(--fg-faint);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   line-height: 1.45;
   animation: blockIn var(--dur-base) var(--ease-page) both;
 }
@@ -73,7 +87,7 @@
 
 /* collapsed reasoning */
 .sthink { margin: var(--stream-gap) 0; }
-.sthink-row { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-faint);
+.sthink-row { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--fg-faint);
   background: none; border: 0; cursor: pointer; padding: 0; transition: color var(--dur-fast); }
 .sthink-row svg:first-child { color: var(--fg-faint); }
 .sthink-row:hover:not(.bare) { color: var(--fg-muted); }
@@ -82,27 +96,31 @@
 .sthink-row.bare { cursor: default; }
 .sthink-chev { transition: transform var(--dur-fast); }
 .sthink-chev.open { transform: rotate(180deg); }
-.sthink-text { margin: 8px 0 0; max-width: 64ch; font-size: 12.5px; line-height: 1.55; color: var(--fg-faint); font-style: italic; white-space: pre-wrap; }
+/* Thinking body — Markdown now (parity w/ MessageBubble's thinking block), in
+   a dimmed italic "inner monologue" voice. Overrides target the md-* classes
+   the renderer emits; this file is a global sheet so no :global() needed. */
+.sthink-text { margin: 8px 0 0; max-width: 64ch; font-size: var(--fs-sm); line-height: 1.55; color: var(--fg-faint); font-style: italic; }
+.sthink-text .md-p, .sthink-text .md-li { color: var(--fg-faint); font-size: var(--fs-sm); }
 
 /* live footer status line — verb breathes on the left, elapsed/tokens sit as a
    quiet mono cluster at the right edge so the numbers stop crowding the word.
    {#key} remounts .sf-verb per word swap → verbIn gives each new word a soft
    rise instead of a hard cut. */
-.sfooter { display: flex; align-items: center; gap: 7px; margin: var(--stream-gap-turn) 0 2px; font-size: 12.5px;
+.sfooter { display: flex; align-items: center; gap: 7px; margin: var(--stream-gap-turn) 0 2px; font-size: var(--fs-sm);
   color: var(--fg-faint); font-variant-numeric: tabular-nums; animation: blockIn var(--dur-base) var(--ease-page) both; }
 .sfooter .sf-verb { color: var(--fg-muted); }
 /* The live target ("composer.svelte", "git status …") right after the verb, so
    the footer reads as one honest phrase. Quiet mono, truncates before it can
    shove the meter off the row. */
 .sfooter .sf-cap { margin-left: 7px; min-width: 0; font-family: var(--font-mono, monospace);
-  font-size: 11px; color: var(--fg-faint); white-space: nowrap; overflow: hidden;
+  font-size: var(--fs-xs); color: var(--fg-faint); white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; }
 .sfooter .sf-verb-wrap { display: inline-flex; align-items: baseline; min-width: 0; max-width: 60%;
   animation: verbIn 320ms var(--ease-page) both; }
 @keyframes verbIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .sfooter .sf-fill { flex: 1; min-width: 16px; }
 .sfooter .sf-cluster { display: inline-flex; align-items: baseline; gap: 7px; flex: none;
-  font-family: var(--font-mono, monospace); font-size: 10.5px; letter-spacing: 0.02em;
+  font-family: var(--font-mono, monospace); font-size: var(--fs-xs); letter-spacing: 0.02em;
   color: var(--fg-faint); opacity: 0.85; }
 .sfooter .sf-meta { color: var(--fg-subtle); }
 .sfooter .sf-pip { opacity: 0.5; }
@@ -114,7 +132,7 @@
 .sfooter.stalled .sf-verb {
   animation: none; -webkit-text-fill-color: currentColor;
   background: none; color: var(--warn, #d9a441); }
-.sstall-note { margin: 4px 0 2px; font-size: 12px; line-height: 1.45;
+.sstall-note { margin: 4px 0 2px; font-size: var(--fs-sm); line-height: 1.45;
   color: var(--fg-faint); max-width: 52ch;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
 
@@ -136,7 +154,7 @@
    and the lead icon-box carries a cool-neutral read tint so the row has an
    identity at a glance without shouting. */
 .wline { margin: var(--stream-gap) 0; }
-.wline-head { display: inline-flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--fg-muted);
+.wline-head { display: inline-flex; align-items: center; gap: 9px; font-size: var(--fs-sm); color: var(--fg-muted);
   background: none; border: 0; cursor: pointer; padding: 0; transition: color var(--dur-fast);
   max-width: 100%; min-width: 0; }
 .wline-head:hover { color: var(--fg); }
@@ -153,7 +171,7 @@
 .wline-chev.open { transform: rotate(180deg); }
 .wline-list { margin: 8px 0 2px; padding-left: 27px; display: flex; flex-direction: column; gap: 5px;
   animation: workOpen 0.3s var(--ease-page) both; }
-.wline-row { font-family: var(--font-mono); font-size: 11.5px; line-height: 1.55; color: var(--fg-faint);
+.wline-row { font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.55; color: var(--fg-faint);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wline-row .wr-verb { color: var(--fg-subtle); }
 .wline-row .wr-dir { color: var(--fg-faint); opacity: 0.7; }
@@ -166,7 +184,7 @@
    stop being opaque stubs. Indented under the row via a thin left rule; the
    progressive line-cap + "Show more" lives in OutputBlock. */
 .wr-out { margin: 2px 0 6px; border-left: 2px solid color-mix(in oklch, var(--border) 80%, transparent); }
-.wr-out :global(.oblock-out) { padding: 4px 9px; color: var(--fg-faint); font-size: 11px; }
+.wr-out :global(.oblock-out) { padding: 4px 9px; color: var(--fg-faint); font-size: var(--fs-xs); }
 .wr-out :global(.oblock-acts) { padding: 3px 9px 4px; border-top: 0; }
 /* Detailed tier: full path shown in place of dir+basename. Let the row wrap so
    the whole path is legible rather than ellipsised away. */
@@ -177,7 +195,7 @@
    across the row while it runs so "working on this now" reads as active
    scanning, not a static line waiting. Boxless still — the sweep is a masked
    pseudo-element, no border/fill added to the resting row. */
-.wline-active { position: relative; display: inline-flex; align-items: center; gap: 8px; margin: var(--stream-gap) 0; font-size: 12.5px; color: var(--fg-muted);
+.wline-active { position: relative; display: inline-flex; align-items: center; gap: 8px; margin: var(--stream-gap) 0; font-size: var(--fs-sm); color: var(--fg-muted);
   max-width: 100%; min-width: 0; overflow: hidden;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
 .wline-active::after { content: ""; position: absolute; inset: 0; pointer-events: none;
@@ -187,7 +205,7 @@
 @keyframes waScan { from { background-position: 130% 0; } to { background-position: -130% 0; } }
 .wline-active .wa-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; animation: streamLivePulse var(--pulse-live) ease-out infinite; }
 .wline-active .wa-text { flex: none; }
-.wline-active .wa-cap { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-faint);
+.wline-active .wa-cap { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-faint);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .wline-active .wa-cap .wa-dir { color: var(--fg-faint); opacity: 0.65; }
 .wline-active .wa-cap b { color: var(--fg-2); font-weight: 600; }
@@ -209,11 +227,11 @@
 
 /* ── file-write batch ── */
 .wbatch { margin: var(--stream-gap) 0; display: flex; flex-direction: column; gap: 6px; }
-.wbrow { display: flex; align-items: center; gap: 9px; font-size: 12.5px;
+.wbrow { display: flex; align-items: center; gap: 9px; font-size: var(--fs-sm);
   animation: blockIn var(--dur-base) var(--ease-page) both; }
 .wb-verb { color: var(--fg-muted); }
 .wb-name { color: var(--fg); font-weight: 600; letter-spacing: -0.004em; }
-.wb-diff { display: inline-flex; gap: 6px; font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; }
+.wb-diff { display: inline-flex; gap: 6px; font-family: var(--font-mono); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 .wb-add { color: var(--ok); }
 .wb-del { color: var(--fg-faint); }
 .wb-del.real { color: var(--danger); }
@@ -247,7 +265,7 @@
 /* turn footer — a quiet receipt pill; tone varies by what the turn actually did */
 .sapplied { display: inline-flex; align-items: center; gap: 10px; margin: var(--stream-gap-turn) 0 2px;
   padding: 3px 11px 3px 9px; border-radius: 999px; width: fit-content;
-  font-size: 12px; color: var(--fg-subtle);
+  font-size: var(--fs-sm); color: var(--fg-subtle);
   background: color-mix(in oklab, var(--fg) 4%, transparent);
   border: 1px solid color-mix(in oklab, var(--border) 75%, transparent); }
 .sapplied[data-outcome="applied"] {
@@ -262,8 +280,8 @@
 /* "Changes failed" — edits attempted but all errored */
 .sapplied .bad { display: inline-flex; align-items: center; gap: 5px; color: var(--danger); font-weight: 600; }
 /* distinct-file count next to "Applied" */
-.sapplied .files { font-family: var(--font-mono); font-size: 11.5px; color: var(--ok); }
-.sapplied .sapplied-meta { color: var(--fg-faint); font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; }
+.sapplied .files { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ok); }
+.sapplied .sapplied-meta { color: var(--fg-faint); font-family: var(--font-mono); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 /* a faint separator dot before the meta group keeps time+cost reading as a
    distinct trailing cluster from the Applied/Done verb */
 .sapplied .sapplied-meta::before {
@@ -276,7 +294,7 @@
 .sapplied .sapplied-cost {
   display: inline-flex; align-items: center;
   padding: 1px 7px; border-radius: 6px;
-  font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono); font-size: var(--fs-xs); font-variant-numeric: tabular-nums;
   color: color-mix(in oklab, var(--accent) 78%, var(--fg));
   background: color-mix(in oklab, var(--accent) 9%, transparent);
   cursor: default;
@@ -287,7 +305,7 @@
   opacity: 0.42; transform: none; transition: opacity var(--dur-fast), transform var(--dur-fast); }
 .sturn:hover .msg-acts, .sturn:focus-within .msg-acts { opacity: 1; transform: none; }
 .msg-act { display: inline-flex; align-items: center; gap: 6px; height: 27px; padding: 0 9px; border-radius: 7px;
-  font-size: 11px; font-weight: 500; color: var(--fg-faint); transition: background var(--dur-fast), color var(--dur-fast); }
+  font-size: var(--fs-xs); font-weight: 500; color: var(--fg-faint); transition: background var(--dur-fast), color var(--dur-fast); }
 .msg-act:hover { background: var(--surface-hover); color: var(--fg-2); }
 .msg-act.copied { color: var(--ok); }
 .msg-act svg { flex: none; }
@@ -298,14 +316,14 @@
    reads through it. ── */
 .splan { margin: var(--stream-gap) 0 var(--stream-gap) var(--stream-indent); border-left: 2px solid color-mix(in oklch, var(--border) 80%, transparent); padding-left: 11px; background: transparent;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
-.splan-head { display: flex; align-items: center; gap: 9px; padding: 2px 0 8px; font-size: 12px; color: var(--fg-2); }
+.splan-head { display: flex; align-items: center; gap: 9px; padding: 2px 0 8px; font-size: var(--fs-sm); color: var(--fg-2); }
 .splan-head > svg { color: var(--accent); flex: none; }
 .splan-title { font-weight: 650; letter-spacing: -0.006em; }
 .splan-track { flex: 1; height: 4px; border-radius: 999px; background: color-mix(in oklab, var(--fg) 8%, transparent); overflow: hidden; }
 .splan-fill { display: block; height: 100%; border-radius: 999px; background: var(--accent); transition: width var(--dur-base) var(--ease-page); }
-.splan-count { font-family: var(--font-mono); font-size: 11px; color: var(--fg-subtle); font-variant-numeric: tabular-nums; flex: none; }
+.splan-count { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-subtle); font-variant-numeric: tabular-nums; flex: none; }
 .splan-list { display: flex; flex-direction: column; padding: 2px 0; margin: 0; list-style: none; }
-.splan-item { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: 12.5px; color: var(--fg-muted); }
+.splan-item { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: var(--fs-sm); color: var(--fg-muted); }
 .splan-mark { width: 16px; height: 16px; display: grid; place-items: center; flex: none; }
 .splan-item.is-done .splan-mark { color: var(--ok); }
 .splan-item.is-done .splan-text { color: var(--fg-subtle); }
@@ -318,17 +336,17 @@
 .sxplan { margin: var(--stream-gap) 0 var(--stream-gap) var(--stream-indent); border-left: 2px solid color-mix(in oklch, var(--border) 80%, transparent); padding-left: 11px; background: transparent;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
 .sxplan.pending { border-left-color: color-mix(in oklab, var(--accent) 55%, transparent); }
-.sxplan-head { display: flex; align-items: center; gap: 9px; width: 100%; padding: 2px 0 4px; font-size: 12px; color: var(--fg-2); background: none; border: none; cursor: pointer; text-align: left; }
+.sxplan-head { display: flex; align-items: center; gap: 9px; width: 100%; padding: 2px 0 4px; font-size: var(--fs-sm); color: var(--fg-2); background: none; border: none; cursor: pointer; text-align: left; }
 .sxplan-head > svg { color: var(--accent); flex: none; }
 .sxplan-title { font-weight: 650; letter-spacing: -0.006em; }
 .sxplan.pending .sxplan-title { color: var(--fg); }
 .sxplan-chev { margin-left: auto; display: grid; place-items: center; color: var(--fg-faint); transition: transform var(--dur-base) var(--ease-page); }
 .sxplan-chev.open { transform: rotate(180deg); }
-.sxplan-empty { padding: 2px 0 6px; font-size: 12.5px; color: var(--fg-faint); font-style: italic; }
+.sxplan-empty { padding: 2px 0 6px; font-size: var(--fs-sm); color: var(--fg-faint); font-style: italic; }
 .sxplan-body { padding: 2px 0 6px; font-size: 13px; }
 
 /* ── web search / fetch ── */
-.sweb { display: flex; gap: 9px; margin: var(--stream-gap) 0; font-size: 12.5px; color: var(--fg-muted); animation: blockIn var(--dur-base) var(--ease-page) both; }
+.sweb { display: flex; gap: 9px; margin: var(--stream-gap) 0; font-size: var(--fs-sm); color: var(--fg-muted); animation: blockIn var(--dur-base) var(--ease-page) both; }
 .sweb-ic { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; background: color-mix(in oklab, var(--info) 12%, transparent); color: var(--info); flex: none; }
 .sweb-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding-top: 1px; }
 .sweb-q b { color: var(--fg); font-weight: 600; }
@@ -337,26 +355,28 @@
 /* Source chip — hover lifts it to a link-affordance (these are real domains the
    search hit). The favicon dot is hue-seeded off the domain (see StreamWeb) so
    each source reads distinctly instead of a row of identical grey squares. */
-.sweb-chip { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-subtle); padding: 2px 8px 2px 6px; border-radius: 6px; background: color-mix(in oklch, var(--fg) 6%, transparent); border: 1px solid color-mix(in oklch, var(--border) 60%, transparent); transition: color var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast); }
+.sweb-chip { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-subtle); padding: 2px 8px 2px 6px; border-radius: 6px; background: color-mix(in oklch, var(--fg) 6%, transparent); border: 1px solid color-mix(in oklch, var(--border) 60%, transparent); transition: color var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast); }
 .sweb-chip:hover { color: var(--fg-2); border-color: var(--border-strong); background: color-mix(in oklch, var(--fg) 9%, transparent); }
 .sweb-fav { width: 8px; height: 8px; border-radius: 2px; flex: none;
   background: color-mix(in oklab, var(--fav-h, oklch(0.7 0.12 250)) 85%, transparent); }
-.sweb-more { font-size: 10.5px; color: var(--fg-faint); align-self: center; }
+.sweb-more { font-size: var(--fs-xs); color: var(--fg-faint); align-self: center; }
 
 /* ── test / type-check result ── */
-.sresult { display: flex; align-items: center; gap: 9px; margin: var(--stream-gap) 0; font-size: 12.5px; color: var(--fg-muted); animation: blockIn var(--dur-base) var(--ease-page) both; }
+/* Column now: a BlockHeader row (icon · command · pill/dur/copy/chev) with an
+   expandable failure body under it — the old pill-only row was a dead end. */
+.sresult { display: flex; flex-direction: column; gap: 0; margin: var(--stream-gap) 0; font-size: var(--fs-sm); color: var(--fg-muted); animation: blockIn var(--dur-base) var(--ease-page) both; }
+.sresult .bh { gap: 9px; }
+.sresult .sr-out { margin-top: 4px; border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: color-mix(in oklab, var(--fg) 2%, transparent); overflow: hidden; }
+.sresult.bad .sr-out { border-color: color-mix(in oklab, var(--danger) 30%, var(--border)); }
 /* Icon glyph takes the semantic hue of the outcome (green pass · red fail ·
    neutral running) so it reads as one unit with the pill beside it, instead of
    a grey box that fights the colored pill. Set via .sresult modifier below. */
 .sr-ic { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; background: color-mix(in oklab, var(--fg) 6%, transparent); color: var(--fg-2); flex: none; transition: color var(--dur-fast), background var(--dur-fast); }
 .sresult.ok .sr-ic { color: var(--ok); background: var(--ok-soft); }
 .sresult.bad .sr-ic { color: var(--danger); background: var(--danger-soft); }
-.sr-label { font-family: var(--font-mono); font-size: 11.5px; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sr-pill { flex: none; display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 9px; border-radius: 999px; font-size: 11px; font-weight: 600; }
-.sr-pill.ok { background: var(--ok-soft); color: var(--ok); }
-.sr-pill.bad { background: var(--danger-soft); color: var(--danger); }
-.sr-pill.running { background: color-mix(in oklab, var(--fg) 6%, transparent); color: var(--fg-subtle); font-style: italic; }
-.sr-dur { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--fg-faint); flex: none; }
+.sr-label { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* (pill + duration render via BlockHeader's shared meta cluster now) */
 
 /* (delegated-subagent `.sagent*` rules removed 2026-07-01 — StreamAgent.svelte
    renders sub-agents with its own scoped `.sacard`/`.sa-*` styles now.) */
