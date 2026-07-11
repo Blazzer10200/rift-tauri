@@ -8,6 +8,7 @@
   import { portal } from "$lib/actions/portal";
   import { tooltip } from "$lib/actions/tooltip";
   import { leafName, rootKey } from "$lib/utils/path";
+  import { projectHue } from "$lib/utils/projectHue";
 
   // ── grouping ─────────────────────────────────────────────────────────
   type Group = { label: string; items: ConversationMeta[] };
@@ -245,7 +246,8 @@
         </span>
       {/if}
       {#if shell.allProjects}
-        <span class="crow-proj" title={c.workspaceRoot ?? "Unfiled"}>{projLabel(c.workspaceRoot)}</span>
+        {@const lbl = projLabel(c.workspaceRoot)}
+        <span class="crow-proj" style="--ph:{projectHue(lbl)}" title={c.workspaceRoot ?? "Unfiled"}>{lbl}</span>
       {/if}
       {#if workingIds.has(c.id)}
         <span class="crow-time busy">{fmtElapsed(liveStarts.get(c.id))}</span>
@@ -348,9 +350,13 @@
     background: color-mix(in oklab, var(--accent) 12%, transparent); }
 
   /* per-row project label (All-projects mode only) */
-  .crow-proj { flex: none; max-width: 84px; padding: 1px 6px; border-radius: 5px;
-    font-size: 10px; font-weight: 600; color: var(--fg-faint); background: color-mix(in oklab, var(--fg) 7%, transparent);
+  /* Identity-hue dot + tinted label — All-projects rows color-code themselves. */
+  .crow-proj { flex: none; max-width: 92px; padding: 1px 6px; border-radius: 5px;
+    font-size: 10px; font-weight: 600; color: color-mix(in oklab, oklch(0.78 0.11 var(--ph)) 62%, var(--fg-faint));
+    background: oklch(0.72 0.13 var(--ph) / 0.09);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .crow-proj::before { content: ""; display: inline-block; width: 5px; height: 5px; border-radius: 50%;
+    margin-right: 4px; vertical-align: 1px; background: oklch(0.75 0.14 var(--ph)); }
   .crow:hover .crow-proj, .crow.menu-open .crow-proj { display: none; }
 
   .conv-list { display: flex; flex-direction: column; gap: 1px; overflow-y: auto; min-height: 0; flex: 1; padding: 8px 0;

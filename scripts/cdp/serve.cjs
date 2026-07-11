@@ -510,7 +510,16 @@ async function _screenshotImpl({ format = 'jpeg', quality = 65, clip, selector, 
         resp = await cdp('Page.captureScreenshot', params, 15000, target);
     } finally {
         if (overrideViewport || autoScaled) {
-            await cdp('Emulation.clearDeviceMetricsOverride', {}, 8000, target).catch(() => {});
+            // The clear itself can silently fail during the same pipe congestion
+            // that timed the capture out (observed 2026-07-10: two look timeouts
+            // left the REAL window rendering zoomed until /reset-viewport).
+            // Verify the override actually dropped and retry once before giving up.
+            let ok = false;
+            try { await cdp('Emulation.clearDeviceMetricsOverride', {}, 8000, target); ok = true; } catch {}
+            if (!ok) {
+                await new Promise((res) => setTimeout(res, 600));
+                await cdp('Emulation.clearDeviceMetricsOverride', {}, 8000, target).catch(() => {});
+            }
         }
         // Release any interactive state we forced for the capture, else the UI is
         // left stuck in :hover/:active (poisons the NEXT diff/look — the pointer is

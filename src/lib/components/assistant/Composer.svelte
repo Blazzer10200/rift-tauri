@@ -1656,35 +1656,60 @@
      prompt and the text you type read at the same size. */
   .composer.hero .placeholder-ghost { font-size: 14.5px; line-height: 1.55; top: 11px; left: 14px; right: 12px; }
 
-  /* Streaming = ONE coherent signal: a thin model-tinted border + the
-     animated top-edge bar below (synced 2.6s with the model-pill breathe).
-     No aurora swirl, no extra glow — calm and in-sync. */
+  /* Streaming = the composer visibly breathes: tinted ring (::before), an
+     orbiting comet arc (::after), and an outer halo carried on the box's OWN
+     box-shadow — pseudo shadows get clipped by the well's overflow:hidden,
+     so a halo on ::before never actually painted. */
   .composer.streaming .composer-box {
-    border-color: color-mix(in oklch, var(--model-color) 42%, var(--border));
+    border-color: color-mix(in oklch, var(--model-color) 55%, var(--border));
+    box-shadow:
+      0 10px 28px -10px oklch(0 0 0 / 0.45),
+      0 0 20px -4px color-mix(in oklch, var(--model-color) 45%, transparent),
+      0 0 42px -4px color-mix(in oklch, var(--model-color) 26%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 4%, transparent);
   }
-  /* Full-frame streaming ring — a model-tinted border that breathes around
-     the entire composer (synced 2.6s with the model-pill breathe). Sits as a
-     border-only overlay (transparent center, pointer-events none) so it traces
-     the frame without crossing the input text. */
   .composer.streaming .composer-box::before {
     content: "";
     position: absolute;
     inset: 0;
-    border-radius: 14px;
-    border: 1.5px solid color-mix(in oklch, var(--model-color) 65%, transparent);
-    box-shadow:
-      0 0 12px color-mix(in oklch, var(--model-color) 32%, transparent),
-      inset 0 0 8px color-mix(in oklch, var(--model-color) 16%, transparent);
+    border-radius: inherit;
+    border: 1.5px solid color-mix(in oklch, var(--model-color) 55%, transparent);
+    box-shadow: inset 0 0 10px color-mix(in oklch, var(--model-color) 18%, transparent);
     pointer-events: none;
     animation: composer-stream 2.6s ease-in-out infinite;
     z-index: 2;
   }
-  @keyframes composer-stream {
-    0%, 100% { opacity: 0.35; }
-    50%      { opacity: 1; }
+  /* Comet — a bright model-tinted arc tracing the frame edge (conic gradient
+     masked to a border-width ring, angle driven by a registered @property).
+     Asymmetric stops = long faint tail building into a hot head. */
+  .composer.streaming .composer-box::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    padding: 2px;
+    background: conic-gradient(from var(--stream-angle),
+      transparent 0deg,
+      color-mix(in oklch, var(--model-color) 60%, transparent) 34deg,
+      color-mix(in oklch, var(--model-color) 45%, white) 54deg,
+      transparent 62deg);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask-composite: exclude;
+    pointer-events: none;
+    animation: composer-orbit 3.4s linear infinite;
+    z-index: 3;
   }
+  @property --stream-angle { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+  @keyframes composer-stream {
+    0%, 100% { opacity: 0.5; }
+    50%      { opacity: 0.85; }
+  }
+  @keyframes composer-orbit { to { --stream-angle: 360deg; } }
   @media (prefers-reduced-motion: reduce) {
-    .composer.streaming .composer-box::before { animation: none; opacity: 0.7; }
+    .composer.streaming .composer-box::before { animation: none; opacity: 0.8; }
+    .composer.streaming .composer-box::after { display: none; }
   }
 
   .textarea-wrap {

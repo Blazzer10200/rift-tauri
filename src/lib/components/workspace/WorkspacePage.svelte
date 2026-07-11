@@ -21,6 +21,7 @@
   import { workspace } from "../../state/workspace.svelte";
   import { goHome } from "../../state/nav";
   import { prettyPath, leafName, shortPath } from "../shell/tabsbar/helpers";
+  import { projectHue } from "$lib/utils/projectHue";
   import { notify } from "../../state/toast.svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import { globSummary } from "./globPreview";
@@ -523,7 +524,7 @@
                   onclick={() => (active ? goHome() : void openProject(p))}
                   onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); active ? goHome() : void openProject(p); } }}>
                   <div class="pcard-top">
-                    <span class="pcard-mono">{monogram(p.name)}</span>
+                    <span class="pcard-mono" style="--ph:{projectHue(p.name)}">{monogram(p.name)}</span>
                     <div class="pcard-id">
                       <div class="pcard-name-row">
                         <span class="pcard-name">{p.name}</span>
@@ -591,7 +592,20 @@
         </div>
 
         {#if statsLoading}
-          <div class="act-state"><Loader2 size={16} class="spin" /><span>Reading conversations…</span></div>
+          <!-- Skeleton in the shape of the incoming chart — reads as "already
+               rendering" instead of a spinner void. Bar heights are a fixed
+               pseudo-random sequence so the frame is stable across loads. -->
+          <div class="act-skel" role="status" aria-label="Reading conversations…">
+            <div class="ask-left">
+              <span class="skel ask-num"></span>
+              <span class="skel ask-sub"></span>
+            </div>
+            <div class="ask-bars" aria-hidden="true">
+              {#each Array.from({ length: 16 }) as _, i (i)}
+                <span class="skel ask-bar" style="height:{22 + ((i * 53) % 58)}%"></span>
+              {/each}
+            </div>
+          </div>
         {:else if statsError}
           <div class="act-state err">
             <AlertTriangle size={18} />
@@ -781,6 +795,22 @@
     .act-card { grid-template-columns: minmax(0, 1fr); gap: 18px; }
     .act-side { padding-left: 0; border-left: 0; padding-top: 16px; border-top: 1px solid var(--border); }
   }
+  /* loading skeleton — ghost hero number + a row of chart bars, shimmering */
+  .act-skel { display: flex; align-items: flex-end; gap: 28px; padding: 22px 20px 18px; min-height: 150px; }
+  .ask-left { display: flex; flex-direction: column; gap: 9px; flex: none; }
+  .ask-num { width: 110px; height: 30px; border-radius: 8px; }
+  .ask-sub { width: 170px; height: 12px; border-radius: 6px; }
+  .ask-bars { flex: 1; display: flex; align-items: flex-end; gap: 6px; height: 96px; }
+  .ask-bar { flex: 1; min-width: 6px; border-radius: 4px 4px 2px 2px; }
+  .skel {
+    background: linear-gradient(100deg, color-mix(in oklab, var(--fg) 6%, transparent) 40%,
+      color-mix(in oklab, var(--fg) 11%, transparent) 50%, color-mix(in oklab, var(--fg) 6%, transparent) 60%);
+    background-size: 220% 100%;
+    animation: skel-shimmer 1.5s ease-in-out infinite;
+  }
+  @keyframes skel-shimmer { from { background-position: 130% 0; } to { background-position: -70% 0; } }
+  @media (prefers-reduced-motion: reduce) { .skel { animation: none; } }
+
   .act-state { display: flex; flex-direction: column; align-items: center; gap: 9px; padding: 34px 20px; text-align: center;
     font-size: var(--fs-sm); color: var(--fg-subtle); border-radius: var(--radius-2xl);
     border: 1px solid var(--border); background: var(--bg-elev-1); }
@@ -1005,12 +1035,14 @@
     box-shadow: 0 14px 36px -24px color-mix(in oklab, var(--accent) 55%, transparent); }
   .pcard.active:hover { border-color: color-mix(in oklab, var(--accent) 50%, var(--border)); }
   .pcard-top { display: flex; align-items: center; gap: 11px; min-width: 0; }
+  /* Identity hue (--ph, hashed from the project name) instead of the shared
+     accent — each project wears its own color across card/switcher/chips. */
   .pcard-mono { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: var(--radius);
-    font-size: 13px; font-weight: 700; color: var(--accent); background: var(--accent-soft);
-    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 30%, transparent); }
-  .pcard.active .pcard-mono { color: var(--accent-fg);
-    background: linear-gradient(150deg, color-mix(in oklab, var(--accent) 92%, white), var(--accent));
-    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 60%, transparent), 0 4px 12px -6px color-mix(in oklab, var(--accent) 50%, transparent); }
+    font-size: 13px; font-weight: 700; color: oklch(0.78 0.14 var(--ph)); background: oklch(0.72 0.14 var(--ph) / 0.13);
+    box-shadow: inset 0 0 0 1px oklch(0.75 0.14 var(--ph) / 0.3); }
+  .pcard.active .pcard-mono { color: oklch(0.19 0.03 var(--ph));
+    background: linear-gradient(150deg, oklch(0.83 0.15 var(--ph)), oklch(0.72 0.15 var(--ph)));
+    box-shadow: inset 0 0 0 1px oklch(0.75 0.15 var(--ph) / 0.6), 0 4px 12px -6px oklch(0.72 0.15 var(--ph) / 0.5); }
   .pcard-id { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .pcard-name-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
   .pcard-name { font-size: var(--fs-md); font-weight: 640; letter-spacing: -0.01em; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

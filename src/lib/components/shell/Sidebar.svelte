@@ -237,14 +237,15 @@
   /* ── collapsed mini-rail ── an icon column that fades in as the full rail
      fades out; slight delay so the two never overlap mid-tween. */
   .mini { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; gap: 5px;
-    padding: 8px 0 10px; border-right: 1px solid var(--border); box-sizing: border-box;
+    padding: 2px 0 10px; box-sizing: border-box;
     background: linear-gradient(180deg, color-mix(in oklab, var(--fg) 3.6%, var(--bg)), color-mix(in oklab, var(--fg) 1.6%, var(--bg)) 260px);
     opacity: 0; pointer-events: none; transform: translateX(-8px);
     transition: opacity 0.2s var(--ease-page), transform 0.26s var(--ease-page); }
+  .mini::after { content: ""; position: absolute; top: 40px; right: 0; bottom: 0; width: 1px; background: var(--border); pointer-events: none; }
   .side-rail.collapsed .mini { opacity: 1; pointer-events: auto; transform: none; transition-delay: 0.1s; }
   .mini button { -webkit-app-region: no-drag; }
 
-  .mini-brand { position: relative; width: 36px; height: 36px; display: grid; place-items: center; border-radius: 9px; flex: none;
+  .mini-brand { position: relative; width: 36px; height: 36px; margin-bottom: 6px; display: grid; place-items: center; border-radius: 9px; flex: none;
     transition: background var(--dur-fast); }
   .mini-brand .mb-logo, .mini-brand .mb-open { grid-area: 1 / 1; display: grid; place-items: center; transition: opacity var(--dur-fast); }
   .mini-brand :global(.mb-logo svg) { border-radius: 7px; display: block; }
@@ -264,21 +265,25 @@
   .mini-spacer { flex: 1; }
   @media (prefers-reduced-motion: reduce) { .mini { transition: none; } }
 
-  .side-resize { position: absolute; top: 0; right: 0; width: 8px; height: 100%; z-index: 6; cursor: col-resize; -webkit-app-region: no-drag; }
+  /* Handle starts below the top strip so the strip stays fully draggable. */
+  .side-resize { position: absolute; top: 40px; right: 0; width: 8px; height: calc(100% - 40px); z-index: 6; cursor: col-resize; -webkit-app-region: no-drag; }
   .side-resize::after { content: ""; position: absolute; top: 0; right: 0; width: 2px; height: 100%; background: transparent; transition: background var(--dur-fast); }
   .side-resize:hover::after, .side-rail.resizing .side-resize::after { background: var(--accent); }
 
-  .sidebar { width: 100%; height: 100%; flex: none; display: flex; flex-direction: column; gap: 4px; min-height: 0;
-    padding: 8px 10px 10px; border-right: 1px solid var(--border);
+  .sidebar { position: relative; width: 100%; height: 100%; flex: none; display: flex; flex-direction: column; gap: 4px; min-height: 0;
+    padding: 0 10px 10px;
     background: linear-gradient(180deg, color-mix(in oklab, var(--fg) 3.6%, var(--bg)), color-mix(in oklab, var(--fg) 1.6%, var(--bg)) 260px);
     box-shadow: inset 0 1px 0 color-mix(in oklab, var(--fg) 4%, transparent);
     box-sizing: border-box; transition: transform 0.36s var(--ease-page), opacity 0.26s var(--ease-page); }
+  /* Divider starts BELOW the 40px top strip so the sidebar head + topbar read
+     as one continuous drag bar across the window. */
+  .sidebar::after { content: ""; position: absolute; top: 40px; right: 0; bottom: 0; width: 1px; background: var(--border); pointer-events: none; }
   .sidebar.home { background: color-mix(in oklab, var(--bg) 72%, transparent);
-    backdrop-filter: blur(18px) saturate(1.1); -webkit-backdrop-filter: blur(18px) saturate(1.1);
-    border-right-color: color-mix(in oklab, var(--border) 70%, transparent); }
+    backdrop-filter: blur(18px) saturate(1.1); -webkit-backdrop-filter: blur(18px) saturate(1.1); }
+  .sidebar.home::after { background: color-mix(in oklab, var(--border) 70%, transparent); }
   .sidebar button { -webkit-app-region: no-drag; }
 
-  .side-head { display: flex; align-items: center; justify-content: space-between; height: 40px; padding: 0 6px 0 8px; flex: none; -webkit-app-region: drag; }
+  .side-head { display: flex; align-items: center; justify-content: space-between; height: 40px; margin-bottom: 8px; padding: 0 6px 0 8px; flex: none; -webkit-app-region: drag; }
   .brand { display: inline-flex; align-items: center; gap: 9px; }
   .brand :global(.brand-mk) { border-radius: 7px; display: block; }
   .brand-name { font-size: 14px; font-weight: 650; letter-spacing: -0.012em; color: var(--fg); }

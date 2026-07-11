@@ -17,11 +17,14 @@
   import { portal } from "$lib/actions/portal";
   import { tooltip } from "$lib/actions/tooltip";
 
+  import { projectHue } from "$lib/utils/projectHue";
+
   const list = $derived(projects.sorted);
   const activeKey = $derived(projectRootKey(assistant.activeRoot));
   const isActive = (p: Project) => !!activeKey && projectRootKey(p.root) === activeKey;
   const monogram = (name: string) => (name.trim().match(/[a-z0-9]/i)?.[0] ?? "·").toUpperCase();
   const activeProject = $derived(list.find(isActive) ?? null);
+  const activeHue = $derived(projectHue(activeProject?.name ?? "·"));
   // `assistant.workspaceBranch` is the FOCUSED-tab store field: it transiently
   // clears whenever a non-chat surface (Settings, AI Health) mounts and the
   // focused root shifts off the project, which made the branch pill flip to
@@ -127,7 +130,7 @@
   aria-haspopup="menu"
   aria-expanded={menuOpen}
 >
-  <span class="sw-mono" class:all={shell.allProjects}>
+  <span class="sw-mono" class:all={shell.allProjects} style="--ph:{activeHue}">
     {#if shell.allProjects}<Layers size={14} />{:else}{monogram(activeProject?.name ?? "·")}{/if}
   </span>
   <span class="sw-meta">
@@ -172,7 +175,7 @@
         oncontextmenu={(e) => onItemContext(e, p)}
         use:tooltip={`Open ${p.name} · drag to a pane to split · right-click for options`}
       >
-        <span class="sw-item-mk">{monogram(p.name)}</span>
+        <span class="sw-item-mk" style="--ph:{projectHue(p.name)}">{monogram(p.name)}</span>
         <span class="sw-item-nm">{p.name}</span>
         {#if !shell.allProjects && isActive(p)}<Check size={14} class="sw-item-ck" />{/if}
       </button>
@@ -194,9 +197,10 @@
     border-radius: 11px; border: 1px solid var(--border); background: var(--bg-inset);
     transition: border-color var(--dur-fast), background var(--dur-fast); }
   .switcher:hover, .switcher.open { border-color: var(--border-strong); background: var(--surface); }
+  /* Monogram tiles wear the project's identity hue (--ph), not the accent. */
   .sw-mono { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: 8px;
-    font-size: 12px; font-weight: 700; letter-spacing: -0.01em; color: var(--accent); background: var(--accent-soft);
-    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 24%, transparent); }
+    font-size: 12px; font-weight: 700; letter-spacing: -0.01em; color: oklch(0.78 0.14 var(--ph)); background: oklch(0.72 0.14 var(--ph) / 0.13);
+    box-shadow: inset 0 0 0 1px oklch(0.75 0.14 var(--ph) / 0.28); }
   .sw-mono.all { color: var(--fg-muted); background: color-mix(in oklab, var(--fg) 9%, transparent); box-shadow: none; }
   .sw-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; text-align: left; }
   .sw-name { font-size: 13px; font-weight: 650; color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -227,9 +231,9 @@
   :global(.sw-menu .sw-item.add:hover) { cursor: pointer; }
   :global(.sw-menu .sw-item.on) { background: color-mix(in oklab, var(--fg) 10%, transparent); color: var(--fg); }
   :global(.sw-menu .sw-item-mk) { width: 22px; height: 22px; flex: none; display: grid; place-items: center; border-radius: 6px;
-    font-size: 11px; font-weight: 700; color: var(--accent); background: var(--accent-soft);
-    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 24%, transparent); }
-  :global(.sw-menu .sw-item.on .sw-item-mk) { background: var(--accent); color: var(--bg); box-shadow: none; }
+    font-size: 11px; font-weight: 700; color: oklch(0.78 0.14 var(--ph)); background: oklch(0.72 0.14 var(--ph) / 0.13);
+    box-shadow: inset 0 0 0 1px oklch(0.75 0.14 var(--ph) / 0.28); }
+  :global(.sw-menu .sw-item.on .sw-item-mk) { background: oklch(0.75 0.14 var(--ph)); color: var(--bg); box-shadow: none; }
   :global(.sw-menu .mk-all), :global(.sw-menu .mk-add) { color: var(--fg-muted); background: color-mix(in oklab, var(--fg) 9%, transparent); box-shadow: none; }
   :global(.sw-menu .sw-item.on .mk-all) { background: var(--accent); color: var(--bg); }
   :global(.sw-menu .sw-item-nm) { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

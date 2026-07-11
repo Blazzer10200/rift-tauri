@@ -254,10 +254,12 @@
       <OnboardingFlow onDone={finishOnboarding} />
     </div>
   {:else}
+    <!-- Full-window strip ABOVE the body: keeps the sidebar head + topbar
+         aligned as one continuous top band even while a banner shows. -->
+    <UpdateBanner />
     <div class="app-body">
       <Sidebar />
       <div class="main">
-        <UpdateBanner />
         <Topbar />
         <main class="workspace">
           <WorkspaceShell />
