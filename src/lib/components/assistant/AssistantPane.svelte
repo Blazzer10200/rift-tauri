@@ -137,10 +137,32 @@
     scrollToXch(Math.min(exchangeCount - 1, Math.max(0, activeXch + dir)));
   }
 
+  // Programmatic scrolls must never un-latch stickToBottom. Scroll events echo
+  // ASYNCHRONOUSLY after a pin — if content grew in between, the handler reads
+  // gap > 80 from our own echo and kills follow (the classic dead-autoscroll
+  // race during bursty streams / conversation hydration). So every pin records
+  // the position it set (pinEcho) and its echo is ignored; smooth glides get a
+  // latch-only window (glideUntil) since their intermediate positions are
+  // unpredictable. Only scroll positions WE didn't create can un-latch.
+  let glideUntil = 0;
+  let pinEcho = -1;
+
+  function pinToBottom() {
+    if (!scrollEl) return;
+    scrollEl.scrollTop = scrollEl.scrollHeight;
+    pinEcho = scrollEl.scrollTop; // post-clamp actual position
+  }
+
   function onScroll() {
     if (!scrollEl) return;
     const gap = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
-    stickToBottom = gap < 80;
+    if (Math.abs(scrollEl.scrollTop - pinEcho) < 2) {
+      // echo of our own pin — content may have grown since; stay latched
+    } else if (performance.now() < glideUntil) {
+      if (gap < 80) glideUntil = 0; // glide arrived — resume normal tracking
+    } else {
+      stickToBottom = gap < 80;
+    }
     scrolledTop = scrollEl.scrollTop > 8;
     updateActiveXch();
     if (tabId) assistant.setTabScroll(tabId, scrollEl.scrollTop);
@@ -152,7 +174,7 @@
       // Background-pane streams: only force-stick when the user was already
       // at the bottom — don't yank the scroll on a pane they're reading
       // mid-history just because a sibling pane is streaming.
-      if (scrollEl && stickToBottom) scrollEl.scrollTop = scrollEl.scrollHeight;
+      if (stickToBottom) pinToBottom();
     });
     ro.observe(messagesEl);
     return () => ro.disconnect();
@@ -163,7 +185,7 @@
     const _streaming = streaming;
     void _len; void _streaming;
     void tick().then(() => {
-      if (scrollEl && stickToBottom) scrollEl.scrollTop = scrollEl.scrollHeight;
+      if (stickToBottom) pinToBottom();
     });
   });
 
@@ -176,11 +198,14 @@
     void tick().then(() => {
       if (!scrollEl) return;
       if (cached != null) {
-        scrollEl.scrollTo({ top: cached, behavior: "smooth" });
+        // Instant — a smooth glide here animates from the PREVIOUS tab's
+        // scroll position across the new tab's content. Pure noise.
+        scrollEl.scrollTop = cached;
+        pinEcho = scrollEl.scrollTop;
         const gap = scrollEl.scrollHeight - cached - scrollEl.clientHeight;
         stickToBottom = gap < 80;
       } else {
-        scrollEl.scrollTop = scrollEl.scrollHeight;
+        pinToBottom();
         stickToBottom = true;
       }
     });
@@ -188,8 +213,9 @@
 
   function jumpToLatest() {
     if (!scrollEl) return;
-    scrollEl.scrollTo({ top: scrollEl.scrollHeight, behavior: "smooth" });
     stickToBottom = true;
+    glideUntil = performance.now() + 700;
+    scrollEl.scrollTo({ top: scrollEl.scrollHeight, behavior: "smooth" });
   }
 
   // ── Composer FLIP: home (centered hero) → conversation (docked bottom) ────
@@ -203,6 +229,8 @@
 
   function handleSend(text: string) {
     if (showEmpty && composerSlotEl) flipFirst = composerSlotEl.getBoundingClientRect();
+    // Sending always re-latches follow — your own message must be on screen.
+    stickToBottom = true;
     assistant.send(text, tabId);
   }
 
@@ -483,7 +511,7 @@
       {#if showEmpty}
         <AssistantWelcome {needsAuth} {tabId} />
       {:else}
-        <div class="stream" bind:this={scrollEl} onscroll={onScroll}>
+        <div class="stream" bind:this={scrollEl} onscroll={onScroll} onwheel={() => (glideUntil = 0)}>
           <div class="messages" bind:this={messagesEl}>
             {#each messages as m, mi (m.id)}
               {#if uiPrefs.streamMode && m.role === "assistant"}
@@ -925,6 +953,9 @@
     overflow-y: auto;
     padding: 16px 18px 8px;
     scroll-padding-bottom: 28px;
+    /* Follow-pin owns scroll position — native anchoring tugs against it when
+       content above the viewport resizes (late highlight, output slides). */
+    overflow-anchor: none;
     display: flex; flex-direction: column;
     scrollbar-width: none;
   }

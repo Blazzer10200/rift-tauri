@@ -153,7 +153,7 @@
    often the BULK of a turn, so the summary sits at --fg-muted (was --fg-subtle)
    and the lead icon-box carries a cool-neutral read tint so the row has an
    identity at a glance without shouting. */
-.wline { margin: var(--stream-gap) 0; }
+.wline { margin: var(--stream-gap) 0; animation: blockIn var(--dur-base) var(--ease-page) both; }
 .wline-head { display: inline-flex; align-items: center; gap: 9px; font-size: var(--fs-sm); color: var(--fg-muted);
   background: none; border: 0; cursor: pointer; padding: 0; transition: color var(--dur-fast);
   max-width: 100%; min-width: 0; }
@@ -257,7 +257,7 @@
   /* Entrance slides + pulse dots — everything blockIn/workOpen/streamLivePulse
      drives. animation:none on a `both`-fill entrance lands at natural styles. */
   .sturn-head, .snarr, .snarr-beat, .sfooter, .sstall-note,
-  .wline-list, .wline-active, .wbrow, .splan, .sxplan, .sweb, .sresult { animation: none; }
+  .wline, .wline-list, .wline-active, .wbrow, .splan, .sxplan, .sweb, .sresult { animation: none; }
   .sturn-head.live .sh-dot, .wline-active .wa-dot, .wb-dot.live { animation: none; }
   .wline-active::after { animation: none; background: none; }
 }

@@ -805,9 +805,10 @@
   // In-flight spoken words for THIS pane — rendered as a dim ghost tail after
   // the solid draft; they "turn white" when the final transcript commits.
   let ghostEl = $state<HTMLDivElement | null>(null);
-  const dictGhost = $derived(
-    stt.targetTabId === tabId && (stt.recording || stt.transcribing) ? stt.ghostTail : "",
+  const dictating = $derived(
+    stt.targetTabId === tabId && (stt.recording || stt.transcribing),
   );
+  const dictGhost = $derived(dictating ? stt.ghostTail : "");
   $effect(() => {
     const _g = dictGhost;
     void _g;
@@ -1287,7 +1288,9 @@
           rows="1"
           readonly={enhancing}
         ></textarea>
-        {#if hero && draft.length === 0 && !streaming && attachments.length === 0}
+        {#if dictating && draft.length === 0}
+          {#if !dictGhost}<span class="placeholder-ghost static" aria-hidden="true">Listening…</span>{/if}
+        {:else if hero && draft.length === 0 && !streaming && attachments.length === 0}
           <span class="placeholder-ghost static" aria-hidden="true">What are we working on today?</span>
         {:else if draft.length === 0 && !streaming && attachments.length === 0}
           <span class="placeholder-ghost static" aria-hidden="true">Ask {localLlm.askLabel} · <span class="ph-k">/</span> for commands · <span class="ph-k">@</span> to mention a file{#if stt.config.enabled} · <span class="ph-k">Ctrl+D</span> to dictate{/if}</span>
