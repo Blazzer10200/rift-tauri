@@ -113,18 +113,80 @@ pub(crate) fn current_root() -> Option<PathBuf> {
     load_config().current_root
 }
 
-/// The persistent local scratch workspace used when no project folder is open.
-/// Resolves to `%LOCALAPPDATA%\Rift\local` (pattern mirrors `certs.rs` — prefer
-/// LOCALAPPDATA, which GPO forbids redirecting, over a redirectable temp dir),
-/// always `create_dir_all`'d so it self-heals a deleted dir and is guaranteed to
-/// exist for the MCP containment boundary + `current_dir`. Backend-resolved only,
-/// never renderer-supplied → no path-injection surface.
-pub(crate) fn local_scratch_dir() -> Result<PathBuf, String> {
+/// The user-visible Documents folder, resolved the way Explorer does — the
+/// `User Shell Folders\Personal` registry value (REG_EXPAND_SZ; honors OneDrive
+/// Known-Folder-Move redirection), falling back to `%USERPROFILE%\Documents`.
+/// `None` when neither resolves to an existing dir.
+#[cfg(windows)]
+fn documents_dir() -> Option<PathBuf> {
+    use winreg::enums::HKEY_CURRENT_USER;
+    use winreg::RegKey;
+    RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders")
+        .ok()
+        .and_then(|k| k.get_value::<String, _>("Personal").ok())
+        .map(|raw| PathBuf::from(super::cli_install::expand_env_refs(&raw)))
+        .filter(|p| p.is_dir())
+        .or_else(|| {
+            super::dirs_home().ok().map(|h| h.join("Documents")).filter(|p| p.is_dir())
+        })
+}
+
+#[cfg(not(windows))]
+fn documents_dir() -> Option<PathBuf> {
+    None
+}
+
+/// The pre-v0.104 hidden scratch location (`%LOCALAPPDATA%\Rift\local`). Still
+/// the active location when Documents can't be resolved or a legacy dir with
+/// content can't be moved — never silently strand a user's files.
+fn legacy_scratch_base() -> PathBuf {
     let base = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .filter(|p| p.is_dir())
         .unwrap_or_else(std::env::temp_dir);
-    let dir = base.join("Rift").join("local");
+    base.join("Rift").join("local")
+}
+
+/// The persistent local scratch workspace used when no project folder is open.
+/// Resolves to `Documents\Rift Workspace` — a folder the user can actually FIND
+/// in Explorer (the whole point of working without a project is making files
+/// you can locate later). One-time migration hoists a non-empty legacy
+/// `%LOCALAPPDATA%\Rift\local`; if the move fails (cross-volume, locked file)
+/// the legacy dir stays authoritative so nothing is stranded. Always
+/// `create_dir_all`'d so it self-heals a deleted dir and is guaranteed to exist
+/// for the MCP containment boundary + `current_dir`. Backend-resolved only,
+/// never renderer-supplied → no path-injection surface.
+pub(crate) fn local_scratch_dir() -> Result<PathBuf, String> {
+    if let Some(docs) = documents_dir() {
+        let dir = docs.join("Rift Workspace");
+        if !dir.is_dir() {
+            let legacy = legacy_scratch_base();
+            let legacy_has_content = std::fs::read_dir(&legacy)
+                .map(|mut it| it.next().is_some())
+                .unwrap_or(false);
+            if legacy_has_content {
+                match std::fs::rename(&legacy, &dir) {
+                    Ok(()) => log::info!(
+                        "scratch: migrated {} -> {}",
+                        legacy.display(),
+                        dir.display()
+                    ),
+                    Err(e) => {
+                        log::warn!(
+                            "scratch: could not migrate legacy dir ({e}); keeping {}",
+                            legacy.display()
+                        );
+                        return Ok(legacy);
+                    }
+                }
+            }
+        }
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("could not create local scratch dir: {e}"))?;
+        return Ok(dir);
+    }
+    let dir = legacy_scratch_base();
     std::fs::create_dir_all(&dir).map_err(|e| format!("could not create local scratch dir: {e}"))?;
     Ok(dir)
 }
@@ -281,8 +343,15 @@ mod tests {
     fn local_scratch_dir_creates_and_is_dir() {
         let dir = local_scratch_dir().expect("scratch dir resolves");
         assert!(dir.is_dir(), "scratch dir must exist after resolve");
-        assert!(dir.ends_with("Rift/local") || dir.ends_with("Rift\\local"),
-            "scratch dir tail should be Rift/local, got {}", dir.display());
+        // Documents-visible location when Documents resolves; legacy hidden
+        // location on machines where it doesn't (or a stuck migration).
+        assert!(
+            dir.ends_with("Rift Workspace")
+                || dir.ends_with("Rift/local")
+                || dir.ends_with("Rift\\local"),
+            "scratch dir tail should be 'Rift Workspace' or legacy Rift/local, got {}",
+            dir.display()
+        );
     }
 
     #[test]

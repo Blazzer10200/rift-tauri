@@ -4,6 +4,7 @@
     X, Folder, GitBranch, ChevronRight, ChevronDown,
     Compass, MessageSquare, Shield, Zap, BarChart3,
   } from "lucide-svelte";
+  import { openPath } from "@tauri-apps/plugin-opener";
   import { assistant } from "../../state/assistant.svelte";
   import { workspace } from "../../state/workspace.svelte";
   import RiftLogo from "$lib/components/shell/RiftLogo.svelte";
@@ -197,12 +198,23 @@
     <div class="wel-inner welcome-cold">
       {#if assistant.isLocalMode}
         <!-- Local scratch active — no project folder, but turns run with full
-             tools in %LOCALAPPDATA%\Rift\local. The "Open a project" CTA + recents
+             tools in Documents\Rift Workspace (legacy %LOCALAPPDATA%\Rift\local).
+             The path chip opens it in Explorer; the "Open a project" CTA + recents
              below let the user switch to a real repo whenever they want. -->
         <div class="welcome-hero local-hero">
           <div class="welcome-mark local-mark"><HardDrive size={28} /></div>
           <h1 class="welcome-title">Working locally</h1>
-          <p class="welcome-tag">No project folder — just start chatting. The assistant reads, writes, and runs in a private scratch workspace. Open a folder below to switch to a real project.</p>
+          <p class="welcome-tag">No project folder — just start chatting. Everything the assistant makes lands in your Rift Workspace folder, right in Documents. Open a folder below to switch to a real project.</p>
+          {#if assistant.localScratchPath}
+            <button
+              class="local-path"
+              type="button"
+              onclick={() => { const p = assistant.localScratchPath; if (p) void openPath(p); }}
+              use:tooltip={"Show these files in Explorer"}
+            >
+              <Folder size={12} /><span>{shortPath(assistant.localScratchPath)}</span>
+            </button>
+          {/if}
         </div>
       {:else}
         <!-- Hero — logo over a soft accent aura + a vertical "rift" seam of light. -->
@@ -454,6 +466,14 @@
     box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.06), 0 14px 34px -16px color-mix(in oklab, var(--accent) 60%, transparent);
   }
   .local-mark { color: color-mix(in oklab, var(--accent) 80%, var(--fg)); }
+  /* Quiet mono path chip under the local-hero tag — opens the folder in Explorer. */
+  .local-path {
+    display: inline-flex; align-items: center; gap: 6px; margin-top: 10px;
+    padding: 4px 10px; border-radius: 7px; cursor: pointer;
+    border: 1px solid var(--border); background: var(--bg-inset);
+    color: var(--fg-subtle); font-family: var(--font-mono); font-size: 11px;
+  }
+  .local-path:hover { color: var(--fg-2); border-color: var(--border-strong); background: var(--bg-elev-1); }
   .welcome-title { margin: 5px 0 0; font-size: 28px; font-weight: 600; letter-spacing: -0.024em; color: var(--fg); }
   .welcome-tag {
     margin: 0; max-width: 44ch; color: var(--fg-subtle); font-size: 13.5px;

@@ -964,7 +964,8 @@ async fn resolve_spawn(
         .map(PathBuf::from)
         .filter(|p| p.is_dir());
     // No folder open → fall back to the persistent local scratch workspace
-    // (`%LOCALAPPDATA%\Rift\local`) so the standard OAuth no-folder turn gets the
+    // (`Documents\Rift Workspace`; legacy `%LOCALAPPDATA%\Rift\local`) so the
+    // standard OAuth no-folder turn gets the
     // full tool set + MCP boundary instead of a dead `--tools ""` chat. Gated to
     // the full-config OAuth path: API-key / local-LLM / (later) sandboxed branches
     // keep the empty roots → no-tools fallback intact (mirrors the `use_full_config`

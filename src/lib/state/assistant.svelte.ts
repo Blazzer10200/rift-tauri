@@ -584,9 +584,10 @@ class AssistantStore {
   }
 
   /** No project folder open, but the backend scratch workspace is available →
-   *  turns silently run in `%LOCALAPPDATA%\Rift\local` with the full tool set.
-   *  Drives the "Local" badge + welcome card. `effectiveRoot` stays null in this
-   *  mode (the backend fills the scratch dir per turn). */
+   *  turns silently run in `Documents\Rift Workspace` (legacy
+   *  `%LOCALAPPDATA%\Rift\local`) with the full tool set. Drives the "Local"
+   *  badge + welcome card. `effectiveRoot` stays null in this mode (the backend
+   *  fills the scratch dir per turn). */
   get isLocalMode(): boolean {
     return !this.workspace.current && !!this.localScratchPath;
   }

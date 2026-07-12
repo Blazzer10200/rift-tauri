@@ -85,7 +85,7 @@ fn expand_env_refs_with(s: &str, lookup: impl Fn(&str) -> Option<String>) -> Str
 /// `%VAR%` expansion against the process environment (registry `Path` values
 /// are commonly REG_EXPAND_SZ; winreg decodes but does not expand them).
 #[cfg(windows)]
-fn expand_env_refs(s: &str) -> String {
+pub(super) fn expand_env_refs(s: &str) -> String {
     expand_env_refs_with(s, |name| std::env::var(name).ok())
 }
 
