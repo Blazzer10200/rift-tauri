@@ -20,8 +20,27 @@ const TARGET_HZ: u32 = 16_000;
 /// oldest audio still falls off (warned at drain).
 const MAX_BUFFER_SECS: usize = 300;
 
+/// Ring storage + absolute-offset bookkeeping. `start` is the absolute sample
+/// index (since capture start) of `buf[0]` — it advances as the cap evicts old
+/// samples, so segment boundaries recorded as absolute offsets stay valid even
+/// after eviction.
+pub struct RingBuf {
+    buf: VecDeque<f32>,
+    start: u64,
+}
+
+impl RingBuf {
+    fn new(capacity: usize) -> Self {
+        Self { buf: VecDeque::with_capacity(capacity), start: 0 }
+    }
+    /// Absolute sample index one past the newest sample.
+    fn end(&self) -> u64 {
+        self.start + self.buf.len() as u64
+    }
+}
+
 /// Shared 16 kHz mono f32 ring buffer. Cheap to clone (Arc).
-pub type AudioRing = Arc<Mutex<VecDeque<f32>>>;
+pub type AudioRing = Arc<Mutex<RingBuf>>;
 
 /// Live capture session. Dropping it stops the cpal stream.
 pub struct AudioCapture {
@@ -75,9 +94,7 @@ pub fn start_capture(device_name: Option<&str>) -> Result<AudioCapture, String> 
 
     // Pre-alloc 1 min; grows amortized toward MAX_BUFFER_SECS only when a
     // dictation actually runs long (don't commit 19 MB per mic start).
-    let ring: AudioRing = Arc::new(Mutex::new(VecDeque::with_capacity(
-        TARGET_HZ as usize * 60,
-    )));
+    let ring: AudioRing = Arc::new(Mutex::new(RingBuf::new(TARGET_HZ as usize * 60)));
 
     let ring_cb = ring.clone();
     let needs_resample = source_hz != TARGET_HZ;
@@ -200,9 +217,10 @@ fn push_samples(
     if channels <= 1 && resampler.is_none() {
         let cap = TARGET_HZ as usize * MAX_BUFFER_SECS;
         if let Ok(mut q) = ring.lock() {
-            q.extend(interleaved.iter().copied());
-            while q.len() > cap {
-                q.pop_front();
+            q.buf.extend(interleaved.iter().copied());
+            while q.buf.len() > cap {
+                q.buf.pop_front();
+                q.start += 1;
             }
         }
         return;
@@ -247,9 +265,10 @@ fn push_samples(
 
     let cap = TARGET_HZ as usize * MAX_BUFFER_SECS;
     if let Ok(mut q) = ring.lock() {
-        q.extend(resampled);
-        while q.len() > cap {
-            q.pop_front();
+        q.buf.extend(resampled);
+        while q.buf.len() > cap {
+            q.buf.pop_front();
+            q.start += 1;
         }
     }
 }
@@ -263,8 +282,50 @@ pub fn peek_window(ring: &AudioRing, secs: f32) -> Vec<f32> {
         Ok(g) => g,
         Err(_) => return Vec::new(),
     };
-    let start = q.len().saturating_sub(n);
-    q.iter().copied().skip(start).collect()
+    let start = q.buf.len().saturating_sub(n);
+    q.buf.iter().copied().skip(start).collect()
+}
+
+/// Peek samples from absolute offset `from` to the newest sample. When
+/// `max_secs` is set and the span is longer, only the most-recent `max_secs`
+/// are returned (sliding display window). Returns `(samples, end_offset)` —
+/// `end_offset` is the absolute offset one past the last returned sample, for
+/// recording a segment boundary. A `from` older than the ring's retention is
+/// clamped to what's still buffered.
+pub fn peek_from(ring: &AudioRing, from: u64, max_secs: Option<f32>) -> (Vec<f32>, u64) {
+    let q = match ring.lock() {
+        Ok(g) => g,
+        Err(_) => return (Vec::new(), from),
+    };
+    let end = q.end();
+    let mut lo = from.max(q.start).min(end);
+    if let Some(secs) = max_secs {
+        let cap = (TARGET_HZ as f32 * secs) as u64;
+        lo = lo.max(end.saturating_sub(cap));
+    }
+    let skip = (lo - q.start) as usize;
+    (q.buf.iter().copied().skip(skip).collect(), end)
+}
+
+/// Take everything from absolute offset `from` and clear the ring (finalise-on-
+/// stop). Warns when `from` predates retention — uncommitted audio older than
+/// the cap was evicted, so the tail transcript can't cover it.
+pub fn take_from(ring: &AudioRing, from: u64) -> Vec<f32> {
+    let mut q = match ring.lock() {
+        Ok(g) => g,
+        Err(_) => return Vec::new(),
+    };
+    if from < q.start {
+        log::warn!(
+            "[stt] uncommitted dictation exceeded {MAX_BUFFER_SECS}s — final tail covers only the most recent {MAX_BUFFER_SECS}s"
+        );
+    }
+    let skip = (from.max(q.start) - q.start) as usize;
+    let out: Vec<f32> = q.buf.iter().copied().skip(skip).collect();
+    let end = q.end();
+    q.buf.clear();
+    q.start = end;
+    out
 }
 
 /// RMS amplitude (0.0..~1.0) of the most recent `secs` of audio, for driving a
@@ -276,10 +337,10 @@ pub fn peek_level(ring: &AudioRing, secs: f32) -> f32 {
         Ok(g) => g,
         Err(_) => return 0.0,
     };
-    let start = q.len().saturating_sub(n);
+    let start = q.buf.len().saturating_sub(n);
     let mut sum_sq = 0.0f32;
     let mut count = 0usize;
-    for &s in q.iter().skip(start) {
+    for &s in q.buf.iter().skip(start) {
         sum_sq += s * s;
         count += 1;
     }
@@ -289,21 +350,53 @@ pub fn peek_level(ring: &AudioRing, secs: f32) -> f32 {
     (sum_sq / count as f32).sqrt()
 }
 
-/// Drain the entire buffer (used at finalise-on-stop).
-pub fn drain_all(ring: &AudioRing) -> Vec<f32> {
-    let mut q = match ring.lock() {
-        Ok(g) => g,
-        Err(_) => return Vec::new(),
-    };
-    let out: Vec<f32> = q.iter().copied().collect();
-    q.clear();
-    // A full ring means eviction ran: the dictation outlived the cap and the
-    // final transcript covers only the most recent window. Say so instead of
-    // silently returning a truncated take.
-    if out.len() >= TARGET_HZ as usize * MAX_BUFFER_SECS {
-        log::warn!(
-            "[stt] dictation exceeded {MAX_BUFFER_SECS}s — final transcript covers only the most recent {MAX_BUFFER_SECS}s"
-        );
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ring_with(samples: &[f32], start: u64) -> AudioRing {
+        Arc::new(Mutex::new(RingBuf {
+            buf: samples.iter().copied().collect(),
+            start,
+        }))
     }
-    out
+
+    #[test]
+    fn peek_from_respects_absolute_offsets() {
+        let ring = ring_with(&[1.0, 2.0, 3.0, 4.0], 10);
+        let (samples, end) = peek_from(&ring, 12, None);
+        assert_eq!(samples, vec![3.0, 4.0]);
+        assert_eq!(end, 14);
+    }
+
+    #[test]
+    fn peek_from_clamps_evicted_offset() {
+        // `from` predates retention — clamp to what's buffered.
+        let ring = ring_with(&[5.0, 6.0], 100);
+        let (samples, end) = peek_from(&ring, 3, None);
+        assert_eq!(samples, vec![5.0, 6.0]);
+        assert_eq!(end, 102);
+    }
+
+    #[test]
+    fn peek_from_caps_to_max_secs() {
+        let n = TARGET_HZ as usize; // 1s of audio
+        let buf: Vec<f32> = (0..n * 2).map(|i| i as f32).collect();
+        let ring = ring_with(&buf, 0);
+        let (samples, end) = peek_from(&ring, 0, Some(1.0));
+        assert_eq!(samples.len(), n);
+        assert_eq!(samples[0], n as f32); // most-recent second only
+        assert_eq!(end, n as u64 * 2);
+    }
+
+    #[test]
+    fn take_from_drains_tail_and_clears() {
+        let ring = ring_with(&[1.0, 2.0, 3.0], 5);
+        let out = take_from(&ring, 6);
+        assert_eq!(out, vec![2.0, 3.0]);
+        // Ring is empty; offsets keep advancing from where it ended.
+        let (rest, end) = peek_from(&ring, 0, None);
+        assert!(rest.is_empty());
+        assert_eq!(end, 8);
+    }
 }

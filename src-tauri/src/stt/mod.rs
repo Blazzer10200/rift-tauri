@@ -12,8 +12,10 @@
 //!     + 25 EU languages, ~10x whisper's speed, DirectML on any GPU.
 //!
 //! The local engines share one Rust pipeline: cpal mic capture → webrtc-vad
-//! gating → rolling-window partials → final transcribe → optional Claude
-//! cleanup polish.
+//! gating → rolling-window partials + pause-triggered segment commits
+//! (`stt://segment`) → stop-time tail transcribe (`stt://final`, tail only —
+//! committed segments are already text) → background Claude cleanup polish
+//! (`stt://polish`, never blocks the final).
 
 pub mod audio;
 pub mod cleanup;
@@ -258,8 +260,23 @@ impl LoadedEngine {
 pub struct EngineCache(pub AsyncMutex<Option<LoadedEngine>>);
 pub struct SttSession(pub AsyncMutex<Option<ActiveSession>>);
 
+/// Segments finalized mid-recording (committed on speech pauses). `text` is
+/// the raw joined transcript of every committed segment; `upto` is the
+/// absolute ring offset the commits cover. Shared between the dictation loop
+/// (writer) and `stt_stop_recording` (reader) — a std Mutex with only short
+/// critical sections. The loop re-checks its CancellationToken *inside* the
+/// lock before committing, and stop cancels *before* locking, so a segment is
+/// either fully committed (event emitted, `upto` advanced) or left for the
+/// stop-time tail — never both, never neither.
+#[derive(Default)]
+struct SegmentLedger {
+    text: String,
+    upto: u64,
+}
+
 pub struct ActiveSession {
     ring: audio::AudioRing,
+    segments: std::sync::Arc<std::sync::Mutex<SegmentLedger>>,
     /// The engine THIS session loaded/resolved at start. Stored so the final
     /// transcribe uses the session's own model, not whatever is in the shared
     /// cache at stop-time — a second start racing during this session's model
@@ -320,17 +337,38 @@ struct PartialPayload {
     text: String,
 }
 
+/// A segment finalized mid-recording — committed text the frontend folds into
+/// the draft immediately ("turns white" while dictation continues).
+#[derive(Clone, Serialize)]
+struct SegmentPayload {
+    text: String,
+}
+
+/// Background cleanup result, emitted after `stt://final`. `raw` is the full
+/// raw transcript the polish ran over; `text` is the cleaned version (equal to
+/// `raw` when cleanup failed or changed nothing — the frontend uses the event
+/// to stop its shimmer either way).
+#[derive(Clone, Serialize)]
+struct PolishPayload {
+    text: String,
+    raw: String,
+}
+
 #[derive(Clone, Serialize)]
 struct LevelPayload {
     /// RMS amplitude 0.0..~1.0 of the live mic input, for the meter.
     rms: f32,
 }
 
+/// Stop-time payload. `text` is ONLY the uncommitted tail (audio after the
+/// last committed segment) — the frontend folds it like any other segment, so
+/// text it already committed (possibly edited by voice commands) is never
+/// rewritten. `polish_pending` announces the background cleanup pass that will
+/// follow as `stt://polish`.
 #[derive(Clone, Serialize)]
 struct FinalPayload {
     text: String,
-    raw: String,
-    cleaned: bool,
+    polish_pending: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -535,6 +573,7 @@ pub async fn stt_start_recording(
     let rolling_cancel = CancellationToken::new();
     // Clone for the spawn before moving rolling_cancel into the session slot.
     let task_cancel = rolling_cancel.clone();
+    let segments = std::sync::Arc::new(std::sync::Mutex::new(SegmentLedger::default()));
 
     // Store session BEFORE spawning — any racing stop call can now cancel.
     {
@@ -550,6 +589,7 @@ pub async fn stt_start_recording(
         }
         *slot = Some(ActiveSession {
             ring: ring.clone(),
+            segments: segments.clone(),
             engine: engine.clone(),
             initial_prompt: initial_prompt.clone(),
             language: language.clone(),
@@ -575,16 +615,20 @@ pub async fn stt_start_recording(
         });
     }
 
-    // Spawn rolling-window transcribe task after session is visible.
-    if cfg.show_interim {
+    // Spawn the dictation loop after the session is visible. Always — it owns
+    // segment finalization (commit-on-pause), not just the interim display;
+    // `show_interim` only gates the partial emissions inside it.
+    {
         let task_app = app.clone();
         let task_win = win.clone();
         let task_ring = ring;
         let task_engine = engine.clone();
         let task_prompt = initial_prompt.clone();
         let task_lang = language.clone();
+        let task_segments = segments;
+        let show_interim = cfg.show_interim;
         tokio::spawn(async move {
-            rolling_window_loop(
+            dictation_loop(
                 task_app,
                 task_win,
                 task_ring,
@@ -593,6 +637,8 @@ pub async fn stt_start_recording(
                 task_lang,
                 beam_size,
                 task_cancel,
+                task_segments,
+                show_interim,
             )
             .await;
         });
@@ -618,62 +664,107 @@ pub async fn stt_stop_recording(
 
     let win = active.window_label.clone();
     // Join the capture thread off the Tokio runtime to avoid blocking a worker.
+    // shutdown_capture also cancels the dictation loop, so no further segment
+    // can commit once the ledger is read below.
     if let Some(h) = active.shutdown_capture() {
         tokio::task::spawn_blocking(move || { let _ = h.join(); }).await.ok();
     }
     emit_state(&app, &win, "transcribing", None);
 
-    // Drain final buffer, transcribe with the SESSION'S OWN engine (stored at
-    // start), NOT the shared cache — a start racing during this session's model
-    // load could have overwritten the cache with a different model, and the
-    // rolling partials all ran on this engine, so the final block must match.
-    let samples = audio::drain_all(&active.ring);
-    let engine = active.engine.clone();
-    let prompt = active.initial_prompt.clone();
-    let language = active.language.clone();
-    let beam_size = active.beam_size;
-    let raw = tokio::task::spawn_blocking(move || {
-        engine.transcribe(&samples, &prompt, language.as_deref(), beam_size)
-    })
-    .await
-    .map_err(|e| format!("final transcribe join: {e}"))??;
-
-    let scrubbed = vad::strip_hallucinations(&raw);
-
-    let final_text = if active.cleanup_enabled && !scrubbed.is_empty() {
-        match cleanup::polish_with_ctx(&scrubbed, &active.workspace_ctx).await {
-            Ok(t) => t,
-            Err(e) => {
-                log::warn!("[stt] cleanup hop failed, returning raw: {e}");
-                // Surface the failure so the user knows the transcript is the
-                // unpolished raw text (token expiry / network), not silent.
-                emit_error(&app, &win, "cleanup_failed", &e);
-                scrubbed.clone()
-            }
-        }
-    } else {
-        scrubbed.clone()
+    // Read the committed ledger AFTER cancel: the loop's commit path re-checks
+    // the token inside this lock, so anything not in the ledger now is ours.
+    let (committed, upto) = {
+        let led = active
+            .segments
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        (led.text.clone(), led.upto)
     };
 
+    // Transcribe ONLY the uncommitted tail with the SESSION'S OWN engine
+    // (stored at start), NOT the shared cache — a start racing during this
+    // session's model load could have overwritten the cache with a different
+    // model, and the committed segments all ran on this engine. Segments
+    // already committed are text — no re-transcription of the whole ring.
+    let samples = audio::take_from(&active.ring, upto);
+    let tail = if samples.is_empty() {
+        String::new()
+    } else {
+        let engine = active.engine.clone();
+        let prompt = active.initial_prompt.clone();
+        let language = active.language.clone();
+        let beam_size = active.beam_size;
+        let raw = tokio::task::spawn_blocking(move || {
+            engine.transcribe(&samples, &prompt, language.as_deref(), beam_size)
+        })
+        .await
+        .map_err(|e| format!("final transcribe join: {e}"))??;
+        vad::strip_hallucinations(&raw)
+    };
+
+    let full_raw = match (committed.is_empty(), tail.is_empty()) {
+        (true, _) => tail.clone(),
+        (_, true) => committed,
+        _ => format!("{committed} {tail}"),
+    };
+
+    // Mirror cleanup::polish's own skip gates so the frontend never shimmers
+    // for a pass that will return the input unchanged.
+    let polish_pending = active.cleanup_enabled && full_raw.split_whitespace().count() >= 3;
+
+    // The raw transcript is committed and sendable NOW — cleanup polish runs in
+    // the background and swaps in via `stt://polish` only if the draft is still
+    // untouched (frontend-guarded). It must never block the final.
     let _ = app.emit_to(
         &win,
         "stt://final",
         FinalPayload {
-            text: final_text.clone(),
-            raw: scrubbed,
-            cleaned: active.cleanup_enabled,
+            text: tail,
+            polish_pending,
         },
     );
     emit_state(&app, &win, "idle", None);
-    Ok(final_text)
+
+    if polish_pending {
+        let polish_app = app.clone();
+        let polish_win = win;
+        let ctx = active.workspace_ctx.clone();
+        let raw_for_polish = full_raw.clone();
+        tokio::spawn(async move {
+            let cleaned = match cleanup::polish_with_ctx(&raw_for_polish, &ctx).await {
+                Ok(t) => t,
+                Err(e) => {
+                    log::warn!("[stt] cleanup hop failed, keeping raw: {e}");
+                    // Surface the failure so the user knows the transcript is
+                    // the unpolished raw text (token expiry / network).
+                    emit_error(&polish_app, &polish_win, "cleanup_failed", &e);
+                    raw_for_polish.clone()
+                }
+            };
+            let _ = polish_app.emit_to(
+                &polish_win,
+                "stt://polish",
+                PolishPayload { text: cleaned, raw: raw_for_polish },
+            );
+        });
+    }
+
+    Ok(full_raw)
 }
 
-/// Rolling-window partial-emit loop. Ticks on the engine's cadence (1 s
-/// whisper / 400 ms parakeet); peeks the most-recent 3 s of audio, runs VAD,
-/// transcribes if speech is present, emits the result as `stt://partial` only
-/// when it differs from the previous emission (avoids flooding the frontend
-/// w/ identical text).
-async fn rolling_window_loop(
+/// Dictation loop — rolling partials + pause-triggered segment commits.
+///
+/// Ticks on the engine's cadence (1 s whisper / 400 ms parakeet). Two jobs:
+///   * Partials (`show_interim`): transcribe the UNCOMMITTED span (capped at
+///     the engine's display window) and emit `stt://partial` when it changes.
+///   * Segment commits: when VAD hears no speech for `SEGMENT_SILENCE_MS` and
+///     uncommitted speech exists, transcribe the whole uncommitted span,
+///     append it to the ledger and emit `stt://segment` — the sentence "turns
+///     white" in the composer while dictation keeps running. This also keeps
+///     every span the engine ever transcribes short (one utterance), so the
+///     stop-time tail transcribe is near-instant regardless of session length.
+#[allow(clippy::too_many_arguments)]
+async fn dictation_loop(
     app: AppHandle,
     win: String,
     ring: audio::AudioRing,
@@ -682,63 +773,137 @@ async fn rolling_window_loop(
     language: Option<String>,
     beam_size: Option<u8>,
     cancel: CancellationToken,
+    segments: std::sync::Arc<std::sync::Mutex<SegmentLedger>>,
+    show_interim: bool,
 ) {
-    // VAD gate span — only the recent tail decides "is anyone talking",
-    // independent of how much context the engine re-transcribes. Keeps the
-    // gate cheap and stops inference ~3 s into a pause (the frozen partial is
-    // the correct display for silence).
+    // VAD gate span for partials — only the recent tail decides "is anyone
+    // talking", independent of how much context the engine re-transcribes.
+    // Keeps the gate cheap and stops inference ~3 s into a pause (the frozen
+    // partial is the correct display for silence).
     const GATE_SECS: f32 = 3.0;
+    // Short tail deciding "the speaker paused" — must be tighter than the
+    // 3 s partial gate or speech from 2 s ago would block every commit.
+    const SILENCE_GATE_SECS: f32 = 1.0;
+    // Pause length that finalizes the current segment.
+    const SEGMENT_SILENCE_MS: u128 = 1200;
+    // Don't bother committing sub-half-second blips.
+    const MIN_SEGMENT_SECS: f32 = 0.4;
+
     let window_secs = engine.partial_window_secs();
     let tick_ms = engine.partial_tick_ms();
     let mut last_emitted = String::new();
+    let mut last_speech: Option<std::time::Instant> = None;
+    let mut speech_since_commit = false;
     let mut ticker = tokio::time::interval(std::time::Duration::from_millis(tick_ms));
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    // Transcribe → scrub, racing cancel. Ok(None) = tick-level failure
+    // (already emitted as stt://error), Err(()) = cancelled → caller returns.
+    let transcribe_span = |samples: Vec<f32>| {
+        let engine_c = engine.clone();
+        let prompt_c = initial_prompt.clone();
+        let lang_c = language.clone();
+        let app_c = app.clone();
+        let win_c = win.clone();
+        let cancel_c = cancel.clone();
+        async move {
+            let infer = tokio::task::spawn_blocking(move || {
+                engine_c.transcribe(&samples, &prompt_c, lang_c.as_deref(), beam_size)
+            });
+            // RR10: race the (CPU-bound) inference against cancel. If stop
+            // fires mid-transcribe, bail immediately — otherwise a stale
+            // partial lands AFTER stt://final and overwrites the committed
+            // transcript on the frontend.
+            let raw = tokio::select! {
+                _ = cancel_c.cancelled() => return Err(()),
+                res = infer => match res {
+                    Ok(Ok(t)) => t,
+                    Ok(Err(e)) => {
+                        emit_error(&app_c, &win_c, "transcribe_failed", &e);
+                        return Ok(None);
+                    }
+                    Err(e) => {
+                        emit_error(&app_c, &win_c, "task_join_failed", &e.to_string());
+                        return Ok(None);
+                    }
+                }
+            };
+            Ok(Some(vad::strip_hallucinations(&raw)))
+        }
+    };
 
     loop {
         tokio::select! {
             _ = cancel.cancelled() => return,
             _ = ticker.tick() => {}
         }
-        let gate = audio::peek_window(&ring, GATE_SECS);
-        if gate.is_empty() {
+        let recent = audio::peek_window(&ring, SILENCE_GATE_SECS);
+        if recent.is_empty() {
             continue;
         }
-        if !vad::window_has_speech(&gate) {
-            continue;
-        }
-        let samples = if window_secs > GATE_SECS {
-            audio::peek_window(&ring, window_secs)
-        } else {
-            gate
-        };
-        let engine_c = engine.clone();
-        let prompt_c = initial_prompt.clone();
-        let lang_c = language.clone();
-        let infer = tokio::task::spawn_blocking(move || {
-            engine_c.transcribe(&samples, &prompt_c, lang_c.as_deref(), beam_size)
-        });
-        // RR10: race the (multi-second, CPU-bound) inference against cancel. If
-        // stop fires mid-transcribe, return immediately — otherwise the stale
-        // partial lands AFTER stt://final + stt://state:idle, overwriting the
-        // Haiku-cleaned final transcript on the frontend.
-        let raw = tokio::select! {
-            _ = cancel.cancelled() => return,
-            res = infer => match res {
-                Ok(Ok(t)) => t,
-                Ok(Err(e)) => {
-                    emit_error(&app, &win, "transcribe_failed", &e);
-                    continue;
+        if vad::window_has_speech(&recent) {
+            last_speech = Some(std::time::Instant::now());
+            speech_since_commit = true;
+        } else if speech_since_commit
+            && last_speech.is_some_and(|t| t.elapsed().as_millis() >= SEGMENT_SILENCE_MS)
+        {
+            // Pause detected with uncommitted speech → finalize the segment.
+            let upto = segments.lock().unwrap_or_else(|e| e.into_inner()).upto;
+            let (samples, end) = audio::peek_from(&ring, upto, None);
+            if samples.len() < (16_000.0 * MIN_SEGMENT_SECS) as usize {
+                speech_since_commit = false;
+                continue;
+            }
+            let scrubbed = match transcribe_span(samples).await {
+                Err(()) => return,
+                Ok(None) => continue,
+                Ok(Some(t)) => t,
+            };
+            {
+                // Commit is atomic under the ledger lock: stop() cancels
+                // BEFORE reading the ledger, and we re-check the token here, so
+                // this segment lands either in the ledger (event emitted) or in
+                // stop's tail — never both, never neither.
+                let mut led = segments.lock().unwrap_or_else(|e| e.into_inner());
+                if cancel.is_cancelled() {
+                    return;
                 }
-                Err(e) => {
-                    emit_error(&app, &win, "task_join_failed", &e.to_string());
-                    continue;
+                led.upto = end;
+                if !scrubbed.is_empty() {
+                    if !led.text.is_empty() {
+                        led.text.push(' ');
+                    }
+                    led.text.push_str(&scrubbed);
+                    let _ = app.emit_to(&win, "stt://segment", SegmentPayload { text: scrubbed });
                 }
             }
+            speech_since_commit = false;
+            last_emitted.clear();
+            continue;
+        }
+
+        if !show_interim {
+            continue;
+        }
+        let gate = audio::peek_window(&ring, GATE_SECS);
+        if gate.is_empty() || !vad::window_has_speech(&gate) {
+            continue;
+        }
+        // Partial over the uncommitted span only (sliding display cap) — the
+        // committed segments are already solid in the draft.
+        let upto = segments.lock().unwrap_or_else(|e| e.into_inner()).upto;
+        let (samples, _) = audio::peek_from(&ring, upto, Some(window_secs));
+        if samples.is_empty() {
+            continue;
+        }
+        let scrubbed = match transcribe_span(samples).await {
+            Err(()) => return,
+            Ok(None) => continue,
+            Ok(Some(t)) => t,
         };
         if cancel.is_cancelled() {
             return;
         }
-        let scrubbed = vad::strip_hallucinations(&raw);
         if scrubbed.is_empty() || scrubbed == last_emitted {
             continue;
         }

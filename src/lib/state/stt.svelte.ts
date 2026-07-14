@@ -10,13 +10,16 @@
 //
 //   • engine="whisper" / engine="parakeet" — Rust-side cpal mic capture,
 //     webrtc-vad gating, local inference (whisper.cpp / Parakeet TDT via
-//     ONNX Runtime), optional Claude cleanup polish. Driven over Tauri IPC
-//     (`stt_start_recording` / `stt_stop_recording`); partial + final text
-//     arrives via `stt://partial` / `stt://final` events.
+//     ONNX Runtime). Driven over Tauri IPC (`stt_start_recording` /
+//     `stt_stop_recording`). Event flow: `stt://partial` (interim ghost) →
+//     `stt://segment` (sentence committed on a speech pause, mid-recording) →
+//     `stt://final` (stop-time uncommitted tail only) → `stt://polish`
+//     (background Claude cleanup, swapped in only if the draft is untouched).
 //
 // Interim speech renders as `ghostTail` (dim, display-only, in the composer
 // overlay); only finalized text is committed into the draft — spoken words
-// "turn white" when the transcript lands.
+// "turn white" when the transcript lands (per sentence for local engines,
+// per final result for Web Speech).
 //
 // Switching engines mid-session is allowed — `setConfig({engine})` aborts
 // any in-flight recording before the new engine takes over.
@@ -166,10 +169,10 @@ class SttStore {
   /** True while the cleanup polish of a finished dictation is in flight. */
   polishing = $state(false);
   /** Uncommitted interim speech — rendered by the composer as ghost text after
-   *  the solid draft, NOT written into it. Committed (turned solid) when the
-   *  final transcript lands; cleared on cancel/consume. Whisper/Parakeet: the
-   *  whole utterance stays ghost until stop. Web Speech: finals commit as you
-   *  speak, only the in-flight interim segment is ghost. */
+   *  the solid draft, NOT written into it. Committed (turned solid) when a
+   *  segment or the final lands; cleared on cancel/consume. All engines: only
+   *  the in-flight sentence is ghost — Whisper/Parakeet commit on speech
+   *  pauses (stt://segment), Web Speech on recognizer finals. */
   ghostTail = $state("");
   /** Restore-point after a cleanup polish: full draft before/after, so the user
    *  can flip back to the raw transcript. Cleared on typing or timeout. */
@@ -193,6 +196,14 @@ class SttStore {
   // polish whose result/shimmer should no longer land (user typed, or the
   // visual cap elapsed) — see polishWebSpeechFinal / cancelPolish (#40a/#40b).
   private polishGuard = 0;
+  // Token armed at stt://final when a backend polish is pending; the
+  // stt://polish handler only applies when it still matches polishGuard.
+  private pendingPolishToken: number | null = null;
+  // True once a voice command edited the committed text ("scratch that",
+  // "new line", "send it"). The backend polishes ITS raw transcript, which no
+  // longer matches — applying it would resurrect scratched words, so the
+  // polish swap is skipped for the session.
+  private commandsMutated = false;
   private recognition: SpeechRecognitionInstance | null = null;
   private initStarted = false;
   private baseDraft = "";
@@ -271,9 +282,17 @@ class SttStore {
       await sub("stt://partial", () =>
         listen<{ text: string }>("stt://partial", (ev) => this.onBackendPartial(ev.payload.text)),
       );
+      await sub("stt://segment", () =>
+        listen<{ text: string }>("stt://segment", (ev) => this.onBackendSegment(ev.payload.text)),
+      );
       await sub("stt://final", () =>
-        listen<{ text: string; raw: string; cleaned: boolean }>("stt://final", (ev) =>
-          this.onBackendFinal(ev.payload.text, ev.payload.raw, ev.payload.cleaned),
+        listen<{ text: string; polish_pending: boolean }>("stt://final", (ev) =>
+          this.onBackendFinal(ev.payload.text, ev.payload.polish_pending),
+        ),
+      );
+      await sub("stt://polish", () =>
+        listen<{ text: string; raw: string }>("stt://polish", (ev) =>
+          this.onBackendPolish(ev.payload.text, ev.payload.raw),
         ),
       );
       await sub("stt://state", () =>
@@ -443,6 +462,8 @@ class SttStore {
     this.polishUndo = null;
     this.consumed = false;
     this.cancelRequested = false;
+    this.commandsMutated = false;
+    this.pendingPolishToken = null; // a polish from a prior session can't land here
     this.clearTranscribeTimer();
 
     if (isLocalEngine(this.config.engine)) {
@@ -526,10 +547,9 @@ class SttStore {
       this.whisperStartInvoked = false;
       try {
         this.transcribing = true;
-        const final = await invoke<string>("stt_stop_recording");
-        // The `stt://final` event also fires; we treat the invoke return as
-        // the authoritative result and ignore the event if it lands first.
-        return final;
+        // Draft commits ride the events (`stt://segment` / `stt://final`);
+        // the invoke return is the full raw transcript, for the caller only.
+        return await invoke<string>("stt_stop_recording");
       } catch (e) {
         this.lastError = `Stop whisper recording failed: ${e}`;
         this.recording = false;
@@ -737,36 +757,78 @@ class SttStore {
     this.ghostTail = t;
   }
 
-  private onBackendFinal(text: string, raw?: string, cleaned?: boolean) {
+  /** A sentence finalized mid-recording (the backend heard a speech pause).
+   *  Folds through the same segment machinery as Web Speech finals — voice
+   *  commands ("send it", "scratch that", "new line") work mid-dictation. */
+  private onBackendSegment(text: string) {
+    this.lastSpeechAt = Date.now();
+    if (this.consumed || this.cancelRequested) return;
+    this.ghostTail = "";
+    this.commitSegment(decensor(text));
+    const composed = this.composeDraft(this.finalText);
+    if (this.readDraft() !== composed) this.writeDraft(composed);
+    this.lastTranscript = this.finalText;
+    if (this.pendingSend) {
+      this.pendingSend = false;
+      // Committed text is already in the draft; the composer's effect fires
+      // the send, whose consume() stops the backend recording.
+      this.sendRequested = true;
+    }
+  }
+
+  /** Stop-time result — carries ONLY the uncommitted tail (segments already
+   *  landed via stt://segment). The raw transcript is committed and sendable
+   *  immediately; the cleanup polish arrives later via stt://polish. */
+  private onBackendFinal(tailText: string, polishPending: boolean) {
     this.clearSilenceWatch();
     this.ghostTail = "";
     if (this.consumed || this.cancelRequested) return;
-    let t = decensor(text);
-    let send = false;
-    if (this.config.voice_commands) {
-      t = applyInlineCommands(t).trim();
-      if (SEND_CMD_RE.test(t)) {
-        t = t.replace(SEND_CMD_RE, "").trim();
-        // Send even when the utterance was ONLY the command — the intent is to
-        // ship whatever is already in the draft (baseDraft / prior segments).
-        send = true;
-      }
-    }
-    this.finalText = t;
-    this.lastTranscript = t;
-    const committed = this.composeDraft(t);
-    this.writeDraft(committed);
-    // The Whisper path polishes backend-side — arm the raw-transcript undo.
-    if (cleaned && raw && raw.trim() !== text.trim()) {
-      this.setPolishUndo(committed, this.composeDraft(decensor(raw.trim())));
-    }
+    this.commitSegment(decensor(tailText));
+    const composed = this.composeDraft(this.finalText);
+    if (this.readDraft() !== composed) this.writeDraft(composed);
+    this.lastTranscript = this.finalText;
     this.recording = false;
     this.transcribing = false;
     // Same stale-error rule as the Web Speech onEnd: a non-empty final means
-    // the whisper session succeeded — clear any transient error so the mic
-    // doesn't stay red.
-    if (t) this.lastError = null;
-    if (send) this.sendRequested = true;
+    // the session succeeded — clear any transient error so the mic doesn't
+    // stay red.
+    if (this.finalText) this.lastError = null;
+    if (this.pendingSend) {
+      this.pendingSend = false;
+      this.sendRequested = true;
+    }
+    // Announce the background cleanup: quiet shimmer (visual cap well under
+    // the backend's 15s timeout), never blocks editing or sending.
+    if (polishPending && !this.sendRequested) {
+      this.polishing = true;
+      const token = ++this.polishGuard;
+      this.pendingPolishToken = token;
+      setTimeout(() => {
+        if (token === this.polishGuard) this.polishing = false;
+      }, 6000);
+    }
+  }
+
+  /** Background cleanup landed. Swap the polished transcript into the draft
+   *  only when nothing invalidated it: no typing since the final (draft still
+   *  matches), no send/cancel, no voice-command edits (the backend polished
+   *  its own raw join, which wouldn't include them). */
+  private onBackendPolish(text: string, raw: string) {
+    const token = this.pendingPolishToken;
+    this.pendingPolishToken = null;
+    if (token === null || token !== this.polishGuard) return; // cancelled or superseded
+    this.polishing = false;
+    if (this.consumed || this.cancelRequested || this.commandsMutated) return;
+    const cleaned = decensor(text).trim();
+    if (!cleaned || cleaned === raw.trim()) return;
+    const committed = this.composeDraft(this.finalText);
+    if (this.readDraft() !== committed) return;
+    const polished = this.composeDraft(cleaned);
+    this.writeDraft(polished);
+    this.segments = [cleaned];
+    this.finalText = cleaned;
+    this.lastTranscript = cleaned;
+    this.setPolishUndo(polished, committed);
   }
 
   // ---- Event handlers (Web Speech) ----------------------------------------
@@ -885,8 +947,11 @@ class SttStore {
     let seg = raw.trim();
     if (!seg) return;
     if (this.config.voice_commands) {
-      seg = applyInlineCommands(seg);
+      const applied = applyInlineCommands(seg);
+      if (applied !== seg) this.commandsMutated = true;
+      seg = applied;
       if (SCRATCH_CMD_RE.test(seg)) {
+        this.commandsMutated = true;
         // "scratch that" deletes the last thing said. Pop the previous committed
         // segment, then push back any words spoken AFTER the command in the same
         // utterance ("scratch that, actually …") so they aren't lost.
@@ -897,6 +962,7 @@ class SttStore {
         return;
       }
       if (SEND_CMD_RE.test(seg)) {
+        this.commandsMutated = true;
         const rest = seg.replace(SEND_CMD_RE, "").trim();
         if (rest) this.segments.push(rest);
         this.refreshFinal();
