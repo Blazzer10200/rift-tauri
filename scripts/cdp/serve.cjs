@@ -28,8 +28,10 @@
 //   POST /key      { key, modifiers? }          -> { ok, key }
 //   GET  /state                                 -> assistant-state snapshot
 //   GET  /page                                  -> generic page snapshot
-//   GET  /console  [?clear=1&level=&limit=]     -> { total, count, logs } console/exception/log ring buffer
+//   GET  /console  [?clear=1&level=&limit=&all=1] -> { total, count, stale, gen, logs } ring buffer (current page-gen by default)
 //   GET/POST /ax   { selector?, full?, limit? }  -> { count, nodes } a11y-tree structure (image-free)
+//   GET/POST /find { query, limit? }             -> locate elements by visible text/aria/title (returns robust selectors)
+//   GET/POST /text { selector?, maxChars? }      -> normalized innerText of the page/element (read content w/o pixels)
 //   POST /batch    { ops, parallel? }           -> { results, elapsedMs }
 //   POST /shutdown                              -> { ok }
 //
@@ -108,6 +110,11 @@ if (!fs.existsSync(TMP_DIR)) fs.mkdirSync(TMP_DIR, { recursive: true });
 // (the batch dispatcher fires them at once); they just queue here and run back
 // to back. Pure reads (eval/state/ax) never enter this lock.
 const emuLocks = new Map(); // target -> tail promise
+// Sticky per-target flag: a capture set a device-metrics override and BOTH
+// clear attempts failed — every later read/shot may be at a wrong emulated
+// size until /reset-viewport (or /reload) succeeds. Surfaced in /health and
+// /look so a wedged viewport is diagnosed as tool-state, not a phantom app bug.
+const vpSuspect = new Map(); // target -> true
 function withEmuLock(target, fn) {
     const prev = emuLocks.get(target) || Promise.resolve();
     let release;
@@ -206,6 +213,18 @@ class Conn {
         this.nextId = 1;
         this.pending = new Map(); // id -> { resolve, reject }
         this.logs = [];           // ring buffer of console/exception/log events
+        // Page generation: bumped when the JS world is destroyed (reload/navigation
+        // via Runtime.executionContextsCleared, or ws loss = app restart). Log
+        // entries are stamped with the gen they fired in, so /console and /look can
+        // report CURRENT-page errors instead of ghost-replaying stale HMR errors
+        // from a previous load (the #1 false-diagnosis source, ISSUES #93).
+        this.gen = 0;
+        this.genBumpedAt = null;
+    }
+    _bumpGen(why) {
+        this.gen++;
+        this.genBumpedAt = Date.now();
+        console.log(`[cdp/serve] ${this.key}: page generation -> ${this.gen} (${why})`);
     }
     _onMessage(ev) {
         let frame;
@@ -222,10 +241,14 @@ class Conn {
         if (frame.method) this._onEvent(frame.method, frame.params || {});
     }
     _pushLog(entry) {
+        entry.gen = this.gen;
         this.logs.push(entry);
         if (this.logs.length > LOG_KEEP) this.logs.splice(0, this.logs.length - LOG_KEEP);
     }
     _onEvent(method, p) {
+        // Context destroyed = real reload/navigation (HMR hot-updates do NOT fire
+        // this, so live-injected errors correctly stay current-gen).
+        if (method === 'Runtime.executionContextsCleared') { this._bumpGen('navigation'); return; }
         if (method === 'Runtime.consoleAPICalled') {
             this._pushLog({
                 kind: 'console', level: p.type || 'log',
@@ -256,6 +279,9 @@ class Conn {
         for (const [, p] of this.pending) p.reject(new Error('ws closed before response'));
         this.pending.clear();
         this.ws = null;
+        // ws loss = the target died (app restart/navigated away). Anything already
+        // buffered belongs to the dead instance — stale by definition.
+        this._bumpGen('ws closed');
     }
     async connect() {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) return;
@@ -340,12 +366,14 @@ async function typeText({ selector, text, key }, target = 'main') {
         })()
     `, 30000, target);
     if (setRes.error) return { error: setRes.error };
-    if (setRes.value?.error) return { error: setRes.value.error };
+    if (setRes.value?.error) {
+        const out = { error: setRes.value.error };
+        if (/selector not found/i.test(out.error)) out.suggestions = await suggestSelectors(selector, target);
+        return out;
+    }
     if (key) {
-        // CtrlEnter = Enter + Ctrl modifier (CDP modifier bitmask: Alt=1 Ctrl=2 Meta=4 Shift=8).
-        const k = key === 'CtrlEnter' ? 'Enter' : key;
-        const modifiers = key === 'CtrlEnter' ? 2 : 0;
-        const kr = await pressKey({ key: k, modifiers }, target);
+        // CtrlEnter kept as a legacy alias; pressKey parses full combos now.
+        const kr = await pressKey({ key: key === 'CtrlEnter' ? 'Ctrl+Enter' : key }, target);
         if (kr.error) return { ...setRes.value, keyError: kr.error };
     }
     return setRes.value;
@@ -377,7 +405,11 @@ async function click(selector, target = 'main') {
     `, 30000, target);
     if (loc.error) return { error: loc.error };
     const v = loc.value;
-    if (!v || v.error) return { error: v?.error || 'click target resolution failed' };
+    if (!v || v.error) {
+        const out = { error: v?.error || 'click target resolution failed' };
+        if (/selector not found/i.test(out.error)) out.suggestions = await suggestSelectors(selector, target);
+        return out;
+    }
     if (!v.inView) {
         // Off-viewport even after scroll — synthetic click so the action still lands.
         const fb = await evalJs(`(() => { const el=document.querySelector(${JSON.stringify(selector)}); if(!el) return {error:'gone'}; el.click(); return {ok:true}; })()`, 30000, target);
@@ -401,6 +433,163 @@ async function waitFor({ js, timeoutMs = 60000, intervalMs = 200 }, target = 'ma
         await new Promise(r => setTimeout(r, intervalMs));
     }
     return { error: 'timeout', polls, elapsedMs: Date.now() - start };
+}
+
+// --- quiescence settle (2026-07-14) ---
+// Replaces the blind `sleep` in act/nav/tour: resolves as soon as the DOM has
+// been mutation-quiet for `quietMs`, capped at `maxMs`. Faster than a fixed
+// sleep on quick renders AND more accurate on slow ones (a shot taken mid-
+// transition reads as a phantom layout bug). Continuous animations (streaming
+// shimmer) never go quiet — the cap catches those, reported as quiet:false.
+async function settleQuiet({ quietMs = 120, maxMs = 1500 } = {}, target = 'main') {
+    const qm = Math.max(20, Math.min(Number(quietMs) || 120, 2000));
+    const mm = Math.max(qm, Math.min(Number(maxMs) || 1500, 15000));
+    const js = `(() => new Promise((res) => {
+        const t0 = performance.now();
+        let last = performance.now(), muts = 0;
+        const mo = new MutationObserver((rs) => { muts += rs.length; last = performance.now(); });
+        mo.observe(document.documentElement, { childList: true, subtree: true, attributes: true, characterData: true });
+        const iv = setInterval(() => {
+            const now = performance.now();
+            const done = (quiet) => { clearInterval(iv); mo.disconnect(); res({ quiet, waitedMs: Math.round(now - t0), mutations: muts }); };
+            if (now - last >= ${qm}) done(true);
+            else if (now - t0 >= ${mm}) done(false);
+        }, 40);
+    }))()`;
+    const r = await evalJs(js, mm + 3000, target);
+    return r.error ? { error: r.error } : r.value;
+}
+
+// Robust-selector builder shared by /find and selector-miss suggestions.
+// Prefers #id > tag[aria-label] > tag.classes — each verified UNIQUE via
+// querySelectorAll — then falls back to a parent > nth-of-type path.
+const UNIQ_JS = `
+    const uniqSel = (el) => {
+        if (el.id) return '#' + CSS.escape(el.id);
+        const aria = el.getAttribute && el.getAttribute('aria-label');
+        const tag = el.tagName.toLowerCase();
+        if (aria) { const s = tag + '[aria-label=' + JSON.stringify(aria) + ']'; if (document.querySelectorAll(s).length === 1) return s; }
+        const cls = (typeof el.className === 'string' ? el.className : '').trim();
+        if (cls) {
+            const s = tag + '.' + cls.split(/\\s+/).slice(0, 3).map((c) => CSS.escape(c)).join('.');
+            if (document.querySelectorAll(s).length === 1) return s;
+        }
+        const p = el.parentElement;
+        if (p) {
+            const idx = Array.from(p.children).filter((c) => c.tagName === el.tagName).indexOf(el) + 1;
+            const pcls = (typeof p.className === 'string' ? p.className : '').trim();
+            const pid = p.id ? '#' + CSS.escape(p.id) : p.tagName.toLowerCase() + (pcls ? '.' + CSS.escape(pcls.split(/\\s+/)[0]) : '');
+            return pid + ' > ' + tag + ':nth-of-type(' + idx + ')';
+        }
+        return tag;
+    };`;
+
+// After a selector miss, offer the closest REAL elements instead of a bare
+// "not found" (which used to trigger blind retry-variation loops). Fuzzy:
+// token substring hits on id/class/aria-label (+ leaf text), scored, top N.
+async function suggestSelectors(selector, target = 'main', limit = 5) {
+    const js = `(() => {
+        ${UNIQ_JS}
+        const tokens = (${JSON.stringify(String(selector || ''))}.match(/[a-zA-Z][a-zA-Z0-9_-]{2,}/g) || [])
+            .map((t) => t.toLowerCase()).filter((t) => !['div', 'span', 'button', 'input'].includes(t));
+        if (!tokens.length) return [];
+        // Bigram Dice similarity so real TYPOS match ("setings" ~ "settings" = .92),
+        // not just exact substrings.
+        const grams = (s) => { const g = new Set(); for (let i = 0; i < s.length - 1; i++) g.add(s.slice(i, i + 2)); return g; };
+        const sim = (a, b) => {
+            if (!a || !b) return 0;
+            if (a.includes(b) || b.includes(a)) return 1;
+            const ga = grams(a), gb = grams(b);
+            let inter = 0; for (const g of ga) if (gb.has(g)) inter++;
+            return (2 * inter) / (ga.size + gb.size || 1);
+        };
+        const hits = [];
+        const all = document.querySelectorAll('*');
+        for (let i = 0; i < all.length && i < 5000; i++) {
+            const el = all[i];
+            const cls = (typeof el.className === 'string' ? el.className : '').toLowerCase();
+            const id = (el.id || '').toLowerCase();
+            const aria = (el.getAttribute('aria-label') || '').toLowerCase();
+            const leafText = el.children.length <= 4 ? (el.textContent || '').slice(0, 100).toLowerCase() : '';
+            const words = (id + ' ' + cls + ' ' + aria).split(/[\\s_-]+/).filter((w) => w.length > 2);
+            let s = 0;
+            for (const t of tokens) {
+                let best = 0;
+                for (const w of words) { const d = sim(t, w); if (d > best) best = d; }
+                if (best >= 0.55) s += 4 * best;
+                else if (leafText.includes(t)) s += 1;
+            }
+            if (s > 0.5) hits.push({ el, s });
+        }
+        hits.sort((a, b) => b.s - a.s);
+        return hits.slice(0, ${Math.max(1, Math.min(Number(limit) || 5, 10))}).map(({ el, s }) => {
+            const r = el.getBoundingClientRect();
+            return { selector: uniqSel(el), score: s, tag: el.tagName.toLowerCase(),
+                     text: (el.getAttribute('aria-label') || el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 50),
+                     visible: !!(r.width && r.height) };
+        });
+    })()`;
+    const r = await evalJs(js, 8000, target).catch(() => null);
+    return Array.isArray(r?.value) ? r.value : [];
+}
+
+// /find — locate elements by what they SAY (aria-label / visible text / title /
+// placeholder / value), not by guessing CSS classes. Returns robust selectors +
+// rects. Ancestor de-dup keeps the DEEPEST matching element (a button's text
+// also matches every container above it).
+async function findElements({ query, limit = 12 } = {}, target = 'main') {
+    if (!query) return { error: 'find needs { query }' };
+    const js = `(() => {
+        ${UNIQ_JS}
+        const q = ${JSON.stringify(String(query))}.toLowerCase();
+        const cands = document.querySelectorAll('button, a, input, textarea, select, label, summary, option, h1, h2, h3, h4, [role], [aria-label], [tabindex], [contenteditable], [title], [placeholder]');
+        let matches = [];
+        for (const el of cands) {
+            const aria = el.getAttribute('aria-label') || '';
+            const ph = el.getAttribute('placeholder') || '';
+            const ttl = el.getAttribute('title') || '';
+            const val = ('value' in el && typeof el.value === 'string') ? el.value : '';
+            const txtRaw = (el.innerText != null ? el.innerText : el.textContent) || '';
+            const txt = txtRaw.trim().replace(/\\s+/g, ' ');
+            const hay = (aria + '\\n' + ph + '\\n' + ttl + '\\n' + val + '\\n' + txt.slice(0, 300)).toLowerCase();
+            if (!hay.includes(q)) continue;
+            matches.push(el);
+            if (matches.length >= 120) break;
+        }
+        matches = matches.filter((el) => !matches.some((other) => other !== el && el.contains(other)));
+        const out = matches.slice(0, ${Math.max(1, Math.min(Number(limit) || 12, 30))}).map((el) => {
+            const r = el.getBoundingClientRect();
+            const cs = getComputedStyle(el);
+            const vis = !!(r.width && r.height) && cs.visibility !== 'hidden' && cs.display !== 'none';
+            const label = (el.getAttribute('aria-label') || (el.innerText || el.textContent) || el.getAttribute('placeholder') || el.getAttribute('title') || '').trim().replace(/\\s+/g, ' ').slice(0, 60);
+            return { selector: uniqSel(el), tag: el.tagName.toLowerCase(),
+                     role: el.getAttribute('role') || null, text: label,
+                     rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
+                     visible: vis, disabled: !!el.disabled || el.getAttribute('aria-disabled') === 'true' };
+        });
+        return { count: out.length, matches: out };
+    })()`;
+    const r = await evalJs(js, 15000, target);
+    if (r.error) return { error: r.error };
+    return r.value;
+}
+
+// /text — read the page/element as normalized rendered text (exact content,
+// zero image tokens). The right tool for "what does the transcript/error/copy
+// actually SAY" — ax chunks text into nodes and caps out; this doesn't.
+async function pageText({ selector, maxChars = 4000 } = {}, target = 'main') {
+    const cap = Math.max(100, Math.min(Number(maxChars) || 4000, 60000));
+    const js = `(() => {
+        const el = ${selector ? `document.querySelector(${JSON.stringify(selector)})` : 'document.body'};
+        if (!el) return { error: 'selector not found: ' + ${JSON.stringify(selector || '')} };
+        const raw = (el.innerText || '').replace(/\\n{3,}/g, '\\n\\n').trim();
+        return { totalChars: raw.length, truncated: raw.length > ${cap}, text: raw.slice(0, ${cap}) };
+    })()`;
+    const r = await evalJs(js, 15000, target);
+    if (r.error) return { error: r.error };
+    const v = r.value || {};
+    if (v.error && selector) v.suggestions = await suggestSelectors(selector, target);
+    return v;
 }
 
 function screenshot(opts = {}, target = 'main') {
@@ -460,7 +649,11 @@ async function _screenshotImpl({ format = 'jpeg', quality = 65, clip, selector, 
             if (width <= 0 || height <= 0) return null;
             return { x, y, width, height };
         })()`, 30000, target);
-        if (!r.value) throw new Error(`selector not found or zero-size: ${selector}`);
+        if (!r.value) {
+            const sugg = await suggestSelectors(selector, target);
+            const hint = sugg.length ? ` — did you mean: ${sugg.map((s) => s.selector).join(' , ')}` : '';
+            throw new Error(`selector not found or zero-size: ${selector}${hint}`);
+        }
         // Let the scroll settle one paint before capture (scrollIntoView updates
         // layout synchronously, but the compositor needs a frame to present it).
         await new Promise((res) => setTimeout(res, 120));
@@ -518,8 +711,13 @@ async function _screenshotImpl({ format = 'jpeg', quality = 65, clip, selector, 
             try { await cdp('Emulation.clearDeviceMetricsOverride', {}, 8000, target); ok = true; } catch {}
             if (!ok) {
                 await new Promise((res) => setTimeout(res, 600));
-                await cdp('Emulation.clearDeviceMetricsOverride', {}, 8000, target).catch(() => {});
+                try { await cdp('Emulation.clearDeviceMetricsOverride', {}, 8000, target); ok = true; } catch {}
             }
+            // Both attempts failed → the viewport is likely wedged at the emulated
+            // size. Mark it so /health + /look surface tool-state honestly instead
+            // of letting the next reads masquerade as app bugs.
+            if (!ok) { vpSuspect.set(target, true); console.log(`[cdp/serve] ${target}: metrics override clear FAILED twice — viewport suspect (run reset-viewport)`); }
+            else vpSuspect.delete(target);
         }
         // Release any interactive state we forced for the capture, else the UI is
         // left stuck in :hover/:active (poisons the NEXT diff/look — the pointer is
@@ -551,54 +749,92 @@ async function _screenshotImpl({ format = 'jpeg', quality = 65, clip, selector, 
     return { path: filePath, bytes: buf.length };
 }
 
-// One-shot snapshot of the assistant page state. Cuts a 3-eval poll to 1 call.
+// One-shot snapshot of the assistant page state. STORE-TRUTH FIRST (2026-07-14):
+// dev builds expose the live assistant store on window.__assistant (AppShell
+// onMount), so model/streaming/queue/errors/ctx% are read EXACT from state
+// instead of scraped off DOM selector guesses (whose model regex predated
+// Fable and whose streaming check was a class-substring hunch). The DOM scrape
+// stays as fallback, labeled source:"dom" so degraded fidelity is visible.
 async function assistantState(target = 'main') {
     const js = `
         (() => {
-            const tab = Array.from(document.querySelectorAll('button')).find(b => /^Assistant/.test(b.textContent?.trim()));
+            // workspace.svelte.ts stores ACTIVE_KEY as a bare string, not JSON.
+            const workspaceActiveId = localStorage.getItem('rift.ui.workspace.v1');
             const ta = document.querySelector('.assistant textarea');
+            const base = {
+                workspaceActiveId,
+                location: location.pathname,
+                title: document.title,
+                vp: { w: innerWidth, h: innerHeight, dpr: devicePixelRatio },
+            };
+            const A = window.__assistant;
+            if (A) {
+                try {
+                    const t = A.activeTab;
+                    const msgs = (t && t.messages) || [];
+                    let lastPreview = null;
+                    for (let i = msgs.length - 1; i >= 0; i--) {
+                        const m = msgs[i];
+                        if (m.role !== 'assistant') continue;
+                        const txt = (m.blocks || []).filter((b) => b.type === 'text').map((b) => b.text).join(' ').trim();
+                        if (txt) { lastPreview = txt.replace(/\\s+/g, ' ').slice(0, 200); break; }
+                    }
+                    const pill = document.querySelector('.settings-pill .pill-label');
+                    return Object.assign(base, {
+                        source: 'store',
+                        onAssistant: !!document.querySelector('.assistant'),
+                        streaming: !!(t && t.streaming),
+                        model: (t && (t.modelOverride || t.pinnedModel || t.lastModelId)) || A.model || null,
+                        modelLabel: ((pill && pill.textContent) || '').trim() || null,
+                        permissionMode: A.permissionMode != null ? A.permissionMode : null,
+                        thinkingEnabled: A.thinkingEnabled != null ? A.thinkingEnabled : null,
+                        ctxPct: Math.round((A.ctxPct || 0) * 10) / 10,
+                        bubbleCount: msgs.length,
+                        recentRoles: msgs.slice(-6).map((m) => m.role),
+                        lastError: (t && t.lastError) || null,
+                        activity: (t && t.activity && t.activity.currentLabel) || null,
+                        queueLen: ((t && t.queue) || []).length,
+                        draftChars: ((t && t.draft) || '').length,
+                        textareaValue: (ta && ta.value) || '',
+                        convoTitle: (t && t.convoTitle) || null,
+                        cliSession: ((t && t.cliSessionId) || '').slice(0, 8) || null,
+                        workspaceRoot: (t && t.workspaceRoot) || null,
+                        mcp: ((t && t.mcpServers) || []).map((s) => s.name + ':' + s.status).join(' ') || null,
+                        tabCount: (A.tabs && A.tabs.size != null) ? A.tabs.size : null,
+                        usageTurns: (t && t.sessionUsage && t.sessionUsage.turns) || 0,
+                        lastPreview,
+                    });
+                } catch (e) { base.storeError = String((e && e.message) || e); }
+            }
+            // --- DOM fallback (no dev hook, or the store read threw) ---
             // Stream mode renders assistant turns as .sturn (StreamTurn), not
             // .bubble — count both or completed replies read as "missing".
             const bubbles = Array.from(document.querySelectorAll('.bubble, .sturn')).map(b => {
                 const role = b.getAttribute('data-role') || (b.classList.contains('sturn') ? 'assistant' : null);
                 const reasoning = b.querySelector('.reasoning');
-                // Bubble mode keeps prose in .body .content .text; STREAM mode
-                // (.sturn) renders it as one .snarr block per narration chunk —
-                // join those or stream-mode replies read as 0 chars.
                 const text = b.querySelector('.body .content .text');
                 const snarr = Array.from(b.querySelectorAll('.snarr')).map(n => n.textContent).join('\\n');
                 const txt = text?.textContent || snarr || '';
                 return {
                     role,
                     reasoningLabel: reasoning?.querySelector('.reasoning-head')?.textContent?.trim() || null,
-                    reasoningExpanded: reasoning?.querySelector('.reasoning-head')?.getAttribute('aria-expanded') === 'true',
-                    reasoningChars: reasoning?.querySelector('.reasoning-body')?.textContent?.length ?? reasoning?.querySelector('.reasoning-preview')?.textContent?.length ?? 0,
                     textChars: txt.length,
                     textPreview: txt.slice(0, 200) || null,
                 };
             });
-            // Composer active-model pill (.settings-pill .pill-label) preferred — but
-            // a sibling .settings-pill is the permission-mode toggle, so match by
-            // model name to avoid grabbing "Bypass permissions". Fall back to the
-            // last bubble's .head-model label.
-            // NB: this string is a JS template literal — \\b keeps a regex word
-            // boundary (a bare \b would become a backspace char and never match).
+            // NB: \\b keeps a regex word boundary through the template literal.
             const modelPill = Array.from(document.querySelectorAll('.settings-pill .pill-label, .head-model'))
-                .find(e => /\\b(Sonnet|Opus|Haiku|Claude|GPT)\\b/.test(e.textContent || ''));
+                .find(e => /\\b(Sonnet|Opus|Haiku|Claude|Fable|Mythos|GPT)\\b/.test(e.textContent || ''));
             const streaming = !!document.querySelector('[data-streaming], .assistant [class*=streaming]');
-            // workspace.svelte.ts stores ACTIVE_KEY as a bare string, not JSON.
-            const workspaceActiveId = localStorage.getItem('rift.ui.workspace.v1');
-            return {
-                onAssistant: tab?.className?.includes('active') || !!document.querySelector('.assistant'),
-                workspaceActiveId,
+            return Object.assign(base, {
+                source: 'dom',
+                onAssistant: !!document.querySelector('.assistant'),
                 model: modelPill?.textContent?.trim() || null,
                 textareaValue: ta?.value || '',
                 bubbleCount: bubbles.length,
                 bubbles,
                 streaming,
-                location: location.pathname,
-                title: document.title,
-            };
+            });
         })()
     `;
     return evalJs(js, 30000, target);
@@ -793,7 +1029,11 @@ async function measure({ selector, children = true, depth = 1, pseudo } = {}, ta
       }
       return out;
     })()`;
-    return evalJs(js, 30000, target);
+    const r = await evalJs(js, 30000, target);
+    if (r.value?.error && /selector not found/i.test(r.value.error)) {
+        r.value.suggestions = await suggestSelectors(selector, target);
+    }
+    return r;
 }
 
 // --- state-aware screenshots: drive a real hover/focus before capture ---
@@ -935,14 +1175,19 @@ async function vdiff({ before, after, threshold = 0.1, includeAA = false } = {},
 // info/log), `limit` caps to the newest N, `clear` empties after reading so the
 // next call only sees what fired since. This is the one thing eval/state can't
 // give — async errors that fire between commands.
-function consoleLogs({ clear, level, limit } = {}, target = 'main') {
+function consoleLogs({ clear, level, limit, all } = {}, target = 'main') {
     const c = conn(target);
     const total = c.logs.length;
-    let logs = level ? c.logs.filter(l => l.level === level) : c.logs.slice();
+    const wantAll = all === '1' || all === true || all === 'true';
+    let matched = level ? c.logs.filter(l => l.level === level) : c.logs.slice();
+    // Default scope = CURRENT page generation. Entries from previous loads /
+    // dead app instances are counted as `stale`, not replayed as live errors.
+    const stale = matched.filter(l => (l.gen ?? 0) !== c.gen).length;
+    let logs = wantAll ? matched : matched.filter(l => (l.gen ?? 0) === c.gen);
     const n = Number(limit);
     if (n > 0) logs = logs.slice(-n);
     if (clear === '1' || clear === true || clear === 'true') c.logs = [];
-    return { target, total, count: logs.length, logs };
+    return { target, total, gen: c.gen, stale, count: logs.length, logs };
 }
 
 // /look — the verify primitive (2026-06-09). One round-trip returns everything
@@ -952,12 +1197,20 @@ function consoleLogs({ clear, level, limit } = {}, target = 'main') {
 // console buffer is read in-process. c.sh prints the shot path on the last line
 // so the agent's whole loop is `c.sh look` then Read <path>.
 async function look({ selector, level = 'error', limit = 20, format = 'jpeg', quality = 65, noShot } = {}, target = 'main') {
+    // Both legs individually guarded: a dead app (ws down) must yield a readable
+    // { page: { error } } — not a 500 whose jq render prints nulls.
     const [state, shot] = await Promise.all([
-        assistantState(target),
+        assistantState(target).catch(e => ({ error: e.message })),
         noShot ? Promise.resolve(null) : screenshot({ selector, format, quality }, target).catch(e => ({ error: e.message })),
     ]);
     const c = consoleLogs({ level, limit }, target);
-    return { page: state.value || { error: state.error }, errors: c.logs, errorCount: c.count, shot };
+    return {
+        page: state.value || { error: state.error },
+        errors: c.logs, errorCount: c.count,
+        staleErrors: c.stale, gen: c.gen,
+        viewportSuspect: !!vpSuspect.get(target),
+        shot,
+    };
 }
 
 // Trusted key dispatch via CDP Input domain. Synthetic JS KeyboardEvent
@@ -977,7 +1230,29 @@ const KEY_DEFS = {
     Period: { code: 'Period', key: '.', windowsVirtualKeyCode: 190 },
     Slash: { code: 'Slash', key: '/', windowsVirtualKeyCode: 191 },
     Backquote: { code: 'Backquote', key: '`', windowsVirtualKeyCode: 192 },
+    Delete: { code: 'Delete', key: 'Delete', windowsVirtualKeyCode: 46 },
+    Home: { code: 'Home', key: 'Home', windowsVirtualKeyCode: 36 },
+    End: { code: 'End', key: 'End', windowsVirtualKeyCode: 35 },
+    PageUp: { code: 'PageUp', key: 'PageUp', windowsVirtualKeyCode: 33 },
+    PageDown: { code: 'PageDown', key: 'PageDown', windowsVirtualKeyCode: 34 },
 };
+// "Ctrl+Shift+P" / "Control+4" / "Alt+ArrowLeft" -> { key, modifiers }. CDP
+// modifier bitmask: Alt=1, Ctrl=2, Meta=4, Shift=8. Previously combo strings
+// reached resolveKeyDef verbatim and errored ("unsupported key: Control+4") —
+// and act's output swallowed that error, so documented combos silently no-op'd.
+const MOD_BITS = { alt: 1, ctrl: 2, control: 2, meta: 4, cmd: 4, win: 4, shift: 8 };
+function parseKeyCombo(str) {
+    if (!str || !str.includes('+') || str === '+') return { key: str, modifiers: 0 };
+    const parts = str.split('+');
+    const key = parts.pop();
+    let modifiers = 0;
+    for (const p of parts) {
+        const bit = MOD_BITS[p.toLowerCase()];
+        if (!bit) return { key: str, modifiers: 0, badMod: p }; // unknown prefix — let resolveKeyDef reject the whole string
+        modifiers |= bit;
+    }
+    return { key: key || '+', modifiers };
+}
 // Digit + letter keys derived on demand so KEY_DEFS stays a single source of truth
 // for special-key mappings while still letting callers send Alt+1..9 / Ctrl+T / etc.
 function resolveKeyDef(key) {
@@ -992,11 +1267,13 @@ function resolveKeyDef(key) {
     return null;
 }
 async function pressKey({ key, modifiers = 0 }, target = 'main') {
-    const def = resolveKeyDef(key);
-    if (!def) return { error: `unsupported key: ${key}. Special: ${Object.keys(KEY_DEFS).join(',')}; digits 0-9 and letters a-z are auto-resolved.` };
-    await cdp('Input.dispatchKeyEvent', { type: 'keyDown', modifiers, ...def }, 30000, target);
-    await cdp('Input.dispatchKeyEvent', { type: 'keyUp', modifiers, ...def }, 30000, target);
-    return { ok: true, key };
+    const combo = parseKeyCombo(String(key ?? ''));
+    const def = resolveKeyDef(combo.key);
+    if (!def || combo.badMod) return { error: `unsupported key: ${key}${combo.badMod ? ` (unknown modifier "${combo.badMod}")` : ''}. Combos: Ctrl/Alt/Shift/Meta + key (e.g. Ctrl+Shift+P, Alt+4). Special: ${Object.keys(KEY_DEFS).join(',')}; digits and letters auto-resolve.` };
+    const mods = modifiers | combo.modifiers;
+    await cdp('Input.dispatchKeyEvent', { type: 'keyDown', modifiers: mods, ...def }, 30000, target);
+    await cdp('Input.dispatchKeyEvent', { type: 'keyUp', modifiers: mods, ...def }, 30000, target);
+    return { ok: true, key, modifiers: mods };
 }
 
 // /batch dispatcher — CDP is fully multiplexed by id (commands are demuxed in
@@ -1011,6 +1288,9 @@ async function runOp({ op, params = {}, target }, batchTarget = 'main') {
         case 'click': return click(params.selector, t);
         case 'wait': return waitFor(params, t);
         case 'sleep': { const ms = Math.max(0, Math.min(params.ms ?? 300, 10000)); await new Promise(r => setTimeout(r, ms)); return { ok: true, sleptMs: ms }; }
+        case 'settle': return settleQuiet(params, t);
+        case 'find': return findElements(params, t);
+        case 'text': return pageText(params, t);
         case 'key': return pressKey(params, t);
         case 'screenshot': return screenshot(params, t);
         case 'state': return assistantState(t);
@@ -1041,7 +1321,13 @@ const routes = {
             const t0 = Date.now();
             const r = await cdp('Runtime.evaluate', { expression: '1', returnByValue: true }, 3000, target);
             const ok = r.result?.result?.value === 1;
-            return { ok, target, url: t.url, title: t.title, pingMs: Date.now() - t0, wsOpen: conn(target).ws?.readyState === WebSocket.OPEN };
+            const c = conn(target);
+            return {
+                ok, target, url: t.url, title: t.title, pingMs: Date.now() - t0,
+                wsOpen: c.ws?.readyState === WebSocket.OPEN,
+                gen: c.gen, logsBuffered: c.logs.length,
+                viewportSuspect: !!vpSuspect.get(target),
+            };
         } catch (e) {
             // Can't reach WebView2 CDP (:9222). The #1 cause on WebView2 150.x is
             // the elevated-process regression (WebView2Feedback#5640) — the dev
@@ -1076,6 +1362,10 @@ const routes = {
     'GET /console': async (body, target, query) => consoleLogs(query, target),
     'GET /ax': async (body, target, query) => axTree(query, target),
     'POST /ax': async (body, target) => axTree(body, target),
+    'GET /find': async (body, target, query) => findElements(query, target),
+    'POST /find': async (body, target) => findElements(body, target),
+    'GET /text': async (body, target, query) => pageText(query, target),
+    'POST /text': async (body, target) => pageText(body, target),
     'POST /measure': async (body, target) => measure(body, target),
     'POST /vdiff': async (body, target) => vdiff(body, target),
     'POST /batch': async ({ ops = [], parallel = false }, target) => {
@@ -1097,7 +1387,7 @@ const routes = {
         // stale child ?t= URLs that pin a broken HMR transform). Also clear any
         // leftover device-metrics override — an interrupted screenshot can wedge
         // the layout viewport at a tiny size that survives ws reconnect.
-        try { await cdp('Emulation.clearDeviceMetricsOverride', {}, 5000, target); } catch {}
+        try { await cdp('Emulation.clearDeviceMetricsOverride', {}, 5000, target); vpSuspect.delete(target); } catch {}
         try { await cdp('Network.clearBrowserCache', {}, 5000, target); } catch {}
         await cdp('Page.enable', {}, 5000, target).catch(() => {});
         await cdp('Page.reload', { ignoreCache: true }, 10000, target);
@@ -1108,6 +1398,7 @@ const routes = {
         // WebView2 window size is restored (no reload). Use when innerWidth/Height
         // read tiny after an interrupted shot.
         await cdp('Emulation.clearDeviceMetricsOverride', {}, 5000, target);
+        vpSuspect.delete(target);
         const vp = await evalJs('({w:innerWidth,h:innerHeight})', 5000, target);
         return { ok: true, viewport: vp.value };
     },

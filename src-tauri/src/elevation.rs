@@ -293,6 +293,15 @@ fn run_task() -> Result<(), String> {
 /// through to `Continue` so the app still opens — non-elevated, honestly.
 #[cfg(windows)]
 pub fn bootstrap() -> Boot {
+    // Dev builds NEVER self-promote: the launcher task points at the INSTALLED
+    // exe, so a debug binary honoring `always_elevated` hands the session to the
+    // prod app and kills its own `tauri dev` tree (observed 2026-07-14 — the
+    // de-elevated CDP dev launch collapsed into an elevated prod instance).
+    // Elevation is an installed-app feature; dev runs stay at the launch IL.
+    if cfg!(debug_assertions) {
+        log::info!("elevation: dev build — skipping always-elevated bootstrap");
+        return Boot::Continue;
+    }
     if !crate::assistant::get_always_elevated() {
         return Boot::Continue;
     }

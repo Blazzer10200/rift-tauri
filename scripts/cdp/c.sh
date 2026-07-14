@@ -4,13 +4,17 @@
 #   bash scripts/cdp/c.sh targets                        # list main + browser targets
 #   bash scripts/cdp/c.sh look                           # VERIFY PRIMITIVE: state+errors+shot in ONE call
 #   bash scripts/cdp/c.sh look ".chat"                   # same, screenshot clipped to a selector
+#   bash scripts/cdp/c.sh peek                           # look WITHOUT the shot (state+errors, 0 img tokens)
+#   bash scripts/cdp/c.sh find "Send"                    # locate elements by TEXT/aria — returns robust selectors
+#   bash scripts/cdp/c.sh text ".chat"                   # rendered text content, exact (no shot, no ax caps)
+#   bash scripts/cdp/c.sh errors                         # console errors, CURRENT page-gen only (--all incl. stale)
 #   bash scripts/cdp/c.sh eval "document.title"
 #   bash scripts/cdp/c.sh type ".assistant textarea" "hello world" Enter
 #   bash scripts/cdp/c.sh click "button.sendbtn"
-#   bash scripts/cdp/c.sh act click '[aria-label="Settings"]'   # click+settle+look, ONE call
-#   bash scripts/cdp/c.sh act key "Control+4" ".sb-main"        # keypress+settle+look (clip to sel)
+#   bash scripts/cdp/c.sh act click '[aria-label="Settings"]'   # click+quiesce+look, ONE call (errors LOUD)
+#   bash scripts/cdp/c.sh act key "Ctrl+4" ".sb-main"           # combo keypress+quiesce+look (clip to sel)
 #   bash scripts/cdp/c.sh wait "document.querySelectorAll('.bubble').length >= 2" 30000
-#   bash scripts/cdp/c.sh state                          # assistant snapshot
+#   bash scripts/cdp/c.sh state                          # assistant snapshot (store-truth when dev hook present)
 #   bash scripts/cdp/c.sh page                           # generic "where am I"
 #   bash scripts/cdp/c.sh ax                             # image-FREE a11y structure (what's on screen + clickable)
 #   bash scripts/cdp/c.sh ax ".ah-wrap"                  # scope to a selector subtree
@@ -73,6 +77,54 @@ post() {
   printf '%s' "$out"
 }
 
+# Shared jq renderer for a /look payload (also the last op of act/nav batches).
+# Honest by construction: app-dead, dom-scrape downgrade, stale-error counts,
+# viewport-suspect and per-tab errors all SURFACE — nothing silently hides.
+LOOK_JQ='def looksum(l):
+  (l.page // {}) as $p |
+  if ($p.error) then
+    ("[look] ✗ app unreachable: " + ($p.error|tostring) + " — run: bash scripts/cdp/c.sh doctor")
+  else (
+    "[look] " + ($p.location // "?")
+      + " · ws=" + ($p.workspaceActiveId // "?")
+      + (if $p.model then " · model=" + ($p.model|tostring) elif $p.modelLabel then " · model=" + ($p.modelLabel|tostring) else "" end)
+      + (if $p.source == "dom" then " · (dom-scrape fallback)" else "" end)
+      + " · msgs=" + (($p.bubbleCount // 0)|tostring)
+      + " · streaming=" + (($p.streaming // false)|tostring)
+      + (if ($p.ctxPct // 0) > 0 then " · ctx=" + ($p.ctxPct|tostring) + "%" else "" end)
+      + (if $p.vp then " · vp=" + ($p.vp.w|tostring) + "x" + ($p.vp.h|tostring) else "" end),
+    (if $p.activity then "[activity] " + ($p.activity|tostring) else empty end),
+    (if $p.lastError then "[tab-error] " + ($p.lastError|tostring|.[0:200]) else empty end),
+    (if ($p.queueLen // 0) > 0 then "[queue] " + ($p.queueLen|tostring) + " queued msg(s)" else empty end),
+    "[errors] " + ((l.errorCount // 0)|tostring)
+      + (if (l.staleErrors // 0) > 0 then " (+" + (l.staleErrors|tostring) + " stale hidden — c.sh errors --all)" else "" end),
+    (l.errors[]? | "  ✗ " + (.text // "?")),
+    (if l.viewportSuspect then "⚠ viewport-suspect — a capture failed to clear its size override; run: bash scripts/cdp/c.sh reset-viewport" else empty end),
+    (if l.shot then (l.shot.path // ("(shot failed: " + (l.shot.error // "?") + ")")) else empty end)
+  ) end;
+'
+# Renderer for an action result (click/key op) — surfaces errors + selector
+# suggestions + covered-click warnings that used to be silently swallowed.
+ACT_JQ='def actsum(a; tag):
+  if (a.error) then
+    ("[" + tag + "] ✗ " + (a.error|tostring)
+      + (if (a.suggestions // []) | length > 0 then
+          "\n  did you mean:" + ([a.suggestions[] | "\n    " + .selector + "   ← " + ((.text // "")|.[0:40]) + (if .visible then "" else " [hidden]" end)] | join(""))
+        else "" end))
+  else
+    ("[" + tag + "] ✓"
+      + (if a.via then " via=" + a.via else "" end)
+      + (if a.reason then " (" + a.reason + ")" else "" end)
+      + (if a.covered then "  ⚠ COVERED by " + ((a.coveredBy // "?")|tostring) + " — the click may have landed on an overlay" else "" end))
+  end;
+def settlesum(s):
+  if (s.error) then ("[settled] ✗ " + (s.error|tostring))
+  elif (s.quiet == false) then ("[settled] " + ((s.waitedMs // 0)|tostring) + "ms CAPPED — DOM still mutating (animation/stream?)")
+  elif (s.waitedMs != null) then ("[settled] " + (s.waitedMs|tostring) + "ms quiet, " + ((s.mutations // 0)|tostring) + " mutations")
+  else ("[settled] " + ((s.sleptMs // 0)|tostring) + "ms (fixed)")
+  end;
+'
+
 case "$cmd" in
   health|state|page|targets)
     http_get "$API/$cmd$qs"
@@ -101,16 +153,68 @@ case "$cmd" in
     fi
     ;;
   console)
-    # console [level] [limit] [clear]  — drains nothing unless clear=1 given.
-    #   c.sh console               -> all buffered console/exception/log events
+    # console [level] [limit] [clear] [--all] — raw ring-buffer JSON. Scoped to
+    # the CURRENT page generation by default (stale entries from previous
+    # loads/instances are counted, not replayed); --all includes them.
+    #   c.sh console               -> current-gen console/exception/log events
     #   c.sh console error         -> only errors
     #   c.sh console error 20 1    -> last 20 errors, then clear the buffer
-    lvl="${1:-}"; lim="${2:-}"; clr="${3:-}"
+    #   c.sh console "" "" "" --all -> everything ever buffered (stale incl.)
+    all=""; args=()
+    for a in "$@"; do if [ "$a" = "--all" ]; then all=1; else args+=("$a"); fi; done
+    lvl="${args[0]:-}"; lim="${args[1]:-}"; clr="${args[2]:-}"
     cq="$qs"; sep="?"; [ -n "$qs" ] && sep="&"
     [ -n "$lvl" ] && { cq="$cq${sep}level=$lvl"; sep="&"; }
     [ -n "$lim" ] && { cq="$cq${sep}limit=$lim"; sep="&"; }
     [ -n "$clr" ] && { cq="$cq${sep}clear=$clr"; sep="&"; }
+    [ -n "$all" ] && { cq="$cq${sep}all=1"; sep="&"; }
     http_get "$API/console$cq"
+    ;;
+  errors)
+    # errors [--all] [limit=20] — the pretty console-error shorthand. Current
+    # page generation only by default; --all folds in stale generations too.
+    all=""; lim="20"
+    for a in "$@"; do if [ "$a" = "--all" ]; then all=1; else lim="$a"; fi; done
+    cq="$qs"; sep="?"; [ -n "$qs" ] && sep="&"
+    cq="$cq${sep}level=error&limit=$lim"; [ -n "$all" ] && cq="$cq&all=1"
+    resp="$(http_get "$API/console$cq")"
+    printf '%s' "$resp" | jq -r --arg all "$all" '
+      "[errors] " + (.count|tostring) + (if $all == "1" then " (incl. stale gens)" else " current (gen " + ((.gen // 0)|tostring) + ")" end)
+        + (if ($all != "1") and ((.stale // 0) > 0) then " · " + (.stale|tostring) + " stale hidden (add --all)" else "" end),
+      (.logs[]? | "  ✗ [" + (.kind // "?") + (if .gen != null then "/g" + (.gen|tostring) else "" end) + "] " + ((.text // "?")|.[0:300])
+        + (if .url then "  (" + (.url|split("/")|last) + (if .line then ":" + (.line|tostring) else "" end) + ")" else "" end))'
+    ;;
+  find)
+    # find <query> [limit=12] — locate elements by what they SAY (aria-label /
+    # visible text / title / placeholder), returns ROBUST selectors + rects.
+    # Kills selector guessing: find "Send" then act click on the result.
+    q="${1:-}"; lim="${2:-12}"
+    if [ -z "$q" ]; then echo "usage: $0 find <text> [limit]" >&2; exit 2; fi
+    resp="$(post find "$(jq -nc --arg q "$q" --argjson l "$lim" '{query:$q,limit:$l}')")"
+    printf '%s' "$resp" | jq -r --arg q "$q" '
+      if .error then "[find] ERROR: " + .error
+      else "[find] " + (.count|tostring) + " match(es) for \"" + $q + "\"",
+        (.matches[]? | "  " + .selector
+          + "   ← " + .tag + (if .role then "[" + .role + "]" else "" end)
+          + " \"" + ((.text // "")|.[0:50]) + "\""
+          + (if .visible then "" else "  [HIDDEN]" end)
+          + (if .disabled then "  [disabled]" else "" end)
+          + "  @" + (.rect.x|tostring) + "," + (.rect.y|tostring) + " " + (.rect.w|tostring) + "×" + (.rect.h|tostring))
+      end'
+    ;;
+  text)
+    # text [selector] [maxChars=4000] — the page/element as normalized rendered
+    # text. Reads EXACT content (transcript, error copy, settings values) for
+    # zero image tokens — no screenshot, no ax node caps.
+    sel="${1:-}"; max="${2:-4000}"
+    body="$(jq -nc --arg s "$sel" --argjson m "$max" '{maxChars:$m} + (if $s=="" then {} else {selector:$s} end)')"
+    resp="$(post text "$body")"
+    if [ -n "$(printf '%s' "$resp" | jq -r '.error // empty')" ]; then
+      printf '%s' "$resp" | jq -r '"[text] ERROR: " + .error,
+        (if (.suggestions // []) | length > 0 then "  did you mean:", (.suggestions[] | "    " + .selector + "   ← " + (.text // "")) else empty end)'
+    else
+      printf '%s' "$resp" | jq -r '"[text] " + (.totalChars|tostring) + " chars" + (if .truncated then " (TRUNCATED to " + ((.text|length)|tostring) + " — raise maxChars)" else "" end), "---", .text'
+    fi
     ;;
   look)
     # The verify primitive: page/assistant state + console errors + a screenshot,
@@ -118,41 +222,38 @@ case "$cmd" in
     sel="${1:-}"
     body="$(jq -nc --arg s "$sel" 'if $s=="" then {} else {selector:$s} end')"
     resp="$(post look "$body")"
-    printf '%s' "$resp" | jq -r '
-      "[look] " + (.page.location // .page.pathname // "?")
-        + " · ws=" + (.page.workspaceActiveId // "?")
-        + (if .page.model then " · model=" + .page.model else "" end)
-        + " · bubbles=" + ((.page.bubbleCount // 0)|tostring)
-        + " · streaming=" + ((.page.streaming // false)|tostring),
-      "[errors] " + (.errorCount|tostring),
-      (.errors[]? | "  ✗ " + (.text // "?")),
-      (.shot.path // (.shot.error // "(no shot)"))'
+    printf '%s' "$resp" | jq -r "$LOOK_JQ"'looksum(.)'
+    ;;
+  peek)
+    # peek [selector] — look WITHOUT the screenshot: state + console errors only.
+    # Free of image tokens; the right first call for "did that work?" before
+    # deciding whether pixels are even needed.
+    sel="${1:-}"
+    body="$(jq -nc --arg s "$sel" '{noShot:true} + (if $s=="" then {} else {selector:$s} end)')"
+    resp="$(post look "$body")"
+    printf '%s' "$resp" | jq -r "$LOOK_JQ"'looksum(.)'
     ;;
   act)
-    # act <click|key> <arg> [lookSel] [settleMs=350] — action + settle + look in
-    # ONE round-trip. Replaces the click;sleep;look 3-call dance: the server runs
-    # the action, waits settleMs for the UI to render, then returns the look
-    # summary (state + console errors + screenshot path on the LAST line).
-    av="${1:-}"; arg="${2:-}"; lookSel="${3:-}"; settle="${4:-350}"
+    # act <click|key> <arg> [lookSel] [maxSettleMs=1500] — action + settle + look
+    # in ONE round-trip. Settle is QUIESCENCE-based now: returns as soon as the
+    # DOM stops mutating (~150-400ms typical), capped at maxSettleMs — faster
+    # than the old fixed sleep AND never shoots mid-transition. Key combos work:
+    # act key "Ctrl+Shift+P". Action errors + selector suggestions print LOUDLY
+    # (they used to be silently swallowed — a failed click looked like success).
+    av="${1:-}"; arg="${2:-}"; lookSel="${3:-}"; settle="${4:-1500}"
     case "$av" in
       click) actop="$(jq -nc --arg s "$arg" '{op:"click",params:{selector:$s}}')" ;;
-      key)   actop="$(jq -nc --arg k "$arg" '{op:"key",params:{key:$k,modifiers:0}}')" ;;
-      *) echo "usage: $0 act {click|key} <arg> [lookSel] [settleMs]" >&2; exit 2 ;;
+      key)   actop="$(jq -nc --arg k "$arg" '{op:"key",params:{key:$k}}')" ;;
+      *) echo "usage: $0 act {click|key} <arg> [lookSel] [maxSettleMs]" >&2; exit 2 ;;
     esac
     body="$(jq -nc --argjson act "$actop" --argjson ms "$settle" --arg ls "$lookSel" \
-      '{ops:[ $act, {op:"sleep",params:{ms:$ms}}, ({op:"look"} + (if $ls=="" then {} else {params:{selector:$ls}} end)) ]}')"
+      '{ops:[ $act, {op:"settle",params:{maxMs:$ms,quietMs:120}}, ({op:"look"} + (if $ls=="" then {} else {params:{selector:$ls}} end)) ]}')"
     resp="$(post batch "$body")"
-    printf '%s' "$resp" | jq -r --arg av "$av" '
-      .results as $r | ($r[-1]) as $l |
-      "[act:" + $av + "] settled " + (($r[1].sleptMs // 0)|tostring) + "ms",
-      "[look] " + ($l.page.location // $l.page.pathname // "?")
-        + " · ws=" + ($l.page.workspaceActiveId // "?")
-        + (if $l.page.model then " · model=" + $l.page.model else "" end)
-        + " · bubbles=" + (($l.page.bubbleCount // 0)|tostring)
-        + " · streaming=" + (($l.page.streaming // false)|tostring),
-      "[errors] " + ($l.errorCount|tostring),
-      ($l.errors[]? | "  ✗ " + (.text // "?")),
-      ($l.shot.path // ($l.shot.error // "(no shot)"))'
+    printf '%s' "$resp" | jq -r --arg av "$av" "$LOOK_JQ$ACT_JQ"'
+      .results as $r |
+      actsum($r[0]; "act:" + $av),
+      settlesum($r[1]),
+      looksum($r[-1])'
     ;;
   measure)
     # measure <selector> [nokids] — REAL computed geometry + design tokens for an
@@ -167,7 +268,8 @@ case "$cmd" in
       '{selector:$s,children:$c} + (if $p=="" then {} else {pseudo:$p} end)')"
     resp="$(post measure "$body")"
     if [ -n "$(printf '%s' "$resp" | jq -r '.value.error // .error // empty')" ]; then
-      printf '%s' "$resp" | jq -r '"[measure] ERROR: " + (.value.error // .error)'
+      printf '%s' "$resp" | jq -r '"[measure] ERROR: " + (.value.error // .error),
+        (if ((.value.suggestions // []) | length) > 0 then "  did you mean:", (.value.suggestions[] | "    " + .selector + "   ← " + (.text // "")) else empty end)'
     else
       printf '%s' "$resp" | jq -r '
         (.value // .) as $v |
@@ -207,8 +309,14 @@ case "$cmd" in
     post click "$(jq -nc --arg s "$sel" '{selector:$s}')"
     ;;
   wait)
+    # wait <js-expr> [timeoutMs=60000] — poll until truthy. Prints ✓/✗ and exits
+    # non-zero on timeout/error so `c.sh wait ... && next` chains honestly.
     js="$1"; t="${2:-60000}"
-    post wait "$(jq -nc --arg js "$js" --argjson t "$t" '{js:$js,timeoutMs:$t}')"
+    resp="$(post wait "$(jq -nc --arg js "$js" --argjson t "$t" '{js:$js,timeoutMs:$t}')")"
+    printf '%s' "$resp" | jq -r '
+      if .error then "[wait] ✗ " + .error + " (" + ((.elapsedMs // 0)|tostring) + "ms, " + ((.polls // 0)|tostring) + " polls)"
+      else "[wait] ✓ " + (.value|tostring|.[0:120]) + "  (" + ((.elapsedMs // 0)|tostring) + "ms, " + ((.polls // 0)|tostring) + " polls)" end'
+    printf '%s' "$resp" | jq -e '.error | not' >/dev/null
     ;;
   shot)
     fmt="${1:-jpeg}"; q="${2:-65}"; mode="${3:-path}"
@@ -336,16 +444,13 @@ case "$cmd" in
     sel="[aria-label=\"$label\"]"
     clickop="$(jq -nc --arg s "$sel" '{op:"click",params:{selector:$s}}')"
     body="$(jq -nc --argjson click "$clickop" --argjson ms "$settle" --arg ls "$lookSel" \
-      '{ops:[ $click, {op:"sleep",params:{ms:$ms}}, ({op:"look"} + (if $ls=="" then {} else {params:{selector:$ls}} end)) ]}')"
+      '{ops:[ $click, {op:"settle",params:{maxMs:$ms,quietMs:120}}, ({op:"look"} + (if $ls=="" then {} else {params:{selector:$ls}} end)) ]}')"
     resp="$(post batch "$body")"
-    printf '%s' "$resp" | jq -r --arg d "$dest" '
-      .results as $r | ($r[-1]) as $l |
-      (if ($r[0].error // $r[0].result.error) then "[nav:" + $d + "] ✗ click failed: " + (($r[0].error // $r[0].result.error)|tostring) else "[nav:" + $d + "] → clicked, settled " + (($r[1].sleptMs // 0)|tostring) + "ms" end),
-      "[look] " + ($l.page.location // "?") + " · ws=" + ($l.page.workspaceActiveId // "?")
-        + " · bubbles=" + (($l.page.bubbleCount // 0)|tostring),
-      "[errors] " + (($l.errorCount // 0)|tostring),
-      ($l.errors[]? | "  ✗ " + (.text // "?")),
-      ($l.shot.path // ($l.shot.error // "(no shot)"))'
+    printf '%s' "$resp" | jq -r --arg d "$dest" "$LOOK_JQ$ACT_JQ"'
+      .results as $r |
+      actsum($r[0]; "nav:" + $d),
+      settlesum($r[1]),
+      looksum($r[-1])'
     ;;
   tour)
     # tour <ws1> <ws2> ... [--settle N] — visit N workspaces and screenshot EACH,
@@ -372,17 +477,20 @@ case "$cmd" in
       esac
       labels="$labels $ws"
       ops="$(jq -nc --argjson ops "$ops" --arg sel "[aria-label=\"$label\"]" --argjson ms "$settle" --arg tag "$ws" \
-        '$ops + [ {op:"click",params:{selector:$sel}}, {op:"sleep",params:{ms:$ms}}, {op:"screenshot",params:{format:"jpeg",quality:70,_tag:$tag}} ]')"
+        '$ops + [ {op:"click",params:{selector:$sel}}, {op:"settle",params:{maxMs:$ms,quietMs:120}}, {op:"screenshot",params:{format:"jpeg",quality:70,_tag:$tag}} ]')"
     done
     body="$(jq -nc --argjson ops "$ops" '{ops:$ops}')"
     resp="$(post batch "$body")"
-    # Pull every screenshot result (every 3rd op) with its surface tag.
+    # Index by TRIPLET (click, settle, shot per surface) — never by filtered
+    # shot list, which silently misaligned labels whenever one click failed.
     printf '%s' "$resp" | jq -r --arg labels "$labels" '
       ($labels | ltrimstr(" ") | split(" ")) as $L |
-      "[tour] " + (($L|length)|tostring) + " surfaces captured in ONE round-trip:",
-      ( [ .results[] | select(.path) ] as $shots
-        | range(0; ($shots|length)) as $i
-        | "  " + ($L[$i] // "?") + " → " + ($shots[$i].path // "(no shot)") )'
+      "[tour] " + (($L|length)|tostring) + " surfaces in ONE round-trip:",
+      ( range(0; ($L|length)) as $i |
+        (.results[3*$i]) as $c | (.results[3*$i+2]) as $s |
+        "  " + ($L[$i] // "?")
+        + (if ($c.error) then "  ✗ CLICK FAILED: " + ($c.error|tostring) + " (shot shows the PREVIOUS surface)" else "" end)
+        + "  → " + (if $s then ($s.path // ("(shot failed: " + ($s.error // "?") + ")")) else "(no shot)" end) )'
     ;;
   ready)
     # ready [timeoutMs] — block until the app is MOUNTED and IDLE: .app exists,
@@ -393,7 +501,8 @@ case "$cmd" in
       const app = document.querySelector(".app");
       if (!app) return false;
       if (document.fonts && document.fonts.status !== "loaded") return false;
-      const streaming = !!(window.__assistant && window.__assistant.streaming);
+      const A = window.__assistant;
+      const streaming = !!(A && A.activeTab && A.activeTab.streaming);
       const onboarding = !!document.querySelector(".ob-host");
       return { mounted: true, streaming, onboarding, ws: document.documentElement.dataset.mode };
     })()'
@@ -464,7 +573,10 @@ case "$cmd" in
       if [ -n "$(printf '%s' "$hb" | jq -r 'select(.ok==true) | .ok' 2>/dev/null)" ]; then
         api_ok=1; cdp_ok=1
         echo "  ✓ wrapper (9223): up   ✓ WebView2 CDP ($cdp_port): reachable"
-        printf '%s' "$hb" | jq -r '"  ✓ target=" + .target + " url=" + (.url//"?") + " pingMs=" + ((.pingMs//0)|tostring)'
+        printf '%s' "$hb" | jq -r '"  ✓ target=" + .target + " url=" + (.url//"?") + " pingMs=" + ((.pingMs//0)|tostring) + " gen=" + ((.gen//0)|tostring)'
+        if [ -n "$(printf '%s' "$hb" | jq -r 'select(.viewportSuspect==true) | 1' 2>/dev/null)" ]; then
+          echo "  ⚠ viewport-suspect: a capture failed to clear its size override — run: bash scripts/cdp/c.sh reset-viewport"
+        fi
       else
         api_ok=1
         echo "  ✓ wrapper (9223): up"
@@ -504,7 +616,7 @@ case "$cmd" in
     curl -sS -X POST "$API/shutdown" 2>/dev/null || true
     ;;
   *)
-    echo "usage: $0 [-t main|browser] {health|doctor|reap|targets|look|act|nav|tour|ready|state|page|ax|measure|console|eval|type|click|wait|shot|shot-sel|baseline|diff|batch|key|reload|reset-viewport|diag|shutdown} ..." >&2
+    echo "usage: $0 [-t main|browser] {health|doctor|reap|targets|look|peek|act|nav|tour|ready|state|page|ax|find|text|errors|measure|console|eval|type|click|wait|shot|shot-sel|baseline|diff|batch|key|reload|reset-viewport|diag|shutdown} ..." >&2
     exit 2
     ;;
 esac

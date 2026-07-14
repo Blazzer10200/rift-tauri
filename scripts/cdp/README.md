@@ -59,19 +59,23 @@ Under the hood:
 ```bash
 bash scripts/cdp/c.sh look                                     # VERIFY PRIMITIVE: state+errors+shot, path on last line
 bash scripts/cdp/c.sh look ".chat"                             # same, screenshot clipped to a selector
+bash scripts/cdp/c.sh peek                                     # look WITHOUT the shot — state+errors for 0 image tokens
+bash scripts/cdp/c.sh find "Send"                              # locate elements by TEXT/aria → robust selectors + rects
+bash scripts/cdp/c.sh text ".chat"                             # exact rendered text (transcript/errors) — no shot, no ax caps
+bash scripts/cdp/c.sh errors                                   # console errors, CURRENT page-gen only (--all incl. stale)
 bash scripts/cdp/c.sh doctor                                   # WHY is CDP down? layered diagnosis (wrapper/port/ELEVATION) + fix
 bash scripts/cdp/c.sh nav settings                             # jump to a workspace (home/chat/settings/ai-health/local-llm) + look
 bash scripts/cdp/c.sh tour chat home ai-health settings        # visit N surfaces + screenshot EACH in ONE round-trip
 bash scripts/cdp/c.sh ready                                    # block until app mounted + idle (kills settle-time guessing)
-bash scripts/cdp/c.sh health                                   # smoke + real eval ping (pingMs)
-bash scripts/cdp/c.sh state                                    # assistant snapshot (incl. workspaceActiveId)
+bash scripts/cdp/c.sh health                                   # smoke + real eval ping (pingMs, page gen, viewport-suspect)
+bash scripts/cdp/c.sh state                                    # assistant snapshot — STORE-TRUTH via window.__assistant in dev
 bash scripts/cdp/c.sh page                                     # generic "where am I" (every workspace)
 bash scripts/cdp/c.sh eval "document.title"                    # arbitrary JS
 bash scripts/cdp/c.sh type ".assistant textarea" "hello" Enter # type + Enter
-bash scripts/cdp/c.sh click "button.sendbtn"                   # click
-bash scripts/cdp/c.sh wait "document.querySelectorAll('.bubble').length >= 2" 30000
-bash scripts/cdp/c.sh console                                  # all buffered console/exception/log events
-bash scripts/cdp/c.sh console error                            # only errors
+bash scripts/cdp/c.sh click "button.sendbtn"                   # click (real pointer events; miss → selector suggestions)
+bash scripts/cdp/c.sh act key "Ctrl+Shift+P"                   # key COMBOS parse now (Alt/Ctrl/Shift/Meta + key)
+bash scripts/cdp/c.sh wait "document.querySelectorAll('.bubble').length >= 2" 30000   # ✓/✗ + honest exit code
+bash scripts/cdp/c.sh console                                  # buffered console/exception/log events (current page-gen)
 bash scripts/cdp/c.sh console error 20 1                       # last 20 errors, then clear buffer
 bash scripts/cdp/c.sh shot                                     # jpeg q65 -> prints bare path
 bash scripts/cdp/c.sh shot png 0                               # png lossless
@@ -82,6 +86,21 @@ bash scripts/cdp/c.sh shutdown                                 # stop the server
 ```
 
 `shot` prints just the path on stdout — `f=$(bash scripts/cdp/c.sh shot)` then `Read` $f.
+
+## Accuracy layer (2026-07-14) — why the tool stopped lying
+
+A dedicated pass fixed every known "the tool said X, reality was Y" class:
+
+- **Store-truth state.** `state`/`look`/`peek` read the LIVE assistant store via the dev hook `window.__assistant` (AppShell exposes it in dev): model, streaming, ctx%, permission mode, per-tab `lastError`, queue length, activity label, mcp statuses — exact values, not DOM-selector guesses. Output carries `source:"store"`; if the hook is missing it falls back to the old scrape and the summary shows `(dom-scrape fallback)` so degraded fidelity is visible. (The old scrape's model regex didn't even know "Fable"; its streaming check was a class-substring hunch.)
+- **Console page-generations.** Every buffered console/exception/log entry is stamped with the page generation it fired in (bumped on real navigation via `Runtime.executionContextsCleared` and on ws loss = app restart; HMR hot-updates deliberately do NOT bump). `look`/`errors`/`console` scope to the CURRENT generation — stale errors from a previous load are COUNTED (`+N stale hidden`) instead of replayed as live. Ghost HMR errors that survived app restarts are dead (ISSUES #93 item 5).
+- **Loud action results.** `act`/`nav` print the action verdict first: `✗ selector not found` **with did-you-mean suggestions** (fuzzy-matched real elements, robust selectors), `⚠ COVERED by <overlay>` when the hit-point was occluded, `via=js-fallback (offscreen)` when the real-pointer path couldn't run. Previously act swallowed all of this and printed a healthy-looking summary — a failed click was indistinguishable from success.
+- **Key combos parse.** `act key "Ctrl+Shift+P"`, `Alt+4`, `Ctrl+Enter` — modifier prefixes map to the CDP bitmask. The old code sent combo strings verbatim and errored (silently, per the bullet above). F-keys, Delete/Home/End/PageUp/PageDown added.
+- **Quiescent settle.** `act`/`nav`/`tour` wait for the DOM to stop MUTATING (120ms quiet, capped) instead of sleeping a fixed guess — no more mid-transition screenshots read as phantom layout bugs, and typical actions verify ~2× faster. `[settled] 240ms quiet` vs `1500ms CAPPED — DOM still mutating` tells you which happened. Op available in batches as `{op:"settle",params:{quietMs,maxMs}}`.
+- **Viewport-suspect flag.** If a capture's device-metrics override fails to clear TWICE, the target is marked suspect and `health`/`look` say so (`⚠ viewport-suspect — run reset-viewport`) — a wedged emulated viewport surfaces as tool-state instead of masquerading as an app layout bug. `look` also always prints the live `vp=WxH`.
+- **Honest tour labels.** Tour output is indexed by op-triplet, so a failed nav click prints `✗ CLICK FAILED (shot shows the PREVIOUS surface)` instead of silently shifting every label onto the wrong screenshot.
+- **App-dead is readable.** `look`/`peek` against a dead/restarting app print `✗ app unreachable → run doctor` instead of a null-riddled jq render.
+
+New content primitives: **`find <text>`** (locate elements by what they SAY — aria/text/title/placeholder → unique selectors + rects; kills selector guessing), **`text [sel]`** (exact rendered text, no ax node caps), **`peek`** (look minus the screenshot — the right first call before paying image tokens).
 
 ## /look — the verify primitive (2026-06-09, the fast path)
 
@@ -117,7 +136,7 @@ bash scripts/cdp/c.sh act click ".sendbtn" "" 600                # custom settle
 /c/AI Workflow/projects/rift-tauri/scripts/cdp/.tmp/snap-2026-...-2.jpeg
 ```
 
-Args: `act {click|key} <selector-or-key> [lookSel] [settleMs=350]`. Backed by a new `sleep` op on the `/batch` dispatcher (`{op:"sleep",params:{ms}}`, clamped 0–10000ms) — usable in any hand-authored batch too. Net: a UI change you'd verify in **3 shell calls + a 1s blind sleep** is now **1 call** (+ the `Read` of the shot). Foreground `sleep` is also blocked by the Bash tool now, so `act` is the supported way to wait for a render.
+Args: `act {click|key} <selector-or-key> [lookSel] [maxSettleMs=1500]`. Since 2026-07-14 the settle is **quiescence-based** (`{op:"settle",params:{quietMs,maxMs}}` — resolves when the DOM stops mutating, capped), so typical actions come back in ~150-400ms and slow renders still get their full window; the plain `sleep` op remains for hand-authored batches. The first output line is the **action verdict** (`✓ via=input` / `✗ + suggestions` / `⚠ COVERED`), then `[settled]`, then the look summary. Net: a UI change you'd verify in **3 shell calls + a 1s blind sleep** is now **1 call** (+ the `Read` of the shot). Foreground `sleep` is blocked by the Bash tool, so `act` is the supported way to wait for a render.
 
 ## Design-inspector loop — measure · baseline · diff · state-shots (2026-07-01)
 
@@ -167,7 +186,7 @@ bash scripts/cdp/c.sh console error        # filter by level (error/warning/info
 bash scripts/cdp/c.sh console "" 50 1      # last 50 of any level, then clear
 ```
 
-Each entry: `{ kind: console|exception|log, level, text, ts, url, line, source? }`. `console` is also a `/batch` op, so a single batched call can fire an action then read what it threw. **Workflow:** after any UI action that should mutate state but didn't, pull `console` before guessing — an async throw is the usual culprit, and it was previously unseeable.
+Each entry: `{ kind: console|exception|log, level, text, ts, url, line, source?, gen }`. **`gen` is the page generation** the entry fired in — reads default to the current generation, so errors from a previous load/instance are counted as stale, never replayed as live (see the Accuracy layer section). `console` is also a `/batch` op, so a single batched call can fire an action then read what it threw. **Workflow:** after any UI action that should mutate state but didn't, pull `errors` (or `console`) before guessing — an async throw is the usual culprit, and it was previously unseeable.
 
 ## /ax — image-free structure probe (2026-06-25)
 
@@ -206,7 +225,7 @@ Real timings on a warm session: `health`/`state`/`page` ~80ms · `ax` ~290ms · 
 
 Per-screenshot ~$0.07 + image input tokens. **`ax` first when the question is structural** — it's free of image tokens and often settles "did it render / what's on screen" without a shot.
 
-1. **`/state` or `/eval` first.** Reads DOM for free. Covers most "did it render?" questions.
+1. **`peek`/`state`/`find`/`text` first.** Read state + content for free. Covers most "did it render / what does it say?" questions.
 2. **Screenshot only when pixels matter** — layout bugs, animations, contrast, drag region.
 3. **JPEG q50-70** when you DO screenshot. Half the tokens of PNG.
 4. **Whole-page shots target the model's vision envelope** (rebuilt 2026-06-25, see below) — on a 16:10 window they emit **2419×1512 ≈ 4698 visual tokens, ~95KB q72**, the largest size Opus 4.7/4.8 ingests with *zero* server-side resize. This replaces the old `1280×800 @ DSF=1` clamp (1334 tokens), which predated the Opus-4.7 high-res bump and shipped soft, ~3.5×-under-resolution shots. Cost is ~4698 img-tokens/shot (~$0.024 at Opus-4.8 rates) — pay it only when pixels matter; `ax`/`state` first for structure.
