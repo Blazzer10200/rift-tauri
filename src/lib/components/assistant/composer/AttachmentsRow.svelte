@@ -83,7 +83,7 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 10px;
-    transition: border-color 140ms ease-out, background 140ms ease-out;
+    transition: border-color var(--dur-fast) ease-out, background var(--dur-fast) ease-out;
   }
   .attach-chip:hover { border-color: var(--border-strong); }
   .attach-thumb {
@@ -127,7 +127,7 @@
   .attach-error {
     display: inline-flex; align-items: center; gap: 6px;
     padding: 4px 8px 4px 10px;
-    background: var(--danger-soft, color-mix(in oklab, var(--danger) 12%, transparent));
+    background: var(--danger-soft);
     border: 1px solid color-mix(in oklab, var(--danger) 35%, var(--border));
     border-radius: 8px;
     font-size: var(--fs-xs);

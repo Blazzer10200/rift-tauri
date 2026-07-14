@@ -138,7 +138,7 @@
     color: var(--fg-2);
   }
   .term-line { white-space: pre-wrap; word-break: break-word;
-    animation: termLineIn 240ms var(--ease-page) both; }
+    animation: termLineIn var(--dur-base) var(--ease-page) both; }
   @keyframes termLineIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
   @media (prefers-reduced-motion: reduce) { .term-line { animation: none; } }
   /* Semantic tone (keyword-based) — the line's base color. */

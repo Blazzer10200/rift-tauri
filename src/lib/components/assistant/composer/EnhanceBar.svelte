@@ -240,7 +240,7 @@
     border-radius: 8px;
     font: inherit; font-size: var(--fs-sm); font-weight: 600;
     cursor: pointer;
-    transition: background 140ms ease-out, border-color 140ms ease-out, transform 120ms ease-out;
+    transition: background var(--dur-fast) ease-out, border-color var(--dur-fast) ease-out, transform 120ms ease-out;
   }
   .enhance-btn:active { transform: scale(0.96); }
   .enhance-accept {

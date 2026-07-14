@@ -399,7 +399,7 @@
     transition: background var(--dur-fast), color var(--dur-fast); }
   .crow-act:hover { background: var(--surface-active); color: var(--fg); }
   .crow:hover .crow-time, .crow.menu-open .crow-time { display: none; }
-  .crow:hover .crow-acts, .crow.menu-open .crow-acts { display: flex; animation: actsIn 0.14s var(--ease-page) both; }
+  .crow:hover .crow-acts, .crow.menu-open .crow-acts { display: flex; animation: actsIn var(--dur-fast) var(--ease-page) both; }
   .crow-rename { flex: 1; min-width: 0; height: 25px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border-focus);
     background: var(--bg-inset); color: var(--fg); font-size: 12.5px; outline: 0; box-shadow: 0 0 0 3px var(--ring); }
 
@@ -415,7 +415,7 @@
     color: var(--fg-2); font-size: 12.5px; text-align: left; transition: background var(--dur-fast), color var(--dur-fast); }
   :global(.conv-menu .pop-item:hover) { background: var(--surface-hover); color: var(--fg); }
   :global(.conv-menu .pop-item svg) { color: var(--fg-faint); flex: none; }
-  :global(.conv-menu .pop-item.danger:hover) { background: var(--danger-soft, color-mix(in oklab, var(--danger) 18%, transparent)); color: var(--danger); }
+  :global(.conv-menu .pop-item.danger:hover) { background: var(--danger-soft); color: var(--danger); }
   :global(.conv-menu .pop-item.danger:hover svg) { color: var(--danger); }
 
   @keyframes barPop { from { transform: translateY(-50%) scaleY(0.25); } to { transform: translateY(-50%) scaleY(1); } }

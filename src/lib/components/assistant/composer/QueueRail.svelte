@@ -238,7 +238,7 @@
     font: inherit;
     font-size: 10px;
     letter-spacing: 0.04em;
-    transition: background 140ms ease-out, color 140ms ease-out;
+    transition: background var(--dur-fast) ease-out, color var(--dur-fast) ease-out;
   }
   .rail-clear:hover { background: var(--danger-soft); color: oklch(0.95 0.04 22); }
 </style>

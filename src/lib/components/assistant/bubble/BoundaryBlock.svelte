@@ -116,7 +116,7 @@
     font-size: 11px;
     color: var(--fg-muted);
     white-space: nowrap;
-    transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
+    transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease, transform var(--dur-fast) ease;
   }
   .boundary-head:not(:disabled):hover .boundary-pill {
     background: color-mix(in oklch, var(--bg-elev-1) 95%, transparent);

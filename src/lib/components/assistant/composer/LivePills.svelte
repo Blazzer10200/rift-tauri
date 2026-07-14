@@ -59,10 +59,10 @@
     border: 0;
     border-radius: 999px;
     flex-shrink: 0;
-    transition: color 140ms ease-out;
+    transition: color var(--dur-fast) ease-out;
   }
   .live-pill:hover { color: var(--fg); }
-  .live-pill :global(svg) { color: var(--fg-faint); transition: color 140ms ease-out; }
+  .live-pill :global(svg) { color: var(--fg-faint); transition: color var(--dur-fast) ease-out; }
   .live-pill:hover :global(svg) { color: var(--fg-muted); }
   .live-pill .mono { font-variant-numeric: tabular-nums; color: var(--fg-2); }
 </style>

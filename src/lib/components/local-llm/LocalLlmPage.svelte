@@ -427,7 +427,7 @@
   /* Hero status chip — tinted per readiness state (snippet defined in-file → scoped here). */
   .sb-chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--fg-2); font: inherit; font-size: var(--fs-xs); font-weight: 600; }
   .sb-chip .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--fg-faint); }
-  .sb-chip.ready { background: var(--accent-soft, color-mix(in oklab, var(--accent) 14%, transparent)); border-color: color-mix(in oklch, var(--accent) 30%, transparent); color: var(--accent); }
+  .sb-chip.ready { background: var(--accent-soft); border-color: color-mix(in oklch, var(--accent) 30%, transparent); color: var(--accent); }
   .sb-chip.ready .dot { background: var(--accent); }
   .sb-chip.incomplete { background: var(--warn-soft); border-color: color-mix(in oklab, var(--warn) 28%, transparent); color: var(--warn); }
   .sb-chip.incomplete .dot { background: var(--warn); }

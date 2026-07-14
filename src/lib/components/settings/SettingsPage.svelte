@@ -1459,7 +1459,7 @@
 
   /* expanding a collapsed list cascades the new entries in (keyed each — the
      already-visible head keeps its DOM, so only revealed items animate) */
-  .anim-reveal { animation: reveal-in 240ms var(--ease-page) both; animation-delay: calc(min(var(--ti, 0), 16) * 22ms); }
+  .anim-reveal { animation: reveal-in var(--dur-base) var(--ease-page) both; animation-delay: calc(min(var(--ti, 0), 16) * 22ms); }
   @keyframes reveal-in {
     from { opacity: 0; transform: translateY(7px) scale(0.985); }
     to   { opacity: 1; transform: none; }
@@ -1582,7 +1582,7 @@
   .st-info-s { color: var(--fg-muted); margin-top: 3px; }
   .st-dev { margin-top: 9px; }
   .st-dev > summary { cursor: pointer; color: var(--fg-muted); font-size: var(--fs-xs); list-style: none; user-select: none; display: inline-flex; align-items: center; gap: 5px; }
-  .st-dev > summary::before { content: "›"; display: inline-block; transition: transform 140ms ease-out; }
+  .st-dev > summary::before { content: "›"; display: inline-block; transition: transform var(--dur-fast) ease-out; }
   .st-dev[open] > summary::before { transform: rotate(90deg); }
   .st-dev > summary:hover { color: var(--fg); }
   .st-dev-body { margin-top: 7px; color: var(--fg-muted); }

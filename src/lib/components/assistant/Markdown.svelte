@@ -768,7 +768,7 @@
     cursor: pointer;
     user-select: none;
     opacity: 0;
-    transition: opacity 140ms ease-out, color 120ms ease-out, background 120ms ease-out;
+    transition: opacity var(--dur-fast) ease-out, color 120ms ease-out, background 120ms ease-out;
   }
   .md :global(pre:hover .code-copy),
   .md :global(pre .code-copy:focus) { opacity: 1; }
@@ -927,7 +927,7 @@
     text-decoration-color: color-mix(in oklch, var(--accent) 35%, transparent);
     text-underline-offset: 2px;
     text-decoration-thickness: 1px;
-    transition: text-decoration-color 140ms ease-out, color 140ms ease-out, opacity 220ms ease;
+    transition: text-decoration-color var(--dur-fast) ease-out, color var(--dur-fast) ease-out, opacity 220ms ease;
   }
   .md :global(a:hover) { color: var(--accent); text-decoration-color: var(--accent); }
 
@@ -1335,7 +1335,7 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 8px;
-    transition: border-color 140ms;
+    transition: border-color var(--dur-fast);
   }
   .md :global(details[open]) {
     border-color: var(--border-strong);
@@ -1355,7 +1355,7 @@
     display: inline-block;
     margin-right: 6px;
     color: var(--fg-muted);
-    transition: transform 140ms ease-out;
+    transition: transform var(--dur-fast) ease-out;
   }
   .md :global(details[open] summary::before) { transform: rotate(90deg); }
   .md :global(details summary:hover) { color: var(--fg); }

@@ -547,7 +547,7 @@
     border: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
     border-radius: 5px;
     overflow: hidden;
-    transition: border-color 140ms ease-out, background 140ms ease-out, opacity 140ms ease-out;
+    transition: border-color var(--dur-fast) ease-out, background var(--dur-fast) ease-out, opacity var(--dur-fast) ease-out;
     animation: enter 200ms cubic-bezier(0.22, 1, 0.36, 1);
   }
   .chip[data-status="done"] { opacity: 0.85; }
@@ -577,7 +577,7 @@
     /* No resting left-bar — the node circle on the rail is the spine now, so
        the chip's own inset accent only competes with it. Hover still lifts the
        model-hue bar to signal interactivity. */
-    transition: background 140ms ease-out, transform 140ms ease-out, box-shadow 140ms ease-out;
+    transition: background var(--dur-fast) ease-out, transform var(--dur-fast) ease-out, box-shadow var(--dur-fast) ease-out;
   }
   .chip[data-variant="timeline"]:not(.as-card) :global(.bh:hover:not(:disabled)) {
     background: color-mix(in oklch, var(--surface-hover) 80%, transparent);

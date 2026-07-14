@@ -88,6 +88,7 @@
   --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.40);
   --shadow:    0 4px 14px oklch(0 0 0 / 0.45);
   --shadow-lg: 0 24px 64px oklch(0 0 0 / 0.60);
+  --shadow-float: 0 12px 30px -14px oklch(0 0 0 / 0.60), 0 8px 22px -10px oklch(0 0 0 / 0.45);  /* frosted floating HUDs (jump pill, agent/plan HUD) */
 
   /* motion — one shared vocabulary (reuse, don't hand-roll curves) */
   --ease-page:    cubic-bezier(0.22, 1, 0.36, 1);   /* decelerate — entrances */
@@ -165,7 +166,7 @@ body {
   border: 2px solid transparent;
   background-clip: padding-box;
   border-radius: 999px;
-  transition: background 140ms ease-out;
+  transition: background var(--dur-fast) ease-out;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--fg-faint);

@@ -1600,7 +1600,7 @@
     display: flex; align-items: center; justify-content: center;
     z-index: 8;
     pointer-events: none;
-    animation: drop-in 140ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: drop-in var(--dur-fast) cubic-bezier(0.22, 1, 0.36, 1) both;
   }
   .drop-pill {
     display: inline-flex; align-items: center; gap: 8px;
@@ -1655,7 +1655,7 @@
       inset 0 1px 0 color-mix(in oklch, white 4%, transparent);
     transition: border-color 220ms cubic-bezier(0.22, 1, 0.36, 1),
                 box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1),
-                transform 140ms ease-out;
+                transform var(--dur-fast) ease-out;
     overflow: hidden;
   }
   /* Input row inside the well: textarea grows, send arrow rides the edge. */
@@ -1855,7 +1855,7 @@
     border: 1px solid transparent;
     cursor: pointer;
     flex-shrink: 0;
-    transition: background 140ms, color 140ms, border-color 140ms, transform 140ms;
+    transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast);
   }
   .cbtn:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg-2); }
   .cbtn:active:not(:disabled) { transform: scale(0.96); }
@@ -1865,7 +1865,7 @@
   .cbtn.ic:hover:not(:disabled) { color: var(--fg-2); }
   .cbtn.ic.active { background: var(--accent-soft); color: var(--accent); }
   .cbtn.enhance:hover:not(:disabled) { color: var(--accent); }
-  :global(.cbtn .cbtn-chev) { color: var(--fg-faint); transition: color 140ms, transform 140ms; }
+  :global(.cbtn .cbtn-chev) { color: var(--fg-faint); transition: color var(--dur-fast), transform var(--dur-fast); }
   /* Permission button — colored text by posture, no border (flat). */
   .cbtn.cperm { font-weight: 600; }
   .cbtn.cperm .perm-label { font-size: 12px; font-weight: 600; line-height: 1; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
@@ -1929,7 +1929,7 @@
   /* No input → gentle idle breathing so a silent/blocked mic still reads as
      live rather than frozen. */
   .mic-wave.silent span {
-    animation: mic-idle 1.6s ease-in-out infinite;
+    animation: mic-idle var(--pulse-live) ease-in-out infinite;
   }
   .mic-wave.silent span:nth-child(2) { animation-delay: 0.12s; }
   .mic-wave.silent span:nth-child(3) { animation-delay: 0.24s; }
@@ -1948,7 +1948,7 @@
     line-height: 1;
     font-variant-numeric: tabular-nums;
     color: var(--warn);
-    background: var(--warn-soft, color-mix(in oklab, var(--warn) 14%, transparent));
+    background: var(--warn-soft);
     border-radius: 999px;
     animation: mic-cd-pulse 1s ease-in-out infinite;
   }
@@ -2138,7 +2138,7 @@
       color-mix(in oklch, var(--model-color) 16%, transparent),
       transparent 70%
     );
-    animation: magic-aura-pulse 1.6s ease-in-out infinite;
+    animation: magic-aura-pulse var(--pulse-live) ease-in-out infinite;
   }
   @keyframes magic-aura-pulse {
     0%, 100% { opacity: 0.35; }
@@ -2156,7 +2156,7 @@
     filter: drop-shadow(0 0 4px color-mix(in oklch, var(--model-color) 85%, transparent));
     opacity: 0;
     transform-origin: center;
-    animation: magic-twinkle 1.6s ease-in-out infinite;
+    animation: magic-twinkle var(--pulse-live) ease-in-out infinite;
     animation-delay: var(--sd);
   }
   @keyframes magic-twinkle {
@@ -2275,7 +2275,7 @@
     cursor: pointer;
     font: inherit;
     overflow: hidden;
-    transition: background 140ms ease-out, color 140ms ease-out, border-color 140ms ease-out;
+    transition: background var(--dur-fast) ease-out, color var(--dur-fast) ease-out, border-color var(--dur-fast) ease-out;
   }
   .model-pill:hover {
     background: var(--surface-hover);
@@ -2313,12 +2313,12 @@
     width: 7px; height: 7px; border-radius: 50%;
     flex-shrink: 0;
     background: var(--accent);
-    transition: background 140ms ease-out;
+    transition: background var(--dur-fast) ease-out;
   }
   /* Chevron-up caret on the model pill; rotates 180° when its menu opens. */
   :global(.model-pill .pill-chev) {
     color: var(--fg-faint);
-    transition: color 140ms ease-out, transform 140ms ease-out;
+    transition: color var(--dur-fast) ease-out, transform var(--dur-fast) ease-out;
   }
   .model-pill.open :global(.pill-chev) { transform: rotate(180deg); color: var(--fg-muted); }
 
@@ -2334,7 +2334,7 @@
     border-radius: 9px;
     color: var(--accent);
     cursor: pointer; font: inherit;
-    transition: background 140ms ease-out, border-color 140ms ease-out;
+    transition: background var(--dur-fast) ease-out, border-color var(--dur-fast) ease-out;
   }
   .local-pill:hover { background: color-mix(in oklab, var(--accent) 22%, transparent); border-color: color-mix(in oklab, var(--accent) 55%, transparent); }
   .local-pill :global(svg) { color: var(--accent); flex-shrink: 0; }
@@ -2359,7 +2359,7 @@
     border-radius: 999px;
     color: var(--fg-muted);
     cursor: pointer; font: inherit; font-size: 11.5px; line-height: 1.2;
-    transition: color 140ms ease-out, border-color 140ms ease-out, background 140ms ease-out;
+    transition: color var(--dur-fast) ease-out, border-color var(--dur-fast) ease-out, background var(--dur-fast) ease-out;
   }
   .ps-chip:hover {
     color: var(--accent);
@@ -2373,7 +2373,7 @@
     width: 18px; height: 18px; flex-shrink: 0;
     background: transparent; border: none; border-radius: 6px;
     color: var(--fg-faint); cursor: pointer;
-    transition: color 140ms ease-out, background 140ms ease-out;
+    transition: color var(--dur-fast) ease-out, background var(--dur-fast) ease-out;
   }
   .ps-dismiss:hover { color: var(--fg); background: color-mix(in oklch, var(--bg-elev-2) 80%, transparent); }
 

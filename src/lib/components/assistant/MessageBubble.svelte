@@ -567,7 +567,7 @@
     background: color-mix(in oklab, var(--accent) 12%, transparent);
     color: var(--accent);
     cursor: pointer;
-    transition: background 140ms ease, border-color 140ms ease;
+    transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
   }
   .stop-notice-btn:hover {
     background: color-mix(in oklab, var(--accent) 20%, transparent);
@@ -579,7 +579,7 @@
     column-gap: 12px;
     padding: 2px 0;
     position: relative;
-    animation: enter 240ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: enter var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1);
   }
   /* Thread is emerald-only — rail/avatar/hover-glow/halo all use --accent.
      Model identity lives on the Composer model-card, not the thread. */
@@ -656,7 +656,7 @@
     flex-shrink: 0;
     /* bg ring masks the rail so the avatar reads as the head node on the wire. */
     box-shadow: 0 0 0 3px var(--bg);
-    transition: box-shadow 240ms ease-out, background 240ms ease-out, color 240ms ease-out;
+    transition: box-shadow var(--dur-base) ease-out, background var(--dur-base) ease-out, color var(--dur-base) ease-out;
   }
   .bubble[data-streaming="true"] .avatar {
     animation: avatar-halo 1.8s ease-in-out infinite;
@@ -694,7 +694,7 @@
   }
   /* Model + cost recede so the turn reads "Claude → content" first; the
      metadata brightens on hover when you actually want it. */
-  .head-sep { color: var(--fg-faint); font-size: 11px; opacity: 0.4; transition: opacity 140ms ease-out; }
+  .head-sep { color: var(--fg-faint); font-size: 11px; opacity: 0.4; transition: opacity var(--dur-fast) ease-out; }
   .head-model {
     font-size: 10.5px;
     color: var(--fg-muted);
@@ -702,7 +702,7 @@
     letter-spacing: 0.01em;
     white-space: nowrap;
     opacity: 0.6;
-    transition: opacity 140ms ease-out;
+    transition: opacity var(--dur-fast) ease-out;
   }
   .bubble:hover .head-sep { opacity: 0.7; }
   .bubble:hover .head-model { opacity: 1; }
@@ -716,7 +716,7 @@
   .stage-strip {
     display: flex; align-items: center;
     padding: 2px 0 6px;
-    animation: enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: enter var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1) both;
   }
   .stage-dots {
     display: inline-flex; gap: 4px; align-items: center;
@@ -752,7 +752,7 @@
     font-variant-numeric: tabular-nums;
     letter-spacing: 0.02em;
     opacity: 0.6;
-    transition: opacity 140ms ease-out;
+    transition: opacity var(--dur-fast) ease-out;
   }
   .bubble:hover .cost-pill { opacity: 1; }
   .body { display: flex; flex-direction: column; }
@@ -763,7 +763,7 @@
      just hang dots off it. */
   .tl-node {
     position: relative;
-    animation: enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: enter var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1) both;
     animation-delay: calc(var(--idx, 0) * 35ms);
   }
   /* Streaming cell entrance (mock ct-enter) — each node blur-ins as it streams.
@@ -831,7 +831,7 @@
   .tl-node[data-kind="thinking"][data-status="pending"]::before {
     background: transparent;
     border-color: color-mix(in oklab, var(--accent) 70%, transparent);
-    animation: tl-bullet-pulse 1.6s ease-in-out infinite;
+    animation: tl-bullet-pulse var(--pulse-live) ease-in-out infinite;
   }
   /* Prose paragraphs no longer hang a bullet off the rail. One faint dot per
      paragraph read as left-margin noise on text-only answers; the continuous
@@ -844,10 +844,10 @@
   .tl-node[data-numbered="true"]::before { display: none; }
   .tl-node[data-kind="tool"][data-status="done"]::before,
   .tl-node[data-kind="edit"][data-status="done"]::before {
-    background: var(--ok, oklch(0.74 0.15 145));
-    border-color: color-mix(in oklch, var(--ok, oklch(0.74 0.15 145)) 75%, transparent);
+    background: var(--ok);
+    border-color: color-mix(in oklch, var(--ok) 75%, transparent);
     box-shadow: inset 0 1px 0 color-mix(in oklch, white 22%, transparent),
-                0 1px 2px color-mix(in oklch, var(--ok, oklch(0.74 0.15 145)) 25%, transparent);
+                0 1px 2px color-mix(in oklch, var(--ok) 25%, transparent);
   }
   .tl-node[data-status="error"]::before {
     background: var(--danger);
@@ -858,7 +858,7 @@
   .tl-node[data-status="pending"]:not([data-kind="thinking"])::before {
     background: var(--accent);
     border-color: color-mix(in oklab, var(--accent) 75%, transparent);
-    animation: tl-bullet-pulse 1.6s ease-in-out infinite;
+    animation: tl-bullet-pulse var(--pulse-live) ease-in-out infinite;
   }
   @keyframes tl-bullet-pulse {
     0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 0%, transparent),
@@ -1017,15 +1017,15 @@
   }
   @media (prefers-reduced-motion: reduce) { .tl-stepdot { animation: none; } }
   .tl-node[data-status="done"] .tl-stepdot {
-    background: color-mix(in oklch, var(--ok, oklch(0.74 0.15 145)) 18%, var(--bg));
-    border-color: color-mix(in oklch, var(--ok, oklch(0.74 0.15 145)) 58%, transparent);
-    color: color-mix(in oklch, var(--ok, oklch(0.74 0.15 145)) 90%, var(--fg));
+    background: color-mix(in oklch, var(--ok) 18%, var(--bg));
+    border-color: color-mix(in oklch, var(--ok) 58%, transparent);
+    color: color-mix(in oklch, var(--ok) 90%, var(--fg));
   }
   .tl-node[data-status="pending"] .tl-stepdot {
     background: color-mix(in oklab, var(--accent) 26%, var(--bg));
     border-color: color-mix(in oklab, var(--accent) 70%, transparent);
     color: color-mix(in oklab, var(--accent) 92%, var(--fg));
-    animation: tl-bullet-pulse 1.6s ease-in-out infinite;
+    animation: tl-bullet-pulse var(--pulse-live) ease-in-out infinite;
   }
   .tl-node[data-status="error"] .tl-stepdot {
     background: color-mix(in oklab, var(--danger) 24%, var(--bg));
@@ -1047,7 +1047,7 @@
     letter-spacing: 0.04em;
     text-transform: uppercase;
     color: var(--fg-subtle);
-    animation: enter 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: enter var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1) both;
   }
   .tl-divider::after {
     content: "";
@@ -1132,7 +1132,7 @@
     color: var(--fg-faint);
     letter-spacing: 0.02em;
     opacity: 0;
-    transition: opacity 140ms ease-out;
+    transition: opacity var(--dur-fast) ease-out;
   }
   .bubble:hover .head-time { opacity: 0.9; }
   .bubble[data-role="user"] .user-time {
@@ -1143,7 +1143,7 @@
     color: var(--fg-faint);
     letter-spacing: 0.02em;
     opacity: 0;
-    transition: opacity 140ms ease-out;
+    transition: opacity var(--dur-fast) ease-out;
   }
   .bubble[data-role="user"]:hover .user-time { opacity: 0.9; }
 
@@ -1161,7 +1161,7 @@
     overflow: hidden;
     max-width: min(100%, 320px);
     max-height: 240px;
-    transition: border-color 140ms ease-out, transform 140ms ease-out, box-shadow 140ms ease-out;
+    transition: border-color var(--dur-fast) ease-out, transform var(--dur-fast) ease-out, box-shadow var(--dur-fast) ease-out;
   }
   .user-image-thumb:hover {
     border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
@@ -1199,7 +1199,7 @@
     cursor: default;
     text-align: left;
     border-radius: 3px;
-    transition: color 140ms ease-out, background 140ms ease-out;
+    transition: color var(--dur-fast) ease-out, background var(--dur-fast) ease-out;
   }
   .tn-think.expandable .tn-think-head { cursor: pointer; }
   .tn-think.expandable .tn-think-head:hover {

@@ -184,7 +184,7 @@
   .sel-label.placeholder { color: var(--fg-subtle); }
   .sel-trigger :global(.sel-chev) {
     color: var(--fg-muted); flex-shrink: 0;
-    transition: transform 140ms var(--ease-soft);
+    transition: transform var(--dur-fast) var(--ease-soft);
   }
   .sel-trigger.open :global(.sel-chev) { transform: rotate(180deg); }
 
@@ -201,7 +201,7 @@
     border-radius: var(--radius);
     box-shadow: var(--shadow-lg);
     display: flex; flex-direction: column; gap: 1px;
-    animation: sel-in 140ms var(--ease-page) both;
+    animation: sel-in var(--dur-fast) var(--ease-page) both;
   }
   .sel-pop.flip { transform-origin: bottom; }
   @keyframes sel-in {

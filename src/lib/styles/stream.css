@@ -57,7 +57,7 @@
 /* Hover timestamp — quiet mono at the head's right edge; invisible until the
    pointer asks "when?". */
 .sturn-head .sh-time { margin-left: auto; font-family: var(--font-mono, monospace); font-size: 9.5px;
-  color: var(--fg-faint); letter-spacing: 0.02em; opacity: 0; transition: opacity 140ms ease-out; }
+  color: var(--fg-faint); letter-spacing: 0.02em; opacity: 0; transition: opacity var(--dur-fast) ease-out; }
 .sturn:hover .sturn-head .sh-time { opacity: 0.9; }
 
 /* bright narration — the only high-contrast text in the turn */

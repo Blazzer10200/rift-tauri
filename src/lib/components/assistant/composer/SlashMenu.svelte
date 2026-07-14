@@ -254,7 +254,7 @@
     width: 3px; height: 0; border-radius: 999px;
     background: var(--accent);
     transform: translateY(-50%);
-    transition: height 140ms var(--ease-page, ease-out);
+    transition: height var(--dur-fast) var(--ease-page, ease-out);
   }
   .sm-item[data-active="true"] .sm-bar {
     height: 60%;
@@ -283,7 +283,7 @@
   .sm-cmd { color: var(--accent); font-weight: 500; white-space: nowrap; }
   .sm-cmd b {
     font-weight: 800;
-    color: var(--accent-hover, var(--accent));
+    color: var(--accent-hover);
     text-shadow: 0 0 10px color-mix(in oklab, var(--accent) 35%, transparent);
   }
   .sm-hint {

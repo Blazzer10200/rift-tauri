@@ -1241,7 +1241,7 @@
     position: relative;
     width: 100%; max-width: 26px;
     display: flex; align-items: stretch;
-    transition: height 240ms var(--ease-page);
+    transition: height var(--dur-base) var(--ease-page);
   }
   .ah-sc-bar {
     width: 100%; border-radius: 4px 4px 2px 2px;

@@ -80,7 +80,7 @@
     border: 0; background: transparent;
     color: var(--fg-faint);
     flex: none; cursor: pointer;
-    transition: transform 140ms ease, color 140ms ease;
+    transition: transform var(--dur-fast) ease, color var(--dur-fast) ease;
   }
   .wb-chev:hover { color: var(--fg-2); }
   .wb-chev.open { transform: rotate(90deg); }
@@ -109,7 +109,7 @@
     to   { opacity: 1; transform: translateY(0); }
   }
   @media (prefers-reduced-motion: reduce) {
-    .wb-chev { transition: color 140ms ease; }
+    .wb-chev { transition: color var(--dur-fast) ease; }
     .wb-diffwrap { animation: none; }
   }
 </style>

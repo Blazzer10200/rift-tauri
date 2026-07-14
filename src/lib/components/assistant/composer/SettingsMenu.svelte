@@ -357,7 +357,7 @@
     padding-left: 9px;
     border-left: 1.5px solid color-mix(in oklab, var(--fg) 10%, transparent);
     display: flex; flex-direction: column; gap: 1px;
-    animation: flyout-open 0.24s var(--ease-page) both;
+    animation: flyout-open var(--dur-base) var(--ease-page) both;
   }
   @keyframes flyout-open {
     from { opacity: 0; transform: translateY(-4px); max-height: 0; }
@@ -449,9 +449,9 @@
     border-color: color-mix(in oklab, var(--warn) 28%, transparent);
   }
   :global(.settings-menu .pi-usage.zone-hot) {
-    color: var(--danger, var(--warn));
-    background: color-mix(in oklab, var(--danger, var(--warn)) 10%, transparent);
-    border-color: color-mix(in oklab, var(--danger, var(--warn)) 30%, transparent);
+    color: var(--danger);
+    background: color-mix(in oklab, var(--danger) 10%, transparent);
+    border-color: color-mix(in oklab, var(--danger) 30%, transparent);
   }
   /* "this chat" tag — marks the model the active session is pinned to when the
      picker selection has drifted ahead of it. Neutral (not accent) so the
@@ -480,7 +480,7 @@
     border: 1px solid color-mix(in oklab, var(--accent) 38%, var(--border));
     color: color-mix(in oklab, var(--accent) 92%, var(--fg));
     font: inherit; font-size: 11px; font-weight: 600; cursor: pointer;
-    transition: background 140ms ease, color 140ms ease;
+    transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
   }
   .session-note .sn-action:hover {
     background: color-mix(in oklab, var(--accent) 28%, transparent);
@@ -573,8 +573,8 @@
     padding: 8px 2px 7px; border-radius: 9px;
     border: 1px solid transparent; background: transparent;
     color: var(--fg-faint); cursor: pointer; font: inherit;
-    transition: color 140ms ease, background 140ms ease,
-                border-color 140ms ease, transform 200ms var(--ease-page);
+    transition: color var(--dur-fast) ease, background var(--dur-fast) ease,
+                border-color var(--dur-fast) ease, transform 200ms var(--ease-page);
   }
   :global(.settings-menu .eseg:hover) { color: var(--fg-2); background: var(--surface-hover); }
   :global(.settings-menu .eseg:active) { transform: scale(0.95); }
@@ -609,7 +609,7 @@
   }
   :global(.settings-menu .eseg-bars i) {
     width: 3px; border-radius: 1.5px; background: currentColor; opacity: 0.5;
-    transition: opacity 140ms ease;
+    transition: opacity var(--dur-fast) ease;
   }
   :global(.settings-menu .eseg.on .eseg-bars i) {
     opacity: 1;

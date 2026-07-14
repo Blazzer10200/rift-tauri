@@ -111,7 +111,7 @@
     max-width: 100%;
     font: inherit;
     text-align: left;
-    transition: border-color 140ms ease-out, transform 140ms var(--ease-soft), box-shadow 140ms ease-out;
+    transition: border-color var(--dur-fast) ease-out, transform var(--dur-fast) var(--ease-soft), box-shadow var(--dur-fast) ease-out;
   }
   .toast.clickable { cursor: pointer; }
   .toast.clickable:hover {

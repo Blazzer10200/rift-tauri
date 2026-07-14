@@ -667,7 +667,7 @@
     min-height: 0;
     position: relative;
     border: 1px solid transparent;
-    transition: border-color 140ms ease-out, background 140ms ease-out;
+    transition: border-color var(--dur-fast) ease-out, background var(--dur-fast) ease-out;
   }
   /* Split mode: each pane reads as a rounded card (spec .pane) — inset border,
      dimmed when not focused, accent ghost-ring on focus. Single pane stays bare. */
@@ -700,7 +700,7 @@
     padding: 0 6px 0 8px;
     background: color-mix(in oklch, var(--bg-elev-1) 55%, transparent);
     border-bottom: 1px solid var(--border);
-    transition: background 140ms ease-out, border-color 140ms ease-out;
+    transition: background var(--dur-fast) ease-out, border-color var(--dur-fast) ease-out;
   }
   .pane-head.focused {
     background: color-mix(in oklab, var(--accent) 9%, var(--bg-elev-1));
@@ -712,7 +712,7 @@
     font-size: var(--fs-xs);
     font-weight: 500;
     color: var(--fg-muted);
-    transition: color 140ms ease-out;
+    transition: color var(--dur-fast) ease-out;
   }
   .pane-head.focused .pane-head-title { color: var(--fg); }
   .pane-label {
@@ -1140,10 +1140,10 @@
     color: var(--fg-2);
     font-size: 12px; font-weight: 550;
     cursor: pointer;
-    box-shadow: 0 12px 30px -14px oklch(0 0 0 / 0.6), 0 8px 22px -10px oklch(0 0 0 / 0.45);
+    box-shadow: var(--shadow-float);
     z-index: 3;
     animation: jump-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
-    transition: color 140ms ease, border-color 140ms ease;
+    transition: color var(--dur-fast) ease, border-color var(--dur-fast) ease;
   }
   .jump-latest:hover { color: var(--fg); border-color: var(--accent); }
   .jl-ic {
@@ -1217,7 +1217,7 @@
     border: 1px solid color-mix(in oklab, var(--accent) 30%, var(--border));
     color: var(--fg-2);
     cursor: pointer;
-    transition: background 140ms ease-out, border-color 140ms ease-out;
+    transition: background var(--dur-fast) ease-out, border-color var(--dur-fast) ease-out;
   }
   .alert.notice:hover {
     background: color-mix(in oklab, var(--accent) 14%, var(--surface));
@@ -1244,7 +1244,7 @@
     border: 1px solid color-mix(in oklab, var(--danger) 40%, transparent);
     background: color-mix(in oklab, var(--danger) 12%, var(--surface));
     color: oklch(0.92 0.05 22);
-    transition: background 140ms ease-out, border-color 140ms ease-out, opacity 140ms ease-out;
+    transition: background var(--dur-fast) ease-out, border-color var(--dur-fast) ease-out, opacity var(--dur-fast) ease-out;
   }
   .recovery-btn:hover:not(:disabled) {
     background: color-mix(in oklab, var(--danger) 20%, var(--surface));

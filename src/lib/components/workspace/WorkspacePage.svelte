@@ -974,7 +974,7 @@
     border-radius: var(--radius); color: var(--fg-faint); opacity: 0; cursor: pointer;
     transition: opacity var(--dur-fast), background var(--dur-fast), color var(--dur-fast); }
   .recent-row:hover .recent-forget { opacity: 1; }
-  .recent-forget:hover { background: var(--danger-soft, color-mix(in oklab, red 14%, transparent)); color: var(--danger, #f87171); }
+  .recent-forget:hover { background: var(--danger-soft); color: var(--danger); }
 
   .pat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   @media (max-width: 680px) { .pat-grid { grid-template-columns: minmax(0, 1fr); } }

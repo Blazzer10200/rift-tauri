@@ -222,7 +222,7 @@
     backdrop-filter: blur(16px) saturate(140%);
     -webkit-backdrop-filter: blur(16px) saturate(140%);
     border: 1px solid var(--border-strong);
-    box-shadow: 0 12px 30px -14px oklch(0 0 0 / 0.6), 0 8px 22px -10px oklch(0 0 0 / 0.45);
+    box-shadow: var(--shadow-float);
     overflow: hidden;
     animation: phud-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
     transition: border-color 200ms ease-out;

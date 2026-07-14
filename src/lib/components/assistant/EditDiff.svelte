@@ -424,7 +424,7 @@
     color: var(--fg-faint);
     flex-shrink: 0;
     cursor: pointer;
-    transition: transform 140ms ease, color 140ms ease;
+    transition: transform var(--dur-fast) ease, color var(--dur-fast) ease;
   }
   .edit-chev:hover { color: var(--fg-muted); }
   .edit-chev.open { transform: rotate(90deg); }
@@ -432,7 +432,7 @@
     outline: 2px solid color-mix(in oklab, var(--accent) 60%, transparent);
     outline-offset: 2px; border-radius: 4px;
   }
-  @media (prefers-reduced-motion: reduce) { .edit-chev { transition: color 140ms ease; } }
+  @media (prefers-reduced-motion: reduce) { .edit-chev { transition: color var(--dur-fast) ease; } }
 
   .edit-crumb {
     display: inline-flex; align-items: center; gap: 6px;
@@ -444,7 +444,7 @@
     font-size: 11.5px;
     text-align: left;
     cursor: pointer;
-    transition: background 140ms ease;
+    transition: background var(--dur-fast) ease;
   }
   .edit-crumb:hover { background: var(--surface-hover); }
   .edit-crumb:focus-visible {
@@ -461,7 +461,7 @@
   /* Open-file affordance — corner-down-left icon, hinted at rest. */
   :global(.edit-crumb .edit-open) {
     color: var(--fg-faint); flex-shrink: 0;
-    opacity: 0.3; transition: opacity 140ms ease;
+    opacity: 0.3; transition: opacity var(--dur-fast) ease;
   }
   .edit-crumb:hover :global(.edit-open) { opacity: 0.75; }
 
@@ -471,7 +471,7 @@
     border: 0; background: transparent;
     color: var(--fg-faint);
     border-radius: 6px; cursor: pointer;
-    transition: background 140ms ease, color 140ms ease;
+    transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
   }
   .edit-copy:hover { background: var(--surface-hover); color: var(--fg-2); }
   .edit-copy:focus-visible {
