@@ -2,13 +2,12 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.105.1 — Dictation, unstuck
+## v0.106.0 — Fast lane
 
-- **Spoken sentences now turn solid as you pause.** With the local engines (Parakeet/Whisper), dictated text used to stay dim until you stopped recording — then sat pulsing for up to a minute while the whole recording was re-transcribed and polished. Now each sentence commits about a second after you pause, while you keep talking.
-- **Stopping is near-instant.** Only the last unfinished sentence is transcribed at stop, not the entire recording again.
-- **The AI cleanup pass no longer blocks you.** The transcript is editable and sendable the moment you stop; the polish swaps in quietly a few seconds later — only if you haven't touched the text — with the same "restore raw" undo chip as before.
-- **Voice commands now work mid-dictation on the local engines** — "scratch that", "send it", "new line" apply per sentence, matching the Web Speech engine.
-- **Long dictations are safer:** committed sentences are kept as text, so only the sentence in flight is bounded by the 5-minute audio buffer.
+- **Fast mode for Opus.** A new toggle in the model picker (Opus rows only) runs Opus with noticeably quicker output — same model, same quality tier. Turns that actually ran fast get a small ⚡ "fast" chip, so you always know whether it kicked in. Needs Claude CLI 2.1.209+.
+- **Switching model or permission mode mid-chat is now instant.** Rift pushes the change to the already-running Claude process instead of restarting it — a model switch that used to cost ~1.5s of respawn now takes effect immediately. (Switching between Ask-style and Bypass-style permission modes still restarts — that change genuinely needs different launch flags.)
+- **The context gauge now corrects itself from real data.** After each reply, Rift reads the context window the CLI actually ran against and uses that for the gauge — so accounts with a smaller window (e.g. Free plan) see honest numbers without configuring anything.
+- Recommended Claude CLI version raised to 2.1.209 (fast mode + live switching + several upstream stream-json fixes).
 
 ## Known issues
 - **While elevated, dragging files from Explorer into the window doesn't work** (Windows blocks lower→higher integrity drag-drop); the attach button / file picker still works fine.
