@@ -48,7 +48,7 @@
     border: 1px solid color-mix(in oklch, var(--border) 65%, transparent);
     border-radius: 999px;
     min-width: 0;
-    animation: enter 180ms ease-out;
+    animation: enter var(--dur-fast) ease-out;
   }
   .live-pill {
     display: inline-flex; align-items: center; gap: 5px;

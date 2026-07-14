@@ -224,7 +224,7 @@
     -webkit-backdrop-filter: blur(26px) saturate(1.6); backdrop-filter: blur(26px) saturate(1.6);
     border: 1px solid color-mix(in oklab, var(--fg) 12%, transparent);
     box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.08), 0 24px 56px -26px oklch(0 0 0 / 0.7), var(--shadow-lg);
-    animation: swPopIn 0.16s var(--ease-page) both; transform-origin: top left; }
+    animation: swPopIn var(--dur-fast) var(--ease-page) both; transform-origin: top left; }
   :global(.sw-menu .sw-item) { display: flex; align-items: center; gap: 10px; width: 100%; height: 38px; padding: 0 9px; border-radius: 9px;
     color: var(--fg-muted); font-size: 12.5px; text-align: left; transition: background var(--dur-fast), color var(--dur-fast); }
   :global(.sw-menu .sw-item:hover) { background: var(--surface-hover); color: var(--fg-2); cursor: grab; }

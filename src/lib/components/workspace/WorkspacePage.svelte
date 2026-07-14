@@ -919,7 +919,7 @@
     border: 1px solid color-mix(in oklab, var(--accent) 18%, var(--border-strong));
     background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 4%, var(--bg-elev-1)), var(--bg-elev-1) 96px);
     box-shadow: 0 10px 30px -16px color-mix(in oklab, var(--fg) 30%, transparent);
-    animation: edIn 200ms var(--ease-page); }
+    animation: edIn var(--dur-base) var(--ease-page); }
   @keyframes edIn { from { opacity: 0; transform: translateY(-5px); } }
   @media (prefers-reduced-motion: reduce) { .editor { animation: none; } }
   .ed-head { display: flex; align-items: center; gap: 12px; }

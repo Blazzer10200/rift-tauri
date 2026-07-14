@@ -221,7 +221,7 @@
     color: var(--fg-faint);
     cursor: pointer;
     padding: 0;
-    transition: background 120ms ease-out, color 120ms ease-out;
+    transition: background var(--dur-fast) ease-out, color var(--dur-fast) ease-out;
   }
   .pchip-btn:hover { background: var(--bg-elev-2); color: var(--fg); }
   .rail-actions {

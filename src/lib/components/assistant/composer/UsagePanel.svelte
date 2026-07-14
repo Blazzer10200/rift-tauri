@@ -201,7 +201,7 @@
     width: min(380px, 100%);
     padding: 10px 12px 12px;
     z-index: 10;
-    animation: usage-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: usage-in var(--dur-fast) cubic-bezier(0.22, 1, 0.36, 1);
   }
   .usage-pop.statusbar { left: auto; right: 0; width: min(380px, 92vw); }
   /* ctx mode — compact card, right-anchored so it hangs over the ring that opened it. */

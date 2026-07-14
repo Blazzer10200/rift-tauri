@@ -438,7 +438,7 @@
   .sb-wrap { max-width: 820px; margin: 0 auto; padding: 18px 40px 22px; display: flex; flex-direction: column; gap: 12px; }
 
   /* ── Mode master strip ── */
-  .mode-bar { transition: border-color 200ms var(--ease-soft), background 200ms var(--ease-soft); }
+  .mode-bar { transition: border-color var(--dur-base) var(--ease-soft), background var(--dur-base) var(--ease-soft); }
   .mode-bar:has(:global(.rift-toggle.on)) { border-color: color-mix(in oklch, var(--accent) 30%, var(--border)); background: color-mix(in oklab, var(--accent) 5%, var(--surface)); }
   .mode-bar .mode-main { display: flex; align-items: center; gap: 16px; padding: 15px 18px; }
   .mode-body { flex: 1 1 auto; min-width: 0; }
@@ -515,7 +515,7 @@
   /* presets + detected-model chips share the chip-btn look */
   .preset-row, .model-list { flex-basis: 100%; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
   .preset-lead { font-size: var(--fs-xs); color: var(--fg-subtle); margin-right: 2px; }
-  .chip-btn { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 999px; font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer; border: 1px solid var(--border); background: var(--field); color: var(--fg-2); font-family: var(--font-mono); transition: background 120ms, border-color 120ms, color 120ms; }
+  .chip-btn { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 999px; font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer; border: 1px solid var(--border); background: var(--field); color: var(--fg-2); font-family: var(--font-mono); transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast); }
   .chip-btn:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--border-strong); color: var(--fg); }
   .chip-btn.active { background: var(--ok-soft); border-color: color-mix(in oklch, var(--ok) 32%, transparent); color: var(--ok); }
   .chip-btn:disabled { opacity: 0.45; cursor: not-allowed; }

@@ -69,7 +69,7 @@
     background: transparent; border: none;
     color: var(--fg-muted); cursor: pointer;
     display: inline-flex; align-items: center; justify-content: center;
-    transition: background 100ms var(--ease-soft), color 100ms var(--ease-soft);
+    transition: background var(--dur-fast) var(--ease-soft), color var(--dur-fast) var(--ease-soft);
   }
   .wb:hover { background: var(--bg-elev-2); color: var(--fg); }
   .wb.close:hover { background: var(--danger); color: oklch(0.99 0 0); }

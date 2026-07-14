@@ -1216,7 +1216,7 @@
     border: 0; background: transparent; color: var(--fg-subtle);
     font: inherit; font-size: 11px; font-weight: 620; letter-spacing: 0.01em;
     padding: 3px 9px; border-radius: 6px; cursor: pointer;
-    transition: background 120ms ease-out, color 120ms ease-out;
+    transition: background var(--dur-fast) ease-out, color var(--dur-fast) ease-out;
   }
   .ah-range-b:hover { color: var(--fg); }
   .ah-range-b.active { background: var(--surface); color: var(--fg); box-shadow: inset 0 0 0 1px var(--border); }

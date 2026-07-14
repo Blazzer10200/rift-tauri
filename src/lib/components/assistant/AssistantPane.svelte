@@ -756,7 +756,7 @@
     color: var(--fg-muted);
     font-size: 10px; font-weight: 500; line-height: 1;
     cursor: pointer;
-    transition: background 120ms, color 120ms, border-color 120ms;
+    transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast);
   }
   .pane-folder :global(svg) { flex-shrink: 0; opacity: 0.8; }
   .pane-folder-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -784,7 +784,7 @@
     display: block;
     height: 100%;
     background: var(--accent);
-    transition: width 200ms ease-out;
+    transition: width var(--dur-base) ease-out;
   }
   .pane-ctx-pct { color: var(--fg); font-weight: 600; }
   .pane-cost { color: var(--fg-muted); }
@@ -839,7 +839,7 @@
     border-radius: 4px;
     color: var(--fg-muted);
     cursor: pointer;
-    transition: background 120ms, color 120ms, border-color 120ms;
+    transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast);
   }
   .pane-close:hover {
     color: var(--danger);
@@ -990,7 +990,7 @@
       transparent 100%
     );
     opacity: 0;
-    transition: opacity 220ms ease-out;
+    transition: opacity var(--dur-base) ease-out;
   }
   .scroll-fade-top.visible { opacity: 1; }
   @media (prefers-reduced-motion: reduce) {
@@ -1091,7 +1091,7 @@
     font-size: var(--fs-sm);
     cursor: pointer;
     text-align: left;
-    transition: background 120ms ease, border-color 120ms ease;
+    transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
   }
   .pane-empty-recent-row:hover {
     background: var(--surface-hover);
@@ -1114,7 +1114,7 @@
     color: var(--fg-faint);
     opacity: 0;
     transform: translateX(-3px);
-    transition: opacity 120ms ease, transform 120ms ease, color 120ms ease;
+    transition: opacity var(--dur-fast) ease, transform var(--dur-fast) ease, color var(--dur-fast) ease;
   }
   .pane-empty-recent-row:hover :global(.pane-empty-recent-chev) {
     opacity: 1;
@@ -1142,7 +1142,7 @@
     cursor: pointer;
     box-shadow: var(--shadow-float);
     z-index: 3;
-    animation: jump-in 200ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: jump-in var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1);
     transition: color var(--dur-fast) ease, border-color var(--dur-fast) ease;
   }
   .jump-latest:hover { color: var(--fg); border-color: var(--accent); }
@@ -1204,7 +1204,7 @@
     font-size: var(--fs-sm);
     text-align: left;
     line-height: 1.4;
-    animation: enter 200ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: enter var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1);
   }
   .alert.error {
     background: var(--danger-soft);
@@ -1281,8 +1281,8 @@
     font-size: var(--fs-xs);
     font-weight: 600;
     letter-spacing: 0.02em;
-    transition: background 120ms ease-out, border-color 120ms ease-out;
-    animation: drop-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition: background var(--dur-fast) ease-out, border-color var(--dur-fast) ease-out;
+    animation: drop-in var(--dur-fast) cubic-bezier(0.22, 1, 0.36, 1);
   }
   .drop-zone.full { left: 0; right: 0; }
   .drop-zone.half.left { left: 0; right: 50%; }

@@ -182,7 +182,7 @@
     border-radius: var(--radius-xs);
     color: var(--fg-faint);
     cursor: pointer;
-    transition: background 120ms ease, color 120ms ease;
+    transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
     flex-shrink: 0;
   }
   .close:hover {

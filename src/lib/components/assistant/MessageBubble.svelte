@@ -621,7 +621,7 @@
       color-mix(in oklab, var(--accent) 42%, var(--border)) 12px,
       color-mix(in oklab, var(--accent) 30%, var(--border)) calc(100% - 14px),
       transparent 100%);
-    transition: opacity 200ms ease-out, box-shadow 200ms ease-out;
+    transition: opacity var(--dur-base) ease-out, box-shadow var(--dur-base) ease-out;
   }
   /* Hovering a turn lights its spine — a faint model-hue glow ties the pointer
      to the thread it's reading. */
@@ -806,7 +806,7 @@
     background: var(--bg-elev-2);
     border: 1.5px solid color-mix(in oklch, var(--fg-faint) 60%, transparent);
     z-index: 1;
-    transition: background 220ms ease-out, border-color 220ms ease-out, box-shadow 220ms ease-out;
+    transition: background var(--dur-base) ease-out, border-color var(--dur-base) ease-out, box-shadow var(--dur-base) ease-out;
     /* Each circle draws itself onto the rail as its node lands — staggered down
        the spine so a multi-tool turn reads as a timeline assembling in real
        time (live during streaming, and replays on load). Pending nodes override
@@ -896,7 +896,7 @@
   .tl-node[data-kind="tool"]:hover::before,
   .tl-node[data-kind="edit"]:hover::before {
     transform: scale(1.15);
-    transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1), background 220ms ease-out, border-color 220ms ease-out, box-shadow 220ms ease-out;
+    transition: transform var(--dur-fast) cubic-bezier(0.22, 1, 0.36, 1), background var(--dur-base) ease-out, border-color var(--dur-base) ease-out, box-shadow var(--dur-base) ease-out;
   }
   /* Image nodes don't need a bullet — the user thumbnail carries its own
      framing + sits on the right side anyway. */
@@ -1013,7 +1013,7 @@
     transform-origin: center;
     animation: bullet-pop 340ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
     animation-delay: calc(var(--idx, 0) * 35ms);
-    transition: background 220ms ease-out, border-color 220ms ease-out, color 220ms ease-out, box-shadow 220ms ease-out;
+    transition: background var(--dur-base) ease-out, border-color var(--dur-base) ease-out, color var(--dur-base) ease-out, box-shadow var(--dur-base) ease-out;
   }
   @media (prefers-reduced-motion: reduce) { .tl-stepdot { animation: none; } }
   .tl-node[data-status="done"] .tl-stepdot {
@@ -1034,7 +1034,7 @@
   }
   .tl-node[data-numbered="true"]:hover .tl-stepdot {
     transform: scale(1.12);
-    transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1), background 220ms ease-out, border-color 220ms ease-out, color 220ms ease-out;
+    transition: transform var(--dur-fast) cubic-bezier(0.22, 1, 0.36, 1), background var(--dur-base) ease-out, border-color var(--dur-base) ease-out, color var(--dur-base) ease-out;
   }
 
   /* Mockup `.ct-divider`: a quiet small-caps label, not a heavy condensed bar —
@@ -1082,7 +1082,7 @@
     padding: 2px 4px;
     border-radius: 4px;
     cursor: pointer;
-    transition: opacity 120ms ease-out, color 120ms ease-out, background 120ms ease-out;
+    transition: opacity var(--dur-fast) ease-out, color var(--dur-fast) ease-out, background var(--dur-fast) ease-out;
   }
   .bubble:hover .copybtn { opacity: 1; }
   .copybtn:hover { color: var(--fg); background: var(--surface-hover); }
@@ -1222,7 +1222,7 @@
   .chev {
     display: inline-flex;
     color: var(--fg-faint);
-    transition: transform 160ms ease-out;
+    transition: transform var(--dur-fast) ease-out;
   }
   .chev.open { transform: rotate(180deg); }
   .dots { display: inline-flex; gap: 3px; margin-left: 2px; }
@@ -1319,7 +1319,7 @@
     border: 1px solid var(--border-strong);
     border-radius: 50%;
     cursor: pointer;
-    transition: background 120ms ease, color 120ms ease;
+    transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
   }
   .lightbox-close:hover { background: var(--surface-hover); }
 </style>

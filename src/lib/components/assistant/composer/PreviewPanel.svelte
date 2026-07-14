@@ -40,7 +40,7 @@
       inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
     padding: 12px;
     z-index: 10;
-    animation: slash-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: slash-in var(--dur-fast) cubic-bezier(0.22, 1, 0.36, 1);
   }
   .preview-head {
     display: flex; align-items: center; gap: 7px;

@@ -177,7 +177,7 @@
     color: var(--fg-muted);
     font: inherit; font-size: var(--fs-xs);
     cursor: pointer;
-    transition: color 100ms, border-color 100ms;
+    transition: color var(--dur-fast), border-color var(--dur-fast);
   }
   .mcp-recheck:hover:not(:disabled) { color: var(--fg); border-color: var(--border-strong); }
   .mcp-recheck:disabled { opacity: 0.6; cursor: default; }

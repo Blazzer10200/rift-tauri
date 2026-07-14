@@ -410,7 +410,7 @@
     background: color-mix(in oklab, var(--bg-elev-2) 60%, transparent); -webkit-backdrop-filter: blur(26px) saturate(1.6); backdrop-filter: blur(26px) saturate(1.6);
     border: 1px solid color-mix(in oklab, var(--fg) 12%, transparent);
     box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.08), 0 24px 56px -26px oklch(0 0 0 / 0.7), var(--shadow-lg);
-    animation: convPopIn 0.16s var(--ease-page) both; transform-origin: top left; }
+    animation: convPopIn var(--dur-fast) var(--ease-page) both; transform-origin: top left; }
   :global(.conv-menu .pop-item) { display: flex; align-items: center; gap: 9px; width: 100%; height: 32px; padding: 0 10px; border-radius: 8px;
     color: var(--fg-2); font-size: 12.5px; text-align: left; transition: background var(--dur-fast), color var(--dur-fast); }
   :global(.conv-menu .pop-item:hover) { background: var(--surface-hover); color: var(--fg); }

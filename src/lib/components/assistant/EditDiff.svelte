@@ -527,7 +527,7 @@
      sometimes shows, sometimes doesn't" glitch. Translate-only keeps the bar
      solid through any replay. */
   .diff-line, .diff-meta, .diff-gap {
-    animation: diff-row-in 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: diff-row-in var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1) both;
     animation-delay: calc(var(--ri, 0) * 16ms);
   }
   @keyframes diff-row-in {
@@ -633,7 +633,7 @@
     letter-spacing: 0.03em;
     text-align: center;
     cursor: pointer;
-    transition: background 120ms ease, color 120ms ease;
+    transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
   }
   .diff-more:hover { background: var(--surface-hover); color: var(--fg); }
   .diff-more:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

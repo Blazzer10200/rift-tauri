@@ -240,7 +240,7 @@
     padding: 2px 0 10px; box-sizing: border-box;
     background: linear-gradient(180deg, color-mix(in oklab, var(--fg) 3.6%, var(--bg)), color-mix(in oklab, var(--fg) 1.6%, var(--bg)) 260px);
     opacity: 0; pointer-events: none; transform: translateX(-8px);
-    transition: opacity 0.2s var(--ease-page), transform 0.26s var(--ease-page); }
+    transition: opacity var(--dur-base) var(--ease-page), transform var(--dur-base) var(--ease-page); }
   .mini::after { content: ""; position: absolute; top: 40px; right: 0; bottom: 0; width: 1px; background: var(--border); pointer-events: none; }
   .side-rail.collapsed .mini { opacity: 1; pointer-events: auto; transform: none; transition-delay: 0.1s; }
   .mini button { -webkit-app-region: no-drag; }
@@ -274,7 +274,7 @@
     padding: 0 10px 10px;
     background: linear-gradient(180deg, color-mix(in oklab, var(--fg) 3.6%, var(--bg)), color-mix(in oklab, var(--fg) 1.6%, var(--bg)) 260px);
     box-shadow: inset 0 1px 0 color-mix(in oklab, var(--fg) 4%, transparent);
-    box-sizing: border-box; transition: transform 0.36s var(--ease-page), opacity 0.26s var(--ease-page); }
+    box-sizing: border-box; transition: transform 0.36s var(--ease-page), opacity var(--dur-base) var(--ease-page); }
   /* Divider starts BELOW the 40px top strip so the sidebar head + topbar read
      as one continuous drag bar across the window. */
   .sidebar::after { content: ""; position: absolute; top: 40px; right: 0; bottom: 0; width: 1px; background: var(--border); pointer-events: none; }
@@ -307,7 +307,7 @@
   .tool-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 2px 2px; flex: none; }
   .seg { position: relative; display: inline-flex; padding: 2px; gap: 2px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-inset); }
   .seg-thumb { position: absolute; top: 2px; left: 0; height: 22px; border-radius: 6px; background: var(--surface-active);
-    transition: transform 0.18s var(--ease-page), width 0.18s var(--ease-page); }
+    transition: transform var(--dur-fast) var(--ease-page), width var(--dur-fast) var(--ease-page); }
   .seg-btn { position: relative; z-index: 1; height: 22px; padding: 0 10px; border-radius: 6px; color: var(--fg-subtle); font-size: 11px; font-weight: 600;
     transition: color var(--dur-fast); }
   .seg-btn:hover { color: var(--fg-2); }

@@ -94,17 +94,17 @@
     font-size: 12px;
     line-height: 1.45;
     color: var(--fg-2);
-    transition: color 200ms ease-out, opacity 200ms ease-out;
+    transition: color var(--dur-base) ease-out, opacity var(--dur-base) ease-out;
   }
   .todo-box {
     display: inline-flex; align-items: center; justify-content: center;
     color: var(--fg-faint);
     padding-top: 1px;
-    transition: color 200ms ease-out;
+    transition: color var(--dur-base) ease-out;
   }
   .todo-content {
     word-wrap: break-word;
-    transition: color 200ms ease-out, text-decoration-color 200ms ease-out;
+    transition: color var(--dur-base) ease-out, text-decoration-color var(--dur-base) ease-out;
   }
   /* Semantic dim ladder (CC-UI ref §5/§10): done recedes furthest (--fg-faint,
      it's finished), pending sits mid (--fg-muted), in-progress is full --fg so

@@ -1429,7 +1429,7 @@
 
   /* density stage — list rows driven by the live --row-h/--gap/--fs-md vars */
   .iface-stage { display: flex; flex-direction: column; gap: var(--gap, 9px); padding: 12px 14px; border-bottom: 1px solid var(--border); }
-  .iface-row { display: flex; align-items: center; gap: 9px; height: var(--row-h, 30px); padding: 0 11px; border-radius: 7px; font-size: var(--fs-md, 13px); color: var(--fg-2); background: color-mix(in oklab, var(--fg) 3.5%, transparent); border: 1px solid color-mix(in oklch, var(--border) 60%, transparent); transition: height 200ms var(--ease-page); }
+  .iface-row { display: flex; align-items: center; gap: 9px; height: var(--row-h, 30px); padding: 0 11px; border-radius: 7px; font-size: var(--fs-md, 13px); color: var(--fg-2); background: color-mix(in oklab, var(--fg) 3.5%, transparent); border: 1px solid color-mix(in oklch, var(--border) 60%, transparent); transition: height var(--dur-base) var(--ease-page); }
   .iface-row.on { color: var(--fg); background: color-mix(in oklab, var(--accent) 10%, transparent); border-color: color-mix(in oklab, var(--accent) 28%, transparent); }
   .iface-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--fg-faint); }
   .iface-dot.on { background: var(--accent); box-shadow: 0 0 6px color-mix(in oklab, var(--accent) 60%, transparent); }
@@ -1450,7 +1450,7 @@
   /* progressive-disclosure expander — one quiet row under a collapsed list */
   .set-expand { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; margin-top: 12px; padding: 7px 0; border: 1px dashed color-mix(in oklab, var(--border-strong) 80%, transparent); border-radius: var(--radius); background: none; cursor: pointer; font: inherit; font-size: 11.5px; font-weight: 550; color: var(--fg-subtle); transition: color var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast); }
   .set-expand:hover { color: var(--fg-2); border-color: var(--border-strong); background: color-mix(in oklab, var(--fg) 4%, transparent); }
-  .set-expand :global(.set-expand-ic) { transition: transform 160ms var(--ease-page); }
+  .set-expand :global(.set-expand-ic) { transition: transform var(--dur-fast) var(--ease-page); }
   .set-expand :global(.set-expand-ic.flip) { transform: rotate(180deg); }
   /* per-tab factory reset — same quiet chrome, warn tint on hover so it reads
      as "careful" without shouting */
@@ -1530,7 +1530,7 @@
 
   /* ── Hero tab bar (hero chrome via PageHero component) ── */
   .sb-chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--fg-2); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: default; }
-  button.sb-chip { cursor: pointer; transition: background 120ms, border-color 120ms; }
+  button.sb-chip { cursor: pointer; transition: background var(--dur-fast), border-color var(--dur-fast); }
   button.sb-chip:hover { background: var(--surface-hover); border-color: var(--border-strong); }
   .sb-chip.ok { background: var(--ok-soft); border-color: color-mix(in oklch, var(--ok) 28%, transparent); color: var(--ok); }
   .sb-chip.ok :global(svg) { color: var(--ok); }
@@ -1597,7 +1597,7 @@
   /* CLI update command line — copyable npm install command. */
   .st-cli-cmd { display: flex; align-items: center; gap: 8px; margin-top: 8px; max-width: 360px; background: color-mix(in oklch, white 9%, var(--surface)); border: 1px solid var(--border-strong); border-radius: 8px; padding: 6px 7px 6px 10px; }
   .st-cli-cmd code { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 11px; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .st-cli-copy { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 24px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--fg-muted); cursor: pointer; transition: color 120ms, border-color 120ms, background 120ms; }
+  .st-cli-copy { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 24px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--fg-muted); cursor: pointer; transition: color var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast); }
   .st-cli-copy:hover { color: var(--fg); border-color: var(--border-strong); }
   .st-cli-copy.done { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 50%, var(--border)); }
   .st-cli-copy.sm { flex-shrink: 0; width: 22px; height: 20px; border-radius: 5px; }
@@ -1661,7 +1661,7 @@
   .set-pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px; width: 100%; }
   .set-pick-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .set-pick-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-  .set-pick { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 11px; background: var(--field); border: 1px solid var(--field-border); border-radius: var(--radius); color: var(--fg); font: inherit; font-size: var(--fs-sm); cursor: pointer; text-align: left; transition: background 100ms, border-color 100ms; }
+  .set-pick { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 11px; background: var(--field); border: 1px solid var(--field-border); border-radius: var(--radius); color: var(--fg); font: inherit; font-size: var(--fs-sm); cursor: pointer; text-align: left; transition: background var(--dur-fast), border-color var(--dur-fast); }
   .set-pick:hover { background: var(--surface-hover); }
   .set-pick[data-active="true"] { border-color: color-mix(in oklab, var(--accent) 45%, var(--border)); background: var(--accent-soft); color: var(--accent); }
   .set-pick-label { font-weight: 550; }
@@ -1676,7 +1676,7 @@
   .set-model-sub { font-size: 10px; color: var(--fg-muted); margin-top: 2px; }
   .set-model-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
   .set-progress { margin-top: 8px; height: 4px; background: var(--bg-elev-2); border-radius: 2px; overflow: hidden; }
-  .set-progress-fill { height: 100%; background: var(--accent); transition: width 120ms linear; }
+  .set-progress-fill { height: 100%; background: var(--accent); transition: width var(--dur-fast) linear; }
   .set-progress-label { font-size: 10px; margin-top: 3px; color: var(--fg-muted); }
   .set-mic-r { width: 100%; max-width: 360px; }
   .set-mic-select { flex: 1 1 auto; }

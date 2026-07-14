@@ -73,7 +73,7 @@
     border: 1px solid color-mix(in oklab, var(--warn) 40%, var(--border));
     border-left-width: 3px;
     border-left-color: var(--warn);
-    animation: perm-enter 200ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: perm-enter var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1);
   }
   .perm-icon {
     display: inline-flex;
@@ -109,7 +109,7 @@
     font-size: 11.5px;
     font-weight: 600;
     cursor: pointer;
-    transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+    transition: background var(--dur-fast) ease-out, border-color var(--dur-fast) ease-out, color var(--dur-fast) ease-out;
   }
   .perm-btn:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg); }
   .perm-btn:disabled { opacity: 0.5; cursor: default; }

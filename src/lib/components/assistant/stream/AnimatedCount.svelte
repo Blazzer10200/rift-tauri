@@ -28,7 +28,7 @@
   let from = 0;
   let start = 0;
   // Roll direction + a key that flips whenever the rendered text changes, so the
-  // glyph re-mounts and replays the 0.17s roll keyframe.
+  // glyph re-mounts and replays the var(--dur-fast) roll keyframe.
   let dir = $state<"up" | "down">("up");
   let rollKey = $state(0);
   let lastText = "";
@@ -96,8 +96,8 @@
     display: inline;
     clip-path: inset(0 -0.15em);
   }
-  .acount.live .acount-v { animation: acRoll 0.17s cubic-bezier(0.22, 1, 0.36, 1); }
-  .acount.live[data-dir="down"] .acount-v { animation: acRollDown 0.17s cubic-bezier(0.22, 1, 0.36, 1); }
+  .acount.live .acount-v { animation: acRoll var(--dur-fast) cubic-bezier(0.22, 1, 0.36, 1); }
+  .acount.live[data-dir="down"] .acount-v { animation: acRollDown var(--dur-fast) cubic-bezier(0.22, 1, 0.36, 1); }
   @keyframes acRoll {
     from { transform: translateY(0.62em); opacity: 0.25; }
     to   { transform: none; opacity: 1; }

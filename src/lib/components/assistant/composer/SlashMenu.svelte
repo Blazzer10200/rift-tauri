@@ -140,7 +140,7 @@
       0 24px 56px -12px oklch(0 0 0 / 0.65),
       0 0 0 1px color-mix(in oklab, var(--accent) 7%, transparent),
       inset 0 1px 0 color-mix(in oklch, white 7%, transparent);
-    animation: slash-in 180ms var(--ease-page, cubic-bezier(0.22, 1, 0.36, 1));
+    animation: slash-in var(--dur-fast) var(--ease-page, cubic-bezier(0.22, 1, 0.36, 1));
   }
   @keyframes slash-in {
     from { opacity: 0; transform: translateY(6px) scale(0.985); }
@@ -231,7 +231,7 @@
     color: var(--fg); font: inherit; font-size: var(--fs-sm);
     text-align: left; border-radius: var(--radius); cursor: pointer;
     transition: background 90ms;
-    animation: slash-item-in 260ms var(--ease-page, cubic-bezier(0.22, 1, 0.36, 1)) both;
+    animation: slash-item-in var(--dur-base) var(--ease-page, cubic-bezier(0.22, 1, 0.36, 1)) both;
     /* Cap the stagger — a long skills catalog shouldn't take a second to fade in. */
     animation-delay: calc(min(var(--idx, 0), 12) * 13ms);
   }
@@ -269,7 +269,7 @@
     box-shadow:
       inset 0 0 0 1px color-mix(in oklab, var(--fg) 8%, transparent),
       inset 0 1px 0 color-mix(in oklch, white 6%, transparent);
-    transition: color 110ms, box-shadow 110ms;
+    transition: color var(--dur-fast), box-shadow var(--dur-fast);
   }
   .sm-icon[data-skill="true"] { color: color-mix(in oklab, var(--accent) 72%, var(--fg-muted)); }
   .sm-item[data-active="true"] .sm-icon {

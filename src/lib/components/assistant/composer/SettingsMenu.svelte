@@ -314,7 +314,7 @@
     from { opacity: 0; transform: translateY(4px); }
     to { opacity: 1; transform: none; }
   }
-  :global(.settings-menu > *) { animation: row-rise 0.26s var(--ease-page) both; }
+  :global(.settings-menu > *) { animation: row-rise var(--dur-base) var(--ease-page) both; }
   :global(.settings-menu > :nth-child(1)) { animation-delay: 0.02s; }
   :global(.settings-menu > :nth-child(2)) { animation-delay: 0.04s; }
   :global(.settings-menu > :nth-child(3)) { animation-delay: 0.06s; }
@@ -381,7 +381,7 @@
     content: ""; position: absolute; left: 0; top: 50%; width: 2.5px; height: 0;
     border-radius: 0 3px 3px 0; background: var(--accent);
     transform: translateY(-50%); opacity: 0;
-    transition: height 0.2s var(--ease-page), opacity 0.16s ease;
+    transition: height var(--dur-base) var(--ease-page), opacity var(--dur-fast) ease;
   }
   :global(.settings-menu .pop-item:hover),
   :global(.settings-menu .pop-item.active) {
@@ -562,7 +562,7 @@
       color-mix(in oklab, var(--fg) 6%, transparent));
     border: 1px solid color-mix(in oklab, var(--fg) 9%, transparent);
     box-shadow: inset 0 1px 2px oklch(0 0 0 / 0.16);
-    transition: border-color 160ms ease;
+    transition: border-color var(--dur-fast) ease;
   }
   /* Keyboard cursor parked on the effort row (Composer onKey ↑↓). */
   :global(.settings-menu .effort-seg.active) {
@@ -589,7 +589,7 @@
     border-color: color-mix(in oklab, var(--accent) 32%, transparent);
     box-shadow: 0 0 12px -2px color-mix(in oklab, var(--accent) 35%, transparent),
                 inset 0 1px 0 oklch(1 0 0 / 0.08);
-    animation: eseg-in 0.26s var(--ease-page);
+    animation: eseg-in var(--dur-base) var(--ease-page);
   }
   @keyframes eseg-in {
     from { transform: scale(0.9); }
@@ -624,7 +624,7 @@
   :global(.settings-menu .model-caption) {
     margin: 10px 10px 4px; padding: 0;
     font-size: var(--sm-sub); font-weight: 450; line-height: 1.45; color: var(--fg-muted);
-    transition: color 180ms ease;
+    transition: color var(--dur-fast) ease;
   }
   :global(.settings-menu .model-caption.warn) { color: var(--warn); }
 

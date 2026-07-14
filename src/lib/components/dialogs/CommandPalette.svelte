@@ -467,7 +467,7 @@
     background: var(--bg-elev-3);
     border-radius: 7px;
     flex-shrink: 0;
-    transition: color 100ms, background 100ms;
+    transition: color var(--dur-fast), background var(--dur-fast);
   }
   .cp-item[data-active="true"] .cp-item-icon {
     color: var(--accent);

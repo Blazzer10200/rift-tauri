@@ -51,7 +51,7 @@
     max-height: 280px;
     overflow-y: auto;
     z-index: 10;
-    animation: slash-in 160ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: slash-in var(--dur-fast) cubic-bezier(0.22, 1, 0.36, 1);
   }
   @keyframes slash-in {
     from { opacity: 0; transform: translateY(4px); }

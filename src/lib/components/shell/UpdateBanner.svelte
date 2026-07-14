@@ -214,7 +214,7 @@
     position: absolute;
     inset: 0 auto 0 0;
     background: color-mix(in oklab, var(--accent) 18%, transparent);
-    transition: width 220ms ease-out;
+    transition: width var(--dur-base) ease-out;
     z-index: 0;
   }
 

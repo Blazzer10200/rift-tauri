@@ -362,7 +362,7 @@
     border-radius: 8px;
     background: transparent;
     cursor: pointer;
-    transition: border-color 120ms, background 120ms;
+    transition: border-color var(--dur-fast), background var(--dur-fast);
   }
   .sask-option:hover:not(:disabled) {
     border-color: color-mix(in oklab, var(--accent) 45%, transparent);

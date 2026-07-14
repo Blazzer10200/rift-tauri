@@ -565,7 +565,7 @@
         color-mix(in oklab, var(--accent) 26%, transparent) 50%,
         color-mix(in oklab, var(--accent) 10%, transparent) 70%);
     background-size: 200% 100%;
-    animation: wb-shimmer 1.5s linear infinite, wb-airead-in 0.18s ease;
+    animation: wb-shimmer 1.5s linear infinite, wb-airead-in var(--dur-fast) ease;
   }
   @keyframes wb-shimmer {
     from { background-position: 120% 0; }
@@ -586,7 +586,7 @@
     color: var(--danger);
     font: inherit; font-size: 12px; font-weight: 600;
     cursor: pointer;
-    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+    transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease, color var(--dur-fast) ease;
   }
   .wb-console:hover:not(:disabled) { background: color-mix(in oklab, var(--danger) 24%, transparent); }
   .wb-console:disabled { opacity: 0.6; cursor: default; }
@@ -623,7 +623,7 @@
     color: var(--fg);
     font: inherit; font-size: 12px; font-weight: 500; white-space: nowrap;
     cursor: pointer;
-    transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+    transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease, color var(--dur-fast) ease;
   }
   .wb-add:hover:not(:disabled) { background: color-mix(in oklab, var(--accent) 24%, transparent); border-color: var(--accent); }
   .wb-add:disabled { opacity: 0.4; cursor: default; }

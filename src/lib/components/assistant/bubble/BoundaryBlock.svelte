@@ -125,7 +125,7 @@
   }
   .boundary-pill :global(svg) { color: var(--accent); }
   .boundary-pill :global(.chev) {
-    transition: transform 120ms ease;
+    transition: transform var(--dur-fast) ease;
     opacity: 0.6;
   }
   .boundary-head[aria-expanded="true"] :global(.chev) {

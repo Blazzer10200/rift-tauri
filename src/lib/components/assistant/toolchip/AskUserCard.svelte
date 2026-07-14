@@ -382,7 +382,7 @@
     border-radius: var(--radius-sm);
     text-align: left;
     cursor: pointer;
-    transition: background 120ms ease-out, border-color 120ms ease-out, transform 80ms ease-out;
+    transition: background var(--dur-fast) ease-out, border-color var(--dur-fast) ease-out, transform 80ms ease-out;
     color: var(--fg-2);
     font: inherit;
     width: 100%;
@@ -434,7 +434,7 @@
     font: inherit;
     font-size: 12px;
     outline: none;
-    transition: border-color 120ms ease-out, box-shadow 120ms ease-out;
+    transition: border-color var(--dur-fast) ease-out, box-shadow var(--dur-fast) ease-out;
   }
   .ask-other-input:focus {
     border-color: color-mix(in oklch, var(--ask) 65%, transparent);
@@ -456,7 +456,7 @@
     font-weight: 600;
     cursor: pointer;
     display: inline-flex; align-items: center; gap: 5px;
-    transition: background 120ms ease-out, border-color 120ms ease-out, color 120ms ease-out;
+    transition: background var(--dur-fast) ease-out, border-color var(--dur-fast) ease-out, color var(--dur-fast) ease-out;
   }
   .ask-btn:hover:not(:disabled) {
     background: var(--surface-hover);

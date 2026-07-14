@@ -672,14 +672,14 @@
      these selectors cost nothing outside a live stream. */
   @media (prefers-reduced-motion: no-preference) {
     .md :global(:is(code, kbd, mark, h1, h2, h3, h4, h5, h6, li, blockquote, table, tr)) {
-      transition: opacity 220ms ease;
+      transition: opacity var(--dur-base) ease;
     }
     .md :global(:is(code, kbd, mark, a, h1, h2, h3, h4, h5, h6, li, blockquote, table, tr):has(.md-w-hold):not(:has(.md-w, .md-w-shown))) {
       opacity: 0;
     }
     /* hr carries no words — hold it while the element after it is fully held,
        and while it's the trailing element of an in-flight stream. */
-    .md :global(hr) { transition: opacity 220ms ease; }
+    .md :global(hr) { transition: opacity var(--dur-base) ease; }
     .md :global(hr:has(+ :is(p, ul, ol, h1, h2, h3, h4, h5, h6, blockquote, table):has(.md-w-hold):not(:has(.md-w, .md-w-shown)))) {
       opacity: 0;
     }
@@ -688,7 +688,7 @@
        earlier sibling still has held words, so a finished block never pops in
        ahead of the prose above it. Once the prose catches up it fades in and
        may keep growing line-by-line (the live-typing feel is kept). */
-    .md :global(:is(pre, .shiki-block, img)) { transition: opacity 220ms ease; }
+    .md :global(:is(pre, .shiki-block, img)) { transition: opacity var(--dur-base) ease; }
     .md :global(*:has(.md-w-hold) ~ :is(pre, .shiki-block, img)) { opacity: 0; }
   }
 
@@ -1117,7 +1117,7 @@
     border-radius: 4px;
     cursor: pointer;
     user-select: none;
-    transition: color 120ms ease-out, background 120ms ease-out, border-color 120ms ease-out;
+    transition: color var(--dur-fast) ease-out, background var(--dur-fast) ease-out, border-color var(--dur-fast) ease-out;
   }
   .md :global(.shiki-head .code-copy:hover) {
     color: var(--fg);
@@ -1218,7 +1218,7 @@
     background: color-mix(in oklab, var(--bg-elev-2) 88%, transparent);
     border: 1px solid color-mix(in oklab, var(--fg) 12%, transparent);
     box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-    transition: color 120ms ease, border-color 120ms ease, transform 120ms ease;
+    transition: color var(--dur-fast) ease, border-color var(--dur-fast) ease, transform var(--dur-fast) ease;
   }
   .md :global(.code-more:hover .cm-pill) {
     color: var(--accent);
@@ -1444,7 +1444,7 @@
     cursor: pointer;
     text-decoration: underline dotted color-mix(in oklab, var(--accent) 55%, transparent);
     text-underline-offset: 3px;
-    transition: text-shadow 0.15s ease, border-color 0.15s ease;
+    transition: text-shadow var(--dur-fast) ease, border-color var(--dur-fast) ease;
   }
   .md :global(code.md-path:hover),
   .md :global(code.md-path:focus-visible) {

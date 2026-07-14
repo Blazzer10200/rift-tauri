@@ -548,7 +548,7 @@
     border-radius: 5px;
     overflow: hidden;
     transition: border-color var(--dur-fast) ease-out, background var(--dur-fast) ease-out, opacity var(--dur-fast) ease-out;
-    animation: enter 200ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: enter var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1);
   }
   .chip[data-status="done"] { opacity: 0.85; }
   .chip[data-status="done"]:hover { opacity: 1; }

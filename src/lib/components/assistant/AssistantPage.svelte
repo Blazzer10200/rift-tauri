@@ -11,7 +11,7 @@
   // Slide the browser dock open/closed by animating its real width (not a clip)
   // so the stage's ResizeObserver fires syncBounds and the native child webview
   // tracks the motion instead of blinking. Mirrors the side panel's
-  // 220ms cubic-bezier(0.22,1,0.36,1) width + opacity reveal.
+  // var(--dur-base) cubic-bezier(0.22,1,0.36,1) width + opacity reveal.
   function dockSlide(node: HTMLElement, params: { duration?: number } = {}) {
     const w = node.getBoundingClientRect().width;
     return {
@@ -324,7 +324,7 @@
     background: color-mix(in oklch, var(--border) 70%, transparent);
     align-self: stretch;
     user-select: none;
-    transition: background 120ms ease-out;
+    transition: background var(--dur-fast) ease-out;
   }
   .dock-divider:hover,
   .workbench[data-dock-dragging="true"] .dock-divider {
@@ -345,7 +345,7 @@
     background: var(--border);
     align-self: stretch;
     user-select: none;
-    transition: background 120ms ease-out;
+    transition: background var(--dur-fast) ease-out;
   }
   .divider:hover,
   .split[data-dragging="true"] > .divider {
@@ -363,7 +363,7 @@
     background: var(--fg-faint);
     border-radius: 2px;
     opacity: 0;
-    transition: opacity 120ms ease-out;
+    transition: opacity var(--dur-fast) ease-out;
   }
   .divider:hover .divider-grip,
   .split[data-dragging="true"] .divider-grip,

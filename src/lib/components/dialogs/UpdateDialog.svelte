@@ -325,7 +325,7 @@
     border-radius: var(--radius-xs);
     display: flex; align-items: center; justify-content: center;
     flex: none;
-    transition: background 120ms ease, color 120ms ease;
+    transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
   }
   .upd-x:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg); }
   .upd-x:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -427,7 +427,7 @@
     height: 100%;
     background: linear-gradient(90deg, color-mix(in oklab, var(--tone) 78%, transparent), var(--tone));
     border-radius: 999px;
-    transition: width 160ms ease;
+    transition: width var(--dur-fast) ease;
   }
 
   /* Collapsed raw error — human copy leads, the dump is opt-in. */
@@ -528,7 +528,7 @@
     padding: 2px 0;
     cursor: pointer;
     align-self: flex-start;
-    transition: color 120ms ease;
+    transition: color var(--dur-fast) ease;
   }
   .link-row:hover { color: var(--accent); }
 

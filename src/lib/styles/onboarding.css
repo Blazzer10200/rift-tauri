@@ -61,7 +61,7 @@
   display: grid; grid-template-columns: 26px 1fr; align-items: start; gap: 13px;
   padding: 9px 8px; border: 0; background: none; text-align: left; cursor: default;
   color: var(--fg-subtle); border-radius: var(--radius); position: relative;
-  transition: color 160ms ease;
+  transition: color var(--dur-fast) ease;
 }
 .ob-step.done { cursor: pointer; }
 .ob-step.done:hover { background: var(--surface-hover); }
@@ -71,7 +71,7 @@
   background: var(--bg-elev-2); border: 1px solid var(--border);
   color: var(--fg-subtle); font-size: 11px; font-weight: 600;
   font-variant-numeric: tabular-nums;
-  transition: background 200ms ease, border-color 200ms ease, color 200ms ease, box-shadow 200ms ease;
+  transition: background var(--dur-base) ease, border-color var(--dur-base) ease, color var(--dur-base) ease, box-shadow var(--dur-base) ease;
 }
 .ob-step.active .ob-node {
   background: var(--accent); border-color: transparent; color: var(--accent-fg);
@@ -89,7 +89,7 @@
   align-self: flex-start; display: inline-flex; align-items: center; gap: 5px;
   padding: 0; border: 0; background: none; cursor: pointer;
   color: var(--fg-muted); font: inherit; font-size: 12px;
-  transition: color 120ms ease;
+  transition: color var(--dur-fast) ease;
 }
 .ob-skip-link:hover { color: var(--fg); }
 
@@ -134,7 +134,7 @@
   height: 36px; padding: 0 16px; border-radius: var(--radius);
   font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
   border: 1px solid var(--border); background: var(--bg-elev-2); color: var(--fg);
-  transition: background 130ms ease, border-color 130ms ease, color 130ms ease, transform 100ms ease, box-shadow 130ms ease;
+  transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease, color var(--dur-fast) ease, transform var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
 }
 .ob-btn:hover { background: var(--surface-hover); border-color: var(--border-strong); }
 .ob-btn:active { transform: translateY(0.5px); }
@@ -154,7 +154,7 @@
 }
 .ob-foot-left { display: flex; align-items: center; gap: 6px; }
 .ob-foot-dots { display: flex; gap: 6px; align-items: center; }
-.ob-fdot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); transition: background 200ms ease, width 200ms ease; }
+.ob-fdot { width: 6px; height: 6px; border-radius: 50%; background: var(--border-strong); transition: background var(--dur-base) ease, width var(--dur-base) ease; }
 .ob-fdot.on { background: var(--accent); }
 .ob-fdot.cur { width: 18px; border-radius: 999px; background: var(--accent); }
 .ob-foot-right { display: flex; align-items: center; gap: 10px; }
@@ -164,7 +164,7 @@
 .ob-vrow {
   display: grid; grid-template-columns: 34px 1fr; align-items: start; gap: 13px;
   padding: 11px 10px; border-radius: var(--r-card);
-  transition: background 130ms ease;
+  transition: background var(--dur-fast) ease;
 }
 .ob-vrow:hover { background: var(--surface-hover); }
 .ob-vic { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; background: var(--bg-elev-2); color: var(--accent); }
@@ -181,7 +181,7 @@
   width: 30px; height: 30px; border-radius: 50%; background: var(--sw); border: 0; cursor: pointer;
   display: grid; place-items: center; color: oklch(0 0 0 / 0.82);
   box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.16);
-  transition: transform .12s ease, box-shadow .15s ease;
+  transition: transform var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
 }
 .ob-accent-dot:hover { transform: translateY(-2px); }
 .ob-accent-dot.on { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px color-mix(in oklab, var(--sw) 80%, transparent); }
@@ -214,7 +214,7 @@
   height: 30px; padding: 0 13px; border: 0; border-radius: calc(var(--radius) - 3px);
   font: inherit; font-size: var(--fs-sm); font-weight: 500; cursor: pointer;
   background: none; color: var(--fg-muted);
-  transition: background 130ms ease, color 130ms ease, box-shadow 130ms ease;
+  transition: background var(--dur-fast) ease, color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
 }
 .ob-seg-btn:hover { color: var(--fg); }
 .ob-seg-btn.on {
@@ -231,7 +231,7 @@
   padding: 11px 14px; text-align: left; cursor: pointer;
   background: var(--bg-elev-1); border: 1px solid var(--border); border-radius: var(--r-card);
   font: inherit; color: var(--fg);
-  transition: background 130ms ease, border-color 130ms ease, box-shadow 130ms ease;
+  transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
 }
 .ob-preset:hover { background: var(--bg-elev-2); border-color: color-mix(in oklab, var(--accent) 30%, var(--border)); }
 .ob-preset.on {
@@ -264,7 +264,7 @@
   height: 28px; padding: 0 10px; border-radius: var(--radius-xs);
   font: inherit; font-size: var(--fs-xs); font-weight: 500; cursor: pointer;
   border: 1px solid var(--border); background: var(--bg-elev-2); color: var(--fg-muted);
-  transition: background 130ms ease, color 130ms ease, border-color 130ms ease;
+  transition: background var(--dur-fast) ease, color var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
 .ob-copy-btn:hover { background: var(--surface-hover); color: var(--fg); }
 .ob-copy-btn.ok { color: var(--ok); border-color: color-mix(in oklab, var(--ok) 35%, transparent); }
@@ -274,7 +274,7 @@
   flex: 1; min-width: 0; height: 34px; padding: 0 12px;
   font: inherit; font-size: var(--fs-sm); color: var(--fg);
   background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius);
-  transition: border-color 130ms ease, box-shadow 130ms ease;
+  transition: border-color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
 }
 .ob-input::placeholder { color: var(--fg-faint); }
 .ob-input:focus-visible { outline: none; border-color: var(--gi-ghost-border); box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 12%, transparent); }
@@ -286,7 +286,7 @@
   padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--r-card);
   font: inherit; font-size: var(--fs-sm); cursor: pointer; text-align: left;
   background: var(--bg-elev-1); color: var(--fg-2);
-  transition: background 130ms ease, border-color 130ms ease;
+  transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
 .ob-recent-btn:hover { background: var(--surface-hover); border-color: var(--border-strong); }
 .ob-recent-btn :global(.lucide) { flex: none; color: var(--fg-subtle); }

@@ -210,7 +210,7 @@
       inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
     padding: 12px;
     z-index: 10;
-    animation: slash-in 180ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: slash-in var(--dur-fast) cubic-bezier(0.22, 1, 0.36, 1);
   }
   @keyframes slash-in {
     from { opacity: 0; transform: translateY(4px); }
@@ -268,7 +268,7 @@
     background: color-mix(in oklch, var(--bg-elev-2) 60%, transparent);
     border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
     cursor: pointer;
-    transition: color 130ms, background 130ms, border-color 130ms;
+    transition: color var(--dur-fast), background var(--dur-fast), border-color var(--dur-fast);
   }
   .enhance-toggle:hover:not(:disabled) { color: var(--fg); border-color: var(--border-strong); }
   .enhance-toggle:disabled { opacity: 0.5; cursor: default; }
@@ -293,7 +293,7 @@
     background: transparent;
     border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
     cursor: pointer;
-    transition: color 130ms, background 130ms, border-color 130ms, transform 120ms;
+    transition: color var(--dur-fast), background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast);
   }
   .enhance-refine:hover:not(:disabled) { color: var(--fg); background: color-mix(in oklch, var(--surface-hover) 70%, transparent); border-color: var(--border-strong); }
   .enhance-refine:active:not(:disabled) { transform: scale(0.96); }
@@ -338,7 +338,7 @@
     border-radius: 8px;
     padding: 4px 9px;
     outline: none;
-    transition: border-color 130ms;
+    transition: border-color var(--dur-fast);
   }
   .enhance-steer input:focus { border-color: color-mix(in oklch, var(--model-color) 45%, var(--border)); }
   .enhance-steer input::placeholder { color: var(--fg-muted); opacity: 0.7; }

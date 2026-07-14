@@ -239,8 +239,8 @@
    changing box type or baseline. Mirrors AnimatedCount.svelte's scoped rules. */
 .acount { display: inline; font-variant-numeric: tabular-nums; }
 .acount-v { display: inline; clip-path: inset(0 -0.15em); }
-.acount.live .acount-v { animation: acRoll 0.17s var(--ease-page); }
-.acount.live[data-dir="down"] .acount-v { animation: acRollDown 0.17s var(--ease-page); }
+.acount.live .acount-v { animation: acRoll var(--dur-fast) var(--ease-page); }
+.acount.live[data-dir="down"] .acount-v { animation: acRollDown var(--dur-fast) var(--ease-page); }
 .wb-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex: none; margin-left: 2px;
   box-shadow: 0 0 6px color-mix(in oklab, var(--ok) 50%, transparent); }
 .wb-dot.live { background: var(--accent); box-shadow: none; animation: streamLivePulse var(--pulse-live) ease-out infinite; }

@@ -224,8 +224,8 @@
     border: 1px solid var(--border-strong);
     box-shadow: var(--shadow-float);
     overflow: hidden;
-    animation: phud-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
-    transition: border-color 200ms ease-out;
+    animation: phud-in var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1) both;
+    transition: border-color var(--dur-base) ease-out;
   }
   @keyframes phud-in {
     from { opacity: 0; transform: translateY(-8px); }
@@ -289,7 +289,7 @@
     border-top: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
     max-height: 40vh; overflow-y: auto;
     scrollbar-width: none;
-    animation: phud-open 200ms var(--ease-page) both;
+    animation: phud-open var(--dur-base) var(--ease-page) both;
   }
   .phud-list::-webkit-scrollbar { width: 0; height: 0; display: none; }
   @keyframes phud-open { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }

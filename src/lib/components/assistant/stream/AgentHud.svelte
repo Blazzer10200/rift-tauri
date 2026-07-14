@@ -258,8 +258,8 @@
     border: 1px solid var(--border-strong);
     box-shadow: var(--shadow-float);
     overflow: hidden;
-    animation: ahud-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
-    transition: border-color 200ms ease-out;
+    animation: ahud-in var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1) both;
+    transition: border-color var(--dur-base) ease-out;
     pointer-events: auto;
   }
   @keyframes ahud-in {
@@ -304,7 +304,7 @@
     border-top: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
     max-height: 38vh; overflow-y: auto;
     scrollbar-width: none;
-    animation: ahud-open 200ms var(--ease-page) both;
+    animation: ahud-open var(--dur-base) var(--ease-page) both;
   }
   .ahud-list::-webkit-scrollbar { width: 0; height: 0; display: none; }
   @keyframes ahud-open { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }

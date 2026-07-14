@@ -107,7 +107,7 @@
       inset 0 1px 0 oklch(1 0 0 / 0.08),
       0 28px 64px -28px oklch(0 0 0 / 0.7),
       var(--shadow-lg);
-    animation: pop-in 0.26s var(--ease-page) both;
+    animation: pop-in var(--dur-base) var(--ease-page) both;
   }
   :global(.perm-menu .pop-label) {
     display: flex; align-items: center; gap: 7px;

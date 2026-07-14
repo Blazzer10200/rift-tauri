@@ -1653,8 +1653,8 @@
     box-shadow:
       0 10px 28px -10px oklch(0 0 0 / 0.45),
       inset 0 1px 0 color-mix(in oklch, white 4%, transparent);
-    transition: border-color 220ms cubic-bezier(0.22, 1, 0.36, 1),
-                box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    transition: border-color var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1),
+                box-shadow var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1),
                 transform var(--dur-fast) ease-out;
     overflow: hidden;
   }
@@ -1975,7 +1975,7 @@
     background: color-mix(in oklch, var(--bg-elev-2) 60%, transparent);
     border-radius: 999px;
     border: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
-    animation: enter 160ms ease-out;
+    animation: enter var(--dur-fast) ease-out;
   }
   .char-count.warn {
     color: var(--warn);
@@ -2002,9 +2002,9 @@
     border: 1px solid transparent; border-radius: 999px;
     cursor: pointer;
     flex-shrink: 0;
-    transition: color 160ms ease-out, background 160ms ease-out,
-                border-color 160ms ease-out, box-shadow 160ms ease-out,
-                transform 120ms ease-out;
+    transition: color var(--dur-fast) ease-out, background var(--dur-fast) ease-out,
+                border-color var(--dur-fast) ease-out, box-shadow var(--dur-fast) ease-out,
+                transform var(--dur-fast) ease-out;
   }
   .send-btn:active:not(:disabled) { transform: scale(0.9); }
   .send-btn:disabled { cursor: default; opacity: 0.55; }
@@ -2072,7 +2072,7 @@
     display: inline-flex; align-items: center; justify-content: center;
     opacity: 0;
     transform: scale(0.6) rotate(-30deg);
-    transition: opacity 180ms ease-out, transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition: opacity var(--dur-fast) ease-out, transform var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1);
   }
   .icon-slot.active {
     opacity: 1;
@@ -2236,7 +2236,7 @@
     background: transparent;
     border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
     cursor: pointer;
-    transition: color 130ms, background 130ms, border-color 130ms;
+    transition: color var(--dur-fast), background var(--dur-fast), border-color var(--dur-fast);
   }
   .du-btn:hover { color: var(--fg); background: color-mix(in oklch, var(--surface-hover) 70%, transparent); border-color: var(--border-strong); }
   @media (prefers-reduced-motion: reduce) {
@@ -2253,7 +2253,7 @@
 
   /* Compose-tools (improve/preview) reveal once the draft has text — the empty
      composer stays calm. Reuses the global `enter` keyframe. */
-  .cbtn.reveal { animation: enter 160ms ease-out; }
+  .cbtn.reveal { animation: enter var(--dur-fast) ease-out; }
   @media (prefers-reduced-motion: reduce) {
     .cbtn.reveal { animation: none; }
   }

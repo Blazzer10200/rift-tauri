@@ -562,7 +562,7 @@
   .folder-row-x {
     background: transparent; border: 0; padding: 0 8px; color: var(--fg-faint); cursor: pointer;
     opacity: 0; display: inline-flex; align-items: center; border-radius: 8px;
-    transition: opacity 120ms, color 120ms;
+    transition: opacity var(--dur-fast), color var(--dur-fast);
   }
   .folder-row-wrap:hover .folder-row-x { opacity: 1; }
   .folder-row-x:hover { color: var(--danger); }

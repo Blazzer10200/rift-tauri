@@ -174,7 +174,7 @@
     color: var(--fg);
     font: inherit; font-size: var(--fs-md);
     cursor: pointer;
-    transition: border-color 80ms ease, box-shadow 80ms ease, background 100ms ease;
+    transition: border-color 80ms ease, box-shadow 80ms ease, background var(--dur-fast) ease;
   }
   .sel-trigger:hover:not(:disabled) { border-color: var(--accent); }
   .sel-trigger.open { border-color: var(--accent); box-shadow: 0 0 0 3px var(--ring); }
