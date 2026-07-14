@@ -62,7 +62,6 @@
 
 /* bright narration — the only high-contrast text in the turn */
 .snarr { color: var(--fg-2); margin: var(--stream-gap) 0; animation: blockIn var(--dur-base) var(--ease-page) both; }
-.snarr :global(.md-p), .snarr :global(.md-li) { color: var(--fg-2); }
 
 /* demoted connective beat (balanced narration) — a between-tools line ("now the
    release build:", "exe still locked, kill harder:") rendered as quiet inline
@@ -97,10 +96,8 @@
 .sthink-chev { transition: transform var(--dur-fast); }
 .sthink-chev.open { transform: rotate(180deg); }
 /* Thinking body — Markdown now (parity w/ MessageBubble's thinking block), in
-   a dimmed italic "inner monologue" voice. Overrides target the md-* classes
-   the renderer emits; this file is a global sheet so no :global() needed. */
+   a dimmed italic "inner monologue" voice. */
 .sthink-text { margin: 8px 0 0; max-width: 64ch; font-size: var(--fs-sm); line-height: 1.55; color: var(--fg-faint); font-style: italic; }
-.sthink-text .md-p, .sthink-text .md-li { color: var(--fg-faint); font-size: var(--fs-sm); }
 
 /* live footer status line — verb breathes on the left, elapsed/tokens sit as a
    quiet mono cluster at the right edge so the numbers stop crowding the word.
