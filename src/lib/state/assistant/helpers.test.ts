@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage, ToolBlock } from "./types";
 import {
   FABLE_DISABLED, FABLE_SUNSET_MS, clampEffort, effortToFlag, fableAvailable,
-  flattenToolResult, isStaleTurnEpoch, loadEffort, messagesHaveContextSignals,
+  fastEligible, flattenToolResult, isStaleTurnEpoch, loadEffort, messagesHaveContextSignals,
   migrateThinkingPins, modelFamily, previewToolInput, ctxWindowForModelId,
   modelNativeWindow, planContextCap,
 } from "./helpers";
@@ -161,6 +161,18 @@ describe("modelFamily", () => {
     expect(modelFamily("claude-opus-4-7")).toBe("opus");
     expect(modelFamily("claude-fable-5")).toBe("opus");
     expect(modelFamily("sonnet")).toBe("sonnet");
+  });
+});
+
+describe("fastEligible (must mirror config.rs model_fast_eligible)", () => {
+  it("is Opus-family only — Fable shares the opus VISUAL family but is not fast-eligible", () => {
+    expect(fastEligible("opus")).toBe(true);
+    expect(fastEligible("claude-opus-4-8")).toBe(true);
+    expect(fastEligible("claude-opus-4-7")).toBe(true);
+    expect(fastEligible("claude-fable-5")).toBe(false);
+    expect(fastEligible("sonnet")).toBe(false);
+    expect(fastEligible("claude-sonnet-5")).toBe(false);
+    expect(fastEligible("haiku")).toBe(false);
   });
 });
 

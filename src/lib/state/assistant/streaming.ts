@@ -1145,6 +1145,37 @@ export function onStreamLine(tab: TabState, raw: string) {
       }
       const resultUsage = (env as { usage?: Record<string, unknown> }).usage;
       if (resultUsage) recordTurnUsage(tab, resultUsage, true);
+      // Ground-truth context window (#94 self-correction): the CLI reports the
+      // window each model actually ran against — modelUsage[id].contextWindow —
+      // which folds in the [1m] selector AND account-side gating the user-set
+      // plan estimate can't see. Prefer the turn's own model; else the largest
+      // entry. ctxWindowFor prefers this over plan×model while the tab stays
+      // on that model.
+      // Keys + lastModelId both normalized: init reports the model WITH the
+      // [1m] selector and modelUsage keys can carry it too (probe-verified) —
+      // and modelUsage is session-CUMULATIVE after a mid-chat switch, so the
+      // turn-model match (not the largest entry) is what keeps this honest.
+      const mu = (env as { modelUsage?: Record<string, { contextWindow?: number }> }).modelUsage;
+      if (mu) {
+        const norm = (s: string) => s.replace(/\[1m\]$/i, "");
+        const turnModel = norm(tab.lastModelId ?? "");
+        let pick: { model: string; window: number } | null = null;
+        for (const [id, u] of Object.entries(mu)) {
+          const w = typeof u?.contextWindow === "number" ? u.contextWindow : 0;
+          if (w <= 0) continue;
+          if (norm(id) === turnModel) { pick = { model: norm(id), window: w }; break; }
+          if (!pick || w > pick.window) pick = { model: norm(id), window: w };
+        }
+        if (pick) tab.reportedCtxWindow = pick;
+      }
+      // Fast-mode honesty stamp: only when the CLI CONFIRMS the turn ran fast
+      // (fast_mode_state / usage.speed) — a requested-but-unavailable fast
+      // turn gets no badge.
+      const fms = (env as { fast_mode_state?: unknown }).fast_mode_state;
+      const speed = (resultUsage as { speed?: unknown } | undefined)?.speed;
+      if (fms === "on" || speed === "fast") {
+        mutateStreaming(tab, (m) => ({ ...m, fast: true }));
+      }
       if (env.subtype && env.subtype !== "success") {
         const msg = RESULT_ERROR_MESSAGES[env.subtype];
         if (msg) {

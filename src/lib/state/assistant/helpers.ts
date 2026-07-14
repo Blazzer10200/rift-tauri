@@ -43,6 +43,7 @@ const EFFORT_KEY = "rift.assistant.thinkingEffort";
 const THINKING_KEY = "rift.assistant.thinkingEnabled";
 const PERMISSION_KEY = "rift.assistant.permissionMode";
 const PLAN_KEY = "rift.assistant.plan";
+const FAST_MODE_KEY = "rift.assistant.fastMode";
 
 // Per-workspace override keys for model + effort. A `base::<root>` key holds a
 // workspace's pinned choice; the bare global key is the baseline default for
@@ -214,6 +215,35 @@ export function loadPermissionMode(): PermissionMode {
 export function savePermissionMode(v: PermissionMode) {
   try {
     if (typeof localStorage !== "undefined") localStorage.setItem(PERMISSION_KEY, v);
+  } catch {
+    /* storage disabled */
+  }
+}
+
+/** Models the CLI's fast-output mode applies to — the Opus family only (the
+ *  bare `opus` alias + pinned `claude-opus-4-x` ids). Fable shares Opus's
+ *  VISUAL family (modelFamily) but is not fast-eligible upstream, so don't
+ *  derive this from modelFamily. Mirrors model_fast_eligible in config.rs. */
+export function fastEligible(model: string): boolean {
+  return model === "opus" || model.startsWith("claude-opus-4-");
+}
+
+/** Fast mode (Opus fast output) master switch. GLOBAL like permissionMode —
+ *  a speed preference, not a per-project pin. Default off; the toggle only
+ *  surfaces on fast-eligible (Opus) rows and the backend re-gates by model +
+ *  CLI version, so a stale `on` can never reach an ineligible spawn. */
+export function loadFastMode(): boolean {
+  try {
+    if (typeof localStorage !== "undefined") return localStorage.getItem(FAST_MODE_KEY) === "on";
+  } catch {
+    /* SSR or storage disabled */
+  }
+  return false;
+}
+
+export function saveFastMode(v: boolean) {
+  try {
+    if (typeof localStorage !== "undefined") localStorage.setItem(FAST_MODE_KEY, v ? "on" : "off");
   } catch {
     /* storage disabled */
   }

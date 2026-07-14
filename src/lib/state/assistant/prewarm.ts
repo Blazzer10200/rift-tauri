@@ -25,7 +25,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type { AssistantStore } from "../assistant.svelte";
-import { effortToFlag } from "./helpers";
+import { effortToFlag, fastEligible } from "./helpers";
 
 // Debounce so a burst of reactive ticks (focus + picker hydrate + draft) coalesce
 // into one spawn. ~600ms: long enough to skip the mount thrash, short enough that
@@ -61,6 +61,10 @@ function signatureOf(
     store.thinkingEnabled ? effortToFlag(store.thinkingEffort, store.effectiveModel) : "low",
     String(store.thinkingEnabled),
     store.permissionMode,
+    // Mirror the send-path gating (fastEligible) so the spare's SpawnKey
+    // matches the real send — an ineligible model folds to "false" both here
+    // and there, and a fast toggle mid-typing re-arms the trigger.
+    String(store.fastMode && fastEligible(store.effectiveModel)),
     root,
     // A fresh-tab spare (`--session-id`) and a restart-history spare (`--resume`)
     // are different children; keep them distinct in the dedup key so opening a
@@ -129,6 +133,7 @@ export function requestPrewarm(store: AssistantStore): void {
       thinkingEffort: store.thinkingEffort,
       thinkingEnabled: store.thinkingEnabled,
       permissionMode: store.permissionMode,
+      fastMode: store.fastMode && fastEligible(store.effectiveModel),
       root,
       isFirstTurn,
     }).catch((e) => {

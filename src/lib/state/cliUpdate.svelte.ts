@@ -61,12 +61,14 @@ function parseSemver(v: string): [number, number, number] | null {
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
 }
 
-/** The CLI version at which every Rift-gated spawn flag is available. Mirrors
- *  the HIGHEST gate in `cli_caps::mins` (`DISABLE_SLASH_COMMANDS` = 2.1.170);
- *  all other gates sit below the hard floor (`MIN_SUPPORTED` = 2.1.161), so an
- *  above-floor install is missing at most this one. Keep in lockstep if a new
- *  higher gate is added Rust-side. */
-export const CLI_RECOMMENDED_VERSION = "2.1.170";
+/** The CLI version at which every Rift-gated spawn feature is available.
+ *  Mirrors the HIGHEST gate in `cli_caps::mins` (`FAST_MODE` = 2.1.209; the
+ *  live-switch control pushes gate at 2.1.208, everything else lower). Unlike
+ *  the dormant prompt-suggestions case, fast mode + live model/permission
+ *  switching are LIVE features an older install actually loses — so the
+ *  recommendation nudges to the real floor. Keep in lockstep with new
+ *  Rust-side gates. */
+export const CLI_RECOMMENDED_VERSION = "2.1.209";
 
 /** >0 if a is newer than b, <0 if older, 0 if equal/unparseable. An
  *  unparseable operand fails closed (returns 0 → treated up-to-date), so warn

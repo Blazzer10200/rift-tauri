@@ -126,6 +126,38 @@ describe("assistant.ctxWindowFor()", () => {
     const tab = { lastModelId: "claude-mystery-3-0", lastTurnUsage: null } as any;
     expect(assistant.ctxWindowFor(tab)).toBe(200_000);
   });
+
+  it("prefers the CLI-reported window while the tab is on that model", () => {
+    // Ground truth beats the plan×model estimate: a Free-plan account whose
+    // API gates sonnet at 200K reports contextWindow:200000 even though the
+    // default `max` plan estimate would claim 1M.
+    const tab = {
+      lastModelId: "claude-sonnet-5",
+      lastTurnUsage: null,
+      reportedCtxWindow: { model: "claude-sonnet-5", window: 200_000 },
+    } as any;
+    expect(assistant.ctxWindowFor(tab)).toBe(200_000);
+  });
+
+  it("matches a [1m]-suffixed lastModelId against the normalized reported model", () => {
+    const tab = {
+      lastModelId: "claude-sonnet-5[1m]",
+      lastTurnUsage: null,
+      reportedCtxWindow: { model: "claude-sonnet-5", window: 1_000_000 },
+    } as any;
+    expect(assistant.ctxWindowFor(tab)).toBe(1_000_000);
+  });
+
+  it("ignores a stale reported window after a mid-chat model switch", () => {
+    // lastModelId moved to opus but the report is still sonnet's — fall back
+    // to the estimate until the next result re-reports for the new model.
+    const tab = {
+      lastModelId: "claude-opus-4-8",
+      lastTurnUsage: null,
+      reportedCtxWindow: { model: "claude-sonnet-5", window: 200_000 },
+    } as any;
+    expect(assistant.ctxWindowFor(tab)).toBe(1_000_000);
+  });
 });
 
 describe("assistant.ctxTokensFor()", () => {

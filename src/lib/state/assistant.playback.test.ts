@@ -476,6 +476,40 @@ describe("playback — usage, cost, model attribution", () => {
     expect(rec.modelId).toBe("claude-opus-4-8");
   });
 
+  it("result modelUsage sets reportedCtxWindow — turn-model match wins, keys [1m]-normalized", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    const id = tab.streamingMsgId!;
+    feed(tab, [
+      sysModel("claude-sonnet-5[1m]"),
+      textDelta("ok"),
+      resultEnv({
+        // modelUsage is session-CUMULATIVE — after a mid-chat switch both
+        // models appear; the turn's own (sonnet) entry must win over the
+        // larger opus sibling, and both key + lastModelId normalize [1m].
+        modelUsage: {
+          "claude-opus-4-8": { contextWindow: 1_000_000 },
+          "claude-sonnet-5[1m]": { contextWindow: 200_000 },
+        },
+      }),
+    ]);
+    expect(tab.reportedCtxWindow).toEqual({ model: "claude-sonnet-5", window: 200_000 });
+    // No fast confirmation on this result → no stamp.
+    expect(tab.messages.find((m) => m.id === id)?.fast).toBeUndefined();
+  });
+
+  it("a CLI-confirmed fast turn stamps message.fast (honest badge, result-time only)", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    const id = tab.streamingMsgId!;
+    feed(tab, [
+      sysModel("claude-opus-4-8"),
+      textDelta("ok"),
+      resultEnv({ fast_mode_state: "on", usage: { speed: "fast" } }),
+    ]);
+    expect(tab.messages.find((m) => m.id === id)?.fast).toBe(true);
+  });
+
   it("surfaces a known error result.subtype as a plain-English lastError", () => {
     const tab = freshTab();
     beginTurn(tab);

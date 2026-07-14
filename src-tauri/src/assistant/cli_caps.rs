@@ -90,6 +90,22 @@ mod mins {
     /// exactly Rift's spawn shape). Absent from the changelog; confirmed
     /// present @2.1.201 via `--help` + exe strings. Confirmed-present bound.
     pub const PROMPT_SUGGESTIONS: Version = (2, 1, 201); // confirmed present @ 2.1.201
+
+    /// `--settings {"fastMode":true}` honored in `-p` mode (Opus fast output;
+    /// the result frame answers with `fast_mode_state:"on"` + `usage.speed:
+    /// "fast"`). The feature dates to ~2.1.34 (third-party changelog), but the
+    /// HEADLESS settings-key path is probe-confirmed only @2.1.209 — a silent
+    /// no-op key on an older CLI would render Rift's Fast toggle dead, so this
+    /// is a confirmed-present bound. Tighten downward on changelog evidence.
+    pub const FAST_MODE: Version = (2, 1, 209); // confirmed present @ 2.1.209 (live probe)
+
+    /// Host→CLI `set_permission_mode` / `set_model` control_requests over the
+    /// stream-json stdin (live-switch a warm child instead of drain+respawn).
+    /// Foundational SDK machinery (predates the tracked changelog), but 2.1.208
+    /// fixed "headless stream-json sessions hanging permanently when a
+    /// control_request carried a non-string set_model payload" — floor at the
+    /// hardened release rather than risk the hang class on older CLIs.
+    pub const LIVE_SWITCH: Version = (2, 1, 208); // hardened @ 2.1.208 (changelog)
 }
 
 /// The hard minimum CLI version Rift can drive at all. Below this, no turn can
@@ -114,6 +130,8 @@ pub struct CliCaps {
     pub strict_mcp_config: bool,
     pub disable_slash_commands: bool,
     pub prompt_suggestions: bool,
+    pub fast_mode: bool,
+    pub live_switch: bool,
 }
 
 /// `a >= b` on version triples.
@@ -138,6 +156,8 @@ impl CliCaps {
                 strict_mcp_config: false,
                 disable_slash_commands: false,
                 prompt_suggestions: false,
+                fast_mode: false,
+                live_switch: false,
             },
             Some(ver) => Self {
                 version: Some(ver),
@@ -151,6 +171,8 @@ impl CliCaps {
                 strict_mcp_config: at_least(ver, mins::STRICT_MCP_CONFIG),
                 disable_slash_commands: at_least(ver, mins::DISABLE_SLASH_COMMANDS),
                 prompt_suggestions: at_least(ver, mins::PROMPT_SUGGESTIONS),
+                fast_mode: at_least(ver, mins::FAST_MODE),
+                live_switch: at_least(ver, mins::LIVE_SWITCH),
             },
         }
     }
@@ -236,6 +258,11 @@ mod tests {
         // 2.1.201 confirmed-present bound (--help + exe strings; not in changelog).
         assert!(!CliCaps::from_version(Some((2, 1, 200))).prompt_suggestions);
         assert!(CliCaps::from_version(Some((2, 1, 201))).prompt_suggestions);
+
+        assert!(!CliCaps::from_version(Some((2, 1, 207))).live_switch);
+        assert!(CliCaps::from_version(Some((2, 1, 208))).live_switch);
+        assert!(!CliCaps::from_version(Some((2, 1, 208))).fast_mode);
+        assert!(CliCaps::from_version(Some((2, 1, 209))).fast_mode);
         assert!(!CliCaps::from_version(None).prompt_suggestions);
     }
 

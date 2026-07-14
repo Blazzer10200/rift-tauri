@@ -18,7 +18,7 @@ import { accessibility } from "../accessibility.svelte";
 import { notify } from "../toast.svelte";
 import type { AssistantStore, TabState } from "../assistant.svelte";
 import type { Block, ChatMessage, ModelSel, QueueItem, TurnRecord } from "./types";
-import { effortToFlag, fableAvailable, haikuAvailable, FABLE_SUNSET_MS } from "./helpers";
+import { effortToFlag, fableAvailable, fastEligible, haikuAvailable, FABLE_SUNSET_MS } from "./helpers";
 import { mcpPanel } from "../mcp-panel.svelte";
 import { finalizeInflightBlocks } from "./streaming";
 
@@ -328,6 +328,10 @@ export async function send(
       thinkingEffort: sendEffort,
       thinkingEnabled: store.thinkingEnabled,
       permissionMode: store.permissionMode,
+      // Sent pre-gated by model family so an ineligible model never carries a
+      // stale global `on` into the SpawnKey; the backend re-gates by CLI
+      // version (caps.fast_mode) on top.
+      fastMode: store.fastMode && fastEligible(effModel),
       // priorContextSummary is intentionally omitted (defaults to None backend-
       // side): the CLI does compaction natively in-process now, so Rift never
       // re-injects a prior-conversation summary. The backend keeps the param as a

@@ -5,10 +5,10 @@
   // ←/→ effort nudges); this child renders, handles clicks, and owns the
   // pointer-drag slider. Derives re-compute here from the shared modelMatrix
   // + assistant store — same pure helpers the parent uses, so they can't drift.
-  import { Check, ChevronRight, Layers, Plus } from "lucide-svelte";
+  import { Check, ChevronRight, Layers, Plus, Zap } from "lucide-svelte";
   import { tick } from "svelte";
   import { assistant } from "../../../state/assistant.svelte";
-  import { modelFamily as modelFamilyOf } from "../../../state/assistant/helpers";
+  import { fastEligible, modelFamily as modelFamilyOf } from "../../../state/assistant/helpers";
   import { usage, limitZone, type ScopedLimit } from "../../../state/usage.svelte";
   import { portal } from "$lib/actions/portal";
   import { tooltip } from "$lib/actions/tooltip";
@@ -74,6 +74,9 @@
   });
 
   const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === assistant.effectiveModel));
+  // Fast mode — surfaces only on fast-eligible (Opus-family) rows. The stored
+  // global pref survives on other models but is inert there (send.ts gates it).
+  const fastApplies = $derived(!!currentModel && fastEligible(currentModel.id));
   // ── Reasoning: ONE ladder ─────────────────────────────────────────────────
   // The old Thinking toggle + effort slider were two knobs over one wire lever
   // (see modelMatrix DIAL_STOPS). The ladder is the honest control: rung 0 =
@@ -233,6 +236,28 @@
         <Plus size={12} /> New chat in {picked ? picked.label : "this model"}
       </button>
     </div>
+  {/if}
+
+  {#if fastApplies}
+    <div class="rift-menu-divider"></div>
+    <!-- Fast mode — Opus fast output. One quiet checkbox row matching the
+         model-row anatomy (icon tile + title/sub + trailing switch); the
+         per-turn "fast" chip in the transcript is the honest confirmation. -->
+    <button
+      type="button"
+      role="menuitemcheckbox"
+      aria-checked={assistant.fastMode}
+      class="pop-item rich fast-row"
+      use:tooltip={"Fast mode — quicker Opus output. Applies from your next message."}
+      onmousedown={(e) => { e.preventDefault(); assistant.setFastMode(!assistant.fastMode); }}
+    >
+      <span class="pi-ic fast-ic" class:on={assistant.fastMode}><Zap size={15} /></span>
+      <span class="pi-text">
+        <span class="pi-name"><span class="model-name">Fast mode</span></span>
+        <span class="pi-sub">Faster output on Opus — same model, quicker replies</span>
+      </span>
+      <span class="fast-switch" class:on={assistant.fastMode} aria-hidden="true"><i></i></span>
+    </button>
   {/if}
 
   {#if dialApplies}
@@ -533,6 +558,32 @@
   }
   :global(.settings-menu .model-row:hover .model-num),
   :global(.settings-menu .model-row.active .model-num) { color: var(--fg-muted); }
+
+  /* Fast-mode row — same pop-item anatomy as model rows; the trailing switch
+     is a compact track+knob keyed to the accent when on. */
+  :global(.settings-menu .fast-row .fast-ic.on) {
+    background: color-mix(in oklab, var(--accent) 16%, transparent);
+    border-color: color-mix(in oklab, var(--accent) 40%, transparent);
+    color: var(--accent);
+  }
+  :global(.settings-menu .fast-switch) {
+    flex: none; position: relative;
+    width: 30px; height: 17px; border-radius: 999px;
+    background: color-mix(in oklab, var(--fg) 10%, transparent);
+    border: 1px solid color-mix(in oklab, var(--fg) 14%, transparent);
+    transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
+  }
+  :global(.settings-menu .fast-switch i) {
+    position: absolute; top: 2px; left: 2px;
+    width: 11px; height: 11px; border-radius: 50%;
+    background: var(--fg-muted);
+    transition: transform var(--dur-base) var(--ease-page), background var(--dur-fast) ease;
+  }
+  :global(.settings-menu .fast-switch.on) {
+    background: color-mix(in oklab, var(--accent) 26%, transparent);
+    border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+  }
+  :global(.settings-menu .fast-switch.on i) { transform: translateX(13px); background: var(--accent); }
 
   /* Effort — segmented rung cards (Low→X-High), stops = dialStopsFor(model).
      One card per CLI flag on a recessed glass rail; the ascending-bars glyph is

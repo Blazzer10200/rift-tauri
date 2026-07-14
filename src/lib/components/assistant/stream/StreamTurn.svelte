@@ -1,6 +1,6 @@
 <script lang="ts">
   import "$lib/styles/stream.css";
-  import { Check, Copy, RotateCcw, AlertTriangle } from "lucide-svelte";
+  import { Check, Copy, RotateCcw, AlertTriangle, Zap } from "lucide-svelte";
   import Markdown from "../Markdown.svelte";
   import StreamThinking from "./StreamThinking.svelte";
   import WorkLine from "./WorkLine.svelte";
@@ -349,6 +349,7 @@
       {#if turn.meta}
         <span class="sapplied-meta">{turn.meta.time}</span>
         {#if turn.meta.cost}<span class="sapplied-cost" use:tooltip={"Total cost of this turn"}>{turn.meta.cost}</span>{/if}
+        {#if turn.meta.fast}<span class="sapplied-fast" use:tooltip={"This turn ran in fast mode (quicker Opus output)"}><Zap size={11} />fast</span>{/if}
       {/if}
     </div>
   {/if}

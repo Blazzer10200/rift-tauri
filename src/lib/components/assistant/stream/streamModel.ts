@@ -169,7 +169,7 @@ export type TurnModel = {
   thinking: { active: boolean; durSecs: number; text: string } | null;
   outcome: TurnOutcome;
   files: number; // distinct files edited/created (only meaningful for "applied")
-  meta: { time: string; cost: string | null } | null; // footer time·cost line
+  meta: { time: string; cost: string | null; fast: boolean } | null; // footer time·cost(·fast) line
   totalSecs: number;
 };
 
@@ -695,7 +695,9 @@ export function messageToTurn(m: ChatMessage): TurnModel {
 
   // Footer time·cost line — shown for any turn that did work (not pure text).
   const cost = typeof m.costUsd === "number" && m.costUsd > 0 ? `$${m.costUsd.toFixed(2)}` : null;
-  const meta = outcome === "text" ? null : { time: fmtDur(shownSecs), cost };
+  // `fast` is stamped at result-time only when the CLI confirmed fast output
+  // (streaming.ts) — the chip is honest state, never a request echo.
+  const meta = outcome === "text" ? null : { time: fmtDur(shownSecs), cost, fast: m.fast === true };
 
   return { blocks, thinking, outcome, files: changedFiles.size, meta, totalSecs: shownSecs };
 }

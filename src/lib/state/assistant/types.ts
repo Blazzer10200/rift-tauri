@@ -179,6 +179,10 @@ export type ChatMessage = {
    *  Ns"; the old summed thinking+tool secs under-reported badly (a pure-text
    *  turn read "Worked for 0s"). Absent on pre-field convos → legacy sum. */
   turnDurationMs?: number | null;
+  /** True when the CLI confirmed this turn ran in fast mode (result frame's
+   *  fast_mode_state / usage.speed) — stamped at result, never at request, so
+   *  the TurnSummary badge is honest. Absent on non-fast + pre-field convos. */
+  fast?: boolean | null;
   // Terminal stop reason when noteworthy: "max_tokens" (response truncated at
   // the output cap) or "refusal" (model declined). Null/absent for normal
   // completions. Drives the truncation/refusal notice in MessageBubble.

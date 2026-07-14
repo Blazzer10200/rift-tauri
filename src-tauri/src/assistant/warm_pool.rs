@@ -89,6 +89,11 @@ pub(super) async fn kill_child_tree_async(pid: u32) {
 pub(super) struct TurnCmd {
     /// The pre-built stream-json `user` envelope (text + optional images).
     pub user_line: Vec<u8>,
+    /// Serialized host→CLI `control_request` lines the reader loop writes to
+    /// stdin BEFORE this turn's user envelope — the live-switch path
+    /// (`set_permission_mode` / `set_model`, CLI ≥2.1.208) rides here so the
+    /// push and the turn stay ordered on the one pipe. Empty for normal turns.
+    pub pre_controls: Vec<Vec<u8>>,
     /// App handle for `emit_to` (per-turn — the turn may originate from a
     /// different window than the one that cold-spawned the child).
     pub app: AppHandle,
@@ -154,6 +159,10 @@ pub(super) struct SpawnKey {
     /// argv at spawn like effort — without it in the key, a budget change kept
     /// the warm child enforcing the stale cap until an unrelated respawn.
     pub max_budget_bits: Option<u64>,
+    /// Fast mode (Opus fast output) rides `--settings {"fastMode":true}` —
+    /// baked at spawn like effort. Holds the flag actually SENT (false for
+    /// ineligible models / gated CLIs), so identical-argv spawns share a key.
+    pub fast_mode: bool,
 }
 
 /// Cheap stable fingerprint for a secret/URL string, for `SpawnKey.cred_fp` /
@@ -163,6 +172,21 @@ pub(super) fn fingerprint(s: &str) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
     s.hash(&mut h);
     h.finish()
+}
+
+/// True when `old` → `new` differs ONLY in the fields the CLI can change on a
+/// LIVE child via stdin control_requests — `permission_mode` and `model`
+/// (`set_permission_mode` / `set_model`, hardened @ CLI 2.1.208). Everything
+/// else in the key is argv/env-baked and still forces a drain + cold respawn.
+/// Equal keys return false (that's a plain warm reuse, not a switch).
+pub(super) fn live_switchable(old: &SpawnKey, new: &SpawnKey) -> bool {
+    if old == new {
+        return false;
+    }
+    let mut aligned = old.clone();
+    aligned.permission_mode = new.permission_mode.clone();
+    aligned.model = new.model.clone();
+    aligned == *new
 }
 
 /// A persistent `claude` child kept warm across turns for one CLI session.
@@ -563,6 +587,42 @@ mod tests {
     fn empty_pool_is_noop() {
         let d = evict_decision(&[], &[], 3, IDLE_EVICT, IDLE_EVICT_PRESSURE);
         assert!(d.is_empty());
+    }
+
+    fn key(model: &str, perm: &str, effort: &str) -> SpawnKey {
+        SpawnKey {
+            model: model.into(),
+            root: Some("C:/proj".into()),
+            permission_mode: perm.into(),
+            prompting_mode: false,
+            use_full_config: true,
+            use_api_key: false,
+            cred_fp: 0,
+            local_llm_enabled: false,
+            local_llm_fp: 0,
+            thinking_on: false,
+            effort_level: effort.into(),
+            trust_level: "readonly".into(),
+            addendum_ptr: 0,
+            max_budget_bits: None,
+            fast_mode: false,
+        }
+    }
+
+    /// The live-switch kernel: ONLY permission_mode/model diffs qualify — any
+    /// other changed field (or an equal key) must fall back to drain+respawn.
+    #[test]
+    fn live_switchable_only_for_perm_and_model_diffs() {
+        let base = key("claude-opus-4-8", "bypassPermissions", "low");
+        assert!(!live_switchable(&base, &base), "equal keys = plain reuse, not a switch");
+        assert!(live_switchable(&base, &key("claude-opus-4-8", "acceptEdits", "low")), "perm-only diff");
+        assert!(live_switchable(&base, &key("claude-sonnet-5", "bypassPermissions", "low")), "model-only diff");
+        assert!(live_switchable(&base, &key("claude-sonnet-5", "default", "low")), "perm+model diff");
+        assert!(!live_switchable(&base, &key("claude-opus-4-8", "bypassPermissions", "high")), "effort diff → respawn");
+        assert!(!live_switchable(&base, &key("claude-sonnet-5", "bypassPermissions", "high")), "model+effort diff → respawn");
+        let mut fast = key("claude-opus-4-8", "bypassPermissions", "low");
+        fast.fast_mode = true;
+        assert!(!live_switchable(&base, &fast), "fast_mode diff → respawn (settings are argv-baked)");
     }
 
     /// Leak-fix coverage (cont.216): both the idle-evict and shutdown-drain paths

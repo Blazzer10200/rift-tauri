@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Check, GitCommit, Clock, RotateCcw } from "lucide-svelte";
+  import { Check, GitCommit, Clock, RotateCcw, Zap } from "lucide-svelte";
   import { fade } from "svelte/transition";
   import { tooltip } from "$lib/actions/tooltip";
   import { assistant, type ChatMessage } from "../../../state/assistant.svelte";
@@ -73,6 +73,7 @@
         <span class="ts-item mono"><Clock size={12} />{formatDuration(turnDurationMs)}</span>
       {/if}
       {#if costLabel}<span class="ts-dot" aria-hidden="true"></span><span class="ts-cost mono" use:tooltip={"Total cost of this turn"}>{costLabel}</span>{/if}
+      {#if message.fast}<span class="ts-dot" aria-hidden="true"></span><span class="ts-cost mono" use:tooltip={"This turn ran in fast mode (quicker Opus output)"}><Zap size={11} />fast</span>{/if}
     </div>
     <div class="ts-actions">
       {#if autoApplied}

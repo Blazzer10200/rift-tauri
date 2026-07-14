@@ -296,6 +296,17 @@
   background: color-mix(in oklab, var(--accent) 9%, transparent);
   cursor: default;
 }
+/* fast-mode confirmation — same quiet-chip anatomy as cost so the trailing
+   meta cluster reads as one system; only shown when the CLI confirmed the
+   turn actually ran fast (honest state, not a request echo) */
+.sapplied .sapplied-fast {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 1px 7px; border-radius: 6px;
+  font-family: var(--font-mono); font-size: var(--fs-xs);
+  color: color-mix(in oklab, var(--accent) 78%, var(--fg));
+  background: color-mix(in oklab, var(--accent) 9%, transparent);
+  cursor: default;
+}
 
 /* per-turn hover actions (copy / retry) */
 .msg-acts { display: flex; align-items: center; gap: 2px; margin-top: 13px; height: 28px;

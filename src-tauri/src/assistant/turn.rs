@@ -26,7 +26,7 @@ use super::config::{
     fable_unavailable, haiku_unavailable, HAIKU_FALLBACK_MODEL, HAIKU_MODEL,
     is_valid_effort_tier,
     is_valid_local_model_name, is_valid_model_name, is_valid_permission_mode, load_config,
-    normalize_effort_tier, send_effort_flag, DEFAULT_MODEL, FABLE_FALLBACK_MODEL, FABLE_MODEL,
+    model_fast_eligible, normalize_effort_tier, send_effort_flag, DEFAULT_MODEL, FABLE_FALLBACK_MODEL, FABLE_MODEL,
 };
 use super::convo_store::{
     is_valid_session_id, load_session_cwd, load_session_model, save_session_cwd,
@@ -417,6 +417,29 @@ pub struct AssistantAttachment {
     pub data_base64: String,
 }
 
+/// Serialize a host→CLI `control_request` line — the live-switch pushes
+/// (`set_permission_mode` / `set_model`) dispatch_turn rides on a warm child's
+/// stdin ahead of the user envelope. `fields` merges into the request object
+/// beside `subtype`. The request_id is process-unique so an ack (or a rejected
+/// push) is attributable in logs.
+fn control_push_line(subtype: &str, mut fields: serde_json::Value) -> Vec<u8> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static PUSH_SEQ: AtomicU64 = AtomicU64::new(1);
+    let id = PUSH_SEQ.fetch_add(1, Ordering::Relaxed);
+    let mut req = serde_json::json!({ "subtype": subtype });
+    if let (Some(obj), Some(extra)) = (req.as_object_mut(), fields.as_object_mut()) {
+        obj.append(extra);
+    }
+    let mut line = serde_json::to_vec(&serde_json::json!({
+        "type": "control_request",
+        "request_id": format!("rift-push-{id}"),
+        "request": req,
+    }))
+    .unwrap_or_default();
+    line.push(b'\n');
+    line
+}
+
 /// Write a `control_response` envelope (the CLI's expected reply to a
 /// `can_use_tool` ask) to the child's stdin. `response` is the inner decision
 /// object: `{ "behavior": "allow", "updatedInput": {..} }` or
@@ -632,13 +655,14 @@ pub async fn assistant_send(
     thinking_effort: Option<String>,
     thinking_enabled: Option<bool>,
     permission_mode: Option<String>,
+    fast_mode: Option<bool>,
     prior_context_summary: Option<String>,
     root: Option<String>,
     turn_epoch: Option<u64>,
 ) -> Result<(), String> {
     run_or_prewarm(
         app, window, prompt, session_id, is_first_turn, model, attachments,
-        dyslexia_mode, thinking_effort, thinking_enabled, permission_mode,
+        dyslexia_mode, thinking_effort, thinking_enabled, permission_mode, fast_mode,
         prior_context_summary, root, turn_epoch.unwrap_or(0), false,
     ).await
 }
@@ -668,6 +692,7 @@ pub async fn assistant_prewarm(
     thinking_effort: Option<String>,
     thinking_enabled: Option<bool>,
     permission_mode: Option<String>,
+    fast_mode: Option<bool>,
     root: Option<String>,
     // Re-warm support (2026-06-28 cold-start arc): a fresh tab pre-warms a
     // `--session-id` child; an EXISTING conversation whose warm child was idle-
@@ -696,7 +721,7 @@ pub async fn assistant_prewarm(
     run_or_prewarm(
         app, window, String::new(), session_id, is_first_turn.unwrap_or(true), model,
         /*attachments*/ None, /*dyslexia*/ None, thinking_effort, thinking_enabled,
-        permission_mode, /*prior_context_summary*/ None, root, /*turn_epoch*/ 0, true,
+        permission_mode, fast_mode, /*prior_context_summary*/ None, root, /*turn_epoch*/ 0, true,
     ).await
 }
 
@@ -712,6 +737,10 @@ struct ResolvedSpawn {
     user_line: Vec<u8>,
     mcp_guard: Option<McpConfigGuard>,
     model: String,
+    /// CLI accepts live `set_permission_mode`/`set_model` control pushes
+    /// (caps.live_switch, ≥2.1.208) — lets dispatch_turn switch a warm child
+    /// in place instead of drain + cold respawn. False in local-LLM mode.
+    live_switch_ok: bool,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -727,6 +756,7 @@ async fn run_or_prewarm(
     thinking_effort: Option<String>,
     thinking_enabled: Option<bool>,
     permission_mode: Option<String>,
+    fast_mode: Option<bool>,
     prior_context_summary: Option<String>,
     root: Option<String>,
     turn_epoch: u64,
@@ -760,9 +790,9 @@ async fn run_or_prewarm(
     // Resolve model/effort/thinking/perm/roots/caps + build the `claude` command
     // and per-turn envelope. Extracted so this orchestrator stays readable; the
     // body is behavior-identical to the former inline prologue.
-    let ResolvedSpawn { cmd, key, user_line, mcp_guard, model } = resolve_spawn(
+    let ResolvedSpawn { cmd, key, user_line, mcp_guard, model, live_switch_ok } = resolve_spawn(
         &app, &window_label, &prompt, &session_id, is_first_turn, model, attachments,
-        dyslexia_mode, thinking_effort, thinking_enabled, permission_mode,
+        dyslexia_mode, thinking_effort, thinking_enabled, permission_mode, fast_mode,
         prior_context_summary, root, prewarm,
     )
     .await?;
@@ -780,11 +810,22 @@ async fn run_or_prewarm(
         // first self-heals via the DeadOnReuse cold-retry path, and the spawn
         // below still settles ownership through insert_if_absent.
         if let Some(arc) = warm_pool::get(&session_id) {
-            let (matches, busy) = {
+            let (matches, busy, switchable) = {
                 let g = match arc.lock() { Ok(g) => g, Err(p) => p.into_inner() };
-                (g.key == key, g.turn_in_progress.load(std::sync::atomic::Ordering::Acquire))
+                (
+                    g.key == key,
+                    g.turn_in_progress.load(std::sync::atomic::Ordering::Acquire),
+                    warm_pool::live_switchable(&g.key, &key),
+                )
             };
             if matches || busy {
+                return Ok(());
+            }
+            // Live-switchable spare (perm/model-only diff on a ≥2.1.208 CLI):
+            // KEEP it parked — the real send pushes set_permission_mode /
+            // set_model over the control channel on reuse, which beats
+            // draining a healthy child just to respawn an identical one.
+            if live_switch_ok && switchable {
                 return Ok(());
             }
             let old_pid = warm_pool::pid_of(&session_id);
@@ -814,6 +855,7 @@ async fn run_or_prewarm(
         is_first_turn,
         model,
         turn_epoch,
+        live_switch_ok,
     )
     .await
 }
@@ -837,6 +879,7 @@ async fn resolve_spawn(
     thinking_effort: Option<String>,
     thinking_enabled: Option<bool>,
     permission_mode: Option<String>,
+    fast_mode: Option<bool>,
     prior_context_summary: Option<String>,
     root: Option<String>,
     prewarm: bool,
@@ -1458,22 +1501,40 @@ async fn resolve_spawn(
         if let Some(level) = send_effort {
             cmd.arg("--effort").arg(level);
         }
-        // Ultracode tier: xhigh effort + autonomous dynamic-workflow
-        // orchestration. The workflow behavior rides the CLI's `ultracode`
-        // settings key (a boolean read into app state, gated server-side by the
-        // user's plan entitlement). `--settings` merges this additively over
-        // user/project/local settings — when unentitled the CLI ignores it and
-        // the session simply runs at xhigh effort. Haiku is excluded (it skips
-        // extended thinking + workflow orchestration wholesale). Only when
-        // thinking is actually on — a thinking-off turn never rides ultracode.
-        if thinking_on && effort_tier == "ultra" && caps.settings_flag {
-            cmd.arg("--settings").arg(r#"{"ultracode":true}"#);
+    }
+    // Fast mode (Opus fast output) — the flag actually SENT: requested AND the
+    // model is Opus-family AND the headless settings-key path is confirmed on
+    // this CLI (caps.fast_mode). Local-LLM mode skips wholesale like effort.
+    let fast_on = fast_mode.unwrap_or(false)
+        && !cfg.local_llm_enabled
+        && model_fast_eligible(&model)
+        && caps.fast_mode;
+    // `--settings` merges additively over user/project/local settings. Two keys
+    // ride it: `ultracode` — xhigh effort + autonomous workflow orchestration,
+    // gated server-side by plan entitlement (unentitled → ignored, the session
+    // simply runs at xhigh; only when thinking is actually on — a thinking-off
+    // turn never rides ultracode) — and `fastMode` (Opus fast output; the
+    // result frame answers `fast_mode_state` so the FE badge stays honest).
+    // Built as ONE JSON object: the CLI takes the last `--settings` arg, so two
+    // separate args would silently drop a key. Compact single-line JSON
+    // (.cmd-shim batch-arg validator, Rust 1.77+ CVE-2024-24576). Haiku is
+    // excluded wholesale (no extended thinking / workflow / fast).
+    if !cfg.local_llm_enabled && model != "haiku" && caps.settings_flag {
+        let mut settings = serde_json::Map::new();
+        if caps.effort && thinking_on && effort_tier == "ultra" {
+            settings.insert("ultracode".into(), serde_json::Value::Bool(true));
+        }
+        if fast_on {
+            settings.insert("fastMode".into(), serde_json::Value::Bool(true));
+        }
+        if !settings.is_empty() {
+            cmd.arg("--settings").arg(serde_json::Value::Object(settings).to_string());
         }
     }
 
     log::info!(
-        "resolve_spawn: spawn session_id={} first_turn={} model={} effort={} thinking_on={} perm={} use_full_config={} mcp={} api_key={} local_llm={} cli_ver={:?} caps=[effort={} perm_tool={} excl_dyn={} partial={} budget={} settings={}]",
-        session_id, is_first_turn, model, effort_level, thinking_on, permission_mode, use_full_config, mcp_config_path.is_some(), use_api_key, cfg.local_llm_enabled,
+        "resolve_spawn: spawn session_id={} first_turn={} model={} effort={} thinking_on={} fast={} perm={} use_full_config={} mcp={} api_key={} local_llm={} cli_ver={:?} caps=[effort={} perm_tool={} excl_dyn={} partial={} budget={} settings={}]",
+        session_id, is_first_turn, model, effort_level, thinking_on, fast_on, permission_mode, use_full_config, mcp_config_path.is_some(), use_api_key, cfg.local_llm_enabled,
         caps.version, caps.effort, caps.permission_prompt_tool, caps.exclude_dynamic_sections, caps.include_partial_messages, caps.max_budget_usd, caps.settings_flag
     );
     log::debug!(
@@ -1626,9 +1687,17 @@ async fn resolve_spawn(
             .max_budget_usd
             .filter(|v| v.is_finite() && *v > 0.0)
             .map(f64::to_bits),
+        fast_mode: fast_on,
     };
 
-    Ok(ResolvedSpawn { cmd, key, user_line, mcp_guard: _mcp_guard, model })
+    Ok(ResolvedSpawn {
+        cmd,
+        key,
+        user_line,
+        mcp_guard: _mcp_guard,
+        model,
+        live_switch_ok: caps.live_switch && !cfg.local_llm_enabled,
+    })
 }
 
 /// Reuse-or-cold-spawn a warm `claude` child for this turn, run the turn, and
@@ -1649,6 +1718,7 @@ async fn dispatch_turn(
     is_first_turn: bool,
     model: String,
     turn_epoch: u64,
+    live_switch_ok: bool,
 ) -> Result<(), String> {
     use std::sync::atomic::Ordering;
 
@@ -1660,13 +1730,52 @@ async fn dispatch_turn(
     if let Some(arc) = warm_pool::get(&session_id) {
         // M5/M7: lock the child only to read tx + key + in-progress, then RELEASE
         // before any await. Never hold the WarmChild mutex across the turn.
-        let reuse: Option<(mpsc::UnboundedSender<warm_pool::TurnCmd>, Arc<std::sync::atomic::AtomicBool>)> = {
+        let reuse: Option<(mpsc::UnboundedSender<warm_pool::TurnCmd>, Arc<std::sync::atomic::AtomicBool>, Vec<Vec<u8>>)> = {
             let mut g = match arc.lock() { Ok(g) => g, Err(p) => p.into_inner() };
             if g.key != key {
-                // Signature changed (model/effort/perm/root/mode) → can't reuse.
-                // Drain the old child + fall through to cold respawn (--resume).
-                log::info!("warm_pool: signature changed for {session_id} — draining + cold respawn");
-                None
+                if live_switch_ok
+                    && !g.turn_in_progress.load(Ordering::Acquire)
+                    && warm_pool::live_switchable(&g.key, &key)
+                {
+                    // Live-switch (CLI ≥2.1.208): the key differs ONLY in
+                    // permission_mode and/or model — push the change onto the
+                    // LIVE child over the control channel instead of paying a
+                    // drain + ~1.7s cold respawn. Pushes ride the TurnCmd
+                    // (pre_controls) so they hit stdin ordered BEFORE the user
+                    // envelope; acks are swallowed by the reader loop (error
+                    // acks logged loudly there). Update the stored key while
+                    // still under the lock — a racing send must compare
+                    // against the pushed state, not the old one.
+                    let mut ctls: Vec<Vec<u8>> = Vec::new();
+                    if g.key.permission_mode != key.permission_mode {
+                        ctls.push(control_push_line(
+                            "set_permission_mode",
+                            serde_json::json!({ "mode": key.permission_mode }),
+                        ));
+                    }
+                    if g.key.model != key.model {
+                        // Same arg form as --model (canonical id + [1m] window
+                        // selector where gated) — probe-verified accepted.
+                        ctls.push(control_push_line(
+                            "set_model",
+                            serde_json::json!({ "model": cli_model_arg(&key.model) }),
+                        ));
+                    }
+                    log::info!(
+                        "warm_pool: live-switch for {session_id} (perm {} → {}, model {} → {}) — respawn avoided",
+                        g.key.permission_mode, key.permission_mode, g.key.model, key.model
+                    );
+                    g.key = key.clone();
+                    g.turn_in_progress.store(true, Ordering::Release);
+                    g.last_used = std::time::Instant::now();
+                    Some((g.turn_tx.clone(), g.turn_in_progress.clone(), ctls))
+                } else {
+                    // Signature changed (effort/root/trust/… — or an old CLI
+                    // without live-switch) → can't reuse. Drain the old child +
+                    // fall through to cold respawn (--resume).
+                    log::info!("warm_pool: signature changed for {session_id} — draining + cold respawn");
+                    None
+                }
             } else if g.turn_in_progress.load(Ordering::Acquire) {
                 // Concurrent turn on one session (failure mode #1). The frontend
                 // serializes turns per tab via the queue, so this is a bug/race;
@@ -1677,7 +1786,7 @@ async fn dispatch_turn(
                 // send sees it. The reader loop clears it on `result` (M6).
                 g.turn_in_progress.store(true, Ordering::Release);
                 g.last_used = std::time::Instant::now();
-                Some((g.turn_tx.clone(), g.turn_in_progress.clone()))
+                Some((g.turn_tx.clone(), g.turn_in_progress.clone(), Vec::new()))
             }
         };
         // Emit the warm-hit AFTER releasing the WarmChild lock above: emit_dispatch
@@ -1685,14 +1794,14 @@ async fn dispatch_turn(
         // acquiring the registry lock while holding a WarmChild guard inverts the
         // lock order the rest of the pool uses (registry → child) — a deadlock
         // hazard + extra contention on the hottest path. `reuse.is_some()` ⇒ hit.
-        if reuse.is_some() {
-            emit_dispatch(&session_id, "hit", &model, &key);
+        if let Some((_, _, ctls)) = reuse.as_ref() {
+            emit_dispatch(&session_id, if ctls.is_empty() { "hit" } else { "live_switch" }, &model, &key);
         }
         // `user_line` is moved into the TurnCmd only on the reuse path; on every
         // fall-through (mismatch / dead-on-send) it's recovered so the cold path
         // below still has it. `user_line` stays a binding the cold call consumes.
         let user_line = match reuse {
-            Some((turn_tx, in_progress)) => {
+            Some((turn_tx, in_progress, pre_controls)) => {
                 let (done_tx, done_rx) = oneshot::channel();
                 let bg_evict = Arc::new(std::sync::atomic::AtomicBool::new(false));
                 // Keep a copy: if the reused child turns out to be dead (killed
@@ -1701,6 +1810,7 @@ async fn dispatch_turn(
                 let retry_line = user_line.clone();
                 let cmd_msg = warm_pool::TurnCmd {
                     user_line,
+                    pre_controls,
                     app: app.clone(),
                     window_label: window_label.clone(),
                     done: done_tx,
@@ -1788,6 +1898,7 @@ fn emit_dispatch(session_id: &str, outcome: &str, model: &str, key: &warm_pool::
         "cold" => crate::metric!("warm_pool.cold"),
         "signature_drain" => crate::metric!("warm_pool.drain"),
         "dead_on_send" => crate::metric!("warm_pool.dead_on_send"),
+        "live_switch" => crate::metric!("warm_pool.live_switch"),
         _ => {}
     }
     crate::diagnostics::emit_with_fields(
@@ -1924,6 +2035,7 @@ async fn cold_spawn_and_run(
     let first_bg_evict = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let first_turn = warm_pool::TurnCmd {
         user_line,
+        pre_controls: Vec::new(),
         app: app.clone(),
         window_label: window_label.clone(),
         done: done_tx,
@@ -2260,6 +2372,7 @@ async fn run_turn_loop(mut ctx: RunCtx) {
                                     let (done_tx, _done_rx) = oneshot::channel();
                                     break 'park Some(warm_pool::TurnCmd {
                                         user_line: Vec::new(),
+                                        pre_controls: Vec::new(),
                                         app,
                                         window_label,
                                         done: done_tx,
@@ -2298,7 +2411,21 @@ async fn run_turn_loop(mut ctx: RunCtx) {
         let bg_evict = turn.bg_evict.clone();
         let done = turn.done;
         let user_line = turn.user_line;
+        let pre_controls = turn.pre_controls;
         let turn_epoch = turn.turn_epoch;
+        // Live-switch pushes (set_permission_mode / set_model) go out FIRST so
+        // the CLI applies them before this turn's user envelope (stdin is
+        // ordered). A write failure here = dead child — stream_one_turn's own
+        // user-line write owns that path (DeadOnReuse / Fatal), so just log.
+        if !pre_controls.is_empty() {
+            for line in &pre_controls {
+                if let Err(e) = stdin.write_all(line).await {
+                    log::warn!("warm_pool: live-switch push write failed (session={stream_sid}): {e} — child likely dead, the turn write resolves it");
+                    break;
+                }
+            }
+            let _ = stdin.flush().await;
+        }
         // Route a continuation turn that may arrive while parked AFTER this
         // turn to the same window/epoch (see the idle-drain park above).
         last_turn_ctx = Some((app_out.clone(), win_label.clone(), turn_epoch));
@@ -2844,6 +2971,13 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                     // so the old `!user_sent` conjunction made this dead → the
                     // re-ack leaked to the UI. Gate on handshake_done alone.
                     if *handshake_done && ty == Some("control_response") {
+                        // Live-switch push acks land here too. A FAILED push
+                        // means this turn runs with the OLD mode/model while
+                        // the warm-pool key already claims the new one — loud
+                        // log so it's greppable, the turn itself proceeds.
+                        if v.pointer("/response/subtype").and_then(|s| s.as_str()) == Some("error") {
+                            log::error!("control push REJECTED by CLI (session={stream_sid}): {trimmed}");
+                        }
                         continue;
                     }
                     // Permission ask → resolve via the registry + UI, write the
@@ -3403,6 +3537,28 @@ mod tests {
         STREAM_TOOL_CEILING_SECS,
     };
     use tokio::io::{AsyncBufReadExt, BufReader};
+
+    #[test]
+    fn control_push_line_carries_subtype_fields_and_newline() {
+        // The live-switch wire shape (probe-verified against CLI 2.1.209):
+        // {"type":"control_request","request_id":"rift-push-N","request":
+        // {"subtype":"set_model","model":"…"}} + trailing newline. A drift here
+        // silently no-ops the push (the CLI errors the ack, the turn runs on
+        // the OLD model/mode while the SpawnKey claims the new one).
+        let line = super::control_push_line("set_model", serde_json::json!({ "model": "claude-sonnet-5[1m]" }));
+        assert_eq!(line.last(), Some(&b'\n'), "stream-json lines are newline-delimited");
+        let v: serde_json::Value = serde_json::from_slice(&line[..line.len() - 1]).expect("valid JSON");
+        assert_eq!(v["type"], "control_request");
+        assert_eq!(v["request"]["subtype"], "set_model");
+        assert_eq!(v["request"]["model"], "claude-sonnet-5[1m]");
+        assert!(v["request_id"].as_str().unwrap_or("").starts_with("rift-push-"));
+
+        let perm = super::control_push_line("set_permission_mode", serde_json::json!({ "mode": "acceptEdits" }));
+        let p: serde_json::Value = serde_json::from_slice(&perm[..perm.len() - 1]).expect("valid JSON");
+        assert_eq!(p["request"]["subtype"], "set_permission_mode");
+        assert_eq!(p["request"]["mode"], "acceptEdits");
+        assert_ne!(p["request_id"], v["request_id"], "request ids are unique per push");
+    }
 
     #[test]
     fn fable_never_routes_through_the_nothink_shim() {

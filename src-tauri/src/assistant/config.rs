@@ -344,6 +344,16 @@ pub(super) fn cli_model_arg(model: &str) -> String {
     }
 }
 
+/// Models the CLI's fast-output mode applies to — the Opus family only (the
+/// bare `opus` alias + pinned `claude-opus-4-x` ids). Fable shares Opus's
+/// visual family but is NOT fast-eligible upstream. Gating here keeps an
+/// ineligible model from baking a no-op `fastMode` key into `--settings`
+/// (which would still churn the SpawnKey → pointless respawns). Mirrors
+/// `fastEligible` in state/assistant/helpers.ts.
+pub(super) fn model_fast_eligible(model: &str) -> bool {
+    model == "opus" || model.starts_with("claude-opus-4-")
+}
+
 /// Read config.json with NO side effects — does not run the keychain
 /// migration. Used by setters that need to inspect/clear the legacy plaintext
 /// field before performing their own keychain op, where letting `load_config`'s
@@ -650,7 +660,7 @@ pub fn assistant_set_api_key(api_key: Option<String>) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        canonical_model_alias, clamp_effort, cli_model_arg, effort_tier_to_flag,
+        canonical_model_alias, clamp_effort, cli_model_arg, effort_tier_to_flag, model_fast_eligible,
         is_valid_effort_tier, is_valid_local_base_url, is_valid_model_name, model_max_effort,
         normalize_effort_tier, send_effort_flag, DEFAULT_MODEL, FABLE_FALLBACK_MODEL, SONNET_MODEL,
     };
@@ -800,6 +810,20 @@ mod tests {
         assert_eq!(cli_model_arg("haiku"), "haiku");
         // Sonnet 4.5 is excluded (flaky [1m] support, not in Rift's resume path).
         assert_eq!(cli_model_arg("claude-sonnet-4-5"), "claude-sonnet-4-5");
+    }
+
+    // Fast mode is Opus-family only: alias + pinned ids qualify; Fable shares
+    // the opus VISUAL family but is not fast-eligible upstream — a regression
+    // here would bake a no-op fastMode key into --settings for it.
+    #[test]
+    fn fast_eligibility_is_opus_family_only() {
+        assert!(model_fast_eligible("opus"));
+        assert!(model_fast_eligible("claude-opus-4-8"));
+        assert!(model_fast_eligible("claude-opus-4-7"));
+        assert!(!model_fast_eligible("claude-fable-5"));
+        assert!(!model_fast_eligible("sonnet"));
+        assert!(!model_fast_eligible("claude-sonnet-5"));
+        assert!(!model_fast_eligible("haiku"));
         // The suffixed arg is NOT a valid model name (so it can never be pinned),
         // while every bare id the pin sees IS valid.
         assert!(!is_valid_model_name(&cli_model_arg("claude-sonnet-5")));

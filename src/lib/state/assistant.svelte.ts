@@ -53,6 +53,8 @@ import {
   saveThinkingEnabled,
   loadPermissionMode,
   savePermissionMode,
+  loadFastMode,
+  saveFastMode,
   loadPlan,
   savePlan,
   planContextCap,
@@ -213,6 +215,11 @@ export class TabState {
   lastError = $state<string | null>(null);
   totalCostUsd = $state<number | null>(null);
   lastTurnUsage = $state<{ input: number; output: number; cacheRead: number; cacheCreate: number } | null>(null);
+  /** CLI-reported context window from the last result frame's
+   *  `modelUsage[id].contextWindow` — ground truth for what the CLI actually
+   *  ran (and auto-compacts) against. Overrides the plan×model estimate in
+   *  ctxWindowFor while the tab is still on that model. */
+  reportedCtxWindow = $state<{ model: string; window: number } | null>(null);
   sessionUsage = $state({ totalInput: 0, totalOutput: 0, totalCacheRead: 0, totalCacheCreate: 0, turns: 0 });
   /** Output tokens generated so far in the in-flight turn. Drives the live
    *  "1.2k tokens" readout in the spinner + composer pill. The CLI only reports
@@ -519,6 +526,13 @@ class AssistantStore {
     // shows the 200K null-fallback even for a Max user on a 1M model, which reads
     // as "out of line" before the first send.
     const model = tab?.lastModelId ?? tab?.modelOverride ?? this.model;
+    // CLI ground truth first: the result frame reports the window the CLI
+    // actually ran against (folds in the [1m] selector AND account-side gating
+    // the user-set plan can't see). Valid only while the tab is still on that
+    // model — a mid-chat switch falls back to the estimate until the next
+    // result re-reports.
+    const rep = tab?.reportedCtxWindow;
+    if (rep && model && model.replace(/\[1m\]$/i, "") === rep.model) return rep.window;
     return ctxWindowForModelId(model, this.planCap);
   }
   ctxTokensFor(tab: TabState | null): number {
@@ -793,6 +807,10 @@ class AssistantStore {
   // model/effort). `bypassPermissions` until the user picks otherwise so
   // existing behavior is unchanged. Persisted to localStorage.
   permissionMode = $state<PermissionMode>(loadPermissionMode());
+  // Fast mode (Opus fast output) — rides `--settings {"fastMode":true}` on
+  // fast-eligible models. Global, persisted, default off. The backend re-gates
+  // by model family + CLI version, so this can be sent unconditionally.
+  fastMode = $state<boolean>(loadFastMode());
   // Subscription plan (USER-SET — no programmatic plan signal exists for OAuth
   // users). Drives the context-window cap applied to every model's native window
   // (see ctxWindowFor). Global, persisted; default `max` (1M). Free/uncredited-Pro
@@ -963,6 +981,17 @@ class AssistantStore {
     this.telemetry.event("permission_mode.change", { from: prev, to: v });
   }
 
+  setFastMode(v: boolean) {
+    if (this.fastMode === v) return;
+    this.fastMode = v;
+    saveFastMode(v);
+    this.telemetry.event("fast_mode.change", { to: v });
+    // Mid-conversation flip changes the SpawnKey (fastMode is baked into
+    // --settings at spawn) → same cache-bust hint as effort so the prewarm
+    // can hide the respawn behind typing time.
+    if ((this.activeTab?.messages.length ?? 0) > 0) this.cacheBustHint("fast");
+  }
+
   setPlan(v: RiftPlan) {
     if (this.plan === v) return;
     const prev = this.plan;
@@ -990,8 +1019,8 @@ class AssistantStore {
    *  effort changes (S106 measurement: 0 cacheRead on 3 consecutive sonnet
    *  turns w/ effort flips vs healthy reuse without). Opus is more forgiving.
    *  Notice is fire-once so it's a hint, not a nag. */
-  private cacheBustHintShown = { model: false, effort: false, thinking: false };
-  private cacheBustHint(kind: "model" | "effort" | "thinking") {
+  private cacheBustHintShown = { model: false, effort: false, thinking: false, fast: false };
+  private cacheBustHint(kind: "model" | "effort" | "thinking" | "fast") {
     if (this.cacheBustHintShown[kind]) return;
     this.cacheBustHintShown[kind] = true;
     // Ephemeral heads-up → toast stack (top-right), not the composer notice
@@ -1005,6 +1034,8 @@ class AssistantStore {
         ? "Effort changed mid-conversation"
         : kind === "thinking"
         ? "Thinking toggled mid-conversation"
+        : kind === "fast"
+        ? "Fast mode toggled mid-conversation"
         : "Model switched mid-conversation",
       detail: kind === "model"
         ? "Rebuilds the prefix cache — next turn will pay full cache_create."
