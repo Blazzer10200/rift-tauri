@@ -319,8 +319,8 @@
     background: color-mix(in oklab, var(--accent) 13%, transparent);
   }
   .sask.answered .sask-head-ic {
-    color: var(--ok, #4ade80);
-    background: color-mix(in oklab, var(--ok, #4ade80) 14%, transparent);
+    color: var(--ok);
+    background: color-mix(in oklab, var(--ok) 14%, transparent);
   }
 
   /* answered summary — chips, not a monospace dump */
@@ -332,10 +332,10 @@
     font-size: 12px; line-height: 1.3;
     border-radius: 999px;
     color: var(--fg, inherit);
-    border: 1px solid color-mix(in oklab, var(--ok, #4ade80) 40%, transparent);
-    background: color-mix(in oklab, var(--ok, #4ade80) 11%, transparent);
+    border: 1px solid color-mix(in oklab, var(--ok) 40%, transparent);
+    background: color-mix(in oklab, var(--ok) 11%, transparent);
   }
-  .sask-chip :global(svg) { color: var(--ok, #4ade80); flex: none; }
+  .sask-chip :global(svg) { color: var(--ok); flex: none; }
 
   .sask-question { display: flex; flex-direction: column; gap: 6px; }
   .sask-q-header {

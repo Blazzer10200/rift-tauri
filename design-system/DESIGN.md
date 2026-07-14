@@ -95,6 +95,11 @@ seed rules below.
 - DON'T use purple/lavender-on-dark defaults or oversized hero numerals (AI-slop tells).
 - DON'T pill-round buttons or inputs; pills are for badges/toggles only.
 - DON'T hard-code hex, row heights, or durations where a token exists.
+- DON'T write `var(--token, #hexFallback)` with a divergent hex (2026-07-14): the
+  ok/warn/danger tokens are `:root`-global so the fallback is dead code, and the ones
+  found (Tailwind green/red/amber) had drifted from the tokens' real oklch values —
+  a wrong color waiting for a scoping accident. Use the bare `var(--token)`; if a
+  fallback is genuinely needed, it must equal the token's current value.
 
 ## 9. Agent guide — process over palette
 

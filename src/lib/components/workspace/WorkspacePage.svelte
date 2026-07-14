@@ -506,7 +506,7 @@
                  the user, so we don't repeat the instruction here. -->
             <div class="empty lean">
               <div class="empty-tt">No projects yet</div>
-              <div class="empty-sub">Name a workspace folder and scope which files Rift can read.</div>
+              <div class="empty-sub">Name a project folder and scope which files Rift can read.</div>
               <button class="save-btn" type="button" onclick={() => startNew()}>
                 <Plus size={15} strokeWidth={2.4} /> New project
               </button>

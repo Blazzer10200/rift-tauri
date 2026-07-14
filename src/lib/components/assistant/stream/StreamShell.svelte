@@ -138,7 +138,7 @@
   .sshell { display: flex; flex-direction: column; margin: var(--stream-gap, 12px) 0; border-radius: var(--radius-lg);
     border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 2.5%, transparent); overflow: hidden;
     animation: blockIn var(--dur-base) var(--ease-page) both; }
-  .sshell.bad { border-color: color-mix(in oklab, var(--danger, #f87171) 34%, var(--border)); }
+  .sshell.bad { border-color: color-mix(in oklab, var(--danger) 34%, var(--border)); }
   /* the prompt glyph breathes while the command is still running — a soft glow
      halo makes a live command read as genuinely in-flight (terminal cursor
      energy). The glow is keyed to the flavor color. */

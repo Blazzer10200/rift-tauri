@@ -131,7 +131,7 @@
    and read calm-amber. Honest sub-note explains it's not Rift + offers Stop. */
 .sfooter.stalled .sf-verb {
   animation: none; -webkit-text-fill-color: currentColor;
-  background: none; color: var(--warn, #d9a441); }
+  background: none; color: var(--warn); }
 .sstall-note { margin: 4px 0 2px; font-size: var(--fs-sm); line-height: 1.45;
   color: var(--fg-faint); max-width: 52ch;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
