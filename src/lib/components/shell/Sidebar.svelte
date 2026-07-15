@@ -297,6 +297,4 @@
 
   /* conversation-list section wrapper */
   .side-sec { display: flex; flex-direction: column; flex: 1; min-height: 0; margin-top: 2px; }
-
-  @keyframes barPop { from { transform: translateY(-50%) scaleY(0.25); } to { transform: translateY(-50%) scaleY(1); } }
 </style>
