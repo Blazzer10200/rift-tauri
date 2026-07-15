@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { PanelLeftClose, PanelLeftOpen, Plus, Search } from "lucide-svelte";
+  import { PanelLeftClose, Plus, Search } from "lucide-svelte";
   import { workspace, type WorkspaceId } from "$lib/state/workspace.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { shell } from "$lib/state/shell.svelte";
@@ -68,6 +68,12 @@
     return () => ro.disconnect();
   });
 
+  // Collapsed → the island only ever appears as the hover-peek, which renders
+  // a MINI flavor: fixed compact width, content-sized height, no scope row —
+  // a quick-switcher flyout, not the full furniture slab over the content.
+  const mini = $derived(shell.collapsed);
+  const MINI_W = 240;
+
   // ── rail resize ──────────────────────────────────────────────────────
   function startResize(e: PointerEvent) {
     e.preventDefault();
@@ -107,28 +113,29 @@
   <aside
     class="sidebar"
     class:home={isNavActive("home")}
+    class:mini
     inert={shell.collapsed && !shell.peek}
-    style="width:{shell.width - 16}px"
+    style="width:{mini ? MINI_W : shell.width - 16}px"
   >
-    <div class="side-head" data-tauri-drag-region>
-      <span class="brand">
-        <RiftLogo size={22} class="brand-mk" />
-        <span class="brand-name">Rift</span>
-      </span>
-      <button
-        class="side-collapse"
-        type="button"
-        onclick={() => shell.toggleCollapsed()}
-        use:tooltip={shell.collapsed ? "Pin sidebar open" : "Collapse sidebar"}
-        aria-label={shell.collapsed ? "Pin sidebar open" : "Collapse sidebar"}
-      >
-        {#if shell.collapsed}
-          <PanelLeftOpen size={16} />
-        {:else}
+    <!-- Head hides in the mini peek — the topbar cluster right above it already
+         carries the brand context + pin trigger; repeating them wastes rows. -->
+    {#if !mini}
+      <div class="side-head" data-tauri-drag-region>
+        <span class="brand">
+          <RiftLogo size={22} class="brand-mk" />
+          <span class="brand-name">Rift</span>
+        </span>
+        <button
+          class="side-collapse"
+          type="button"
+          onclick={() => shell.toggleCollapsed()}
+          use:tooltip={"Collapse sidebar"}
+          aria-label="Collapse sidebar"
+        >
           <PanelLeftClose size={16} />
-        {/if}
-      </button>
-    </div>
+        </button>
+      </div>
+    {/if}
 
     <ProjectSwitcher />
 
@@ -142,18 +149,21 @@
       </button>
     </div>
 
-    <!-- Scope segment: This project / All (binds shell.allProjects) + live count. -->
-    <div class="tool-row">
-      <div class="seg" role="group" aria-label="Conversation scope" bind:this={segEl}>
-        <span class="seg-thumb" aria-hidden="true" style="transform:translateX({segThumb.x}px); width:{segThumb.w}px"></span>
-        <button class="seg-btn" class:on={!shell.allProjects} type="button" onclick={() => shell.setAllProjects(false)} aria-pressed={!shell.allProjects}>This project</button>
-        <button class="seg-btn" class:on={shell.allProjects} type="button" onclick={() => shell.setAllProjects(true)} aria-pressed={shell.allProjects}>All</button>
+    <!-- Scope segment: This project / All (binds shell.allProjects) + live count.
+         Hidden in the mini peek — scope refinement is full-sidebar furniture. -->
+    {#if !mini}
+      <div class="tool-row">
+        <div class="seg" role="group" aria-label="Conversation scope" bind:this={segEl}>
+          <span class="seg-thumb" aria-hidden="true" style="transform:translateX({segThumb.x}px); width:{segThumb.w}px"></span>
+          <button class="seg-btn" class:on={!shell.allProjects} type="button" onclick={() => shell.setAllProjects(false)} aria-pressed={!shell.allProjects}>This project</button>
+          <button class="seg-btn" class:on={shell.allProjects} type="button" onclick={() => shell.setAllProjects(true)} aria-pressed={shell.allProjects}>All</button>
+        </div>
+        <span class="count-note">{scopeCount} {scopeCount === 1 ? "chat" : "chats"}</span>
       </div>
-      <span class="count-note">{scopeCount} {scopeCount === 1 ? "chat" : "chats"}</span>
-    </div>
+    {/if}
 
     <div class="side-sec">
-      <ConversationList />
+      <ConversationList {mini} />
     </div>
 
     <nav class="foot-nav" aria-label="Workspaces">
@@ -209,7 +219,7 @@
      Starts BELOW the topbar so the trigger cluster stays visible and hoverable
      (island covering the trigger would flicker the hover state). */
   .side-rail.peeking .sidebar { transform: none; opacity: 1; pointer-events: auto;
-    top: 44px;
+    top: 54px;
     box-shadow: var(--shadow-float); }
   .side-rail.collapsed .side-resize { display: none; }
 
@@ -232,6 +242,10 @@
     transition: transform 0.36s var(--ease-page), top 0.36s var(--ease-page), opacity var(--dur-base) var(--ease-page), box-shadow var(--dur-base) var(--ease-page); }
   .sidebar.home { background: color-mix(in oklab, var(--bg) 72%, transparent);
     backdrop-filter: blur(18px) saturate(1.1); -webkit-backdrop-filter: blur(18px) saturate(1.1); }
+  /* Mini peek flavor — the flyout hugs its content instead of spanning the
+     window: height comes from the capped list, bottom edge floats free.
+     max-height pairs with the peek's top:54 (+8px bottom breathing room). */
+  .sidebar.mini { bottom: auto; max-height: calc(100% - 62px); padding-top: 10px; }
   .sidebar button { -webkit-app-region: no-drag; }
 
   .side-head { display: flex; align-items: center; justify-content: space-between; height: 40px; margin-bottom: 8px; padding: 0 6px 0 8px; flex: none; -webkit-app-region: drag; }

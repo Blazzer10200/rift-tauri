@@ -105,6 +105,13 @@ seed rules below.
   placeholder is an invitation, not documentation: one quiet plain-text phrase
   at a time; if more must be taught, rotate phrases slowly instead of joining
   them with separators and keycaps.
+- DON'T let a transient hover-peek be the full persistent surface teleported over
+  the content (2026-07-15, sidebar peek — owner: "overlapping everything… not framed
+  correctly"). A peek/flyout is a MINIMIZED sibling of the pinned surface: same
+  language (radius, hairline, gradient), compact fixed width, height that hugs its
+  content, only the high-frequency items — with a quiet seam back to the full
+  version. Full-height + full-width floating over content reads as a glitch, not
+  an affordance.
 - DON'T ship a control that spends the user's money without saying so AT the control
   (2026-07-14, fast-mode incident — owner: "it's charging me, that is a huge gap").
   Porting an upstream feature means porting its cost disclosure too (the CLI showed

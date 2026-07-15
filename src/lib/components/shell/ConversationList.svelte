@@ -10,6 +10,12 @@
   import { leafName, rootKey } from "$lib/utils/path";
   import { projectHue } from "$lib/utils/projectHue";
 
+  // mini = the sidebar's hover-peek flyout: flat list capped to the most
+  // recent chats, no bucket headers, no "Show earlier" — the full history
+  // lives in the pinned sidebar.
+  let { mini = false }: { mini?: boolean } = $props();
+  const MINI_CAP = 8;
+
   // ── grouping ─────────────────────────────────────────────────────────
   type Group = { label: string; items: ConversationMeta[] };
 
@@ -98,6 +104,12 @@
   const recentLabels = $derived(new Set(recentGroups.map((g) => g.label)));
   const olderGroups = $derived(groups.filter((g) => !recentLabels.has(g.label)));
   const olderCount = $derived(olderGroups.reduce((n, g) => n + g.items.length, 0));
+
+  // Mini peek: one flat priority-ordered slice (pinned first — groups are
+  // already ordered pinned → newest bucket → older).
+  const flatAll = $derived(groups.flatMap((g) => g.items));
+  const miniItems = $derived(flatAll.slice(0, MINI_CAP));
+  const miniMore = $derived(Math.max(0, flatAll.length - MINI_CAP));
 
   function relTime(ts: number): string {
     const s = Math.max(0, (Date.now() - ts) / 1000);
@@ -277,32 +289,45 @@
     <div class="conv-empty">No conversations yet.{"\n"}Start one from Home or Chat.</div>
   {/if}
 
-  <!-- Most-recent day (+ pinned) render FLAT, no date header — implied default.
-       Keyed on the scope toggle so flipping This/All remounts the rows and
-       replays the stagger-in cascade. -->
-  {#key shell.allProjects}
-    {#each recentGroups as g (g.label)}
-      {#if g.label === "Pinned"}<div class="conv-group-label plain"><span class="cgl-txt">Pinned</span></div>{/if}
-      {#each g.items as c, i (c.id)}{@render convRow(c, i)}{/each}
-    {/each}
-  {/key}
-
-  <!-- Everything older tucks behind one quiet "Show earlier" toggle. -->
-  {#if olderCount > 0}
-    <button class="showmore conv-showmore" class:x={shell.historyExpanded} type="button" onclick={() => shell.toggleHistoryExpanded()}>
-      <span class="sm-rule" aria-hidden="true"></span>
-      <span class="sm-lbl">
-        <ChevronDown size={12} class="sm-ch" />
-        {shell.historyExpanded ? "Show less" : "Show earlier"}
-        {#if !shell.historyExpanded}<span class="sm-ct">{olderCount}</span>{/if}
-      </span>
-      <span class="sm-rule" aria-hidden="true"></span>
-    </button>
-    {#if shell.historyExpanded}
-      {#each olderGroups as g (g.label)}
-        <div class="conv-group-label plain"><span class="cgl-txt">{g.label}</span><span class="cgl-ct">{g.items.length}</span></div>
+  {#if mini}
+    <!-- Peek flyout: just the freshest chats, flat. The "All chats" seam pins
+         the sidebar open for the full scoped/bucketed history. -->
+    {#each miniItems as c, i (c.id)}{@render convRow(c, i)}{/each}
+    {#if miniMore > 0}
+      <button class="showmore" type="button" onclick={() => shell.toggleCollapsed()} use:tooltip={"Pin the sidebar open"}>
+        <span class="sm-rule" aria-hidden="true"></span>
+        <span class="sm-lbl">All chats <span class="sm-ct">{flatAll.length}</span></span>
+        <span class="sm-rule" aria-hidden="true"></span>
+      </button>
+    {/if}
+  {:else}
+    <!-- Most-recent day (+ pinned) render FLAT, no date header — implied default.
+         Keyed on the scope toggle so flipping This/All remounts the rows and
+         replays the stagger-in cascade. -->
+    {#key shell.allProjects}
+      {#each recentGroups as g (g.label)}
+        {#if g.label === "Pinned"}<div class="conv-group-label plain"><span class="cgl-txt">Pinned</span></div>{/if}
         {#each g.items as c, i (c.id)}{@render convRow(c, i)}{/each}
       {/each}
+    {/key}
+
+    <!-- Everything older tucks behind one quiet "Show earlier" toggle. -->
+    {#if olderCount > 0}
+      <button class="showmore conv-showmore" class:x={shell.historyExpanded} type="button" onclick={() => shell.toggleHistoryExpanded()}>
+        <span class="sm-rule" aria-hidden="true"></span>
+        <span class="sm-lbl">
+          <ChevronDown size={12} class="sm-ch" />
+          {shell.historyExpanded ? "Show less" : "Show earlier"}
+          {#if !shell.historyExpanded}<span class="sm-ct">{olderCount}</span>{/if}
+        </span>
+        <span class="sm-rule" aria-hidden="true"></span>
+      </button>
+      {#if shell.historyExpanded}
+        {#each olderGroups as g (g.label)}
+          <div class="conv-group-label plain"><span class="cgl-txt">{g.label}</span><span class="cgl-ct">{g.items.length}</span></div>
+          {#each g.items as c, i (c.id)}{@render convRow(c, i)}{/each}
+        {/each}
+      {/if}
     {/if}
   {/if}
 </div>
