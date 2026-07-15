@@ -4,7 +4,8 @@
   // comes off the shared usage store; fetch fires on mount (60s backend cache
   // keeps repeat opens cheap). Esc or ✕ closes.
   import { onMount } from "svelte";
-  import { X, Gauge, RefreshCw } from "lucide-svelte";
+  import { X, Gauge, RefreshCw, FoldVertical } from "lucide-svelte";
+  import { tooltip } from "$lib/actions/tooltip";
   import { usage, limitZone, type LimitWindow, type ScopedLimit } from "../../../state/usage.svelte";
   import { assistant, type TabState } from "../../../state/assistant.svelte";
   import { fmtTokens } from "../../../state/assistant/helpers";
@@ -31,6 +32,9 @@
   const ctxTokens = $derived(assistant.ctxTokensFor(tab));
   const ctxWindow = $derived(assistant.ctxWindowFor(tab));
   const showCtx = $derived(ctxTokens > 0 && ctxWindow > 0);
+  // Tabs are keyed by convoId, not stored on TabState — reverse-look-up so the
+  // compact turn targets THIS pane's tab, not whichever pane holds focus.
+  const convoKey = $derived(assistant.liveTabs.find((e) => e.tab === tab)?.convoId ?? null);
   function ctxZone(u: number): string {
     return u < 75 ? "ok" : u < 90 ? "warn" : "hot";
   }
@@ -152,6 +156,17 @@
       </div>
       <div class="up-reset">{fmtTokens(ctxTokens)} / {fmtTokens(ctxWindow)} tokens{#if mode === "ctx" && modelName} · on {modelName}{/if}</div>
     </div>
+    {#if mode === "ctx"}
+      <button
+        class="up-compact"
+        type="button"
+        disabled={tab?.streaming}
+        use:tooltip={"Summarize older turns into a recap — frees context, the conversation keeps going"}
+        onclick={() => { onClose(); void assistant.send("/compact", convoKey); }}
+      >
+        <FoldVertical size={12} /> Compact conversation
+      </button>
+    {/if}
     {#if mode === "full"}<div class="up-sep" aria-hidden="true"></div>{/if}
   {:else if mode === "ctx"}
     <div class="up-empty">No context measured yet — send a message first.</div>
@@ -245,6 +260,21 @@
   .up-money { font-size: 13px; font-weight: 700; letter-spacing: -0.01em; color: var(--fg); font-variant-numeric: tabular-nums; line-height: 1; }
   .up-of { font-size: 10px; font-weight: 600; color: var(--fg-subtle); }
   .up-fill-credits { background: linear-gradient(90deg, color-mix(in oklab, var(--fg) 30%, transparent), color-mix(in oklab, var(--fg) 50%, transparent)); }
+  .up-compact {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    width: 100%; margin-top: 10px; padding: 6px 10px;
+    font: inherit; font-size: var(--fs-xs); font-weight: 600;
+    color: var(--fg-muted);
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border); border-radius: 8px;
+    cursor: pointer;
+    transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast);
+  }
+  .up-compact:hover:not(:disabled) {
+    color: var(--fg); background: var(--bg-elev-3);
+    border-color: color-mix(in oklab, var(--accent) 30%, var(--border));
+  }
+  .up-compact:disabled { opacity: 0.5; cursor: default; }
   .up-empty { font-size: var(--fs-xs); color: var(--fg-subtle); padding: 6px 0 2px; }
   .mono { font-family: var(--font-mono); }
   .up-x.spin :global(svg) { animation: up-spin 900ms linear infinite; }

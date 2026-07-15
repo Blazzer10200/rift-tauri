@@ -58,7 +58,7 @@ export async function send(
   // Try-handle as a slash command first; if it matched, we're done. (A KNOWN
   // slash command never reaches the queue — send() consumes it before the
   // queue-on-busy branch — so drain-path re-entry always falls through here.)
-  if (trimmed.startsWith("/") && runSlash(store, trimmed)) return;
+  if (trimmed.startsWith("/") && runSlash(store, trimmed, liveTab ?? null)) return;
   // Auth chokepoint — every send path funnels here (composer Enter/button,
   // queue drains, programmatic retries). A turn with no usable Claude session
   // dies as "claude exited with 1"; block it, re-probe (state may be stale),
@@ -468,13 +468,27 @@ export function removeQueued(store: AssistantStore, id: string, tabId?: string) 
 }
 
 /** Client-side slash commands. Returns true if input was consumed. */
-function runSlash(store: AssistantStore, input: string): boolean {
+function runSlash(store: AssistantStore, input: string, tab: TabState | null): boolean {
   const [cmd, ...rest] = input.slice(1).split(/\s+/);
   const arg = rest.join(" ").trim();
   switch (cmd.toLowerCase()) {
     case "clear":
       void store.clearConversation();
       return true;
+    case "compact":
+      // NOT consumed on the happy path (unique among cases): the literal
+      // "/compact [instructions]" rides to the CLI as a normal turn — the CLI
+      // compacts natively and its compact_boundary event renders the pill
+      // (streaming.ts::appendCliCompaction). Only the meaningless states stop here.
+      if (!tab?.convoCreatedAt) {
+        notify.info("Nothing to compact yet — send a message first.");
+        return true;
+      }
+      if (tab.streaming) {
+        notify.info("A turn is still running — wait for it to finish (or /stop) before compacting.");
+        return true;
+      }
+      return false;
     case "new":
       void store.newTab();
       return true;
@@ -593,8 +607,8 @@ function runSlash(store: AssistantStore, input: string): boolean {
     }
     case "help":
       store.lastNotice =
-        "Slash commands: /new · /clear · /model · /retry · /copy · /stop · /tools · /mcp · /cost · /usage · /openincli · /diag · /diag-clear · /help. " +
-        "/clear wipes the current chat in place (old convo saved to History); /new opens a separate tab. /openincli copies a `claude --resume` command for the standalone CLI. " +
+        "Slash commands: /new · /clear · /compact · /model · /retry · /copy · /stop · /tools · /mcp · /cost · /usage · /openincli · /diag · /diag-clear · /help. " +
+        "/clear wipes the current chat in place (old convo saved to History); /new opens a separate tab. /compact summarizes older turns to free context — the thread keeps going. /openincli copies a `claude --resume` command for the standalone CLI. " +
         "/diag exports session telemetry as JSON to clipboard. Up-arrow recalls previous prompts. " +
         "Your own Claude Code skills and commands (from ~/.claude and the project's .claude folder) show up in the / menu too — they run through the CLI.";
       return true;

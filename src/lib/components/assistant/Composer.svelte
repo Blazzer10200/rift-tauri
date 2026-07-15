@@ -127,6 +127,7 @@
   const SLASH_COMMANDS: SlashCmd[] = [
     { name: "new",       desc: "Start a new conversation (saves current)" },
     { name: "clear",     desc: "Clear this chat in place (saves current to History)" },
+    { name: "compact",   desc: "Summarize older turns to free context" },
     { name: "model",     desc: "Switch model — opens picker" },
     { name: "retry",     desc: "Re-fire the last prompt" },
     { name: "copy",      desc: "Copy last response to clipboard" },

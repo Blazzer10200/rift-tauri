@@ -7,7 +7,7 @@
   import {
     Plus, Eraser, Cpu, RotateCcw, Copy, StopCircle,
     Wrench, Coins, Gauge, BarChart3, Terminal, ClipboardCopy, HelpCircle,
-    Palette, LogIn, Sparkles, FileCode2, SearchX, SquareSlash, Plug,
+    Palette, LogIn, Sparkles, FileCode2, SearchX, SquareSlash, Plug, FoldVertical,
   } from "lucide-svelte";
   import { slashMatchSegments } from "./helpers";
 
@@ -34,6 +34,7 @@
   const META: Record<string, { icon: Icon; group: string }> = {
     new:       { icon: Plus,          group: "Conversation" },
     clear:     { icon: Eraser,        group: "Conversation" },
+    compact:   { icon: FoldVertical,  group: "Conversation" },
     model:     { icon: Cpu,           group: "Compose" },
     retry:     { icon: RotateCcw,     group: "Compose" },
     copy:      { icon: Copy,          group: "Compose" },

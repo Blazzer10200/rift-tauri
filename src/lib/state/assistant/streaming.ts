@@ -1277,10 +1277,23 @@ export function onStreamDone(tab: TabState) {
     // budget tripped before any text/tool) is an errored turn, not a
     // blank/malformed stream — the result-subtype handler already messaged it.
     const hadContent = !!msg && msg.blocks.some((b) => b.type === "tool" || b.type === "thinking");
-    if (!hadContent) blankTurn = true;
+    // A compaction-only turn (manual /compact or auto) legitimately ends with
+    // no assistant text — the boundary pill IS the response, not a blank stream.
+    // Exact subtype match on purpose: microcompact_boundary doesn't count.
+    const compacted =
+      !hadContent &&
+      tab.rawLineLog.some((ln) => {
+        try {
+          const p = JSON.parse(ln) as { type?: string; subtype?: string };
+          return p.type === "system" && p.subtype === "compact_boundary";
+        } catch {
+          return false;
+        }
+      });
+    if (!hadContent && !compacted) blankTurn = true;
     // Don't clobber a friendly error the `result` subtype handler set moments
     // ago with the raw NDJSON dump — that dump is a last-resort diagnostic.
-    if (!hadContent && tab.lastError == null) {
+    if (!hadContent && !compacted && tab.lastError == null) {
       const lines = tab.rawLineLog.slice();
       console.warn("[assistant] turn ended with no text and no tools. Raw stream lines:", lines);
       const types: string[] = [];
