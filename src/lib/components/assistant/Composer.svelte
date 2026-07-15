@@ -180,6 +180,10 @@
     // Only allow the inner scrollbar once content actually hits the cap —
     // otherwise `overflow:auto` paints a phantom gutter in the idle composer.
     atMaxHeight = ta.scrollHeight > 340;
+    // At the height cap the textarea scrolls to the caret — the ghost mirror
+    // must track that scroll or the dictation tail renders against unscrolled
+    // coordinates and overlaps the visible text.
+    if (ghostEl) ghostEl.scrollTop = ta.scrollTop;
   }
 
   $effect(() => {
@@ -2241,7 +2245,10 @@
     position: absolute;
     inset: 0;
     z-index: 2;
-    padding: 8px 10px 6px;
+    /* MUST match the textarea's padding exactly — the mirror positions the
+       tail by re-wrapping the committed draft; a width drift of even 2px
+       wraps differently and the tail lands on top of real text. */
+    padding: 9px 12px;
     font: inherit;
     font-size: var(--fs-md);
     line-height: 1.5;
@@ -2349,11 +2356,18 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  /* Effort label trails the model name — plain quiet word, no separator dot
-     (the 7px pill gap is the separator). */
-  .pill-effort { font-size: 11px; font-weight: 500; color: var(--fg-faint); line-height: 1; white-space: nowrap; }
+  /* Effort as a micro-chip — two bare words at different sizes read uneven
+     (owner, 2026-07-15); a shaped token beside the model name reads deliberate. */
+  .pill-effort {
+    font-size: 10px; font-weight: 500; line-height: 1;
+    color: var(--fg-muted);
+    background: color-mix(in oklab, var(--fg) 7%, transparent);
+    border-radius: 4px;
+    padding: 3px 5px;
+    white-space: nowrap;
+  }
   /* Low rung (replies immediately) reads quieter than the reasoning rungs. */
-  .pill-effort.dim { opacity: 0.72; }
+  .pill-effort.dim { opacity: 0.72; color: var(--fg-faint); }
   /* Permission-mode dot — one consistent at-a-glance signal for all five
      modes (the pill's text-tint only covered ask/bypass). Colored per mode:
      ask=accent, edit=ok, plan=blue, auto=accent, bypass=warn. */

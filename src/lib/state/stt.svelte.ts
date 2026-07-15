@@ -145,6 +145,10 @@ class SttStore {
    *  builds; Whisper needs an LLVM opt-in build (`--features whisper-rs`). */
   backends = $state<{ whisper: boolean; parakeet: boolean }>({ whisper: false, parakeet: false });
   recording = $state(false);
+  /** True from start() until the engine confirms recording (or the start
+   *  fails) — covers the capture-init window so UI keyed to "dictation is
+   *  live here" (composer posture) doesn't flicker while the mic spins up. */
+  starting = $state(false);
   /** True while we've stopped but final results may still arrive. */
   transcribing = $state(false);
   lastError = $state<string | null>(null);
@@ -301,6 +305,7 @@ class SttStore {
           if (ev.payload.state === "transcribing") this.transcribing = true;
           if (ev.payload.state === "recording") {
             this.recording = true;
+            this.starting = false;
             this.transcribing = false;
             // The session is live — any earlier transient error (e.g. a raced
             // double-start) is stale. Leaving it set kept the mic painted red
@@ -309,6 +314,7 @@ class SttStore {
           }
           if (ev.payload.state === "idle") {
             this.recording = false;
+            this.starting = false;
             this.transcribing = false;
           }
         }),
@@ -449,6 +455,7 @@ class SttStore {
     if (this.whisperStartInvoked) return true;
     // Bind BEFORE reading baseDraft so we capture the target pane's draft.
     this.targetTabId = tabId ?? assistant.currentConvoId;
+    this.starting = true;
     this.lastError = null;
     this.ghostTail = "";
     this.baseDraft = this.config.append_to_draft ? this.readDraft() : "";
@@ -473,6 +480,7 @@ class SttStore {
           ? "Whisper backend not built. Install LLVM + rebuild with --features whisper-rs (see Settings → Speech for details)."
           : "Parakeet backend not built into this binary. Rebuild with the default feature set (see Settings → Speech).";
         this.failToast();
+        this.starting = false;
         return false;
       }
       try {
@@ -486,6 +494,7 @@ class SttStore {
       } catch (e) {
         this.lastError = `Could not start whisper recording: ${e}`;
         this.failToast();
+        this.starting = false;
         return false;
       }
     }
@@ -494,10 +503,11 @@ class SttStore {
     if (!this.supported) {
       this.lastError = "Speech recognition is not available in this WebView.";
       this.failToast();
+      this.starting = false;
       return false;
     }
     const Ctor = getSRCtor();
-    if (!Ctor) return false;
+    if (!Ctor) { this.starting = false; return false; }
 
     const r = new Ctor();
     r.lang = this.config.language || "en-US";
@@ -506,6 +516,7 @@ class SttStore {
     r.maxAlternatives = 3;
     r.onstart = () => {
       this.recording = true;
+      this.starting = false;
       this.transcribing = false;
       this.startSilenceWatch();
       void this.startWebMeter();
@@ -522,6 +533,7 @@ class SttStore {
       this.failToast();
       this.recognition = null;
       this.recording = false;
+      this.starting = false;
       return false;
     }
   }
@@ -533,6 +545,7 @@ class SttStore {
     // gets "no stt session active" surfaced as a spurious lastError).
     if (this.stopInFlight) return this.lastTranscript;
     this.stopInFlight = true;
+    this.starting = false;
     try {
       return await this.stopInner();
     } finally {
@@ -578,6 +591,7 @@ class SttStore {
   /** Hard-cancel — drop interim text, restore the original draft. */
   async cancel() {
     this.cancelRequested = true;
+    this.starting = false;
     this.cancelPolish();
     if (this.polishUndoTimer) { clearTimeout(this.polishUndoTimer); this.polishUndoTimer = null; }
     this.clearSilenceWatch();
@@ -1024,6 +1038,7 @@ class SttStore {
 
   private onEnd() {
     this.ghostTail = "";
+    this.starting = false;
     // #175: commit only if neither user-cancel nor composer-consume fired.
     const commit = !this.cancelRequested && !this.consumed;
     if (commit) {

@@ -246,7 +246,10 @@
   // Leaving it (blur with an empty draft, no dictation) floats everything
   // back. Send from the engaged posture is then just a small settle.
   let engaged = $state(false);
-  const sttHere = $derived(stt.recording && stt.targetTabId === tabId);
+  // `starting` included: mic init can take a beat, and the focusout guard
+  // below would otherwise disengage (composer bounces back up) in the gap
+  // between the mic click and `recording` flipping true.
+  const sttHere = $derived((stt.recording || stt.starting) && stt.targetTabId === tabId);
 
   function setEngaged(on: boolean) {
     if (engaged === on) return;
