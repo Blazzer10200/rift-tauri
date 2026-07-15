@@ -981,11 +981,27 @@ class AssistantStore {
     this.telemetry.event("permission_mode.change", { from: prev, to: v });
   }
 
+  /** Latched once per session — the enable-side billing disclosure below. */
+  private fastModeCostWarned = false;
   setFastMode(v: boolean) {
     if (this.fastMode === v) return;
     this.fastMode = v;
     saveFastMode(v);
     this.telemetry.event("fast_mode.change", { to: v });
+    // BILLING DISCLOSURE (owner incident 2026-07-14): fast mode is PAY-PER-USE
+    // — the CLI bills it from usage credits, NOT plan limits (its own TUI shows
+    // "Fast mode ON · Draws from usage credits"). Rift must say so at the
+    // moment of consent, every enable path, not bury it in a tooltip.
+    if (v && !this.fastModeCostWarned) {
+      this.fastModeCostWarned = true;
+      toast.push({
+        severity: "warn",
+        title: "Fast mode is pay-per-use",
+        detail:
+          "Fast Opus turns draw from your usage credits (extra usage) — real billing beyond your plan limits. " +
+          "The ⚡ chip marks each turn that actually ran fast. Turn the toggle off to stop.",
+      });
+    }
     // Mid-conversation flip changes the SpawnKey (fastMode is baked into
     // --settings at spawn) → same cache-bust hint as effort so the prewarm
     // can hide the respawn behind typing time.

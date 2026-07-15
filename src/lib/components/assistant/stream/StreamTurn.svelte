@@ -349,7 +349,7 @@
       {#if turn.meta}
         <span class="sapplied-meta">{turn.meta.time}</span>
         {#if turn.meta.cost}<span class="sapplied-cost" use:tooltip={"Total cost of this turn"}>{turn.meta.cost}</span>{/if}
-        {#if turn.meta.fast}<span class="sapplied-fast" use:tooltip={"This turn ran in fast mode (quicker Opus output)"}><Zap size={11} />fast</span>{/if}
+        {#if turn.meta.fast}<span class="sapplied-fast" use:tooltip={"This turn ran in fast mode — quicker Opus output, billed from your usage credits (pay-per-use)"}><Zap size={11} />fast</span>{/if}
       {/if}
     </div>
   {/if}

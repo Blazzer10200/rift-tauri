@@ -2,9 +2,9 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.106.0 — Fast lane
+## v0.106.1 — Fast lane, honestly priced
 
-- **Fast mode for Opus.** A new toggle in the model picker (Opus rows only) runs Opus with noticeably quicker output — same model, same quality tier. Turns that actually ran fast get a small ⚡ "fast" chip, so you always know whether it kicked in. Needs Claude CLI 2.1.209+.
+- **Fast mode for Opus — with its price tag on.** A new toggle in the model picker (Opus rows only) runs Opus with noticeably quicker output — same model, same quality tier. **Important: fast mode is pay-per-use — it draws from your usage credits, not your plan limits.** The toggle says so in the row, turns amber (not green) when on, wears a "pay-per-use" tag, and pops a one-time warning when you enable it. Turns that actually ran fast get a ⚡ "fast" chip. Needs Claude CLI 2.1.209+. (v0.106.0 shipped this toggle without the billing disclosure — that gap is what this release fixes.)
 - **Switching model or permission mode mid-chat is now instant.** Rift pushes the change to the already-running Claude process instead of restarting it — a model switch that used to cost ~1.5s of respawn now takes effect immediately. (Switching between Ask-style and Bypass-style permission modes still restarts — that change genuinely needs different launch flags.)
 - **The context gauge now corrects itself from real data.** After each reply, Rift reads the context window the CLI actually ran against and uses that for the gauge — so accounts with a smaller window (e.g. Free plan) see honest numbers without configuring anything.
 - Recommended Claude CLI version raised to 2.1.209 (fast mode + live switching + several upstream stream-json fixes).

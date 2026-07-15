@@ -240,21 +240,25 @@
 
   {#if fastApplies}
     <div class="rift-menu-divider"></div>
-    <!-- Fast mode — Opus fast output. One quiet checkbox row matching the
-         model-row anatomy (icon tile + title/sub + trailing switch); the
-         per-turn "fast" chip in the transcript is the honest confirmation. -->
+    <!-- Fast mode — Opus fast output. Row matches the model-row anatomy; the
+         per-turn "fast" chip in the transcript is the honest confirmation.
+         BILLING: pay-per-use (usage credits, NOT plan limits) — the cost line
+         + amber ON treatment are the consent surface, mirroring the CLI's own
+         "Fast mode ON · Draws from usage credits" disclosure. Don't quiet it. -->
     <button
       type="button"
       role="menuitemcheckbox"
       aria-checked={assistant.fastMode}
       class="pop-item rich fast-row"
-      use:tooltip={"Fast mode — quicker Opus output. Applies from your next message."}
+      use:tooltip={"Fast mode — quicker Opus output, billed from your usage credits (pay-per-use, NOT your plan limits). Applies from your next message."}
       onmousedown={(e) => { e.preventDefault(); assistant.setFastMode(!assistant.fastMode); }}
     >
       <span class="pi-ic fast-ic" class:on={assistant.fastMode}><Zap size={15} /></span>
       <span class="pi-text">
-        <span class="pi-name"><span class="model-name">Fast mode</span></span>
-        <span class="pi-sub">Faster output on Opus — same model, quicker replies</span>
+        <span class="pi-name"><span class="model-name">Fast mode</span>
+          {#if assistant.fastMode}<span class="pi-tag warn-tag">pay-per-use</span>{/if}
+        </span>
+        <span class="pi-sub">Quicker Opus replies — <span class="fast-cost">draws from usage credits, not plan limits</span></span>
       </span>
       <span class="fast-switch" class:on={assistant.fastMode} aria-hidden="true"><i></i></span>
     </button>
@@ -560,11 +564,20 @@
   :global(.settings-menu .model-row.active .model-num) { color: var(--fg-muted); }
 
   /* Fast-mode row — same pop-item anatomy as model rows; the trailing switch
-     is a compact track+knob keyed to the accent when on. */
+     is a compact track+knob. ON state is WARN amber, not accent: fast mode is
+     pay-per-use (usage credits), and the color must say "costs money" the same
+     way the bypass pill does — don't re-tint to accent. */
+  :global(.settings-menu .fast-row .fast-cost) { color: var(--warn); }
+  :global(.settings-menu .fast-row .pi-tag.warn-tag) {
+    margin-left: auto; font-size: 9px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--warn); padding: 2px 6px; border-radius: 999px;
+    background: color-mix(in oklab, var(--warn) 12%, transparent);
+    border: 1px solid color-mix(in oklab, var(--warn) 34%, transparent);
+  }
   :global(.settings-menu .fast-row .fast-ic.on) {
-    background: color-mix(in oklab, var(--accent) 16%, transparent);
-    border-color: color-mix(in oklab, var(--accent) 40%, transparent);
-    color: var(--accent);
+    background: color-mix(in oklab, var(--warn) 16%, transparent);
+    border-color: color-mix(in oklab, var(--warn) 40%, transparent);
+    color: var(--warn);
   }
   :global(.settings-menu .fast-switch) {
     flex: none; position: relative;
@@ -580,10 +593,10 @@
     transition: transform var(--dur-base) var(--ease-page), background var(--dur-fast) ease;
   }
   :global(.settings-menu .fast-switch.on) {
-    background: color-mix(in oklab, var(--accent) 26%, transparent);
-    border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+    background: color-mix(in oklab, var(--warn) 26%, transparent);
+    border-color: color-mix(in oklab, var(--warn) 45%, transparent);
   }
-  :global(.settings-menu .fast-switch.on i) { transform: translateX(13px); background: var(--accent); }
+  :global(.settings-menu .fast-switch.on i) { transform: translateX(13px); background: var(--warn); }
 
   /* Effort — segmented rung cards (Low→X-High), stops = dialStopsFor(model).
      One card per CLI flag on a recessed glass rail; the ascending-bars glyph is

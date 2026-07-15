@@ -100,6 +100,13 @@ seed rules below.
   found (Tailwind green/red/amber) had drifted from the tokens' real oklch values —
   a wrong color waiting for a scoping accident. Use the bare `var(--token)`; if a
   fallback is genuinely needed, it must equal the token's current value.
+- DON'T ship a control that spends the user's money without saying so AT the control
+  (2026-07-14, fast-mode incident — owner: "it's charging me, that is a huge gap").
+  Porting an upstream feature means porting its cost disclosure too (the CLI showed
+  "Draws from usage credits"; Rift's toggle didn't). Generalized: anything pay-per-use
+  gets the WARN treatment at the point of consent — amber state (never accent), a cost
+  line in the row itself (not just a tooltip), and a first-enable toast. Accent = free;
+  amber = costs money. Same family as the bypass pill.
 
 ## 9. Agent guide — process over palette
 
