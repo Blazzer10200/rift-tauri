@@ -352,7 +352,14 @@ function enqueueText(tab: TabState, chunk: string) {
  *  mid-stream usage, so the estimate is what makes the counter climb (CC-style)
  *  until each message's real count snaps in via `recordTurnUsage`. */
 function refreshLiveTokens(tab: TabState) {
-  tab.liveOutputTokens = tab.committedOutputTokens + Math.round(tab.liveOutputChars / 4);
+  // Monotonic per turn: the chars/4 estimate can overshoot the real usage that
+  // later snaps in, and a live counter that ticks BACKWARD reads as broken
+  // (caught on the 2026-07-15 session recording — 429→409, 442→434). Hold the
+  // high-water mark; beginTurn's reset to 0 re-arms it each turn.
+  tab.liveOutputTokens = Math.max(
+    tab.liveOutputTokens,
+    tab.committedOutputTokens + Math.round(tab.liveOutputChars / 4),
+  );
 }
 
 /** Body of the per-tab rAF pacer. TabState keeps a stable bound arrow
@@ -823,7 +830,9 @@ export function recordTurnUsage(tab: TabState, u: Record<string, unknown>, accum
     // in-flight char estimate, snapping the live count to the real total.
     tab.committedOutputTokens += turn.output;
     tab.liveOutputChars = 0;
-    tab.liveOutputTokens = tab.committedOutputTokens;
+    // Same monotonic clamp as refreshLiveTokens — snapping exact must never
+    // roll the visible meter down mid-turn.
+    tab.liveOutputTokens = Math.max(tab.liveOutputTokens, tab.committedOutputTokens);
   }
 }
 

@@ -25,7 +25,7 @@
   import OutputBlock from "./stream/OutputBlock.svelte";
   import ReadResult from "./stream/ReadResult.svelte";
   import GrepResult from "./stream/GrepResult.svelte";
-  import { stripAnsi } from "./stream/streamModel";
+  import { stripAnsi, shortScope } from "./stream/streamModel";
 
   import { tooltip } from "$lib/actions/tooltip";
   const reducedMotion =
@@ -89,15 +89,15 @@
     // Search / nav.
     if (n === "Glob") {
       const pat = typeof inp.pattern === "string" ? (inp.pattern as string) : "?";
-      const scope = typeof inp.path === "string" ? ` in ${inp.path}` : "";
+      const scope = typeof inp.path === "string" ? ` in ${shortScope(inp.path)}` : "";
       return `${pat}${scope}`;
     }
     if (n === "Grep" || n === "grep") {
       const pat = typeof inp.pattern === "string" ? `"${inp.pattern}"` : "?";
-      const scope = typeof inp.path === "string" ? ` in ${inp.path}` : "";
+      const scope = typeof inp.path === "string" ? ` in ${shortScope(inp.path)}` : "";
       return `${pat}${scope}`;
     }
-    if (n === "list_dir") return typeof inp.path === "string" ? (inp.path as string) : "directory";
+    if (n === "list_dir") return typeof inp.path === "string" ? shortScope(inp.path as string) : "directory";
     // Web.
     if (n === "WebFetch") return typeof inp.url === "string" ? hostOf(inp.url as string) : "url";
     if (n === "WebSearch") return typeof inp.query === "string" ? `"${trim(inp.query as string, 50)}"` : "search";

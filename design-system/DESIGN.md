@@ -105,6 +105,13 @@ seed rules below.
   placeholder is an invitation, not documentation: one quiet plain-text phrase
   at a time; if more must be taught, rotate phrases slowly instead of joining
   them with separators and keycaps.
+- DO frame tool activity as islands (2026-07-15, owner: work rows "too
+  transparent"). Every tool block in the stream — work-line groups, the
+  in-flight row, edit batches — sits on the same card shell as shell/result
+  blocks (hairline `--border` + `--radius-lg` + faint fg-2.5% fill), sibling
+  language to the sidebar island. Detail stays fully visible; only the chrome
+  got a frame. Narration/prose stays boxless — content is the protagonist,
+  the frames are for the MACHINERY.
 - DON'T let a transient hover-peek be the full persistent surface teleported over
   the content (2026-07-15, sidebar peek — owner: "overlapping everything… not framed
   correctly"). A peek/flyout is a MINIMIZED sibling of the pinned surface: same

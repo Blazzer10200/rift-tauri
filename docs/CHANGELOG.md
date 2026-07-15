@@ -2,12 +2,16 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.108.0 — Sidebar peek, properly minimized
+## v0.109.0 — The stream stops going dark
 
-- **The hover-peek is now a compact flyout, not the whole sidebar.** Hovering the panel glyph while the sidebar is collapsed opens a small card — project switcher, New chat + search, your 8 most-recent chats, footer nav — that hugs its content instead of spanning the full window height. Same island look as the pinned sidebar, just the quick-access version of it.
-- **A quiet "All chats · N" seam** at the bottom of the peek's list pins the sidebar open for the full scoped history (the This-project/All segment and "Show earlier" stay full-sidebar-only).
-- **The peek breathes below the topbar** — it floats in with real separation from the top edge instead of hugging the window chrome, and it no longer repeats the Rift brand row the topbar cluster already shows.
-- Pinned sidebar unchanged: full history, scope segment, resize, everything as before.
+Sourced from a 5½-minute screen recording of a real working turn, where the UI sat visually frozen for ~3 minutes while real work happened underneath.
+
+- **No more dead air.** During long turns the footer no longer collapses to a bare "Working…" between tools — it carries the last finished action ("Working… · Read Composer.svelte") and says "Thinking…" during mid-turn reasoning passes, not just the opening one.
+- **Tool activity is framed now.** Work-line groups, the in-flight row, and edit batches sit on the same island-card language as shell blocks — full detail kept, chrome framed. Composer/STT fixes from the prior patch (dictation ghost overlap, mic engage bounce, effort micro-chip) ship here too.
+- **The token meter never runs backward.** The live estimate holds its high-water mark when real usage lands lower (the 429→409 dips are gone), and the odometer roll no longer fades digits to near-invisible mid-animation.
+- **Honest diff gutters.** Created files show real 1-based line numbers; edits (which carry no absolute file offset) drop the misleading 1..N column and keep the +/− marks.
+- **Live plans actually tick.** The assistant now marks plan steps in_progress/completed the moment they change, so the plan widget fills during the turn instead of jumping 0/N → N/N at the very end.
+- Search chips show `…/src/lib`-style scopes instead of full `C:\` paths; Copy/Retry under a finished turn are readable at rest.
 
 ## Known issues
 - **While elevated, dragging files from Explorer into the window doesn't work** (Windows blocks lower→higher integrity drag-drop); the attach button / file picker still works fine.

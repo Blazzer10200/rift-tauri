@@ -13,7 +13,7 @@
   import StreamShell from "./StreamShell.svelte";
   import StreamExitPlan from "./StreamExitPlan.svelte";
   import PermissionBar from "../PermissionBar.svelte";
-  import { messageToTurn, groupBlocks, fmtDur, classifySay, VERB_ING, tasksToPlanItems, type StreamTool } from "./streamModel";
+  import { messageToTurn, groupBlocks, fmtDur, classifySay, VERB_ING, VERB_PAST, tasksToPlanItems, type StreamTool } from "./streamModel";
   import { assistant, type ChatMessage, type TabState } from "$lib/state/assistant.svelte";
   import { uiPrefs } from "$lib/state/ui-prefs.svelte";
   import { fmtTokens } from "$lib/state/assistant/helpers";
@@ -188,7 +188,11 @@
   // live, else a plain "Working…". The head shows the same state word, so the
   // two never contradict, and the footer only says something specific when a
   // real tool is actually running.
-  const idleVerb = $derived(thinkingNow ? "Thinking" : "Working");
+  // Broader than thinkingNow: a MID-turn reasoning pass (after tokens/tools
+  // already landed) previously fell through to a bare "Working…" for its whole
+  // duration — the model was thinking, the footer just never said so.
+  const reasoningNow = $derived(streaming && !!turn.thinking?.active);
+  const idleVerb = $derived(reasoningNow ? "Thinking" : "Working");
   // Stall watchdog: the turn is live but NOTHING has come back — no tool in
   // flight, no output tokens. A short wait is normal model latency (first token
   // ~4s); a long silence can be the model OR a wedged local Claude process. We
@@ -206,7 +210,7 @@
     // still showing "Thinking…" — the model was working, but the footer read as
     // a 45s hang. thinkingNow gates the head; gate the stall on it too so the
     // two never contradict.
-    if (!streaming || liveTool || liveTokens != null || liveSecs == null || thinkingNow) return 0;
+    if (!streaming || liveTool || liveTokens != null || liveSecs == null || reasoningNow) return 0;
     if (liveSecs >= 150) return 3;
     if (liveSecs >= 60) return 2;
     if (liveSecs >= 20) return 1;
@@ -231,6 +235,27 @@
   // is a clean, minimal stream, so the footer stays a bare verb + meter there.
   const footerCap = $derived(
     liveTool && !awaitingInput && uiPrefs.narration !== "focused" ? (liveTool.cap ?? null) : null,
+  );
+  // Dead-air trail — with no tool in flight the footer used to collapse to a
+  // bare "Working…" for the whole between-tools gap (the #1 "is it stuck?"
+  // read on long turns). Keep the verb honest, but carry the LAST finished
+  // action as a dim past-tense trail ("· Read Composer.svelte") so the quiet
+  // stretch still says where the turn is. Same focused-mode gate as footerCap.
+  const lastDone = $derived.by((): StreamTool | null => {
+    let last: StreamTool | null = null;
+    for (const g of groups) {
+      if (g.type !== "work") continue;
+      for (const seg of g.segs) {
+        const tools = seg.seg === "rich" ? [seg.tool] : seg.tools;
+        for (const t of tools) if (t.status !== "pending") last = t;
+      }
+    }
+    return last;
+  });
+  const idleTrail = $derived(
+    !liveTool && !awaitingInput && stallLevel === 0 && lastDone && uiPrefs.narration !== "focused"
+      ? `${VERB_PAST[lastDone.kind]} ${lastDone.cap}`
+      : null,
   );
 </script>
 
@@ -302,7 +327,7 @@
          — the footer would just duplicate it (and there's no action/tokens to
          report yet), so it's suppressed until a tool or token lands. -->
     <div class="sfooter" class:stalled={stallLevel > 0} class:awaiting={awaitingInput}>
-      {#key footerVerb}<span class="sf-verb-wrap"><span class="sf-verb">{footerVerb}</span>{#if footerCap}<span class="sf-cap">{footerCap}</span>{/if}</span>{/key}
+      {#key footerVerb}<span class="sf-verb-wrap"><span class="sf-verb">{footerVerb}</span>{#if footerCap}<span class="sf-cap">{footerCap}</span>{:else if idleTrail}<span class="sf-cap sf-last">· {idleTrail}</span>{/if}</span>{/key}
       {#if awaitingInput}
         <!-- Parked on the user: no climbing clock (it's human time, not the
              model's), no token meter. Just the calm verb + a nudge. -->

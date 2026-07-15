@@ -660,6 +660,25 @@ describe("playback — live output-token counter", () => {
     feed(tab, [thinkStart(0), thinkDelta("z".repeat(60), 0)]);
     expect(tab.liveOutputTokens).toBe(15); // round(60/4)
   });
+
+  it("never rolls backward when the real usage lands below the estimate", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    // chars/4 overshoots what the usage envelope will report — the visible
+    // meter must hold its high-water mark, not tick down (2026-07-15 recording:
+    // 429→409, 442→434 read as a broken counter).
+    feed(tab, [textDelta("y".repeat(400))]);
+    expect(tab.liveOutputTokens).toBe(100); // round(400/4)
+    feed(tab, [assistantUsageEnv({ input_tokens: 1, output_tokens: 60 })]);
+    expect(tab.liveOutputTokens).toBe(100); // clamped — not 60
+    // The next message's estimate still rides on the REAL banked total (60),
+    // so the meter resumes climbing only once it passes the high-water mark.
+    feed(tab, [textDelta("y".repeat(200))]);
+    expect(tab.liveOutputTokens).toBe(110); // 60 + round(200/4)
+    // A fresh turn re-arms the clamp from zero.
+    beginTurn(tab);
+    expect(tab.liveOutputTokens).toBe(0);
+  });
 });
 
 // ── onDone finalization ──────────────────────────────────────────────────────

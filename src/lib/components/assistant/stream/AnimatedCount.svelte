@@ -98,12 +98,14 @@
   }
   .acount.live .acount-v { animation: acRoll var(--dur-fast) cubic-bezier(0.22, 1, 0.36, 1); }
   .acount.live[data-dir="down"] .acount-v { animation: acRollDown var(--dur-fast) cubic-bezier(0.22, 1, 0.36, 1); }
+  /* Roll starts at 0.6 (was 0.25) — at 1s update cadence the counter spent a
+     third of its life semi-transparent, reading as blurred/illegible digits. */
   @keyframes acRoll {
-    from { transform: translateY(0.62em); opacity: 0.25; }
+    from { transform: translateY(0.62em); opacity: 0.6; }
     to   { transform: none; opacity: 1; }
   }
   @keyframes acRollDown {
-    from { transform: translateY(-0.62em); opacity: 0.25; }
+    from { transform: translateY(-0.62em); opacity: 0.6; }
     to   { transform: none; opacity: 1; }
   }
   @media (prefers-reduced-motion: reduce) {

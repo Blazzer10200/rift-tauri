@@ -26,8 +26,10 @@
 @keyframes workOpen { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 @keyframes ringspin { to { transform: rotate(360deg); } }
 @keyframes shim { from { background-position: 100% 0; } to { background-position: -100% 0; } }
-@keyframes acRoll { from { transform: translateY(0.62em); opacity: 0.25; } to { transform: none; opacity: 1; } }
-@keyframes acRollDown { from { transform: translateY(-0.62em); opacity: 0.25; } to { transform: none; opacity: 1; } }
+/* Roll floor 0.6 (was 0.25) — at 1s cadence the meter spent a third of its
+   life semi-transparent, reading as blurred digits (2026-07-15 recording). */
+@keyframes acRoll { from { transform: translateY(0.62em); opacity: 0.6; } to { transform: none; opacity: 1; } }
+@keyframes acRollDown { from { transform: translateY(-0.62em); opacity: 0.6; } to { transform: none; opacity: 1; } }
 @keyframes streamLivePulse {
   0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 42%, transparent); }
   70% { box-shadow: 0 0 0 5px transparent; }
@@ -112,6 +114,8 @@
 .sfooter .sf-cap { margin-left: 7px; min-width: 0; font-family: var(--font-mono, monospace);
   font-size: var(--fs-xs); color: var(--fg-faint); white-space: nowrap; overflow: hidden;
   text-overflow: ellipsis; }
+/* dead-air trail — the last FINISHED action, quieter than a live cap */
+.sfooter .sf-last { opacity: 0.72; }
 .sfooter .sf-verb-wrap { display: inline-flex; align-items: baseline; min-width: 0; max-width: 60%;
   animation: verbIn 320ms var(--ease-page) both; }
 @keyframes verbIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
@@ -146,15 +150,19 @@
 /* head dot: solid accent, no pulse — calm "parked" not "live grinding" */
 .sturn-head.live.awaiting-head .sh-dot { animation: none; background: var(--accent); }
 
-/* tool run — one quiet line. Quiet, but not invisible: reads/greps/lists are
-   often the BULK of a turn, so the summary sits at --fg-muted (was --fg-subtle)
-   and the lead icon-box carries a cool-neutral read tint so the row has an
-   identity at a glance without shouting. */
-.wline { margin: var(--stream-gap) 0; animation: blockIn var(--dur-base) var(--ease-page) both; }
-.wline-head { display: inline-flex; align-items: center; gap: 9px; font-size: var(--fs-sm); color: var(--fg-muted);
-  background: none; border: 0; cursor: pointer; padding: 0; transition: color var(--dur-fast);
-  max-width: 100%; min-width: 0; }
-.wline-head:hover { color: var(--fg); }
+/* tool run — an ISLAND now (owner call 2026-07-15: bare rows read "too
+   transparent"). Same card language as .sshell/.sresult — hairline border +
+   faint fill + --radius-lg — so every tool block in the stream sits on one
+   family of framed shells. Detail unchanged; only the chrome got a frame.
+   Narration/prose stays boxless: content is still the protagonist. */
+.wline { margin: var(--stream-gap) 0; border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: color-mix(in oklab, var(--fg) 2.5%, transparent); overflow: hidden;
+  animation: blockIn var(--dur-base) var(--ease-page) both; }
+.wline-head { display: flex; width: 100%; align-items: center; gap: 9px; font-size: var(--fs-sm); color: var(--fg-muted);
+  background: none; border: 0; cursor: pointer; padding: 7px 11px;
+  transition: color var(--dur-fast), background var(--dur-fast);
+  max-width: 100%; min-width: 0; text-align: left; }
+.wline-head:hover { color: var(--fg); background: color-mix(in oklab, var(--fg) 3.5%, transparent); }
 .wline-head:hover .wline-ic { border-color: color-mix(in oklab, var(--info) 45%, var(--border)); color: var(--info); }
 .wline-ic { display: grid; place-items: center; width: 18px; height: 18px;
   border: 1px solid color-mix(in oklab, var(--info) 16%, var(--border)); border-radius: 5px;
@@ -164,9 +172,9 @@
 /* Long summaries (regex patterns, absolute paths) truncate instead of running
    off the right edge of the message column — full text via the head's title. */
 .wline-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.wline-chev { color: var(--fg-faint); flex: none; transition: transform var(--dur-fast); }
+.wline-chev { color: var(--fg-faint); flex: none; margin-left: auto; transition: transform var(--dur-fast); }
 .wline-chev.open { transform: rotate(180deg); }
-.wline-list { margin: 8px 0 2px; padding-left: 27px; display: flex; flex-direction: column; gap: 5px;
+.wline-list { margin: 0; padding: 2px 11px 9px 38px; display: flex; flex-direction: column; gap: 5px;
   animation: workOpen 0.3s var(--ease-page) both; }
 .wline-row { font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.55; color: var(--fg-faint);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -188,11 +196,15 @@
 .wline-row .wr-path { color: var(--fg-2); }
 .wline-row:has(.wr-path) { white-space: normal; overflow: visible; word-break: break-all; }
 .wline-row b { color: var(--fg-2); font-weight: 600; }
-/* in-flight tool — single active line, no box. A faint accent sweep travels
-   across the row while it runs so "working on this now" reads as active
-   scanning, not a static line waiting. Boxless still — the sweep is a masked
-   pseudo-element, no border/fill added to the resting row. */
-.wline-active { position: relative; display: inline-flex; align-items: center; gap: 8px; margin: var(--stream-gap) 0; font-size: var(--fs-sm); color: var(--fg-muted);
+/* in-flight tool — single active line, now on the same island shell as .wline
+   (a live read/grep is the one row the eye hunts for during a working turn; a
+   bare line under framed siblings read as a glitch, not a design). The faint
+   accent sweep travels INSIDE the card while it runs; the accent-tinted
+   hairline marks it as the live one at a glance. */
+.wline-active { position: relative; display: flex; align-items: center; gap: 8px; margin: var(--stream-gap) 0;
+  padding: 7px 11px; font-size: var(--fs-sm); color: var(--fg-muted);
+  border: 1px solid color-mix(in oklab, var(--accent) 22%, var(--border));
+  border-radius: var(--radius-lg); background: color-mix(in oklab, var(--fg) 2.5%, transparent);
   max-width: 100%; min-width: 0; overflow: hidden;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
 .wline-active::after { content: ""; position: absolute; inset: 0; pointer-events: none;
@@ -222,9 +234,12 @@
 }
 .sfooter .sf-verb { --sh-b: var(--fg-faint); --sh-h: var(--fg-muted); }
 
-/* ── file-write batch ── */
-.wbatch { margin: var(--stream-gap) 0; display: flex; flex-direction: column; gap: 6px; }
-.wbrow { display: flex; align-items: center; gap: 9px; font-size: var(--fs-sm);
+/* ── file-write batch — island shell like .wline/.sshell; rows + their inline
+   diff cards live inside one framed card so an edit burst reads as one unit ── */
+.wbatch { margin: var(--stream-gap) 0; display: flex; flex-direction: column; gap: 2px;
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: color-mix(in oklab, var(--fg) 2.5%, transparent); padding: 5px 11px; }
+.wbrow { display: flex; align-items: center; gap: 9px; padding: 3px 0; font-size: var(--fs-sm);
   animation: blockIn var(--dur-base) var(--ease-page) both; }
 .wb-verb { color: var(--fg-muted); }
 .wb-name { color: var(--fg); font-weight: 600; letter-spacing: -0.004em; }
@@ -310,10 +325,10 @@
 
 /* per-turn hover actions (copy / retry) */
 .msg-acts { display: flex; align-items: center; gap: 2px; margin-top: 13px; height: 28px;
-  opacity: 0.42; transform: none; transition: opacity var(--dur-fast), transform var(--dur-fast); }
+  opacity: 0.62; transform: none; transition: opacity var(--dur-fast), transform var(--dur-fast); }
 .sturn:hover .msg-acts, .sturn:focus-within .msg-acts { opacity: 1; transform: none; }
 .msg-act { display: inline-flex; align-items: center; gap: 6px; height: 27px; padding: 0 9px; border-radius: 7px;
-  font-size: var(--fs-xs); font-weight: 500; color: var(--fg-faint); transition: background var(--dur-fast), color var(--dur-fast); }
+  font-size: var(--fs-xs); font-weight: 500; color: var(--fg-subtle); transition: background var(--dur-fast), color var(--dur-fast); }
 .msg-act:hover { background: var(--surface-hover); color: var(--fg-2); }
 .msg-act.copied { color: var(--ok); }
 .msg-act svg { flex: none; }

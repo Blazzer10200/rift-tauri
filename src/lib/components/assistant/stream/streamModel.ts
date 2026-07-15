@@ -187,6 +187,14 @@ export type Group =
 const shortName = (n: string) => n.replace(/^mcp__rift__/, "");
 const trim = (s: string, n = 60) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 const hostOf = (u: string) => { try { return new URL(u).host; } catch { return u; } };
+// Scope paths in captions (Grep/Glob/list_dir) arrive as raw absolute paths —
+// collapse to the last two segments (mirrors dirOf) so the chip reads
+// `…/components/assistant`, not a full C:\ path ellipsised mid-string.
+// Exported: ToolChip's history captions share it.
+export const shortScope = (p: string) => {
+  const segs = p.replace(/\\/g, "/").replace(/\/$/, "").split("/").filter(Boolean);
+  return segs.length <= 2 ? segs.join("/") : "…/" + segs.slice(-2).join("/");
+};
 
 // Strip ANSI escape sequences (SGR colors, cursor moves) from tool output —
 // PowerShell/cargo/npm emit them, and raw `\x1b[31;1m` renders as literal
@@ -318,15 +326,15 @@ function caption(tb: ToolBlock): string {
   if (n === "Bash" || n === "remote_bash" || n === "PowerShell") return typeof inp.command === "string" ? trim(inp.command, 70) : "shell";
   if (n === "Glob") {
     const pat = typeof inp.pattern === "string" ? inp.pattern : "?";
-    const scope = typeof inp.path === "string" ? ` in ${inp.path}` : "";
+    const scope = typeof inp.path === "string" ? ` in ${shortScope(inp.path)}` : "";
     return `${pat}${scope}`;
   }
   if (n === "Grep" || n === "grep") {
     const pat = typeof inp.pattern === "string" ? `"${inp.pattern}"` : "?";
-    const scope = typeof inp.path === "string" ? ` in ${inp.path}` : "";
+    const scope = typeof inp.path === "string" ? ` in ${shortScope(inp.path)}` : "";
     return `${pat}${scope}`;
   }
-  if (n === "list_dir") return typeof inp.path === "string" ? inp.path : "directory";
+  if (n === "list_dir") return typeof inp.path === "string" ? shortScope(inp.path) : "directory";
   if (n === "WebFetch") return typeof inp.url === "string" ? hostOf(inp.url) : "url";
   if (n === "WebSearch") return typeof inp.query === "string" ? trim(inp.query, 50) : "search";
   if (n === "Agent" || n === "Task") {

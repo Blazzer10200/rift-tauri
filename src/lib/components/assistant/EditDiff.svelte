@@ -135,6 +135,13 @@
 
   const filePath = $derived(typeof input.file_path === "string" ? input.file_path : null);
 
+  // Write = new file → the 1-based line numbers ARE the real file lines. An
+  // Edit's old/new_string carries no absolute offset, so numbering its hunk
+  // 1..N implied a file position it didn't have (2026-07-15 recording review:
+  // "can't tell where in the file the change landed") — edits drop the number
+  // column and keep the +/− gutter; the crumb still names the file.
+  const numbered = $derived(typeof input.content === "string" && !input.new_string);
+
   // Breadcrumb header — dir/name split + language badge. Long dirs collapse to
   // their last two segments so the filename stays visible; full path goes in
   // the tooltip.
@@ -353,7 +360,7 @@
       </div>
     {/if}
     {#if expanded}
-      <div class="diff-body" transition:slide={{ duration: reducedMotion ? 0 : 200 }}>
+      <div class="diff-body" class:no-nums={!numbered} transition:slide={{ duration: reducedMotion ? 0 : 200 }}>
         {#each visibleLines as l, li (li)}
           {#if l.kind === "meta"}
             <div class="diff-meta" style="--ri: {Math.min(li, 14)}">{l.text}</div>
@@ -363,7 +370,7 @@
             </div>
           {:else}
             <div class="diff-line" data-kind={l.kind} style="--ri: {Math.min(li, 14)}">
-              <span class="diff-num mono">{l.num ?? ""}</span>
+              {#if numbered}<span class="diff-num mono">{l.num ?? ""}</span>{/if}
               <span class="diff-gutter mono">{l.kind === "add" ? "+" : l.kind === "del" ? "−" : ""}</span>
               {#if l.html !== null}<span class="diff-code mono">{@html l.html}</span>{:else}<span class="diff-code mono">{l.text}</span>{/if}
             </div>
@@ -519,6 +526,8 @@
     grid-template-columns: 34px 14px 1fr;
     align-items: baseline;
   }
+  /* Edits (no real file offsets) skip the number column — see `numbered`. */
+  .diff-body.no-nums .diff-line { grid-template-columns: 26px 1fr; }
   /* Staggered reveal — each row slides in keyed off its --ri index (capped at
      14 so big diffs settle fast). NB: the row only translates; it never drops
      to opacity:0. A re-derive (e.g. shiki finishing warm-up flips `shikiReady`
