@@ -162,10 +162,10 @@ class SttStore {
   /** Live mic input level, 0..1 normalized — drives the composer waveform meter.
    *  Whisper feeds it from `stt://level`; web_speech from a browser AnalyserNode. */
   level = $state(0);
-  /** Seconds until auto-stop fires, surfaced only in the last few seconds of
-   *  silence as a "stopping soon" cue. null when auto-stop is off or speech is
-   *  recent. */
-  silenceRemaining = $state<number | null>(null);
+  /** Fraction (1→0) of the auto-stop warning window remaining, surfaced only in
+   *  the last few seconds of silence — drives the composer's depleting ring.
+   *  null when auto-stop is off or speech is recent. */
+  silenceFrac = $state<number | null>(null);
   /** True while the cleanup polish of a finished dictation is in flight. */
   polishing = $state(false);
   /** Uncommitted interim speech — rendered by the composer as ghost text after
@@ -851,20 +851,20 @@ class SttStore {
     if (!secs) return;
     if (this.config.engine === "web_speech" && !this.config.show_interim) return;
     this.lastSpeechAt = Date.now();
-    // Surface the countdown only in the final stretch so it reads as a warning,
+    // Surface the ring only in the final stretch so it reads as a warning,
     // not a perpetual timer. ≤5s auto-stop → last 2s; longer → last 3s.
-    const showUnder = Math.min(secs <= 5 ? 2 : 3, secs);
+    const showMs = Math.min(secs <= 5 ? 2 : 3, secs) * 1000;
     this.silenceTimer = setInterval(() => {
       if (!this.recording) return;
       const elapsedMs = Date.now() - this.lastSpeechAt;
-      if (elapsedMs >= secs * 1000) {
-        this.silenceRemaining = null;
+      const remainingMs = secs * 1000 - elapsedMs;
+      if (remainingMs <= 0) {
+        this.silenceFrac = null;
         this.clearSilenceWatch();
         void this.stop();
         return;
       }
-      const remaining = Math.ceil((secs * 1000 - elapsedMs) / 1000);
-      this.silenceRemaining = remaining <= showUnder ? remaining : null;
+      this.silenceFrac = remainingMs <= showMs ? remainingMs / showMs : null;
     }, 250);
   }
 
@@ -873,7 +873,7 @@ class SttStore {
       clearInterval(this.silenceTimer);
       this.silenceTimer = null;
     }
-    this.silenceRemaining = null;
+    this.silenceFrac = null;
   }
 
   // ---- Cleanup-polish undo ---------------------------------------------------

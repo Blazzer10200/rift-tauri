@@ -2,9 +2,12 @@
   import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { invoke } from "@tauri-apps/api/core";
-  import { X, SplitSquareHorizontal, AppWindow } from "lucide-svelte";
+  import { X, SplitSquareHorizontal, AppWindow, PanelLeftOpen, Plus, Search } from "lucide-svelte";
   import { workspace } from "$lib/state/workspace.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
+  import { shell } from "$lib/state/shell.svelte";
+  import { commandPalette } from "$lib/state/command-palette.svelte";
+  import { goHome } from "$lib/state/nav";
   import { WORKSPACES } from "../workspaces";
   import { tooltip } from "$lib/actions/tooltip";
   import NotificationCenter from "./NotificationCenter.svelte";
@@ -34,9 +37,31 @@
   );
 </script>
 
-<div class="topbar" data-tauri-drag-region>
-  <!-- Expand affordance lives on the collapsed mini-rail's brand button now —
-       no duplicate open-sidebar control up here. -->
+<div class="topbar" class:rail-hidden={shell.collapsed} data-tauri-drag-region>
+  {#if shell.collapsed}
+    <!-- Collapsed-rail cluster: hovering the panel glyph peeks the island over
+         the content; clicking pins it open. New chat + search keep their
+         one-click reach while the rail is away. -->
+    <div class="tb-left">
+      <button
+        class="tb-ic"
+        type="button"
+        onmouseenter={() => shell.beginPeek()}
+        onmouseleave={() => shell.schedulePeekClose()}
+        onclick={() => shell.toggleCollapsed()}
+        use:tooltip={"Open sidebar — hover to peek"}
+        aria-label="Open sidebar"
+      >
+        <PanelLeftOpen size={15} />
+      </button>
+      <button class="tb-ic" type="button" onclick={() => goHome()} use:tooltip={"New chat · Ctrl+N"} aria-label="New chat">
+        <Plus size={16} strokeWidth={2.2} />
+      </button>
+      <button class="tb-ic" type="button" onclick={() => commandPalette.show()} use:tooltip={"Search chats · Ctrl+K"} aria-label="Search chats">
+        <Search size={15} />
+      </button>
+    </div>
+  {/if}
   <span class="topbar-title" data-tauri-drag-region>{title}</span>
 
   <div class="topbar-r">
@@ -67,6 +92,11 @@
 
 <style>
   .topbar { display: flex; align-items: center; gap: 10px; height: 40px; flex: none; padding: 0 6px 0 20px; }
+  .topbar.rail-hidden { padding-left: 8px; }
+  .tb-left { display: flex; align-items: center; gap: 2px; flex: none;
+    animation: enter var(--dur-base) var(--ease-page); }
+  .tb-left button { -webkit-app-region: no-drag; }
+  @media (prefers-reduced-motion: reduce) { .tb-left { animation: none; } }
   .topbar-title { font-size: 13px; font-weight: 600; color: var(--fg-2); letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .topbar-r { margin-left: auto; display: flex; align-items: center; gap: 2px; flex: none; }
   .topbar-r .winctl { margin-left: 6px; }

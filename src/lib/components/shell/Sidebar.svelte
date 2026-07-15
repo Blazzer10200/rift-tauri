@@ -76,8 +76,9 @@
   }
   function moveResize(e: PointerEvent) {
     if (!shell.resizing) return;
-    // Rail is pinned to the window's left edge, so clientX is the new width.
-    shell.setWidth(e.clientX);
+    // The island's right edge sits 8px inside the rail's right edge, so the
+    // rail width that puts the island edge under the cursor is clientX + 8.
+    shell.setWidth(e.clientX + 8);
   }
   function endResize(e: PointerEvent) {
     if (!shell.resizing) return;
@@ -87,13 +88,28 @@
   }
 </script>
 
+<!-- Floating island: the rail is only a width spacer in the flex row; the
+     island card is absolutely positioned inside it, inset from the window
+     edges. Pinned → rail holds layout width and the island reads as furniture
+     (lift + hairline). Collapsed → rail width 0, island slides out; hovering
+     the topbar trigger peeks it back OVER the content as a true floating
+     layer (shadow), and a click pins it. -->
 <div
   class="side-rail"
+  role="presentation"
   class:collapsed={shell.collapsed}
+  class:peeking={shell.collapsed && shell.peek}
   class:resizing={shell.resizing}
-  style="width:{shell.collapsed ? 52 : shell.width}px"
+  style="width:{shell.collapsed ? 0 : shell.width}px"
+  onmouseenter={() => { if (shell.collapsed && shell.peek) shell.cancelPeekClose(); }}
+  onmouseleave={() => { if (shell.collapsed && shell.peek) shell.schedulePeekClose(); }}
 >
-  <aside class="sidebar" class:home={isNavActive("home")} inert={shell.collapsed}>
+  <aside
+    class="sidebar"
+    class:home={isNavActive("home")}
+    inert={shell.collapsed && !shell.peek}
+    style="width:{shell.width - 16}px"
+  >
     <div class="side-head" data-tauri-drag-region>
       <span class="brand">
         <RiftLogo size={22} class="brand-mk" />
@@ -103,10 +119,14 @@
         class="side-collapse"
         type="button"
         onclick={() => shell.toggleCollapsed()}
-        use:tooltip={"Collapse sidebar"}
-        aria-label="Collapse sidebar"
+        use:tooltip={shell.collapsed ? "Pin sidebar open" : "Collapse sidebar"}
+        aria-label={shell.collapsed ? "Pin sidebar open" : "Collapse sidebar"}
       >
-        <PanelLeftClose size={16} />
+        {#if shell.collapsed}
+          <PanelLeftOpen size={16} />
+        {:else}
+          <PanelLeftClose size={16} />
+        {/if}
       </button>
     </div>
 
@@ -166,55 +186,6 @@
     </nav>
   </aside>
 
-  <!-- Collapsed mini-rail: icon-only column so collapse never costs the core
-       affordances (new chat / search / nav). Always mounted; opacity+inert
-       gated so the width tween and the rail cross-fade read as one motion.
-       The brand slot doubles as the expand control (logo ⇢ open-icon on hover). -->
-  <div class="mini" inert={!shell.collapsed}>
-    <button
-      class="mini-brand"
-      type="button"
-      onclick={() => shell.toggleCollapsed()}
-      use:tooltip={"Open sidebar"}
-      aria-label="Open sidebar"
-    >
-      <span class="mb-logo"><RiftLogo size={22} /></span>
-      <span class="mb-open"><PanelLeftOpen size={16} /></span>
-    </button>
-    <button class="mini-btn nc" type="button" onclick={() => goHome()} use:tooltip={"New chat · Ctrl+N"} aria-label="New chat">
-      <Plus size={17} strokeWidth={2.4} />
-    </button>
-    <button class="mini-btn" type="button" onclick={() => commandPalette.show()} use:tooltip={"Search chats · Ctrl+K"} aria-label="Search chats">
-      <Search size={16} />
-    </button>
-    <span class="mini-spacer" aria-hidden="true"></span>
-    {#each footNav as id (id)}
-      {@const def = WORKSPACES[id]}
-      <button
-        class="mini-btn nav"
-        class:on={isNavActive(id)}
-        type="button"
-        onclick={() => goto(id)}
-        use:tooltip={def.title}
-        aria-label={def.title}
-        aria-current={isNavActive(id) ? "page" : undefined}
-      >
-        <def.icon size={17} />
-      </button>
-    {/each}
-    <button
-      class="mini-btn nav"
-      class:on={isNavActive("settings")}
-      type="button"
-      onclick={() => goto("settings")}
-      use:tooltip={"Settings"}
-      aria-label="Settings"
-      aria-current={isNavActive("settings") ? "page" : undefined}
-    >
-      <WORKSPACES.settings.icon size={17} />
-    </button>
-  </div>
-
   <div
     class="side-resize"
     role="separator"
@@ -228,59 +199,39 @@
 </div>
 
 <style>
-  .side-rail { position: relative; flex: none; min-width: 0; overflow: hidden;
+  /* Rail = layout spacer + positioning context. overflow stays visible so the
+     absolutely-positioned island can float over the content while peeking. */
+  .side-rail { position: relative; z-index: 30; flex: none; min-width: 0;
     transition: width 0.36s var(--ease-page); }
   .side-rail.resizing, .side-rail.resizing .sidebar { transition: none; }
-  .side-rail.collapsed .sidebar { transform: translateX(-18px); opacity: 0; pointer-events: none; }
+  .side-rail.collapsed .sidebar { transform: translateX(-16px); opacity: 0; pointer-events: none; }
+  /* Peek: same island, now a genuinely floating layer → it earns a shadow.
+     Starts BELOW the topbar so the trigger cluster stays visible and hoverable
+     (island covering the trigger would flicker the hover state). */
+  .side-rail.peeking .sidebar { transform: none; opacity: 1; pointer-events: auto;
+    top: 44px;
+    box-shadow: var(--shadow-float); }
   .side-rail.collapsed .side-resize { display: none; }
 
-  /* ── collapsed mini-rail ── an icon column that fades in as the full rail
-     fades out; slight delay so the two never overlap mid-tween. */
-  .mini { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; gap: 5px;
-    padding: 2px 0 10px; box-sizing: border-box;
-    background: linear-gradient(180deg, color-mix(in oklab, var(--fg) 3.6%, var(--bg)), color-mix(in oklab, var(--fg) 1.6%, var(--bg)) 260px);
-    opacity: 0; pointer-events: none; transform: translateX(-8px);
-    transition: opacity var(--dur-base) var(--ease-page), transform var(--dur-base) var(--ease-page); }
-  .mini::after { content: ""; position: absolute; top: 40px; right: 0; bottom: 0; width: 1px; background: var(--border); pointer-events: none; }
-  .side-rail.collapsed .mini { opacity: 1; pointer-events: auto; transform: none; transition-delay: 0.1s; }
-  .mini button { -webkit-app-region: no-drag; }
-
-  .mini-brand { position: relative; width: 36px; height: 36px; margin-bottom: 6px; display: grid; place-items: center; border-radius: 9px; flex: none;
-    transition: background var(--dur-fast); }
-  .mini-brand .mb-logo, .mini-brand .mb-open { grid-area: 1 / 1; display: grid; place-items: center; transition: opacity var(--dur-fast); }
-  .mini-brand :global(.mb-logo svg) { border-radius: 7px; display: block; }
-  .mini-brand .mb-open { opacity: 0; color: var(--fg-2); }
-  .mini-brand:hover { background: var(--surface-hover); }
-  .mini-brand:hover .mb-logo { opacity: 0; }
-  .mini-brand:hover .mb-open { opacity: 1; }
-
-  .mini-btn { width: 36px; height: 36px; flex: none; display: grid; place-items: center; border-radius: 9px;
-    color: var(--fg-muted); transition: background var(--dur-fast), color var(--dur-fast); }
-  .mini-btn:hover { background: var(--surface-hover); color: var(--fg); }
-  .mini-btn:active { transform: translateY(1px); }
-  .mini-btn.nc { color: var(--accent); background: color-mix(in oklab, var(--accent) 10%, transparent);
-    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 24%, transparent); }
-  .mini-btn.nc:hover { background: color-mix(in oklab, var(--accent) 18%, transparent); }
-  .mini-btn.nav.on { color: var(--accent); background: color-mix(in oklab, var(--fg) 8%, transparent); }
-  .mini-spacer { flex: 1; }
-  @media (prefers-reduced-motion: reduce) { .mini { transition: none; } }
-
-  /* Handle starts below the top strip so the strip stays fully draggable. */
-  .side-resize { position: absolute; top: 40px; right: 0; width: 8px; height: calc(100% - 40px); z-index: 6; cursor: col-resize; -webkit-app-region: no-drag; }
-  .side-resize::after { content: ""; position: absolute; top: 0; right: 0; width: 2px; height: 100%; background: transparent; transition: background var(--dur-fast); }
+  /* Handle rides the island's right edge (8px inside the rail). */
+  .side-resize { position: absolute; top: 48px; right: 4px; width: 8px; height: calc(100% - 64px); z-index: 6; cursor: col-resize; -webkit-app-region: no-drag; }
+  .side-resize::after { content: ""; position: absolute; top: 0; right: 3px; width: 2px; height: 100%; border-radius: 2px; background: transparent; transition: background var(--dur-fast); }
   .side-resize:hover::after, .side-rail.resizing .side-resize::after { background: var(--accent); }
 
-  .sidebar { position: relative; width: 100%; height: 100%; flex: none; display: flex; flex-direction: column; gap: 4px; min-height: 0;
+  /* The island card — inset from the window edges, rounded, hairline-bordered.
+     Pinned it reads as furniture (lift, no shadow); .peeking above adds the
+     float shadow when it truly hovers over content. */
+  .sidebar { position: absolute; top: 8px; bottom: 8px; left: 8px;
+    display: flex; flex-direction: column; gap: 4px; min-height: 0;
     padding: 0 10px 10px;
-    background: linear-gradient(180deg, color-mix(in oklab, var(--fg) 3.6%, var(--bg)), color-mix(in oklab, var(--fg) 1.6%, var(--bg)) 260px);
-    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--fg) 4%, transparent);
-    box-sizing: border-box; transition: transform 0.36s var(--ease-page), opacity var(--dur-base) var(--ease-page); }
-  /* Divider starts BELOW the 40px top strip so the sidebar head + topbar read
-     as one continuous drag bar across the window. */
-  .sidebar::after { content: ""; position: absolute; top: 40px; right: 0; bottom: 0; width: 1px; background: var(--border); pointer-events: none; }
+    border-radius: 14px;
+    border: 1px solid color-mix(in oklab, var(--border) 92%, transparent);
+    background: linear-gradient(180deg, color-mix(in oklab, var(--fg) 4%, var(--bg)), color-mix(in oklab, var(--fg) 1.8%, var(--bg)) 280px);
+    overflow: hidden;
+    box-sizing: border-box;
+    transition: transform 0.36s var(--ease-page), top 0.36s var(--ease-page), opacity var(--dur-base) var(--ease-page), box-shadow var(--dur-base) var(--ease-page); }
   .sidebar.home { background: color-mix(in oklab, var(--bg) 72%, transparent);
     backdrop-filter: blur(18px) saturate(1.1); -webkit-backdrop-filter: blur(18px) saturate(1.1); }
-  .sidebar.home::after { background: color-mix(in oklab, var(--border) 70%, transparent); }
   .sidebar button { -webkit-app-region: no-drag; }
 
   .side-head { display: flex; align-items: center; justify-content: space-between; height: 40px; margin-bottom: 8px; padding: 0 6px 0 8px; flex: none; -webkit-app-region: drag; }

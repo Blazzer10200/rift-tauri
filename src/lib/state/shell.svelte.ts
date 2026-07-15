@@ -29,6 +29,11 @@ function clampW(w: number): number {
 class ShellState {
   collapsed = $state(false);
   width = $state(DEFAULT_W);
+  /** Transient hover-peek: while collapsed, the island floats over the content
+   *  as long as the cursor is on the topbar trigger or the island itself.
+   *  Never persisted — a pin (toggleCollapsed) always clears it. */
+  peek = $state(false);
+  private peekTimer: ReturnType<typeof setTimeout> | null = null;
   /** Live during a drag on the rail's resize handle — suppresses transitions. */
   resizing = $state(false);
   /** Pinned conversation ids — frontend-only (the backend meta has no pin). */
@@ -106,6 +111,7 @@ class ShellState {
 
   toggleCollapsed() {
     this.collapsed = !this.collapsed;
+    this.endPeek();
     // A manual toggle while narrow becomes the user's new intent: clear the
     // auto-flag so a later widen doesn't override what they just chose.
     this.autoCollapsed = false;
@@ -113,6 +119,36 @@ class ShellState {
     if (typeof window !== "undefined") {
       localStorage.setItem(COLLAPSE_KEY, this.collapsed ? "1" : "0");
     }
+  }
+
+  /** Open the hover-peek island (collapsed only). Cancels a pending close so
+   *  moving trigger → island doesn't flicker. */
+  beginPeek() {
+    if (!this.collapsed) return;
+    this.cancelPeekClose();
+    this.peek = true;
+  }
+
+  /** Schedule the peek to retract — the grace delay covers the cursor's hop
+   *  from the topbar trigger down onto the island. */
+  schedulePeekClose(delayMs = 260) {
+    this.cancelPeekClose();
+    this.peekTimer = setTimeout(() => {
+      this.peek = false;
+      this.peekTimer = null;
+    }, delayMs);
+  }
+
+  cancelPeekClose() {
+    if (this.peekTimer) {
+      clearTimeout(this.peekTimer);
+      this.peekTimer = null;
+    }
+  }
+
+  private endPeek() {
+    this.cancelPeekClose();
+    this.peek = false;
   }
 
   /** Drive auto-collapse from the live window width. Call on resize + once at
@@ -124,10 +160,12 @@ class ShellState {
       this.userCollapsed = false;
       this.autoCollapsed = true;
       this.collapsed = true;
+      this.endPeek();
     } else if (winWidth >= NARROW_REOPEN_W && this.autoCollapsed) {
       // Widening past the reopen mark: restore the rail we auto-hid.
       this.autoCollapsed = false;
       this.collapsed = this.userCollapsed;
+      this.endPeek();
     }
   }
 

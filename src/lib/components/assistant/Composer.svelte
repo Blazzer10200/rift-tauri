@@ -818,8 +818,8 @@
   // hit Enter without an extra click.
   let micBusy = $state(false);
   // Auto-stop countdown — only for the pane that owns the active dictation.
-  const silenceCountdown = $derived(
-    stt.targetTabId === tabId ? stt.silenceRemaining : null,
+  const silenceFrac = $derived(
+    stt.targetTabId === tabId ? stt.silenceFrac : null,
   );
   // In-flight spoken words for THIS pane — rendered as a dim ghost tail after
   // the solid draft; they "turn white" when the final transcript commits.
@@ -1451,12 +1451,19 @@
             {:else}
               <Mic size={15} />
             {/if}
+            {#if stt.recording && silenceFrac !== null}
+              <!-- Auto-stop warning: a depleting ring hugging the button.
+                   Drains over the final seconds of silence; speech refills
+                   (frac → null) and it vanishes. No layout shift. -->
+              <svg class="mic-ring" viewBox="0 0 38 36" aria-hidden="true">
+                <rect
+                  x="1.25" y="1.25" width="35.5" height="33.5" rx="10"
+                  pathLength="100"
+                  style="stroke-dashoffset: {100 - Math.max(0, Math.min(1, silenceFrac)) * 100}"
+                />
+              </svg>
+            {/if}
           </button>
-          {#if stt.recording && silenceCountdown !== null}
-            <span class="mic-countdown" aria-hidden="true" use:tooltip={"Auto-stop on silence"}>
-              {silenceCountdown}s
-            </span>
-          {/if}
           {/if}
           {#if hasDraft}
           <button
@@ -1922,13 +1929,15 @@
   .cbtn.cperm.tone-info:hover:not(:disabled) { background: var(--info-soft); color: var(--info); }
   .cbtn.cperm.open :global(.cbtn-chev) { transform: rotate(180deg); }
 
-  /* Mic — recording / transcribing states inherit .cbtn.ic base + override. */
+  /* Mic — recording / transcribing states inherit .cbtn.ic base + override.
+     Recording stays QUIET: soft danger tint + the live waveform is the only
+     motion. The waveform already says "hearing you" — no halo pulse. */
+  .micbtn { position: relative; }
   .micbtn.recording {
-    background: var(--danger);
-    color: oklch(0.98 0.01 22);
-    border-color: var(--danger);
+    background: var(--danger-soft);
+    color: var(--danger);
+    border-color: color-mix(in oklab, var(--danger) 40%, var(--border));
     opacity: 1;
-    animation: mic-pulse 1.1s ease-in-out infinite;
   }
   .micbtn.transcribing {
     color: var(--accent);
@@ -1942,16 +1951,12 @@
   }
   :global(.mic-spin) { animation: mic-spin 0.9s linear infinite; }
   @keyframes mic-spin { to { transform: rotate(360deg); } }
-  @keyframes mic-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--danger) 45%, transparent); }
-    50%      { box-shadow: 0 0 0 6px transparent; }
-  }
   /* Live recording waveform — 5 bars driven by real mic amplitude. `--lvl`
      (0..1) comes from stt.level (Whisper RMS event / web_speech AnalyserNode).
      Per-bar weights shape a center-tall waveform; each bar's height = a floor
      plus the level scaled by its weight, so the strip visibly reacts to voice.
-     The .recording state on .micbtn paints the bg red + white bars via
-     currentColor. */
+     The .recording state on .micbtn paints danger-tinted bars via
+     currentColor on the soft fill. */
   .mic-wave {
     display: inline-flex; align-items: center; gap: 1.5px;
     height: 13px;
@@ -1983,25 +1988,29 @@
     0%, 100% { height: 22%; }
     50%      { height: 38%; }
   }
-  /* Auto-stop countdown chip — amber "stopping soon" cue beside the mic. */
-  .mic-countdown {
-    margin-left: 2px;
-    padding: 1px 6px;
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 1;
-    font-variant-numeric: tabular-nums;
-    color: var(--warn);
-    background: var(--warn-soft);
-    border-radius: 999px;
-    animation: mic-cd-pulse 1s ease-in-out infinite;
+  /* Auto-stop warning — an amber ring hugging the mic button that drains over
+     the final seconds of silence (stt.silenceFrac 1→0). Speech refills it
+     (frac → null, ring unmounts). Stroke-dashoffset transitions between the
+     store's 250ms ticks so the drain reads as continuous. */
+  .mic-ring {
+    position: absolute;
+    inset: -3px;
+    width: calc(100% + 6px); height: calc(100% + 6px);
+    pointer-events: none;
+    overflow: visible;
   }
-  @keyframes mic-cd-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+  .mic-ring rect {
+    fill: none;
+    stroke: var(--warn);
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-dasharray: 100;
+    transition: stroke-dashoffset 260ms linear;
+  }
   @media (prefers-reduced-motion: reduce) {
     .mic-wave span { transition: none; }
     .mic-wave.silent span { animation: none; height: 30%; }
-    .micbtn.recording { animation: none; }
-    .mic-countdown { animation: none; }
+    .mic-ring rect { transition: none; }
     :global(.mic-spin) { animation: none; }
   }
 

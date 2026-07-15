@@ -256,7 +256,7 @@
     <!-- Full-window strip ABOVE the body: keeps the sidebar head + topbar
          aligned as one continuous top band even while a banner shows. -->
     <UpdateBanner />
-    <div class="app-body">
+    <div class="app-body" class:rail-collapsed={shell.collapsed}>
       <Sidebar />
       <div class="main">
         <Topbar />
@@ -315,13 +315,25 @@
     position: relative;
     z-index: 1;
   }
+  /* Main island — the content surface floats on the same canvas as the
+     sidebar island: inset gutters, rounded hairline card, translucent lift so
+     the ambient glow + dotted field still read through it. The topbar rides
+     inside as the island's header. */
   .main {
     flex: 1;
     min-width: 0;
     min-height: 0;
     display: flex;
     flex-direction: column;
+    margin: 8px 8px 8px 0;
+    border-radius: 14px;
+    border: 1px solid color-mix(in oklab, var(--border) 92%, transparent);
+    background: color-mix(in oklab, var(--fg) 2.2%, transparent);
+    overflow: hidden;
+    transition: margin-left 0.36s var(--ease-page);
   }
+  /* Rail collapsed → rail width is 0, so the island keeps its own left gutter. */
+  .app-body.rail-collapsed .main { margin-left: 8px; }
   .workspace {
     flex: 1;
     min-height: 0;

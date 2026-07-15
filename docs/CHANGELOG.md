@@ -2,21 +2,16 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — Composer & home revamp (Claude-Desktop-inspired)
+## v0.107.0 — Floating islands
 
-- **The composer is a clean three-layer stack.** Workspace chips (folder · branch) float above a standalone input well; the controls sit on a flat quiet row below it. The old everything-in-one-box bar is gone.
-- **The home screen is a launcher.** Idle home shows the greeting, compact recent-chat rows, and a pure input — no toolbar, no clutter. The moment you click in (or start dictation), the welcome drifts away and the composer glides down to its working position, assembling its controls mid-flight. Leave it empty and everything floats back.
-- **Menus are professional-grade dense.** The model picker and permission menu share one flat panel style: one-line rows, plain hotkey digits, tooltips instead of inline blurbs. Effort is now a Faster↔Smarter slider — a groove with a light knob, one stop per real effort level. Explanations rewritten in plain language with a ? for details.
-- **Quieter signals.** Permission tone lives on the icon (Bypass stays amber — it should be loud), chevrons appear on hover, the brain glyph and separator dots are gone, and the idle input rotates one quiet hint at a time instead of a shortcut list.
-- **"Claude can make mistakes" moved to the status bar** — ambient info in the ambient bar, not under every composer.
+- **The whole shell is floating islands now.** The sidebar and the main content are rounded, hairline-bordered cards sitting on a quiet canvas — Claude-Desktop-style — instead of edge-to-edge panels welded together.
+- **Collapsing the sidebar melts it away completely** (no more skinny icon rail). A small cluster appears top-left: open, new chat, search. **Hover the panel glyph to peek the sidebar** — it floats in over your content without shifting anything; click to pin it back in place.
+- **Dictation is one calm signal.** While recording, the mic is a soft red tile with a live waveform — the only thing that moves. The pulsing halo is gone, and the flashing auto-stop countdown pill is replaced by a thin amber ring that quietly drains around the button in the final seconds of silence (speech refills it).
+- **The composer is a clean three-layer stack.** Workspace chips float above a standalone input well; controls sit on a flat quiet row below. The old everything-in-one-box bar is gone.
+- **The home screen is a launcher.** Idle home shows the greeting, compact recent-chat rows, and a pure input. Click in (or start dictating) and the welcome drifts away while the composer glides down to its working position; leave it empty and everything floats back.
+- **Menus are professional-grade dense.** Model picker + permission menu share one flat panel style: one-line rows, plain hotkey digits, tooltips instead of blurbs. Effort is a Faster↔Smarter slider. Permission tone lives on the icon (Bypass stays amber — it should be loud), and the idle input rotates one quiet hint at a time.
+- **"Claude can make mistakes" moved to the status bar** — ambient info in the ambient bar.
 - Fast mode's pay-per-use disclosure, effort mechanics, keyboard navigation, and all model/effort wiring are unchanged.
-
-## v0.106.1 — Fast lane, honestly priced
-
-- **Fast mode for Opus — with its price tag on.** A new toggle in the model picker (Opus rows only) runs Opus with noticeably quicker output — same model, same quality tier. **Important: fast mode is pay-per-use — it draws from your usage credits, not your plan limits.** The toggle says so in the row, turns amber (not green) when on, wears a "pay-per-use" tag, and pops a one-time warning when you enable it. Turns that actually ran fast get a ⚡ "fast" chip. Needs Claude CLI 2.1.209+. (v0.106.0 shipped this toggle without the billing disclosure — that gap is what this release fixes.)
-- **Switching model or permission mode mid-chat is now instant.** Rift pushes the change to the already-running Claude process instead of restarting it — a model switch that used to cost ~1.5s of respawn now takes effect immediately. (Switching between Ask-style and Bypass-style permission modes still restarts — that change genuinely needs different launch flags.)
-- **The context gauge now corrects itself from real data.** After each reply, Rift reads the context window the CLI actually ran against and uses that for the gauge — so accounts with a smaller window (e.g. Free plan) see honest numbers without configuring anything.
-- Recommended Claude CLI version raised to 2.1.209 (fast mode + live switching + several upstream stream-json fixes).
 
 ## Known issues
 - **While elevated, dragging files from Explorer into the window doesn't work** (Windows blocks lower→higher integrity drag-drop); the attach button / file picker still works fine.
