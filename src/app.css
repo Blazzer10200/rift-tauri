@@ -387,8 +387,23 @@ input.slider-zoom::-webkit-slider-thumb { transform: scale(1.35); }
   .enter { animation: none; }
 }
 
-/* Branch pill — shared by the Welcome launchpad + Workspace greeting band
-   (was a verbatim duplicate in both). Accent-soft capsule w/ git branch. */
+/* Context chip — quiet workspace/branch/files readout shared by the composer
+   chip row + the Welcome launchpad facts (one chip dialect everywhere). */
+.ctx-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 22px; padding: 0 8px;
+  background: color-mix(in oklch, var(--bg-elev-1) 80%, transparent);
+  border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+  border-radius: 6px;
+  color: var(--fg-muted);
+  font-size: 11px; line-height: 1;
+  min-width: 0;
+}
+.ctx-chip svg { color: var(--fg-faint); flex: none; }
+.ctx-chip .cc-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
+
+/* Branch pill — Workspace greeting band capsule (Welcome now uses .ctx-chip;
+   was a verbatim duplicate in both). Accent-soft capsule w/ git branch. */
 .branch-pill {
   display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px;
   border-radius: 999px; background: var(--accent-soft); color: var(--accent);

@@ -5,10 +5,10 @@
   // ←/→ effort nudges); this child renders, handles clicks, and owns the
   // pointer-drag slider. Derives re-compute here from the shared modelMatrix
   // + assistant store — same pure helpers the parent uses, so they can't drift.
-  import { Check, ChevronRight, Layers, Plus, Zap } from "lucide-svelte";
+  import { Check, ChevronRight, HelpCircle, Plus, Zap } from "lucide-svelte";
   import { tick } from "svelte";
   import { assistant } from "../../../state/assistant.svelte";
-  import { fastEligible, modelFamily as modelFamilyOf } from "../../../state/assistant/helpers";
+  import { fastEligible } from "../../../state/assistant/helpers";
   import { usage, limitZone, type ScopedLimit } from "../../../state/usage.svelte";
   import { portal } from "$lib/actions/portal";
   import { tooltip } from "$lib/actions/tooltip";
@@ -87,23 +87,27 @@
   const dialApplies = $derived(effortStops.length > 0); // a model with effort
   const effortIdx = $derived(dialIdxFor(effortStops, assistant.thinkingEnabled, assistant.thinkingEffort));
   const currentEffort = $derived(effortStops[effortIdx] ?? effortStops[0]);
-  const stops = $derived(effortStops.length);
   function setEffortByIdx(i: number) {
     const s = effortStops[clampEffortIdx(effortStops, i)];
     if (!s) return;
     if (s.effort === null) assistant.setThinkingDial(false);
     else assistant.setThinkingDial(true, s.effort);
   }
-  // Plain-language summary of what the current model + rung actually does — so
-  // users aren't guessing what a mode gets them into. Fable is special-cased:
-  // its thinking is ALWAYS ON server-side (an explicit disable 400s), so no rung
-  // "replies immediately" there — effort only sets the depth.
+  // Plain-language caption per rung — short, concrete, no marketing voice.
+  // Fable is special-cased: its thinking is ALWAYS ON server-side (an explicit
+  // disable 400s), so no rung "responds immediately" there.
+  const CAPTIONS: Record<string, string> = {
+    low: "Fastest responses with minimal reasoning. Best for quick questions and small edits.",
+    medium: "Balanced speed and reasoning. The recommended default for everyday work.",
+    high: "Reasons longer before replying. For complex work where quality matters more than speed.",
+    xhigh: "Maximum reasoning depth with autonomous workflows. Slowest and most thorough.",
+  };
   const modelCaption = $derived.by(() => {
     const m = currentModel;
     if (!m) return "";
-    if (!m.effort) return `${m.label} ${m.version} answers right away — it doesn't use extended thinking.`;
-    if (m.id === "claude-fable-5") return `Fable reasons on every reply — effort sets how deep it goes. Currently ${currentEffort.label}.`;
-    return currentEffort.hint;
+    if (!m.effort) return `${m.label} ${m.version} responds immediately — it doesn't use extended reasoning.`;
+    if (m.id === "claude-fable-5") return `Fable always reasons before replying — higher effort reasons more deeply. Currently ${currentEffort.label}.`;
+    return CAPTIONS[currentEffort.id] ?? "";
   });
   // Live per-model weekly limit (usage endpoint `limits[]`, model-scoped rows
   // only). Matched by display-name substring — the endpoint names buckets after
@@ -143,36 +147,33 @@
 >
   {#snippet modelRow(m: ModelOpt)}
     {@const sel = m.id === assistant.effectiveModel}
-    {@const Icon = m.icon}
     {@const lim = modelLimitFor(m)}
+    <!-- Dense one-line row (Claude-Desktop density): name + inline tags left,
+         meta + ✓/hotkey right. The blurb/tagline lives in the tooltip. -->
     <button
       type="button"
       role="menuitemradio"
       aria-checked={sel}
-      class="pop-item rich model-row"
+      class="pop-item model-row"
       class:sel
       class:active={MODEL_OPTIONS[settingsIdx]?.id === m.id}
       class:limited={m.limited}
-      use:tooltip={m.tagline}
+      use:tooltip={`${m.tagline} — ${m.blurb}`}
       onmousedown={(e) => { e.preventDefault(); onPickModel(m); }}
     >
-      <span class="pi-ic" data-family={modelFamilyOf(m.id)}><Icon size={15} /></span>
-      <span class="pi-text">
-        <span class="pi-name">
-          <span class="model-name">{m.label} {m.version}</span>
-          {#if m.id === assistant.sessionPinnedModel && assistant.sessionModelDiverged}<span class="pi-tag session">this chat</span>
-          {:else if m.limited}<span class="pi-tag accent">Limited</span>
-          {:else if m.suffix}<span class="pi-tag">{modelWindowSuffix(m.id, assistant.planCap)}</span>{/if}
-          {#if lim}<span
-            class="pi-usage zone-{limitZone(lim.percent, lim.severity)}"
-            use:tooltip={`Your weekly ${m.label} limit — ${Math.round(lim.percent)}% used${lim.isActive ? " · in use now" : ""}`}
-          >{Math.round(lim.percent)}%</span>{/if}
-        </span>
-        <span class="pi-sub">{m.blurb}</span>
+      <span class="pi-name">
+        <span class="model-name">{m.label} {m.version}</span>
+        {#if m.id === assistant.sessionPinnedModel && assistant.sessionModelDiverged}<span class="pi-tag session">this chat</span>
+        {:else if m.limited}<span class="pi-tag accent">Limited</span>
+        {:else if m.suffix}<span class="pi-tag">{modelWindowSuffix(m.id, assistant.planCap)}</span>{/if}
+        {#if lim}<span
+          class="pi-usage zone-{limitZone(lim.percent, lim.severity)}"
+          use:tooltip={`Your weekly ${m.label} limit — ${Math.round(lim.percent)}% used${lim.isActive ? " · in use now" : ""}`}
+        >{Math.round(lim.percent)}%</span>{/if}
       </span>
       <span class="model-trail">
         {#if sel}
-          <Check size={15} class="pop-ck" />
+          <Check size={14} class="pop-ck" />
         {:else}
           <kbd class="model-num">{modelShortcut(m.id)}</kbd>
         {/if}
@@ -194,21 +195,17 @@
     >
       <button
         type="button"
-        class="pop-item rich more-row"
+        class="pop-item more-row"
         class:expanded={legacyOpen}
         class:sel={activeIsLegacy}
         aria-expanded={legacyOpen}
         onmousedown={(e) => { e.preventDefault(); legacyPinned = !legacyOpen; }}
         use:tooltip={"Previous-generation models"}
       >
-        <span class="pi-ic more-ic"><Layers size={14} /></span>
-        <span class="pi-text">
-          <span class="pi-name"><span class="model-name">More models</span>
-            {#if activeIsLegacy}<span class="pi-tag accent">Active</span>{/if}
-          </span>
-          <span class="pi-sub">Previous generations</span>
+        <span class="pi-name"><span class="model-name more-name">More models</span>
+          {#if activeIsLegacy}<span class="pi-tag accent">Active</span>{/if}
         </span>
-        <ChevronRight size={15} class="more-chev" />
+        <ChevronRight size={14} class="more-chev" />
       </button>
       {#if legacyOpen}
         <div class="legacy-flyout">
@@ -253,7 +250,7 @@
       use:tooltip={"Fast mode — quicker Opus output, billed from your usage credits (pay-per-use, NOT your plan limits). Applies from your next message."}
       onmousedown={(e) => { e.preventDefault(); assistant.setFastMode(!assistant.fastMode); }}
     >
-      <span class="pi-ic fast-ic" class:on={assistant.fastMode}><Zap size={15} /></span>
+      <span class="fast-glyph" class:on={assistant.fastMode} aria-hidden="true"><Zap size={13} /></span>
       <span class="pi-text">
         <span class="pi-name"><span class="model-name">Fast mode</span>
           {#if assistant.fastMode}<span class="pi-tag warn-tag">pay-per-use</span>{/if}
@@ -270,39 +267,46 @@
          implied a continuum that doesn't exist; these are four discrete gears.
          Rung 0 replies immediately (thinking off on the wire); higher rungs
          reason before replying at their depth. Every rung is live. -->
+    <!-- Effort — Faster↔Smarter stop-rail (Claude-Desktop flow): N discrete
+         stops on a track, active = accent thumb, current label in the head.
+         Same DIAL_STOPS mechanics: click a stop / ←→ arrows; nothing continuous. -->
     <div class="effort-head">
       <span class="effort-head-k">Effort</span>
-      {#if currentModel?.id === "claude-fable-5"}<span class="effort-head-note">always reasons — effort sets depth</span>
-      {:else if effortIdx === 0}<span class="effort-head-note">replies immediately</span>
-      {:else}<span class="effort-head-note">reasons before replying</span>{/if}
+      <span class="effort-head-cur">{currentEffort.label}</span>
+      <span
+        class="effort-help"
+        use:tooltip={currentModel?.id === "claude-fable-5"
+          ? "Fable always reasons before replying — effort sets how deeply."
+          : "Higher effort reasons longer for better answers. Lower effort responds faster."}
+        aria-label="About effort"
+      ><HelpCircle size={12} /></span>
     </div>
     <div
-      class="effort-seg"
+      class="effort-rail"
       class:active={activeKind === "effort"}
       role="radiogroup"
       tabindex="0"
       aria-label="Effort"
       onkeydown={(e) => { if (e.key === 'ArrowRight') { e.preventDefault(); setEffortByIdx(effortIdx + 1); } else if (e.key === 'ArrowLeft') { e.preventDefault(); setEffortByIdx(effortIdx - 1); } }}
-      style="grid-template-columns: repeat({stops}, 1fr);"
     >
-      {#each effortStops as s, i (s.id)}
-        <button
-          type="button"
-          role="radio"
-          aria-checked={i === effortIdx}
-          class="eseg"
-          class:on={i === effortIdx}
-          class:passed={i < effortIdx}
-          class:xhigh={s.id === "xhigh"}
-          use:tooltip={s.hint}
-          onmousedown={(ev) => { ev.preventDefault(); setEffortByIdx(i); }}
-        >
-          <span class="eseg-bars" aria-hidden="true">
-            {#each { length: i + 1 } as _, bi (bi)}<i style="height: {4 + bi * 3}px"></i>{/each}
-          </span>
-          <span class="eseg-label">{s.label}</span>
-        </button>
-      {/each}
+      <span class="er-end">Faster</span>
+      <div class="er-track">
+        {#each effortStops as s, i (s.id)}
+          <button
+            type="button"
+            role="radio"
+            aria-checked={i === effortIdx}
+            aria-label={s.label}
+            class="er-stop"
+            class:on={i === effortIdx}
+            class:passed={i < effortIdx}
+            class:xhigh={s.id === "xhigh"}
+            use:tooltip={`${s.label} — ${s.hint.split(" — ")[1] ?? s.hint}`}
+            onmousedown={(ev) => { ev.preventDefault(); setEffortByIdx(i); }}
+          ><i></i></button>
+        {/each}
+      </div>
+      <span class="er-end">Smarter</span>
     </div>
   {/if}
   <p class="model-caption" class:warn={dialApplies && currentEffort.id === "xhigh"}>{modelCaption}</p>
@@ -314,51 +318,36 @@
      and a Faster↔Smarter effort slider. Right-anchored, content-width. */
   /* Panel — spec `.pop` glass popover (docs/design/rift-redesign.html). The
      compound selector overrides the shared .rift-menu base chrome. */
+  /* Panel — flat professional surface (Claude-Desktop grade): near-solid fill,
+     mild blur, quick pop-in. No radial glow, no per-row stagger theater.
+     LOCKSTEP w/ PermMenu — keep the two recipes identical. */
   :global(.rift-menu.settings-menu) {
     position: fixed;
-    width: 300px; min-width: 280px;
+    width: 296px; min-width: 280px;
     max-height: min(82vh, 580px);
     overflow-y: auto;
     z-index: 9998;
-    padding: 6px; border-radius: 14px;
+    padding: 5px; border-radius: 12px;
     transform-origin: bottom right;
-    background:
-      radial-gradient(130% 70% at 50% -10%,
-        color-mix(in oklab, var(--accent) 6%, transparent), transparent 58%),
-      color-mix(in oklab, var(--bg-elev-2) 58%, transparent);
-    -webkit-backdrop-filter: blur(28px) saturate(1.7);
-    backdrop-filter: blur(28px) saturate(1.7);
-    border: 1px solid color-mix(in oklab, var(--fg) 12%, transparent);
+    background: color-mix(in oklab, var(--bg-elev-2) 94%, transparent);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    backdrop-filter: blur(20px) saturate(1.4);
+    border: 1px solid color-mix(in oklab, var(--fg) 10%, transparent);
     box-shadow:
-      inset 0 1px 0 oklch(1 0 0 / 0.09),
-      0 28px 64px -28px oklch(0 0 0 / 0.72),
+      inset 0 1px 0 oklch(1 0 0 / 0.05),
+      0 20px 48px -20px oklch(0 0 0 / 0.65),
       var(--shadow-lg);
-    animation: pop-in 0.28s var(--ease-page) both;
+    animation: pop-in var(--dur-base) var(--ease-page) both;
   }
   /* pop-in keyframe → app.css (shared). */
-  /* Per-child staggered rise — the list materializes top-to-bottom instead of
-     all at once, giving the open a sense of assembly. Disabled below for
-     reduced-motion. */
-  @keyframes row-rise {
-    from { opacity: 0; transform: translateY(4px); }
-    to { opacity: 1; transform: none; }
-  }
-  :global(.settings-menu > *) { animation: row-rise var(--dur-base) var(--ease-page) both; }
-  :global(.settings-menu > :nth-child(1)) { animation-delay: 0.02s; }
-  :global(.settings-menu > :nth-child(2)) { animation-delay: 0.04s; }
-  :global(.settings-menu > :nth-child(3)) { animation-delay: 0.06s; }
-  :global(.settings-menu > :nth-child(4)) { animation-delay: 0.08s; }
-  :global(.settings-menu > :nth-child(5)) { animation-delay: 0.10s; }
-  :global(.settings-menu > :nth-child(6)) { animation-delay: 0.12s; }
-  :global(.settings-menu > :nth-child(n+7)) { animation-delay: 0.14s; }
   /* One deliberate type scale for the whole panel — every label pulls from
      these so sizes/weights never drift row to row. */
   :global(.rift-menu.settings-menu) {
     --sm-eyebrow: 9.5px;   /* MODEL / EFFORT section heads */
-    --sm-title: 13px;      /* model name, toggle title */
-    --sm-sub: 11px;        /* blurb, toggle description */
+    --sm-title: 12.5px;    /* model name, toggle title */
+    --sm-sub: 11px;        /* fast-row cost line */
     --sm-meta: 10px;       /* context tag */
-    --sm-mono: 9.5px;      /* hotkeys, tick labels */
+    --sm-mono: 10px;       /* hotkey digits */
   }
   /* Section head — uppercase eyebrow, consistent with PermMenu's `.pop-label`. */
   :global(.settings-menu .rift-menu-head) {
@@ -370,9 +359,8 @@
      (desktop-picker parity). The flyout expands in-flow below the trigger with
      an indent rail, so it reads as a nested group, not a second panel. */
   :global(.settings-menu .legacy-zone) { position: relative; }
-  :global(.settings-menu .more-row .more-ic) { color: var(--fg-faint); }
-  :global(.settings-menu .more-row:hover .more-ic),
-  :global(.settings-menu .more-row.expanded .more-ic) { color: var(--fg-muted); }
+  :global(.settings-menu .more-name) { color: var(--fg-muted); font-weight: 500; }
+  :global(.settings-menu .more-row:hover .more-name) { color: var(--fg-2); }
   :global(.settings-menu .more-row .more-chev) {
     flex: none; color: var(--fg-faint);
     transition: transform 0.24s var(--ease-page), color var(--dur-fast);
@@ -396,55 +384,26 @@
   :global(.settings-menu .legacy-flyout .pi-name .model-name) { color: var(--fg-muted); }
   :global(.settings-menu .legacy-flyout .model-row.sel .pi-name .model-name) { color: var(--fg); }
 
-  /* Compact model rows — no icon tile (text-led), tight PermMenu rhythm. */
+  /* Rows — dense one-line text-led (Claude-Desktop density). Blurbs and
+     taglines live in tooltips; the row is name + meta, nothing else. */
   :global(.settings-menu .pop-item) {
-    position: relative; overflow: hidden;
-    display: flex; align-items: center; gap: 10px; width: 100%;
-    padding: 8px 10px; border-radius: 10px; border: 0; background: transparent;
+    position: relative;
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    min-height: 30px; padding: 0 9px; border-radius: 8px; border: 0; background: transparent;
     color: var(--fg-2); cursor: pointer; font: inherit; text-align: left;
-    transition: background var(--dur-fast), transform 0.18s var(--ease-page);
-  }
-  /* Sliding accent left-rail — grows from the row's vertical center on hover /
-     selection, giving each row a tactile "lit" edge instead of a flat fill. */
-  :global(.settings-menu .pop-item)::before {
-    content: ""; position: absolute; left: 0; top: 50%; width: 2.5px; height: 0;
-    border-radius: 0 3px 3px 0; background: var(--accent);
-    transform: translateY(-50%); opacity: 0;
-    transition: height var(--dur-base) var(--ease-page), opacity var(--dur-fast) ease;
+    transition: background var(--dur-fast), color var(--dur-fast);
   }
   :global(.settings-menu .pop-item:hover),
   :global(.settings-menu .pop-item.active) {
-    background: var(--surface-hover); color: var(--fg); transform: translateX(2px);
+    background: var(--surface-hover); color: var(--fg);
   }
-  :global(.settings-menu .pop-item:hover)::before,
-  :global(.settings-menu .pop-item.active)::before { height: 50%; opacity: 0.6; }
-  :global(.settings-menu .pop-item:active) { transform: translateX(2px) scale(0.985); }
-  /* Per-model identity tile — a small accent-tinted glyph that gives each row a
-     visual anchor (matches PermMenu's icon language). Family-tinted so Opus /
-     Sonnet / Haiku read distinct at a glance without shouting. */
-  :global(.settings-menu .pi-ic) {
-    flex: none; width: 27px; height: 27px; display: grid; place-items: center;
-    border-radius: 8px; background: var(--surface); color: var(--fg-muted);
-    border: 1px solid var(--border);
-    transition: transform 0.34s var(--ease-page), background var(--dur-fast),
-                color var(--dur-fast), border-color var(--dur-fast);
-  }
-  :global(.settings-menu .pop-item:hover .pi-ic),
-  :global(.settings-menu .pop-item.active .pi-ic) {
-    transform: scale(1.08) rotate(-3deg); border-color: var(--border-strong); color: var(--fg-2);
-  }
-  /* Selected model — tile lights up with the accent. */
-  :global(.settings-menu .model-row.sel .pi-ic) {
-    background: color-mix(in oklab, var(--accent) 16%, transparent);
-    border-color: color-mix(in oklab, var(--accent) 40%, transparent);
-    color: var(--accent);
-  }
-  :global(.settings-menu .pi-ic[data-family="opus"]) { color: color-mix(in oklab, var(--accent) 80%, var(--fg-muted)); }
-  :global(.settings-menu .model-row.limited .pi-ic) { color: var(--accent); }
+  /* Fast row is the ONE two-line row — its cost disclosure needs the space. */
+  :global(.settings-menu .fast-row) { padding: 6px 9px; }
   :global(.settings-menu .pi-text) { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   :global(.settings-menu .pi-name) {
-    display: flex; align-items: baseline; gap: 8px;
-    font-size: var(--sm-title); font-weight: 600; color: var(--fg-2);
+    flex: 1; min-width: 0;
+    display: flex; align-items: baseline; gap: 7px;
+    font-size: var(--sm-title); font-weight: 500; color: var(--fg-2);
     line-height: 1.2; letter-spacing: -0.005em;
   }
   :global(.settings-menu .pi-name .model-name) { flex: 0 0 auto; }
@@ -519,24 +478,20 @@
      every current blurb on one line, but wrapping guarantees nothing is ever
      clipped mid-word as the row content grows. */
   :global(.settings-menu .pi-sub) {
-    font-size: var(--sm-sub); font-weight: 450; color: var(--fg-faint); line-height: 1.4;
+    font-size: 10.5px; font-weight: 450; color: var(--fg-faint); line-height: 1.35;
     display: -webkit-box; -webkit-box-orient: vertical;
     -webkit-line-clamp: 2; line-clamp: 2;
     overflow: hidden;
   }
   :global(.settings-menu .pop-item:hover .pi-name),
   :global(.settings-menu .pop-item.active .pi-name) { color: var(--fg); }
-  /* selected model — accent-soft slab + full lit rail + checkmark */
-  :global(.settings-menu .model-row.sel) {
-    background:
-      linear-gradient(90deg, color-mix(in oklab, var(--accent) 7%, transparent), transparent 70%),
-      var(--accent-soft);
-  }
+  /* selected model — quiet accent wash + static left rail + checkmark */
+  :global(.settings-menu .model-row.sel) { background: var(--accent-soft); }
   :global(.settings-menu .model-row.sel)::before {
-    height: 62%; opacity: 1;
-    box-shadow: 0 0 10px color-mix(in oklab, var(--accent) 55%, transparent);
+    content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+    width: 2px; height: 60%; border-radius: 0 2px 2px 0; background: var(--accent);
   }
-  :global(.settings-menu .model-row.sel .pi-name) { color: var(--fg); }
+  :global(.settings-menu .model-row.sel .pi-name) { color: var(--fg); font-weight: 600; }
   :global(.settings-menu .model-row.limited .model-name) { color: var(--accent); }
   :global(.settings-menu .pop-ck) {
     flex: none; color: var(--accent);
@@ -550,15 +505,14 @@
   /* Fixed-width trailing slot so the ✓ (selected) and the number badge
      (unselected) occupy identical space — selecting a row never reflows it. */
   :global(.settings-menu .model-trail) {
-    flex: none; display: inline-flex; align-items: center; justify-content: center; width: 20px;
+    flex: none; display: inline-flex; align-items: center; justify-content: center; width: 16px;
   }
+  /* Hotkey digit — plain quiet numeral (Claude style), no box. */
   :global(.settings-menu .model-num) {
     flex: none;
-    font-family: var(--font-mono); font-size: var(--sm-mono); font-weight: 600; line-height: 1;
+    font-family: var(--font-mono); font-size: var(--sm-mono); font-weight: 500; line-height: 1;
     color: var(--fg-faint);
-    background: color-mix(in oklab, var(--fg) 7%, transparent);
-    border: 1px solid color-mix(in oklab, var(--fg) 10%, transparent);
-    border-radius: 5px; padding: 3px 5px;
+    background: transparent; border: 0; padding: 0;
   }
   :global(.settings-menu .model-row:hover .model-num),
   :global(.settings-menu .model-row.active .model-num) { color: var(--fg-muted); }
@@ -574,11 +528,8 @@
     background: color-mix(in oklab, var(--warn) 12%, transparent);
     border: 1px solid color-mix(in oklab, var(--warn) 34%, transparent);
   }
-  :global(.settings-menu .fast-row .fast-ic.on) {
-    background: color-mix(in oklab, var(--warn) 16%, transparent);
-    border-color: color-mix(in oklab, var(--warn) 40%, transparent);
-    color: var(--warn);
-  }
+  :global(.settings-menu .fast-glyph) { flex: none; display: inline-flex; align-self: flex-start; margin-top: 3px; color: var(--fg-faint); }
+  :global(.settings-menu .fast-glyph.on) { color: var(--warn); }
   :global(.settings-menu .fast-switch) {
     flex: none; position: relative;
     width: 30px; height: 17px; border-radius: 999px;
@@ -598,11 +549,12 @@
   }
   :global(.settings-menu .fast-switch.on i) { transform: translateX(13px); background: var(--warn); }
 
-  /* Effort — segmented rung cards (Low→X-High), stops = dialStopsFor(model).
-     One card per CLI flag on a recessed glass rail; the ascending-bars glyph is
-     the depth metaphor (no fake slider continuum). */
+  /* Effort — Faster↔Smarter stop-rail (Claude-Desktop flow). One tick per
+     dialStopsFor rung; the active stop is the accent thumb; the current label
+     rides the head. Discrete gears — clicking a tick / ←→ arrows, nothing
+     continuous. */
   :global(.settings-menu .effort-head) {
-    display: flex; align-items: center; gap: 8px;
+    display: flex; align-items: baseline; gap: 8px;
     padding: 10px 9px 4px;
     color: var(--fg-muted);
   }
@@ -611,77 +563,66 @@
     font-size: var(--sm-eyebrow); font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
     color: var(--fg-faint);
   }
-  /* Latency note, right-aligned — names what the active rung actually does
-     ("replies immediately" / "reasons before replying" / Fable's always-on). */
-  :global(.settings-menu .effort-head .effort-head-note) {
-    margin-left: auto;
-    font-size: 10px; color: var(--fg-faint); font-style: italic; line-height: 1;
+  /* Current rung label — the head names the setting (rail ticks stay bare). */
+  :global(.settings-menu .effort-head .effort-head-cur) {
+    font-size: 11.5px; font-weight: 600; color: var(--fg-2); line-height: 1;
   }
-  :global(.settings-menu .effort-seg) {
-    display: grid; gap: 4px;
-    margin: 2px 8px 0; padding: 4px;
-    border-radius: 12px;
-    background: linear-gradient(180deg,
-      color-mix(in oklab, var(--fg) 3%, transparent),
-      color-mix(in oklab, var(--fg) 6%, transparent));
-    border: 1px solid color-mix(in oklab, var(--fg) 9%, transparent);
-    box-shadow: inset 0 1px 2px oklch(0 0 0 / 0.16);
-    transition: border-color var(--dur-fast) ease;
+  /* Help glyph — hover carries the one-line explanation (Claude-Desktop "?"). */
+  :global(.settings-menu .effort-help) {
+    margin-left: auto; display: inline-flex; align-items: center; align-self: center;
+    color: var(--fg-faint); cursor: default;
+    transition: color var(--dur-fast);
+  }
+  :global(.settings-menu .effort-help:hover) { color: var(--fg-muted); }
+  :global(.settings-menu .effort-rail) {
+    display: flex; align-items: center; gap: 10px;
+    margin: 0 8px 4px; padding: 6px 3px;
+    border-radius: 8px; outline: none;
+    transition: box-shadow var(--dur-fast) ease;
   }
   /* Keyboard cursor parked on the effort row (Composer onKey ↑↓). */
-  :global(.settings-menu .effort-seg.active) {
-    border-color: color-mix(in oklab, var(--accent) 32%, transparent);
+  :global(.settings-menu .effort-rail.active) {
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 32%, transparent);
   }
-  :global(.settings-menu .eseg) {
-    display: flex; flex-direction: column; align-items: center; gap: 6px;
-    padding: 8px 2px 7px; border-radius: 9px;
-    border: 1px solid transparent; background: transparent;
-    color: var(--fg-faint); cursor: pointer; font: inherit;
-    transition: color var(--dur-fast) ease, background var(--dur-fast) ease,
-                border-color var(--dur-fast) ease, transform 200ms var(--ease-page);
+  :global(.settings-menu .er-end) {
+    flex: none; font-size: 10px; color: var(--fg-faint); line-height: 1; user-select: none;
   }
-  :global(.settings-menu .eseg:hover) { color: var(--fg-2); background: var(--surface-hover); }
-  :global(.settings-menu .eseg:active) { transform: scale(0.95); }
-  /* Rungs below the active one read "crossed" — a notch brighter than idle. */
-  :global(.settings-menu .eseg.passed) { color: var(--fg-muted); }
-  :global(.settings-menu .eseg.on) {
-    color: var(--accent);
-    background:
-      radial-gradient(120% 90% at 50% 0%,
-        color-mix(in oklab, var(--accent) 16%, transparent), transparent 72%),
-      color-mix(in oklab, var(--accent) 7%, transparent);
-    border-color: color-mix(in oklab, var(--accent) 32%, transparent);
-    box-shadow: 0 0 12px -2px color-mix(in oklab, var(--accent) 35%, transparent),
-                inset 0 1px 0 oklch(1 0 0 / 0.08);
-    animation: eseg-in var(--dur-base) var(--ease-page);
+  /* Claude-Desktop slider anatomy: a recessed 6px groove, faint dots inside,
+     and a light round knob on the active stop. Still N discrete stops. */
+  :global(.settings-menu .er-track) {
+    position: relative; flex: 1;
+    display: flex; align-items: center; justify-content: space-between;
+    height: 20px; padding: 0 2px;
   }
-  @keyframes eseg-in {
-    from { transform: scale(0.9); }
-    60% { transform: scale(1.04); }
-    to { transform: scale(1); }
+  :global(.settings-menu .er-track)::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 50%;
+    height: 6px; transform: translateY(-50%);
+    background: color-mix(in oklab, var(--fg) 6%, transparent);
+    border: 1px solid color-mix(in oklab, var(--fg) 7%, transparent);
+    border-radius: 999px;
   }
-  /* X-High lit = the hot gear — amped glow flags its cost/autonomy. */
-  :global(.settings-menu .eseg.xhigh.on) {
-    border-color: color-mix(in oklab, var(--accent) 50%, transparent);
-    box-shadow: 0 0 18px -2px color-mix(in oklab, var(--accent) 60%, transparent),
-                inset 0 1px 0 oklch(1 0 0 / 0.12);
+  :global(.settings-menu .er-stop) {
+    position: relative; z-index: 1;
+    width: 16px; height: 20px; padding: 0;
+    display: grid; place-items: center;
+    background: transparent; border: 0; cursor: pointer;
   }
-  /* Ascending signal bars — rung N draws N bars, heights 4→13px. currentColor
-     keys them to the card state (faint idle, accent lit). */
-  :global(.settings-menu .eseg-bars) {
-    display: flex; align-items: flex-end; gap: 2px; height: 13px;
+  :global(.settings-menu .er-stop i) {
+    width: 3.5px; height: 3.5px; border-radius: 50%;
+    background: color-mix(in oklab, var(--fg) 30%, transparent);
+    transition: background var(--dur-fast), width var(--dur-base) var(--ease-page),
+                height var(--dur-base) var(--ease-page), box-shadow var(--dur-fast);
   }
-  :global(.settings-menu .eseg-bars i) {
-    width: 3px; border-radius: 1.5px; background: currentColor; opacity: 0.5;
-    transition: opacity var(--dur-fast) ease;
+  :global(.settings-menu .er-stop:hover i) { background: color-mix(in oklab, var(--fg) 55%, transparent); }
+  :global(.settings-menu .er-stop.on i) {
+    width: 14px; height: 14px;
+    background: var(--fg);
+    box-shadow: 0 1px 4px oklch(0 0 0 / 0.5), inset 0 -1px 0 oklch(0 0 0 / 0.14);
   }
-  :global(.settings-menu .eseg.on .eseg-bars i) {
-    opacity: 1;
-    box-shadow: 0 0 5px color-mix(in oklab, var(--accent) 55%, transparent);
-  }
-  :global(.settings-menu .eseg-label) {
-    font-family: var(--font-mono); font-size: 9px; font-weight: 600;
-    letter-spacing: 0.03em; line-height: 1; white-space: nowrap;
+  /* X-High lit = the hot gear — a whisper of accent flags its cost/autonomy. */
+  :global(.settings-menu .er-stop.xhigh.on i) {
+    box-shadow: 0 1px 4px oklch(0 0 0 / 0.5),
+                0 0 10px color-mix(in oklab, var(--accent) 45%, transparent);
   }
   /* Plain-language "what you're getting" line under the rung cards. Amber on
      the X-High tier to flag its higher cost / autonomous behavior. */
@@ -694,9 +635,7 @@
 
   @media (prefers-reduced-motion: reduce) {
     :global(.settings-menu),
-    :global(.settings-menu > *),
     :global(.settings-menu .pop-ck),
-    :global(.settings-menu .eseg),
-    :global(.settings-menu .eseg-bars i) { animation: none; transition: none; }
+    :global(.settings-menu .er-stop i) { animation: none; transition: none; }
   }
 </style>

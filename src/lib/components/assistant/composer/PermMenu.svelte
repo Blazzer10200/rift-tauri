@@ -66,7 +66,7 @@
   use:portal
   style="top: {permPos.top}px; left: {permPos.left}px;"
 >
-  <div class="pop-label">Permission mode <kbd class="perm-kbd">⇧Tab</kbd></div>
+  <div class="pop-label">Permission mode</div>
   {#each MODE_OPTIONS as m, i (m.id)}
     {@const Icon = m.icon}
     {@const sel = m.id === assistant.permissionMode}
@@ -81,12 +81,9 @@
       use:tooltip={m.hint}
       onmousedown={(ev) => { ev.preventDefault(); onPick(m); }}
     >
-      <span class="pi-ic"><Icon size={15} /></span>
-      <span class="pi-text">
-        <span class="pi-name">{m.label}</span>
-        <span class="pi-sub">{m.hint.split(" — ")[1] ?? m.hint}</span>
-      </span>
-      {#if sel}<Check size={15} class="pop-ck" />{/if}
+      <span class="pi-ic"><Icon size={14} /></span>
+      <span class="pi-name">{m.label}</span>
+      {#if sel}<Check size={14} class="pop-ck" />{/if}
     </button>
   {/each}
 </div>
@@ -96,76 +93,75 @@
      scoped selectors can't be relied on). Visual spec = docs/design/rift-redesign.html
      `.pop` / `.pop-item.rich`. Namespaced under `.perm-menu` to avoid leaking. */
   /* pop-in keyframe → app.css (shared). */
+  /* Panel chrome MIRRORS SettingsMenu (one popover idiom for the whole bar):
+     flat professional surface — near-solid fill, mild blur, quick pop-in.
+     Keep the two recipes in lockstep when either changes. */
   :global(.perm-menu.pop) {
-    position: fixed; z-index: 9998; min-width: 264px; padding: 7px;
-    border-radius: 14px; transform-origin: bottom left;
-    background: color-mix(in oklab, var(--bg-elev-2) 56%, transparent);
-    -webkit-backdrop-filter: blur(26px) saturate(1.6);
-    backdrop-filter: blur(26px) saturate(1.6);
-    border: 1px solid color-mix(in oklab, var(--fg) 12%, transparent);
+    position: fixed; z-index: 9998; min-width: 236px; padding: 5px;
+    border-radius: 12px; transform-origin: bottom left;
+    background: color-mix(in oklab, var(--bg-elev-2) 94%, transparent);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    backdrop-filter: blur(20px) saturate(1.4);
+    border: 1px solid color-mix(in oklab, var(--fg) 10%, transparent);
     box-shadow:
-      inset 0 1px 0 oklch(1 0 0 / 0.08),
-      0 28px 64px -28px oklch(0 0 0 / 0.7),
+      inset 0 1px 0 oklch(1 0 0 / 0.05),
+      0 20px 48px -20px oklch(0 0 0 / 0.65),
       var(--shadow-lg);
     animation: pop-in var(--dur-base) var(--ease-page) both;
   }
   :global(.perm-menu .pop-label) {
     display: flex; align-items: center; gap: 7px;
-    font-size: 10px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase;
-    color: var(--fg-faint); padding: 7px 9px 5px;
+    font-size: 9.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--fg-faint); padding: 9px 9px 6px;
   }
-  :global(.perm-menu .perm-kbd) {
-    font-family: var(--font-mono); font-size: 9.5px; color: var(--fg-muted);
-    background: var(--bg-inset); border: 1px solid var(--border); border-radius: 4px;
-    padding: 1px 5px; text-transform: none; letter-spacing: 0;
-  }
+  /* Rows — dense one-liners (hint lives in the tooltip): tone glyph, label, ✓. */
   :global(.perm-menu .pop-item) {
+    position: relative;
     display: flex; align-items: center; gap: 9px; width: 100%;
-    padding: 0 8px; height: 32px; border-radius: 8px; border: 0; background: transparent;
+    min-height: 30px; padding: 0 9px; border-radius: 8px; border: 0; background: transparent;
     color: var(--fg-2); cursor: pointer; font: inherit; text-align: left;
+    transition: background var(--dur-fast), color var(--dur-fast);
   }
   :global(.perm-menu .pop-item:hover), :global(.perm-menu .pop-item.active) {
     background: var(--surface-hover); color: var(--fg);
   }
-  :global(.perm-menu .pop-item.rich) {
-    height: auto; gap: 11px; padding: 9px 10px; border-radius: 11px;
-    transition: background var(--dur-fast);
-  }
+  /* Tone glyph — small inline icon, no tile box; carries the mode's semantic
+     color (same signal the bar's perm button icon shows). */
   :global(.perm-menu .pi-ic) {
-    flex: none; width: 30px; height: 30px; display: grid; place-items: center;
-    border-radius: 9px; background: var(--surface); color: var(--fg-muted);
-    border: 1px solid var(--border);
-    transition: transform 0.34s var(--ease-page), background var(--dur-fast),
-                color var(--dur-fast), border-color var(--dur-fast);
+    flex: none; display: inline-flex; color: var(--fg-muted);
+    transition: color var(--dur-fast);
   }
-  :global(.perm-menu .pi-text) { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-  :global(.perm-menu .pi-name) { font-size: 13px; font-weight: 600; color: var(--fg-2); line-height: 1.2; }
-  :global(.perm-menu .pi-sub) {
-    font-size: 11.5px; color: var(--fg-faint); line-height: 1.3;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  :global(.perm-menu .pop-item.tone-ok .pi-ic)   { color: var(--ok); }
+  :global(.perm-menu .pop-item.tone-warn .pi-ic) { color: var(--warn); }
+  :global(.perm-menu .pop-item.tone-info .pi-ic) { color: var(--info); }
+  :global(.perm-menu .pi-name) {
+    flex: 1; min-width: 0; font-size: 12.5px; font-weight: 500; color: var(--fg-2);
+    line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  :global(.perm-menu .pop-item.rich:hover .pi-ic) {
-    color: var(--fg-2); border-color: var(--border-strong); transform: scale(1.09) rotate(-3deg);
+  :global(.perm-menu .pop-item:hover .pi-name) { color: var(--fg); }
+  /* Selected — tone-soft wash + static tone rail + ✓ (matches SettingsMenu). */
+  :global(.perm-menu .pop-item.sel)::before {
+    content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+    width: 2px; height: 60%; border-radius: 0 2px 2px 0; background: var(--accent);
   }
-  :global(.perm-menu .pop-item.rich:hover .pi-name) { color: var(--fg); }
+  :global(.perm-menu .pop-item.tone-ok.sel)::before   { background: var(--ok); }
+  :global(.perm-menu .pop-item.tone-warn.sel)::before { background: var(--warn); }
+  :global(.perm-menu .pop-item.tone-info.sel)::before { background: var(--info); }
 
   /* permission tone tinting */
   :global(.perm-menu .pop-item.tone-ok .pi-ic)   { color: var(--ok); }
   :global(.perm-menu .pop-item.tone-warn .pi-ic) { color: var(--warn); }
   :global(.perm-menu .pop-item.tone-info .pi-ic) { color: var(--info); }
   :global(.perm-menu .pop-item.rich.sel) { background: var(--accent-soft); }
-  :global(.perm-menu .pop-item.rich.sel .pi-name) { color: var(--fg); }
+  :global(.perm-menu .pop-item.rich.sel .pi-name) { color: var(--fg); font-weight: 600; }
   :global(.perm-menu .pop-item.tone-ok.sel)   { background: var(--ok-soft); }
-  :global(.perm-menu .pop-item.tone-ok.sel .pi-ic)   { background: color-mix(in oklab, var(--ok) 16%, transparent);   border-color: transparent; }
   :global(.perm-menu .pop-item.tone-warn.sel) { background: var(--warn-soft); }
-  :global(.perm-menu .pop-item.tone-warn.sel .pi-ic) { background: color-mix(in oklab, var(--warn) 16%, transparent); border-color: transparent; }
   :global(.perm-menu .pop-item.tone-info.sel) { background: var(--info-soft); }
-  :global(.perm-menu .pop-item.tone-info.sel .pi-ic) { background: color-mix(in oklab, var(--info) 16%, transparent); border-color: transparent; }
   :global(.perm-menu .pop-ck) { flex: none; margin-left: 2px; color: var(--accent); }
   :global(.perm-menu .pop-item.tone-ok.sel .pop-ck)   { color: var(--ok); }
   :global(.perm-menu .pop-item.tone-warn.sel .pop-ck) { color: var(--warn); }
   :global(.perm-menu .pop-item.tone-info.sel .pop-ck) { color: var(--info); }
   @media (prefers-reduced-motion: reduce) {
-    :global(.perm-menu.pop), :global(.perm-menu .pop-item.rich) { animation: none; }
+    :global(.perm-menu.pop) { animation: none; }
   }
 </style>

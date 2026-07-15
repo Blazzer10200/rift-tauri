@@ -3,6 +3,7 @@
   import { ChevronDown, ChevronUp, Plus, X, MessageSquarePlus, ChevronRight, FolderOpen, HardDrive } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { workspace } from "../../state/workspace.svelte";
+  import { stt } from "../../state/stt.svelte";
   import MessageBubble from "./MessageBubble.svelte";
   import StreamTurn from "./stream/StreamTurn.svelte";
   import PlanHud from "./stream/PlanHud.svelte";
@@ -226,12 +227,83 @@
   let flipFirst: DOMRect | null = null;
   let prevEmpty: boolean | null = null;
   let flipPrevTabId: string | null = null;
+  let welcomeEl = $state<HTMLDivElement | null>(null);
+  let welcomeExitRect: DOMRect | null = null;
 
   function handleSend(text: string) {
-    if (showEmpty && composerSlotEl) flipFirst = composerSlotEl.getBoundingClientRect();
+    if (showEmpty && composerSlotEl) {
+      flipFirst = composerSlotEl.getBoundingClientRect();
+      welcomeExitRect = welcomeEl?.getBoundingClientRect() ?? null;
+    }
     // Sending always re-latches follow — your own message must be on screen.
     stickToBottom = true;
     assistant.send(text, tabId);
+  }
+
+  // ── Engaged posture: the home surface reacts the moment you engage the
+  // composer (focus it, or start dictation) — the welcome drifts away and the
+  // composer FLIPs DOWN to its working position before anything is sent.
+  // Leaving it (blur with an empty draft, no dictation) floats everything
+  // back. Send from the engaged posture is then just a small settle.
+  let engaged = $state(false);
+  const sttHere = $derived(stt.recording && stt.targetTabId === tabId);
+
+  function setEngaged(on: boolean) {
+    if (engaged === on) return;
+    if (!showEmpty) { engaged = on; return; } // no motion outside the hero
+    if (composerSlotEl) flipFirst = composerSlotEl.getBoundingClientRect();
+    if (on) welcomeExitRect = welcomeEl?.getBoundingClientRect() ?? null;
+    engaged = on;
+    runComposerFlip();
+  }
+
+  // Dictation engages even if the click never focused the textarea.
+  $effect(() => { if (sttHere) setEngaged(true); });
+
+  function onHostFocusIn() { setEngaged(true); }
+  function onHostFocusOut() {
+    // rAF: menu clicks bounce focus through <body> for a frame (both bar
+    // popovers refocus the textarea on open); only disengage once focus has
+    // truly left the composer and there's nothing in flight to come back to.
+    requestAnimationFrame(() => {
+      const ae = document.activeElement;
+      if (composerSlotEl?.contains(ae)) return;
+      if ((tab?.draft ?? "").trim().length > 0 || sttHere) return;
+      setEngaged(false);
+    });
+  }
+
+  // Welcome exit — engage + send paths (rect captured right before the state
+  // flip; every other showEmpty flip, e.g. resuming a chat, leaves it null
+  // and exits instantly like before). Pins the block at its exact pre-flip
+  // viewport spot with position:fixed so it leaves the layout flow at once —
+  // the composer FLIP below then measures its true docked target — and
+  // fades/drifts up while the composer glides down past it.
+  function welcomeOut(node: HTMLElement) {
+    const r = welcomeExitRect;
+    welcomeExitRect = null;
+    if (!r || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return { duration: 0 };
+    node.style.position = "fixed";
+    node.style.top = `${r.top}px`;
+    node.style.left = `${r.left}px`;
+    node.style.width = `${r.width}px`;
+    node.style.margin = "0";
+    node.style.pointerEvents = "none";
+    return {
+      duration: 200,
+      css: (t: number) => `opacity: ${t}; transform: translateY(${(1 - t) * -10}px)`,
+    };
+  }
+
+  // Welcome re-entry on disengage — fades back down into place as the
+  // composer floats up to meet it.
+  function welcomeIn(node: HTMLElement) {
+    void node;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return { duration: 0 };
+    return {
+      duration: 220,
+      css: (t: number) => `opacity: ${t}; transform: translateY(${(1 - t) * -10}px)`,
+    };
   }
 
   function runComposerFlip() {
@@ -248,7 +320,7 @@
       host.style.transition = "none";
       host.style.transform = `translateY(${dy}px)`;
       void host.offsetHeight;
-      host.style.transition = "transform 380ms cubic-bezier(0.22, 1, 0.36, 1)";
+      host.style.transition = "transform 460ms cubic-bezier(0.22, 1, 0.36, 1)";
       host.style.transform = "translateY(0)";
       let flipTimer: ReturnType<typeof setTimeout> | undefined;
       const clear = () => {
@@ -257,7 +329,7 @@
         host.style.transition = ""; host.style.transform = "";
       };
       host.addEventListener("transitionend", clear, { once: true });
-      flipTimer = setTimeout(clear, 460);
+      flipTimer = setTimeout(clear, 540);
     });
   }
 
@@ -269,6 +341,9 @@
       flipPrevTabId = tabId;
       prevEmpty = empty;
       flipFirst = null;
+      // Re-derive (not just reset) posture: a tab switch keeps the composer's
+      // focus, so no focusin will re-fire — focus inside = still engaged.
+      engaged = !!(composerSlotEl && composerSlotEl.contains(document.activeElement));
       return;
     }
     const was = prevEmpty;
@@ -507,10 +582,12 @@
          is a persistent node so it FLIPs from center → bottom on the first send
          (mirrors comp `chat.jsx`). Welcome/stream swap inside; alerts +
          composer stay below the content within the same column. -->
-    <div class="csurf-col" class:is-home={showEmpty} class:is-convo={!showEmpty}>
-      {#if showEmpty}
-        <AssistantWelcome {needsAuth} {tabId} />
-      {:else}
+    <div class="csurf-col" class:is-home={showEmpty} class:is-convo={!showEmpty} class:engaged>
+      {#if showEmpty && !engaged}
+        <div class="welcome-wrap" bind:this={welcomeEl} in:welcomeIn out:welcomeOut>
+          <AssistantWelcome {needsAuth} {tabId} />
+        </div>
+      {:else if !showEmpty}
         <div class="stream" bind:this={scrollEl} onscroll={onScroll} onwheel={() => (glideUntil = 0)}>
           <div class="messages" bind:this={messagesEl}>
             {#each messages as m, mi (m.id)}
@@ -596,8 +673,14 @@
         </div>
       {/if}
 
-      <div class="composer-host" class:is-home={showEmpty} bind:this={composerSlotEl}>
-        <Composer {tabId} hero={showEmpty} onsubmit={handleSend} />
+      <div
+        class="composer-host"
+        class:is-home={showEmpty}
+        bind:this={composerSlotEl}
+        onfocusin={onHostFocusIn}
+        onfocusout={onHostFocusOut}
+      >
+        <Composer {tabId} hero={showEmpty && !engaged} onsubmit={handleSend} />
       </div>
     </div>
   {/if}
@@ -923,6 +1006,9 @@
     flex: none;
   }
   .csurf-col.is-home .composer-host { margin-top: 16px; }
+  /* Engaged posture — welcome unmounted, composer sunk to the working edge.
+     The FLIP in setEngaged animates the journey; this is the destination. */
+  .csurf-col.is-home.engaged { justify-content: flex-end; }
 
   .composer-host {
     position: relative;

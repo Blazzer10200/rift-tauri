@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Send, Square, X, Mic, Loader2, Wand2, Paperclip,
-    Sparkles, Eye, ChevronUp, Undo2, Cpu, Brain } from "lucide-svelte";
+    Sparkles, Eye, ChevronUp, Undo2, Cpu, Folder, GitBranch } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { localLlm } from "../../state/localLlm.svelte";
   import { workspace } from "../../state/workspace.svelte";
@@ -83,6 +83,12 @@
   const textAttachments = $derived(tab?.textAttachments ?? []);
   const queue = $derived(tab?.queue ?? []);
   const streaming = $derived(tab?.streaming ?? false);
+  // Context chips (in-chat only) — passive workspace · branch readout above
+  // the well. Hero suppresses them: the welcome card already shows both.
+  const wsFolderName = $derived(assistant.workspace.current?.split(/[\\/]/).filter(Boolean).pop() ?? "");
+  $effect(() => {
+    if (!hero && assistant.workspace.current && assistant.workspaceBranch == null) void assistant.loadWorkspaceBranch();
+  });
   // Per-pane context readout — the bare assistant.ctx* getters delegate to the
   // focused activeTab, so in split-pane both composers showed the focused
   // pane's ctx%. Read this pane's own tab instead.
@@ -146,7 +152,21 @@
   // composer/modelMatrix.ts (C7) — shared with SettingsMenu + PermMenu so the
   // keyboard nav here and the rendered rows there can never disagree.
 
-  // Idle placeholder — static ghost with `/` `@` keycaps (mock `.ph-ghost`).
+  // Idle placeholder — ONE quiet rotating phrase (the old single-line kbd
+  // soup "Ask · / · @ · Ctrl+D" read as a manual page; owner killed it
+  // 2026-07-14). Cycles every 7s through short plain-text hints via the
+  // shared placeholder-fade rise; frozen on the first hint under
+  // reduced-motion.
+  const IDLE_HINTS = $derived.by(() => {
+    const hints = [
+      `Ask ${localLlm.askLabel} anything`,
+      "Type / for a command",
+      "Mention a file with @",
+    ];
+    if (stt.config.enabled) hints.push("Ctrl+D to dictate");
+    return hints;
+  });
+  let hintIdx = $state(0);
 
   function autosize() {
     if (!ta) return;
@@ -371,7 +391,6 @@
   // tier. See modelMatrix DIAL_STOPS for the wire-truth rationale.
   const effortStops = $derived(dialStopsFor(currentModel));
   const dialApplies = $derived(effortStops.length > 0);
-  const thinkingOn = $derived(assistant.thinkingEnabled);
   const effortIdx = $derived(dialIdxFor(effortStops, assistant.thinkingEnabled, assistant.thinkingEffort));
   const currentEffort = $derived(effortStops[effortIdx] ?? effortStops[0]);
   function setEffortByIdx(i: number) {
@@ -808,6 +827,14 @@
   const dictating = $derived(
     stt.targetTabId === tabId && (stt.recording || stt.transcribing),
   );
+  // Rotate the idle hint only while the idle ghost is actually showing.
+  const idleGhost = $derived(!dictating && !hero && draft.length === 0 && !streaming && attachments.length === 0);
+  $effect(() => {
+    if (!idleGhost) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const t = setInterval(() => { hintIdx = (hintIdx + 1) % IDLE_HINTS.length; }, 7000);
+    return () => clearInterval(t);
+  });
   const dictGhost = $derived(dictating ? stt.ghostTail : "");
   $effect(() => {
     const _g = dictGhost;
@@ -1220,8 +1247,22 @@
     {/if}
 
     <div class="composer" class:hero={hero} class:streaming={streaming} class:enchanting={enhancing} data-mode={mode}>
-      <!-- WELL: attachments + input + inline send arrow (Claude-Code style).
-           All chrome (border/glass/focus-ring/streaming edge) lives here now. -->
+      {#if !hero && assistant.workspace.current}
+        <div class="ctx-chips" aria-label="Workspace context">
+          <span class="ctx-chip" use:tooltip={assistant.workspace.current}>
+            <Folder size={11} />
+            <span class="cc-label">{wsFolderName}</span>
+          </span>
+          {#if assistant.workspaceBranch}
+            <span class="ctx-chip" use:tooltip={"Current git branch"}>
+              <GitBranch size={11} />
+              <span class="cc-label">{assistant.workspaceBranch}</span>
+            </span>
+          {/if}
+        </div>
+      {/if}
+      <!-- WELL: attachments + input only. All chrome (border/glass/focus-ring/
+           streaming edge) lives here; controls sit on the flat bar BELOW. -->
       <div class="composer-box" class:multiline={multiline}>
       {#if tab?.promptSuggestion && !hasDraft && !streaming}
         <!-- #87: ghost suggestion from the CLI's --prompt-suggestions — one
@@ -1293,7 +1334,9 @@
         {:else if hero && draft.length === 0 && !streaming && attachments.length === 0}
           <span class="placeholder-ghost static" aria-hidden="true">What are we working on today?</span>
         {:else if draft.length === 0 && !streaming && attachments.length === 0}
-          <span class="placeholder-ghost static" aria-hidden="true">Ask {localLlm.askLabel} · <span class="ph-k">/</span> for commands · <span class="ph-k">@</span> to mention a file{#if stt.config.enabled} · <span class="ph-k">Ctrl+D</span> to dictate{/if}</span>
+          {#key hintIdx}
+            <span class="placeholder-ghost" aria-hidden="true">{IDLE_HINTS[hintIdx % IDLE_HINTS.length]}</span>
+          {/key}
         {:else if streaming && draft.length === 0}
           <span class="placeholder-ghost static" aria-hidden="true"><span class="ph-k">Enter</span> queues for the next turn · <span class="ph-k">/stop</span> halts</span>
         {:else if attachments.length > 0 && draft.length === 0}
@@ -1316,9 +1359,12 @@
         {/if}
       </div>
       </div>
+      </div>
 
-      <!-- Control deck — docked inside the well's bottom edge: perm + tools
-           left, queue pill middle, model pill + ctx ring + send right. -->
+      {#if !hero}
+      <!-- Control deck — flat row below the well: perm + tools left, live
+           pills middle, model + ctx ring + send right. Hidden while the hero
+           idles; it materializes as the composer descends on engagement. -->
       <div class="composer-bar">
         <div class="cbar-l">
           <button
@@ -1348,6 +1394,8 @@
               onRequestClose={() => (permOpen = false)}
             />
           {/if}
+
+          <span class="cbar-sep" aria-hidden="true"></span>
 
           <input
             bind:this={fileInput}
@@ -1496,10 +1544,7 @@
             <span class="model-dot" aria-hidden="true"></span>
             <span class="pill-label">{currentModel ? `${currentModel.label} ${currentModel.version}` : paneEffectiveModel}</span>
             {#if dialApplies}
-              <span class="pill-effort" class:dim={effortIdx === 0}>· {currentEffort?.label}</span>
-            {/if}
-            {#if dialApplies && thinkingOn}
-              <span class="pill-think" aria-hidden="true" use:tooltip={"Reasons before replying at this effort (slower, deeper)"}><Brain size={11} /></span>
+              <span class="pill-effort" class:dim={effortIdx === 0}>{currentEffort?.label}</span>
             {/if}
             {#if dialApplies && currentEffort?.id === "xhigh"}
               <span class="pill-ultra" aria-hidden="true" use:tooltip={"X-High — deepest reasoning + autonomous workflows"}><Sparkles size={11} /></span>
@@ -1561,11 +1606,9 @@
           </button>
         </div>
       </div>
-      </div>
+      {/if}
     </div>
   </div>
-
-  <p class="ai-note" class:hero={hero}>Claude can make mistakes — double-check important work.</p>
 </div>
 
 <style>
@@ -1582,9 +1625,7 @@
      identity lives on the model-card swatch in the picker. */
   .composer-wrap                      { --model-color: var(--accent); }
 
-  /* Sub-composer AI disclaimer — lives inside the wrap so it rides the hero⇄docked FLIP. */
-  .ai-note { margin: 7px 0 0; text-align: center; font-size: 10.5px; line-height: 1; letter-spacing: 0.01em; color: var(--fg-muted); user-select: none; pointer-events: none; }
-  .ai-note.hero { margin-top: 10px; font-size: 11px; }
+  /* AI disclaimer → global StatusBar (ambient info belongs to the ambient bar). */
   .composer-shell { position: relative; z-index: 1; }
   .composer-shell.drag-over .composer-box {
     border-color: color-mix(in oklch, var(--model-color) 70%, transparent);
@@ -1649,10 +1690,8 @@
     backdrop-filter: blur(14px) saturate(135%);
     -webkit-backdrop-filter: blur(14px) saturate(135%);
     border: 1px solid color-mix(in oklch, var(--border) 90%, transparent);
-    border-radius: 14px;
-    box-shadow:
-      0 10px 28px -10px oklch(0 0 0 / 0.45),
-      inset 0 1px 0 color-mix(in oklch, white 4%, transparent);
+    border-radius: 12px;
+    box-shadow: inset 0 1px 0 color-mix(in oklch, white 3%, transparent);
     transition: border-color var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1),
                 box-shadow var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1),
                 transform var(--dur-fast) ease-out;
@@ -1666,17 +1705,15 @@
      stray rounded "overlay" box around the controls. Keep the glow symmetric
      and contained (0 0 16px, no Y-offset) so it traces the well, not the bar. */
   .composer-box:focus-within {
-    border-color: color-mix(in oklch, var(--model-color) 45%, transparent);
+    border-color: color-mix(in oklch, var(--model-color) 38%, var(--border));
     box-shadow:
-      0 0 0 2px color-mix(in oklch, var(--model-color) 13%, transparent),
-      0 0 16px -6px color-mix(in oklch, var(--model-color) 16%, transparent),
-      inset 0 1px 0 color-mix(in oklch, white 6%, transparent);
+      0 0 0 1px color-mix(in oklch, var(--model-color) 10%, transparent),
+      inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
   }
 
   /* Hero mode — home surface. The composer is the centerpiece: a larger,
      more rounded card. */
-  .composer.hero .composer-box { border-radius: 16px; padding: 3px; }
-  .composer.hero .composer-bar { padding: 6px 6px 5px 7px; }
+  .composer.hero .composer-box { border-radius: 14px; padding: 3px; }
   .composer.hero textarea { font-size: 14.5px; line-height: 1.55; padding: 11px 12px 11px 14px; min-height: 30px; letter-spacing: -0.003em; }
   /* Keep the hero placeholder in lockstep with the hero textarea so the ghost
      prompt and the text you type read at the same size. */
@@ -1689,9 +1726,8 @@
   .composer.streaming .composer-box {
     border-color: color-mix(in oklch, var(--model-color) 55%, var(--border));
     box-shadow:
-      0 10px 28px -10px oklch(0 0 0 / 0.45),
-      0 0 20px -4px color-mix(in oklch, var(--model-color) 45%, transparent),
-      0 0 42px -4px color-mix(in oklch, var(--model-color) 26%, transparent),
+      0 0 20px -4px color-mix(in oklch, var(--model-color) 40%, transparent),
+      0 0 42px -4px color-mix(in oklch, var(--model-color) 22%, transparent),
       inset 0 1px 0 color-mix(in oklch, white 4%, transparent);
   }
   .composer.streaming .composer-box::before {
@@ -1752,7 +1788,7 @@
     resize: none;
     width: 100%;
     min-height: 28px; max-height: 340px;
-    padding: 8px 10px 6px;
+    padding: 9px 12px;
     background: transparent;
     border: 0; outline: none;
     color: var(--fg);
@@ -1771,7 +1807,7 @@
      non-rotating contexts (streaming / attachment hints). */
   .placeholder-ghost {
     position: absolute;
-    top: 8px; left: 10px; right: 10px;
+    top: 9px; left: 12px; right: 12px;
     pointer-events: none;
     font-size: var(--fs-md);
     line-height: 1.5;
@@ -1804,23 +1840,24 @@
     border: 0;
   }
 
-  /* ── Control deck — docked INSIDE the well, under the input. A faint
-     hairline separates it from the textarea; everything a turn needs
+  /* ── Control deck — flat transparent row BELOW the well (Claude-Desktop
+     layout): the input reads as one clean object; everything a turn needs
      (perm · attach · dictate · draft tools | queue | model · ctx · send)
-     lives on the one card, so focus/streaming/drag states read on a single
-     object instead of scattered chrome. */
+     sits quietly underneath on the page itself. */
   .composer-bar {
     position: relative;
     z-index: 1;
     display: flex; align-items: center; gap: 3px;
-    margin-top: 3px;
-    padding: 5px 5px 4px 6px;
-    border-top: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
+    margin-top: 6px;
+    padding: 0 2px;
     /* Width-query container for the narrow-pane ladder below. Safe: both
        popovers (PermMenu/SettingsMenu) portal to <body>, so containment
        can't re-anchor them. */
     container-type: inline-size;
+    /* Materialize — the deck rises in as the composer docks (engage/convo). */
+    animation: enter var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1) both;
   }
+  @media (prefers-reduced-motion: reduce) { .composer-bar { animation: none; } }
   /* overflow:hidden is the paint-over stopper: min-width:0 lets the box
      shrink below its nowrap children, which otherwise keep painting PAST
      its edge and over .cbar-r (the split-pane "glyph soup", 2026-07-10). */
@@ -1865,14 +1902,21 @@
   .cbtn.ic:hover:not(:disabled) { color: var(--fg-2); }
   .cbtn.ic.active { background: var(--accent-soft); color: var(--accent); }
   .cbtn.enhance:hover:not(:disabled) { color: var(--accent); }
-  :global(.cbtn .cbtn-chev) { color: var(--fg-faint); transition: color var(--dur-fast), transform var(--dur-fast); }
-  /* Permission button — colored text by posture, no border (flat). */
-  .cbtn.cperm { font-weight: 600; }
-  .cbtn.cperm .perm-label { font-size: 12px; font-weight: 600; line-height: 1; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  /* Chevrons are hover/open affordances, not idle furniture — hidden until
+     the control is intended (mirrored on the model pill below). */
+  :global(.cbtn .cbtn-chev) { color: var(--fg-faint); opacity: 0; transition: color var(--dur-fast), transform var(--dur-fast), opacity var(--dur-fast); }
+  .cbtn:hover :global(.cbtn-chev), .cbtn.open :global(.cbtn-chev) { opacity: 1; }
+  /* Permission button — the TONE lives on the icon; the label stays quiet
+     text. Exception: bypass (warn) keeps the full amber label — guardrails-off
+     must stay loud (DESIGN.md §8 warn family). */
+  .cbtn.cperm { font-weight: 500; color: var(--fg-2); }
+  .cbtn.cperm .perm-label { font-size: 12px; font-weight: 500; line-height: 1; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .cbtn.cperm > :global(svg:first-child) { color: currentColor; flex-shrink: 0; }
-  .cbtn.cperm.tone-ok   { color: var(--ok);   }
-  .cbtn.cperm.tone-warn { color: var(--warn); }
-  .cbtn.cperm.tone-info { color: var(--info); }
+  .cbtn.cperm.tone-ok   > :global(svg:first-child) { color: var(--ok);   }
+  .cbtn.cperm.tone-info > :global(svg:first-child) { color: var(--info); }
+  .cbtn.cperm.tone-warn { color: var(--warn); font-weight: 600; }
+  /* Hairline between the mode control and the draft tools — two families. */
+  .cbar-sep { flex: none; width: 1px; height: 14px; margin: 0 4px; background: color-mix(in oklch, var(--border) 80%, transparent); }
   .cbtn.cperm.tone-ok:hover:not(:disabled)   { background: var(--ok-soft);   color: var(--ok);   }
   .cbtn.cperm.tone-warn:hover:not(:disabled) { background: var(--warn-soft); color: var(--warn); }
   .cbtn.cperm.tone-info:hover:not(:disabled) { background: var(--info-soft); color: var(--info); }
@@ -2010,14 +2054,12 @@
   .send-btn:disabled { cursor: default; opacity: 0.55; }
   .send-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--ring); }
   .send-btn.ready {
-    background: color-mix(in oklch, var(--model-color) 20%, transparent);
-    border-color: color-mix(in oklch, var(--model-color) 45%, transparent);
-    color: var(--model-color);
-    box-shadow: 0 0 14px -5px color-mix(in oklch, var(--model-color) 50%, transparent);
+    background: var(--model-color);
+    border-color: transparent;
+    color: oklch(0.16 0.01 250);
   }
   .send-btn.ready:hover:not(:disabled) {
-    background: color-mix(in oklch, var(--model-color) 30%, transparent);
-    box-shadow: 0 0 18px -4px color-mix(in oklch, var(--model-color) 65%, transparent);
+    filter: brightness(1.08);
     transform: translateY(-1px);
   }
   /* stop → danger while a run is in flight. */
@@ -2036,7 +2078,7 @@
     color: oklch(0.16 0.01 250);
     font-size: 9.5px; font-weight: 700; line-height: 1;
     font-variant-numeric: tabular-nums;
-    box-shadow: 0 0 0 2px var(--bg-inset);
+    box-shadow: 0 0 0 2px var(--bg);
   }
   /* Launch ripple — two concentric rings expand outward on every fire().
      Mounted by {#key fireKey}; self-removed when the animation ends via
@@ -2283,27 +2325,26 @@
   }
   .model-pill.open {
     background: var(--surface-hover);
-    border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
+    border-color: var(--border-strong);
     color: var(--fg);
   }
   .model-pill:hover :global(.pill-chev) { color: var(--fg-muted); }
   /* Current-model label on the pill. */
   .pill-label {
-    font-size: 11px;
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 500;
     line-height: 1;
-    letter-spacing: 0.01em;
-    max-width: 84px;
+    letter-spacing: 0.005em;
+    max-width: 96px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  /* Effort label trails the model name (mock `.pill-effort`). */
+  /* Effort label trails the model name — plain quiet word, no separator dot
+     (the 7px pill gap is the separator). */
   .pill-effort { font-size: 11px; font-weight: 500; color: var(--fg-faint); line-height: 1; white-space: nowrap; }
   /* Low rung (replies immediately) reads quieter than the reasoning rungs. */
   .pill-effort.dim { opacity: 0.72; }
-  /* Reasoning marker — accent brain glyph, present on rungs above Low. */
-  .pill-think { display: inline-grid; place-items: center; color: var(--accent); }
   /* Permission-mode dot — one consistent at-a-glance signal for all five
      modes (the pill's text-tint only covered ask/bypass). Colored per mode:
      ask=accent, edit=ok, plan=blue, auto=accent, bypass=warn. */
@@ -2317,9 +2358,10 @@
   }
   /* Chevron-up caret on the model pill; rotates 180° when its menu opens. */
   :global(.model-pill .pill-chev) {
-    color: var(--fg-faint);
-    transition: color var(--dur-fast) ease-out, transform var(--dur-fast) ease-out;
+    color: var(--fg-faint); opacity: 0;
+    transition: color var(--dur-fast) ease-out, transform var(--dur-fast) ease-out, opacity var(--dur-fast) ease-out;
   }
+  .model-pill:hover :global(.pill-chev), .model-pill.open :global(.pill-chev) { opacity: 1; }
   .model-pill.open :global(.pill-chev) { transform: rotate(180deg); color: var(--fg-muted); }
 
   /* Experimental local-mode pill (cont.127) — accent-tinted so the active
@@ -2341,6 +2383,14 @@
   .local-pill-label {
     font-size: 11px; font-weight: 600; line-height: 1; letter-spacing: 0.01em;
     max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+
+  /* Context chips row — layout only; the chip itself (.ctx-chip/.cc-label)
+     lives in app.css, shared w/ the Welcome launchpad (one chip dialect). */
+  .ctx-chips {
+    display: flex; align-items: center; gap: 4px;
+    margin: 0 2px 6px;
+    min-width: 0;
   }
 
   /* #87: ghost prompt-suggestion chip (CLI --prompt-suggestions). Quiet by

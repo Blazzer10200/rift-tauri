@@ -93,6 +93,8 @@
     </button>
   {/if}
 
+  <span class="sb-note">Claude can make mistakes — double-check important work.</span>
+
   {#if limits.length}
     <span class="sb-usage">
       {#each limits as l (l.t)}
@@ -137,7 +139,11 @@
   .sb-admin:hover { color: var(--warn); }
   .sb-admin :global(svg) { color: var(--warn); }
   .sb-sep { width: 1px; height: 11px; background: var(--border); }
-  .sb-usage { margin-left: auto; display: inline-flex; align-items: center; gap: 16px; position: relative; -webkit-app-region: no-drag; }
+  /* AI disclaimer — moved here from the composer (home revamp): ambient
+     app-level info belongs to the ambient bar. First to shrink when narrow. */
+  .sb-note { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; color: var(--fg-faint); }
+  .sb-usage { display: inline-flex; align-items: center; gap: 16px; position: relative; -webkit-app-region: no-drag; }
   .rl { display: inline-flex; align-items: center; gap: 7px; color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
   .rl-t { color: var(--fg-faint); }
   .rl-bar { width: 46px; height: 4px; border-radius: 999px; background: color-mix(in oklab, var(--fg) 8%, transparent); overflow: hidden; }

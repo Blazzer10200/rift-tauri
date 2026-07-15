@@ -91,6 +91,10 @@
 
   // Warm-home "New to Rift?" collapsible orientation footer (spec NewToRift).
   let newToRiftOpen = $state(false);
+  // Dismissible for good — permanent orientation chrome earns no home space;
+  // the same primer stays on the no-folder cold welcome.
+  let newToRiftHidden = $state(localStorage.getItem("rift.newToRift.hidden") === "1");
+  function hideNewToRift() { localStorage.setItem("rift.newToRift.hidden", "1"); newToRiftHidden = true; }
 
   // "Jump back in" — the 3 most recently active conversations for THIS pane's
   // root (same root-key normalization the sidebar scope filter uses).
@@ -103,7 +107,7 @@
       .filter((c) => rootKey(c.workspaceRoot) === key)
       .slice()
       .sort((a, b) => (b.lastActivityAt ?? b.updatedAt) - (a.lastActivityAt ?? a.updatedAt))
-      .slice(0, 3);
+      .slice(0, 4);
   });
 
 </script>
@@ -133,8 +137,8 @@
            triple-state what the sidebar switcher + status bar already show. -->
       <div class="ctx-row">
         <span class="ctx-facts">
-          {#if branch}<span class="branch-pill"><GitBranch size={11} />{branch}</span>{/if}
-          {#if fileCount > 0}<span class="ctx-files"><b>{fileCount.toLocaleString()}</b> files</span>{/if}
+          {#if branch}<span class="ctx-chip"><GitBranch size={11} /><span class="cc-label">{branch}</span></span>{/if}
+          {#if fileCount > 0}<span class="ctx-chip"><Folder size={11} /><span class="cc-label">{fileCount.toLocaleString()} files</span></span>{/if}
           <span class="ctx-path" use:tooltip={paneRoot ?? ""}>{shortPath(paneRoot!)}</span>
         </span>
         <span class="ctx-actions">
@@ -151,28 +155,32 @@
       {#if resumables.length > 0}
         <div class="resume">
           <div class="wo-label">Jump back in</div>
-          <div class="resume-row">
+          <div class="resume-list">
             {#each resumables as c (c.id)}
               {@const title = c.title ?? "Untitled chat"}
-              <button class="resume-card" type="button" onclick={() => void assistant.openTab(c.id)} use:tooltip={title}>
-                <span class="rc-ic"><MessageSquare size={13} /></span>
-                <span class="rc-body">
-                  <span class="rc-t">{title}</span>
-                  <span class="rc-m">{fmtAgo(c.lastActivityAt ?? c.updatedAt)}</span>
-                </span>
-                <ChevronRight size={14} class="rc-go" />
+              <button class="resume-item" type="button" onclick={() => void assistant.openTab(c.id)} use:tooltip={title}>
+                <MessageSquare size={13} />
+                <span class="ri-t">{title}</span>
+                <span class="ri-m">{fmtAgo(c.lastActivityAt ?? c.updatedAt)}</span>
+                <ChevronRight size={13} class="ri-go" />
               </button>
             {/each}
           </div>
         </div>
       {/if}
 
-      <!-- New to Rift? — quiet, collapsible orientation footer. -->
+      <!-- New to Rift? — quiet, collapsible orientation footer; dismissible. -->
+      {#if !newToRiftHidden}
       <div class="newrift" class:open={newToRiftOpen}>
-        <button class="newrift-toggle" type="button" onclick={() => (newToRiftOpen = !newToRiftOpen)}>
-          <Compass size={13} /> New to Rift? See how it works
-          <ChevronDown size={12} class="nr-chev" />
-        </button>
+        <div class="newrift-head">
+          <button class="newrift-toggle" type="button" onclick={() => (newToRiftOpen = !newToRiftOpen)}>
+            <Compass size={13} /> New to Rift? See how it works
+            <ChevronDown size={12} class="nr-chev" />
+          </button>
+          <button class="newrift-hide" type="button" onclick={hideNewToRift} use:tooltip={"Hide for good — the primer stays on the no-folder welcome"} aria-label="Hide New to Rift">
+            <X size={11} />
+          </button>
+        </div>
         {#if newToRiftOpen}
           <div class="newrift-body">
             <div class="nr-grid">
@@ -187,6 +195,7 @@
           </div>
         {/if}
       </div>
+      {/if}
     </div>
   {:else if !assistant.workspaceReady}
     <!-- Boot hold — the persisted folder is still rehydrating. Render nothing
@@ -389,12 +398,11 @@
 
   /* context row — slim facts (branch · files · path) left, actions right */
   .ctx-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 13px; }
-  .ctx-facts { display: inline-flex; align-items: center; gap: 10px; min-width: 0; font-size: 12px; color: var(--fg-muted); }
-  .ctx-files b { color: var(--fg-2); font-weight: 600; font-variant-numeric: tabular-nums; }
-  .ctx-path { font-family: var(--font-mono, monospace); font-size: 10.5px; color: var(--fg-faint);
+  .ctx-facts { display: inline-flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; color: var(--fg-muted); }
+  .ctx-path { font-family: var(--font-mono, monospace); font-size: 10.5px; color: var(--fg-faint); margin-left: 4px;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
   .ctx-actions { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
-  /* .branch-pill → app.css (shared w/ WorkspacePage). */
+  /* Facts ride the shared .ctx-chip (app.css) — same dialect as the composer. */
   .greet-switch { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px; border-radius: 999px;
     border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 3%, transparent); color: var(--fg-muted);
     font: inherit; font-size: 12px; font-weight: 500; cursor: pointer;
@@ -402,26 +410,31 @@
   .greet-switch:hover { background: var(--surface-hover); color: var(--fg-2); border-color: var(--border-strong); }
   .greet-switch :global(svg) { color: var(--fg-faint); }
 
-  /* jump back in — freshest threads for this project */
-  .resume { display: flex; flex-direction: column; gap: 10px; margin-top: 22px; }
-  .resume-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 9px; }
-  .resume-card { display: flex; align-items: center; gap: 10px; padding: 10px 11px; border-radius: 12px;
-    border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 2.5%, transparent);
-    color: var(--fg); font: inherit; text-align: left; cursor: pointer; min-width: 0;
-    transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast) var(--ease-page); }
-  .resume-card:hover { background: var(--surface-hover); border-color: var(--border-strong); transform: translateY(-1px); }
-  .rc-ic { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: 8px;
-    background: var(--bg-elev-2); border: 1px solid var(--border); color: var(--fg-muted); }
-  .resume-card:hover .rc-ic { color: var(--accent); background: var(--accent-soft); border-color: var(--ghost-border); }
-  .rc-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-  .rc-t { font-size: 12.5px; font-weight: 600; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .rc-m { font-size: 10.5px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
-  :global(.resume-card .rc-go) { flex: none; color: var(--accent); opacity: 0.35; transition: opacity var(--dur-fast); }
-  .resume-card:hover :global(.rc-go) { opacity: 1; }
+  /* jump back in — compact list rows (Claude-Desktop density), not cards:
+     title-led, time right-aligned, resume arrow revealed on hover. */
+  .resume { display: flex; flex-direction: column; gap: 8px; margin-top: 22px; }
+  .resume-list { display: flex; flex-direction: column; gap: 1px; }
+  .resume-item { display: flex; align-items: center; gap: 9px; width: 100%; height: 32px; padding: 0 9px;
+    border-radius: 8px; border: 0; background: transparent; color: var(--fg-2); font: inherit; text-align: left;
+    cursor: pointer; min-width: 0; transition: background var(--dur-fast), color var(--dur-fast); }
+  .resume-item:hover { background: var(--surface-hover); color: var(--fg); }
+  .resume-item > :global(svg:first-child) { color: var(--fg-faint); flex: none; }
+  .ri-t { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 500;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ri-m { flex: none; font-size: 10.5px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+  :global(.resume-item .ri-go) { flex: none; color: var(--accent); opacity: 0; transition: opacity var(--dur-fast); }
+  .resume-item:hover :global(.ri-go) { opacity: 1; }
 
-  /* new to rift? — collapsible orientation footer */
+  /* new to rift? — collapsible orientation footer, dismissible for good */
   .newrift { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 14px; }
-  .newrift-toggle { display: flex; align-items: center; gap: 8px; width: 100%; font: inherit; font-size: 12.5px; font-weight: 500;
+  .newrift-head { display: flex; align-items: center; gap: 2px; }
+  .newrift-hide { flex: none; display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border: 0; background: transparent; border-radius: 6px;
+    color: var(--fg-faint); cursor: pointer; opacity: 0;
+    transition: opacity var(--dur-fast), color var(--dur-fast), background var(--dur-fast); }
+  .newrift:hover .newrift-hide, .newrift-hide:focus-visible { opacity: 1; }
+  .newrift-hide:hover { color: var(--fg-2); background: var(--surface-hover); }
+  .newrift-toggle { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; font: inherit; font-size: 12.5px; font-weight: 500;
     color: var(--fg-muted); padding: 3px 2px; cursor: pointer; background: none; border: 0; transition: color var(--dur-fast); }
   .newrift-toggle:hover { color: var(--fg-2); }
   .newrift-toggle :global(.nr-chev) { margin-left: auto; transition: transform var(--dur-fast); }

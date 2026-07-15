@@ -100,6 +100,11 @@ seed rules below.
   found (Tailwind green/red/amber) had drifted from the tokens' real oklch values —
   a wrong color waiting for a scoping accident. Use the bare `var(--token)`; if a
   fallback is genuinely needed, it must equal the token's current value.
+- DON'T stack multiple kbd hints into one placeholder/ghost line (2026-07-14,
+  composer idle ghost "Ask · / · @ · Ctrl+D" — owner: "looks like ass"). A
+  placeholder is an invitation, not documentation: one quiet plain-text phrase
+  at a time; if more must be taught, rotate phrases slowly instead of joining
+  them with separators and keycaps.
 - DON'T ship a control that spends the user's money without saying so AT the control
   (2026-07-14, fast-mode incident — owner: "it's charging me, that is a huge gap").
   Porting an upstream feature means porting its cost disclosure too (the CLI showed
