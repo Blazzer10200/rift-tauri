@@ -2,16 +2,14 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.109.0 — The stream stops going dark
+## v0.110.0 — One turn, one bubble
 
-Sourced from a 5½-minute screen recording of a real working turn, where the UI sat visually frozen for ~3 minutes while real work happened underneath.
-
-- **No more dead air.** During long turns the footer no longer collapses to a bare "Working…" between tools — it carries the last finished action ("Working… · Read Composer.svelte") and says "Thinking…" during mid-turn reasoning passes, not just the opening one.
-- **Tool activity is framed now.** Work-line groups, the in-flight row, and edit batches sit on the same island-card language as shell blocks — full detail kept, chrome framed. Composer/STT fixes from the prior patch (dictation ghost overlap, mic engage bounce, effort micro-chip) ship here too.
-- **The token meter never runs backward.** The live estimate holds its high-water mark when real usage lands lower (the 429→409 dips are gone), and the odometer roll no longer fades digits to near-invisible mid-animation.
-- **Honest diff gutters.** Created files show real 1-based line numbers; edits (which carry no absolute file offset) drop the misleading 1..N column and keep the +/− marks.
-- **Live plans actually tick.** The assistant now marks plan steps in_progress/completed the moment they change, so the plan widget fills during the turn instead of jumping 0/N → N/N at the very end.
-- Search chips show `…/src/lib`-style scopes instead of full `C:\` paths; Copy/Retry under a finished turn are readable at rest.
+- **Manual `/compact`.** Type `/compact` (or hit "Compact conversation" in the context-ring popover) to hand-compact a long chat — same CLI compaction the auto path uses, rendered as the usual boundary pill. Compaction-only turns no longer trip a false "Blank response" error (auto-compaction included).
+- **No more split turns.** When a background task finished right after a reply, the turn used to close ("Worked for <1s") and then keep going in a second block underneath. A follow-up that starts within a few seconds now continues in the same bubble, with duration and cost summed.
+- **Polling folds into one card.** An assistant waiting on something (build, port, CI) that re-runs the same command 3+ times shows ONE terminal card with a quiet "polled ×N" tally and the latest output — not a stack of near-identical blocks.
+- **Sharper tool captions.** Pending searches say "searching…" instead of "?", and shell captions drop the `cd "long/path" &&` prefix and keep both ends of a long command visible.
+- **Readable errors + toasts.** Failed tools render through the shared folding output block (long stack traces collapse with "Show more"); long toast details clamp to 2 lines and expand on click.
+- **Fewer typed questions.** The assistant is nudged to end short choose/confirm questions with a clickable options card instead of prose you have to type an answer to.
 
 ## Known issues
 - **While elevated, dragging files from Explorer into the window doesn't work** (Windows blocks lower→higher integrity drag-drop); the attach button / file picker still works fine.
