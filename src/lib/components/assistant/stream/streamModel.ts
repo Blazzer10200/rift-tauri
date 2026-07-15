@@ -174,7 +174,7 @@ export type TurnModel = {
 };
 
 export type WorkSeg =
-  | { seg: "rich"; tool: StreamTool }
+  | { seg: "rich"; tool: StreamTool; poll?: number }
   | { seg: "edit"; tools: StreamTool[] }
   | { seg: "other"; tools: StreamTool[] };
 
@@ -187,6 +187,17 @@ export type Group =
 const shortName = (n: string) => n.replace(/^mcp__rift__/, "");
 const trim = (s: string, n = 60) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 const hostOf = (u: string) => { try { return new URL(u).host; } catch { return u; } };
+// Shell-command caption: the interesting part of a compound command is rarely
+// its head (`cd "C:/long/path" && …` eats the whole budget). Drop a leading
+// cd-prefix, then middle-ellipsize so both the verb and the tail survive.
+// Exported: ToolChip's history captions share it.
+export const trimCmd = (s: string, n = 70): string => {
+  const cmd = s.replace(/^cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*(?:&&|;)\s*/, "");
+  if (cmd.length <= n) return cmd;
+  const head = Math.ceil((n - 1) * 0.6);
+  const tail = n - 1 - head;
+  return cmd.slice(0, head) + "…" + cmd.slice(-tail);
+};
 // Scope paths in captions (Grep/Glob/list_dir) arrive as raw absolute paths —
 // collapse to the last two segments (mirrors dirOf) so the chip reads
 // `…/components/assistant`, not a full C:\ path ellipsised mid-string.
@@ -323,14 +334,16 @@ function caption(tb: ToolBlock): string {
     return fp ? `${fp} · ${c} edits` : `${c} edits`;
   }
   if (n === "NotebookEdit") return fp ?? "notebook";
-  if (n === "Bash" || n === "remote_bash" || n === "PowerShell") return typeof inp.command === "string" ? trim(inp.command, 70) : "shell";
+  if (n === "Bash" || n === "remote_bash" || n === "PowerShell") return typeof inp.command === "string" ? trimCmd(inp.command, 70) : "shell";
   if (n === "Glob") {
-    const pat = typeof inp.pattern === "string" ? inp.pattern : "?";
+    // "searching…" not "?": the pattern field lands late in the streamed
+    // input JSON, so the placeholder is what users see while it forms.
+    const pat = typeof inp.pattern === "string" ? inp.pattern : "searching…";
     const scope = typeof inp.path === "string" ? ` in ${shortScope(inp.path)}` : "";
     return `${pat}${scope}`;
   }
   if (n === "Grep" || n === "grep") {
-    const pat = typeof inp.pattern === "string" ? `"${inp.pattern}"` : "?";
+    const pat = typeof inp.pattern === "string" ? `"${inp.pattern}"` : "searching…";
     const scope = typeof inp.path === "string" ? ` in ${shortScope(inp.path)}` : "";
     return `${pat}${scope}`;
   }
@@ -815,7 +828,45 @@ function segmentWork(tools: StreamTool[]): WorkSeg[] {
     if (!cur || cur.seg !== grp) { cur = { seg: grp, tools: [] }; segs.push(cur); }
     cur.tools.push(t);
   }
-  return segs;
+  return coalescePolls(segs);
+}
+
+// Polling collapse: a model waiting on something (build, port, CI) re-runs the
+// SAME shell command over and over; each run rendered as its own terminal block
+// filled the transcript with near-identical cards. A run of 3+ consecutive
+// rich shell segs with an identical command collapses to ONE card carrying the
+// LATEST run's output + a poll count. Two runs stay separate (a legit re-run,
+// not a wait loop).
+const cmdOf = (t: StreamTool): string | null => {
+  const c = t.input?.command;
+  return typeof c === "string" && c.trim().length > 0 ? c.trim() : null;
+};
+function coalescePolls(segs: WorkSeg[]): WorkSeg[] {
+  const out: WorkSeg[] = [];
+  let i = 0;
+  while (i < segs.length) {
+    const s = segs[i];
+    if (s.seg === "rich" && s.tool.kind === "shell") {
+      const cmd = cmdOf(s.tool);
+      if (cmd) {
+        let j = i + 1;
+        while (j < segs.length) {
+          const nx = segs[j];
+          if (nx.seg === "rich" && nx.tool.kind === "shell" && cmdOf(nx.tool) === cmd) j++;
+          else break;
+        }
+        if (j - i >= 3) {
+          const latest = segs[j - 1] as { seg: "rich"; tool: StreamTool };
+          out.push({ seg: "rich", tool: latest.tool, poll: j - i });
+          i = j;
+          continue;
+        }
+      }
+    }
+    out.push(s);
+    i++;
+  }
+  return out;
 }
 
 // Lower-case verb phrase per kind for a mixed-kind breakdown ("read 3 · searched

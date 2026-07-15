@@ -372,6 +372,10 @@ export class TabState {
   /** Wall-clock of the most recent `stream_event` arrival. Null between turns.
    *  Used to compute `maxStreamGapMs` on the in-flight TurnRecord. */
   lastStreamEventAt: number | null = null;
+  /** Wall-clock of the last clean turn DONE. A CLI-initiated continuation that
+   *  begins within a breath of this reopens the previous assistant bubble
+   *  instead of scaffolding a second one (split "Worked for Ns" fix). */
+  lastTurnDoneAt: number | null = null;
   dockAutoOpenedThisConvo = false;
   /** Id of the single inline plan block appended this turn (TaskCreate/TodoWrite).
    *  The newer CLI emits one TaskCreate per item, so instead of one block per

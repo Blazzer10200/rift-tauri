@@ -301,7 +301,7 @@
           {:else if seg.tool.kind === "exitplan"}
             <StreamExitPlan tool={seg.tool} />
           {:else if seg.tool.kind === "shell"}
-            <StreamShell tool={seg.tool} />
+            <StreamShell tool={seg.tool} poll={seg.poll} />
           {/if}
           {#each pendingPerms([seg.tool]) as pt (pt.id)}
             <PermissionBar toolUseId={pt.id} toolName={pt.name} />

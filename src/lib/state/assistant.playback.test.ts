@@ -1310,3 +1310,66 @@ describe("playback — live tool-block forming (S127)", () => {
     expect((tool as { inputPartial?: boolean }).inputPartial).toBeUndefined();
   });
 });
+
+// ── CLI-initiated continuation turns ─────────────────────────────────────────
+// A background agent finishing after `result` makes the CLI re-invoke the model
+// on its own. One that begins moments after the DONE must reopen the previous
+// bubble (the "Worked for <1s" split-header bug); a late one gets its own.
+describe("playback — continuation merge", () => {
+  const contAssistant = (text: string) => ({
+    type: "assistant",
+    message: { content: [{ type: "text", text }] },
+  });
+
+  it("merges a continuation that begins within the merge window into the previous bubble, summing duration + cost", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    const firstId = tab.streamingMsgId!;
+    feed(tab, [textDelta("started"), blockStop(0), resultEnv({ duration_ms: 5000, total_cost_usd: 0.1 })]);
+    tab.onDone();
+    expect(tab.streaming).toBe(false);
+    const countAfterFirst = tab.messages.length;
+
+    // Continuation lands right after the DONE (lastTurnDoneAt just stamped).
+    feed(tab, [contAssistant("Background agent finished")]);
+    expect(tab.streaming).toBe(true);
+    expect(tab.messages.length).toBe(countAfterFirst); // reopened, no new bubble
+    expect(tab.streamingMsgId).toBe(firstId);
+    feed(tab, [resultEnv({ duration_ms: 3000, total_cost_usd: 0.2 })]);
+    tab.onDone();
+
+    const m = tab.messages.find((x) => x.id === firstId)!;
+    expect(m.turnDurationMs).toBe(8000);
+    expect(m.costUsd).toBeCloseTo(0.3);
+    // Paragraph break between the two turns' text, not a fused sentence.
+    const txt = m.blocks.filter((b) => b.type === "text").map((b) => (b as { text: string }).text).join("|");
+    expect(txt).toBe("started\n\nBackground agent finished");
+  });
+
+  it("a continuation past the merge window still opens its own bubble", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    const firstId = tab.streamingMsgId!;
+    feed(tab, [textDelta("started"), blockStop(0), resultEnv({ duration_ms: 5000 })]);
+    tab.onDone();
+    tab.lastTurnDoneAt = Date.now() - 9000; // simulate a late background agent
+    const countAfterFirst = tab.messages.length;
+
+    feed(tab, [contAssistant("Background agent finished")]);
+    expect(tab.streaming).toBe(true);
+    expect(tab.messages.length).toBe(countAfterFirst + 1);
+    expect(tab.streamingMsgId).not.toBe(firstId);
+  });
+
+  it("never merges into an errored turn (error terminal clears the stamp)", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    feed(tab, [textDelta("partial"), blockStop(0)]);
+    tab.onError("boom");
+    expect(tab.lastTurnDoneAt).toBeNull();
+    const countAfterError = tab.messages.length;
+
+    feed(tab, [contAssistant("Background agent finished")]);
+    expect(tab.messages.length).toBe(countAfterError + 1); // new bubble, error bubble untouched
+  });
+});

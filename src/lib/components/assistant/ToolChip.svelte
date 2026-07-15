@@ -25,7 +25,7 @@
   import OutputBlock from "./stream/OutputBlock.svelte";
   import ReadResult from "./stream/ReadResult.svelte";
   import GrepResult from "./stream/GrepResult.svelte";
-  import { stripAnsi, shortScope } from "./stream/streamModel";
+  import { stripAnsi, shortScope, trimCmd } from "./stream/streamModel";
 
   import { tooltip } from "$lib/actions/tooltip";
   const reducedMotion =
@@ -72,7 +72,7 @@
     }
     if (n === "NotebookEdit") return fp ?? "notebook";
     // Shell.
-    if (n === "Bash" || n === "PowerShell") return typeof inp.command === "string" ? trim(inp.command as string, 70) : "shell";
+    if (n === "Bash" || n === "PowerShell") return typeof inp.command === "string" ? trimCmd(inp.command as string, 70) : "shell";
     if (n === "BashOutput" || n === "TaskOutput") {
       const id = typeof inp.bash_id === "string" ? inp.bash_id : typeof inp.task_id === "string" ? inp.task_id : null;
       return id ? `tail ${id}` : "tail bg task";
@@ -81,19 +81,19 @@
       const id = typeof inp.shell_id === "string" ? inp.shell_id : typeof inp.task_id === "string" ? inp.task_id : null;
       return id ? `stop ${id}` : "stop bg task";
     }
-    if (n === "remote_bash") return typeof inp.command === "string" ? trim(inp.command as string, 70) : "remote shell";
+    if (n === "remote_bash") return typeof inp.command === "string" ? trimCmd(inp.command as string, 70) : "remote shell";
     if (n === "LSP") {
       const op = typeof inp.operation === "string" ? (inp.operation as string) : "lsp";
       return typeof inp.filePath === "string" ? `${op} · ${basename(inp.filePath as string)}` : op;
     }
     // Search / nav.
     if (n === "Glob") {
-      const pat = typeof inp.pattern === "string" ? (inp.pattern as string) : "?";
+      const pat = typeof inp.pattern === "string" ? (inp.pattern as string) : "searching…";
       const scope = typeof inp.path === "string" ? ` in ${shortScope(inp.path)}` : "";
       return `${pat}${scope}`;
     }
     if (n === "Grep" || n === "grep") {
-      const pat = typeof inp.pattern === "string" ? `"${inp.pattern}"` : "?";
+      const pat = typeof inp.pattern === "string" ? `"${inp.pattern}"` : "searching…";
       const scope = typeof inp.path === "string" ? ` in ${shortScope(inp.path)}` : "";
       return `${pat}${scope}`;
     }
@@ -516,7 +516,7 @@
           <span>running…</span>
         </div>
       {:else if tool.isError}
-        <pre class="result error">{errorText}</pre>
+        <div class="body-frame error-frame"><OutputBlock text={errorText} tone="plain" start="collapsed" /></div>
       {:else if resultStyle === "terminal"}
         <div class="body-frame" data-shell={shellKind}>
           {#if shellCommand}
@@ -812,27 +812,14 @@
   .body-frame[data-shell="bash"] .term-cmd-text::before { content: "$ "; color: var(--fg-faint); }
   .body-frame[data-shell="pwsh"] .term-cmd-text::before { content: "PS> "; color: var(--info); }
 
-  /* Result — error text (the one shape still rendered locally). */
-  .result {
-    margin: 0;
-    padding: 7px 10px;
-    background: var(--bg-elev-1);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    font-family: var(--font-mono, monospace);
-    font-size: var(--fs-xs);
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    max-height: 280px;
-    overflow: auto;
-    color: var(--fg-2);
-  }
-  .result.error {
+  /* Error results render through the shared OutputBlock (line caps + Show
+     more) inside a danger-tinted body-frame — the old local <pre class=result>
+     had no fold and ballooned the transcript on long stack traces. */
+  .error-frame {
     border-color: color-mix(in oklab, var(--danger) 35%, var(--border));
-    color: oklch(0.88 0.07 22);
     background: color-mix(in oklch, var(--danger-soft) 25%, var(--bg-elev-1));
   }
+  .error-frame :global(pre) { color: oklch(0.88 0.07 22); }
 
   .mono { font-family: var(--font-mono, monospace); }
 

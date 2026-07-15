@@ -7,7 +7,7 @@
   import OutputBlock from "./OutputBlock.svelte";
   import BlockHeader from "./BlockHeader.svelte";
 
-  let { tool }: { tool: StreamTool } = $props();
+  let { tool, poll }: { tool: StreamTool; poll?: number } = $props();
 
   const running = $derived(tool.status === "pending");
   const failed = $derived(tool.status === "error");
@@ -98,6 +98,7 @@
     {/snippet}
     {#snippet title()}
       <code class="ssh-cmd" title={fullCmd}>{#if cmdHtml}{@html cmdHtml}{:else}{tool.cap}{/if}</code>
+      {#if poll && poll > 1}<span class="ssh-poll" title="Ran {poll} times waiting on this — showing the latest run">{running ? "waiting" : "polled"} ×{poll}</span>{/if}
       {#if running}<span class="ssh-cursor" aria-hidden="true"></span>{/if}
     {/snippet}
   </BlockHeader>
@@ -175,6 +176,13 @@
     background: color-mix(in oklab, var(--accent) 80%, transparent);
     animation: sshBlink 1.06s steps(1) infinite; }
   @keyframes sshBlink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+
+  /* Poll count — a coalesced wait-loop (3+ identical runs) shows once with
+     this quiet tally instead of stacking near-identical terminal cards. */
+  .ssh-poll { flex: none; font-size: 10px; font-family: var(--font-mono);
+    color: var(--fg-faint); padding: 1px 6px; border-radius: 999px;
+    border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
+    background: color-mix(in oklab, var(--fg) 3%, transparent); }
 
   /* OUT — the command's output, on the base (darker) fill so it recedes behind
      the raised IN row. The line-capping / fold tiers live in OutputBlock. */

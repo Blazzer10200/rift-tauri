@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { messageToTurn, parseAskUserResult, groupNames, workLineMode, isFillerSay, classifySay, outputPeek, groupBlocks, shellFlavor, resultMeta, splitOutput, nextRevealTier, isPlanArtifact, REVEAL_COLLAPSED, REVEAL_EXPANDED, REVEAL_SLACK, stripAnsi, ansiLines, classifyShellLine, shellCheckKind, parseCheckSummary, parseGrepLine, parseReadOutput, splitOutputFold, FOLD_TAIL } from "./streamModel";
+import { messageToTurn, parseAskUserResult, groupNames, workLineMode, isFillerSay, classifySay, outputPeek, groupBlocks, shellFlavor, resultMeta, splitOutput, nextRevealTier, isPlanArtifact, REVEAL_COLLAPSED, REVEAL_EXPANDED, REVEAL_SLACK, stripAnsi, ansiLines, classifyShellLine, shellCheckKind, parseCheckSummary, parseGrepLine, parseReadOutput, splitOutputFold, FOLD_TAIL, trimCmd } from "./streamModel";
 import type { StreamTool } from "./streamModel";
 import type { ChatMessage } from "$lib/state/assistant.svelte";
 
@@ -811,5 +811,72 @@ describe("adaptTool — test/lint upgrade + raw ANSI on shell results", () => {
     expect(toolOf(msg([read]))!.input).toEqual({ file_path: "/a/b.ts", offset: 40 });
     const grep = { ...tool("Grep", "done", { pattern: "foo" }), result: "a.ts:1:foo" };
     expect(toolOf(msg([grep]))!.input).toEqual({ pattern: "foo" });
+  });
+});
+
+describe("trimCmd — shell caption keeps the verb and the tail", () => {
+  it("short commands pass through untouched", () => {
+    expect(trimCmd("npm run check")).toBe("npm run check");
+  });
+  it("drops a leading cd-prefix (quoted path, && chain)", () => {
+    expect(trimCmd('cd "c:/AI Workflow/projects/rift-tauri" && npm run check')).toBe("npm run check");
+  });
+  it("drops a cd-prefix with a semicolon chain and unquoted path", () => {
+    expect(trimCmd("cd /tmp; ls -la")).toBe("ls -la");
+  });
+  it("middle-ellipsizes an over-budget command so both ends survive", () => {
+    const long = "npx vitest run " + "src/very/long/path/".repeat(6) + "file.test.ts 2>&1 | tail -8";
+    const out = trimCmd(long, 70);
+    expect(out.length).toBe(70);
+    expect(out.startsWith("npx vitest run ")).toBe(true);
+    expect(out.endsWith("| tail -8")).toBe(true);
+    expect(out).toContain("…");
+  });
+  it("does not strip a bare cd command (nothing chained after it)", () => {
+    expect(trimCmd('cd "c:/somewhere"')).toBe('cd "c:/somewhere"');
+  });
+});
+
+describe("coalescePolls — identical consecutive shell runs collapse to one card", () => {
+  const shell = (command: string, result: string) =>
+    ({ ...tool("Bash", "done", { command }), result });
+  const workSegs = (blocks: unknown[]) => {
+    const groups = groupBlocks(messageToTurn(msg(blocks)).blocks);
+    const work = groups.find((g) => g.type === "work");
+    return work && work.type === "work" ? work.segs : [];
+  };
+
+  it("3 identical runs → one rich seg with poll=3 carrying the LATEST output", () => {
+    const segs = workSegs([
+      shell("curl -s localhost:9222", "down 1"),
+      shell("curl -s localhost:9222", "down 2"),
+      shell("curl -s localhost:9222", "UP"),
+    ]);
+    expect(segs.length).toBe(1);
+    const s = segs[0] as { seg: string; tool: { result: string }; poll?: number };
+    expect(s.seg).toBe("rich");
+    expect(s.poll).toBe(3);
+    expect(s.tool.result).toBe("UP");
+  });
+
+  it("2 identical runs stay separate (a re-run, not a wait loop)", () => {
+    const segs = workSegs([
+      shell("git status", "dirty"),
+      shell("git status", "clean"),
+    ]);
+    expect(segs.length).toBe(2);
+    expect(segs.every((s) => s.seg === "rich" && !("poll" in s && s.poll))).toBe(true);
+  });
+
+  it("a different command ends the run — poll card + the new command's own card", () => {
+    const segs = workSegs([
+      shell("sleep-check", "no"),
+      shell("sleep-check", "no"),
+      shell("sleep-check", "yes"),
+      shell("npm run build", "built"),
+    ]);
+    expect(segs.length).toBe(2);
+    expect((segs[0] as { poll?: number }).poll).toBe(3);
+    expect((segs[1] as { poll?: number }).poll).toBeUndefined();
   });
 });

@@ -18,6 +18,17 @@
     info: Info,
     muted: Bell,
   };
+
+  // Details clamp to 2 lines; clicking the detail un-clamps that toast (long
+  // warnings were unreadable behind a 1-line ellipsis). Set is per-mount —
+  // toast ids are session-monotonic so no stale-id leak matters.
+  let expandedIds = $state(new Set<number>());
+  function toggleDetail(id: number, e: Event) {
+    e.stopPropagation(); // never trigger the toast's action from an expand
+    const next = new Set(expandedIds);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    expandedIds = next;
+  }
 </script>
 
 <div class="host" aria-live="polite">
@@ -49,7 +60,14 @@
       <span class="text">
         <span class="title">{item.title}</span>
         {#if item.detail}
-          <span class="detail" class:mono={item.mono}>{item.detail}</span>
+          <button
+            type="button"
+            class="detail"
+            class:mono={item.mono}
+            class:expanded={expandedIds.has(item.id)}
+            onclick={(e) => toggleDetail(item.id, e)}
+            title={expandedIds.has(item.id) ? undefined : item.detail}
+          >{item.detail}</button>
         {/if}
       </span>
       {#if item.action}
@@ -154,10 +172,20 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .detail {
+    /* Button reset — reads as text, clicks to un-clamp. */
+    background: none; border: 0; padding: 0; margin: 0;
+    font: inherit; text-align: left; cursor: pointer;
     color: var(--fg-subtle);
     font-size: var(--fs-xs);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
+  .detail.expanded { -webkit-line-clamp: unset; line-clamp: unset; display: block; }
   .detail.mono { font-family: var(--font-mono); }
 
   .action {

@@ -51,6 +51,10 @@ const RESULT_ERROR_MESSAGES: Record<string, string> = {
     "The context window filled up and couldn't be compacted further. Start a fresh chat to keep going.",
 };
 
+/** Gap under which a CLI-initiated continuation merges into the previous
+ *  assistant bubble instead of opening a new one (see maybeBeginContinuation). */
+const CONTINUATION_MERGE_MS = 8000;
+
 /** Called at the start of every send(). Clears per-turn pacer / thinking
  *  / dedupe state and flips streaming on. */
 export function beginTurn(tab: TabState) {
@@ -109,6 +113,30 @@ function maybeBeginContinuation(tab: TabState, env: StreamEnvelope): boolean {
     env.type === "assistant" && Array.isArray(env.message?.content) && env.message.content.length > 0;
   if (!isInit && !isContentfulAssistant) return false;
   beginTurn(tab);
+  // A continuation that begins moments after the previous DONE reads as the
+  // SAME turn to the user (the classic symptom: "Worked for <1s" done-header,
+  // then a second block keeps thinking below it). Reopen the previous
+  // assistant bubble and stream into it; the result handler sums duration and
+  // cost. A genuinely late follow-up (background agent minutes later) still
+  // gets its own bubble.
+  const lastIdx = tab.messages.length - 1;
+  const last = lastIdx >= 0 ? tab.messages[lastIdx] : null;
+  const doneAgoMs = tab.lastTurnDoneAt !== null ? Date.now() - tab.lastTurnDoneAt : Infinity;
+  console.debug(`[assistant] continuation turn: ${Math.round(doneAgoMs / 100) / 10}s after done, last=${last?.role ?? "none"} → ${last?.role === "assistant" && doneAgoMs < CONTINUATION_MERGE_MS ? "merge" : "new bubble"}`);
+  if (last && last.role === "assistant" && doneAgoMs < CONTINUATION_MERGE_MS) {
+    tab.streamingMsgId = last.id;
+    tab.streamingMsgIdx = lastIdx;
+    // Paragraph-break a trailing text block so the continuation's text doesn't
+    // fuse onto the previous sentence (appendText concatenates into it).
+    const tail = last.blocks[last.blocks.length - 1];
+    if (tail && tail.type === "text" && tail.text.trim().length > 0 && !tail.text.endsWith("\n\n")) {
+      const blocks = last.blocks.slice();
+      blocks[blocks.length - 1] = { ...tail, text: tail.text + "\n\n" };
+      tab.messages[lastIdx] = { ...last, blocks };
+    }
+    tab.activity = { currentLabel: "Continuing…", turnStartedAt: Date.now() };
+    return true;
+  }
   const asst: ChatMessage = { id: crypto.randomUUID(), role: "assistant", blocks: [], ts: Date.now() };
   tab.messages = [...tab.messages, asst];
   tab.streamingMsgId = asst.id;
@@ -1143,14 +1171,17 @@ export function onStreamLine(tab: TabState, raw: string) {
       if (typeof env.total_cost_usd === "number") {
         tab.totalCostUsd = (tab.totalCostUsd ?? 0) + env.total_cost_usd;
         const turnCost = env.total_cost_usd;
-        mutateStreaming(tab, (m) => ({ ...m, costUsd: turnCost }));
+        // Accumulate, don't overwrite: a message only carries a cost/duration
+        // already when a merged continuation reopened it (one result per
+        // message otherwise), so summing keeps the merged header honest.
+        mutateStreaming(tab, (m) => ({ ...m, costUsd: (m.costUsd ?? 0) + turnCost }));
         if (tab.currentTurnRecord) tab.currentTurnRecord.costUsd = turnCost;
       }
       // Wall-clock of the turn (CLI-measured, tool waits included) — drives
       // the honest "Worked for Ns" header instead of the thinking+tool sum.
       const wallMs = (env as { duration_ms?: unknown }).duration_ms;
       if (typeof wallMs === "number" && wallMs > 0) {
-        mutateStreaming(tab, (m) => ({ ...m, turnDurationMs: wallMs }));
+        mutateStreaming(tab, (m) => ({ ...m, turnDurationMs: (m.turnDurationMs ?? 0) + wallMs }));
       }
       const resultUsage = (env as { usage?: Record<string, unknown> }).usage;
       if (resultUsage) recordTurnUsage(tab, resultUsage, true);
@@ -1321,6 +1352,9 @@ export function onStreamDone(tab: TabState) {
   tab.streaming = false;
   tab.streamingMsgId = null;
   tab.streamingMsgIdx = null;
+  // Clean-DONE stamp only (not error/stop): gates the continuation merge in
+  // maybeBeginContinuation — never merge new frames into an errored bubble.
+  tab.lastTurnDoneAt = tab.lastError == null ? Date.now() : null;
   tab.seenToolUseIds.clear();
   // Drop any unanswered permission asks — the backend auto-denies on turn
   // end, so a lingering Allow/Deny chip would be dead.
@@ -1411,6 +1445,7 @@ export function onStreamError(tab: TabState, msg: string) {
   }
   tab.lastError = msg;
   tab.streaming = false;
+  tab.lastTurnDoneAt = null; // errored turn — a trailing continuation must not merge into it
   if (tab.drainHandle !== null) {
     cancelAnimationFrame(tab.drainHandle);
     tab.drainHandle = null;
