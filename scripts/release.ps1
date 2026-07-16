@@ -1,9 +1,13 @@
 # Rift release pipeline -- Velopack path (v0.4.47+).
 #
-# Builds the app, packs it with Velopack (`vpk pack`), and publishes a GitHub
-# release on THIS repo (`vpk upload github` -> Blazzer10200/rift-tauri).
-# Installed clients update from the Cloudflare R2 feed (update_service.rs
-# UPDATE_FEED_URL); the GitHub release is the human-facing download page.
+# Builds the app, packs it with Velopack (`vpk pack`), and publishes FEED-FIRST:
+# Cloudflare R2 (the live update feed clients read -- update_service.rs
+# UPDATE_FEED_URL) before GitHub (the human-facing download page). Ordering is
+# deliberate: a GitHub outage mid-run must never strand the feed (v0.118.0
+# 2026-07-16 -- the old GitHub-first order died at `vpk upload github` and the
+# R2 step after it never ran, so clients saw no update despite a green build).
+# The delta baseline also comes from the R2 feed (`vpk download http`), so the
+# whole client-critical path is GitHub-free.
 # See src-tauri/src/update_service.rs (arc: git log -- docs/design/velopack-auto-update.md).
 #
 # Single repo: the old separate releases repo (`rift`, renamed from
@@ -198,7 +202,7 @@ foreach ($t in @('npm', 'vpk', 'gh')) {
 
 # --- Preflight: R2 creds present in CI (silent-stale-feed guard) ----------
 # The app's live update feed is R2 ONLY (update_service.rs UPDATE_FEED_URL) --
-# GitHub is NOT a fallback. The R2 dual-publish below is conditional, so a CI run
+# GitHub is NOT a fallback. The R2 feed upload below is conditional, so a CI run
 # missing these secrets would build + pack + publish to GitHub fully green while
 # the feed clients actually read goes stale and no update ever reaches them. Fail
 # loud here -- BEFORE the expensive build -- rather than skip silently at upload.
@@ -279,22 +283,36 @@ if (-not $ortDlls) {
     Write-Host '  note: no onnxruntime/DirectML DLLs found next to exe (static ort link?) — verify Parakeet works on a clean install' -ForegroundColor Yellow
 }
 
-# Token needed by BOTH the delta-baseline download below and the upload step.
-# In CI, -Token carries the workflow GITHUB_TOKEN; locally, fall back to the gh
-# session token. ($Token was already stripped to printable ASCII up top.)
+# Token needed by the GitHub upload step (the delta baseline now comes from the
+# public R2 feed, tokenless). In CI, -Token carries the workflow GITHUB_TOKEN;
+# locally, fall back to the gh session token. ($Token already ASCII-stripped.)
 $ghToken = if ($Token) { $Token } else { (gh auth token).Trim() }
 if (-not $ghToken) { throw 'no GitHub token -- pass -Token <pat> (CI) or run `gh auth login` (local)' }
 
 # --- Delta baseline ------------------------------------------------------
 # Deltas re-enabled (v0.112.0): vpk diffs against the PREVIOUS full .nupkg,
 # which must sit in the output dir at pack time -- CI runs on a fresh checkout,
-# so fetch it from the latest published release. Best-effort: on the first
+# so fetch it from the live feed. Source is the public R2 feed URL (NOT GitHub:
+# keeps the client-critical path GitHub-outage-proof, and the feed is the
+# source of truth for what clients actually run). Best-effort: on the first
 # release (or a download hiccup) we warn and pack full-only, never fail the
 # release over a missing baseline.
-Write-Host '=== vpk download github (delta baseline) ===' -ForegroundColor Cyan
-& vpk download github --repoUrl "https://github.com/$releaseRepo" --channel win -o 'Releases' --token $ghToken
+# LOCKSTEP: $feedUrl must equal update_service.rs UPDATE_FEED_URL.
+$feedUrl = 'https://pub-4fb26c0fc8df484488e4415f112f2d28.r2.dev'
+Write-Host '=== vpk download http (delta baseline from R2 feed) ===' -ForegroundColor Cyan
+& vpk download http --url $feedUrl --channel win -o 'Releases' --timeout 5
 if ($LASTEXITCODE -ne 0) {
     Write-Host '  no previous release baseline (first release or download failure) -- packing full-only' -ForegroundColor Yellow
+}
+# Rerun guard: if the feed ALREADY carries this version (a prior run published
+# R2 then died at the GitHub step; this rerun exists to finish the GitHub half),
+# the downloaded "baseline" is the current version itself -- drop it so vpk pack
+# doesn't diff a release against itself. The rerun packs full-only; the feed
+# copy that clients read is overwritten with an equivalent package.
+$selfBaseline = Get-ChildItem 'Releases' -Filter "*-$version-full.nupkg" -ErrorAction SilentlyContinue
+if ($selfBaseline) {
+    Write-Host "  feed already at v$version (rerun after partial publish) -- dropping self-baseline, packing full-only" -ForegroundColor Yellow
+    $selfBaseline | Remove-Item -Force
 }
 
 # --- vpk pack ------------------------------------------------------------
@@ -328,14 +346,42 @@ if (Test-Path $splashPath) {
 & vpk @packArgs
 if ($LASTEXITCODE -ne 0) { throw 'vpk pack failed' }
 
-# --- Upload to GitHub ----------------------------------------------------
+# --- Upload 1/2: Cloudflare R2 (the LIVE update feed) -- FEED FIRST ---------
+# The app's update feed IS R2 only (update_service.rs UPDATE_FEED_URL) -- GitHub
+# is NOT a fallback. R2 therefore uploads FIRST: once this step lands, every
+# installed client can update, whatever happens to GitHub afterward (v0.118.0
+# lesson -- the old GitHub-first order let a GitHub outage strand the feed).
+# Fires only when R2 creds are present; in CI the preflight above hard-fails on
+# missing creds, so only a local (-Ci-less) run skips -- fine, local builds
+# aren't the shipped feed. Rerun-safe: re-uploading a version overwrites the
+# same objects. (arc: git log -- docs/design/self-hosted-distribution.md)
+$feedLive = $false
+if ($env:R2_ACCESS_KEY_ID -and $env:R2_SECRET_ACCESS_KEY -and $env:R2_ENDPOINT) {
+    Write-Host '=== vpk upload s3 (Cloudflare R2 -- live feed) ===' -ForegroundColor Cyan
+    $r2Args = @(
+        'upload', 's3',
+        '-o', 'Releases',
+        '--bucket', $(if ($env:R2_BUCKET) { $env:R2_BUCKET } else { 'rift-releases' }),
+        '--endpoint', $env:R2_ENDPOINT,
+        '--keyId', $env:R2_ACCESS_KEY_ID,
+        '--secret', $env:R2_SECRET_ACCESS_KEY,
+        '--channel', 'win'
+    )
+    & vpk @r2Args
+    if ($LASTEXITCODE -ne 0) { throw 'vpk upload s3 (R2) failed -- feed NOT updated, clients see nothing new' }
+    $feedLive = $true
+    Write-Host "Feed live: clients can update to v$version now." -ForegroundColor Green
+} else {
+    Write-Host 'R2 env not set -- skipping feed upload (local run; GitHub page only).' -ForegroundColor DarkGray
+}
+
+# --- Upload 2/2: GitHub (human-facing download page) ------------------------
 # vpk uploads Setup.exe + full .nupkg + releases.win.json as release assets
 # and creates/publishes the release. --channel win matches the pack channel +
-# the client manifest. --pre for alpha/beta/rc: the client's
-# GithubSource(prerelease:true) reads the prerelease list, so pre-releases are
-# visible (unlike the old GH-release-API `/latest` path, which excluded them).
+# the client manifest. --pre for alpha/beta/rc. Retried: GitHub 5xx blips are
+# the most common transient failure here, and by this point the feed is already
+# live -- a retry is cheap, a failed run that needs a human rerun is not.
 Write-Host '=== vpk upload github ===' -ForegroundColor Cyan
-# ($ghToken resolved above the delta-baseline step -- shared with download.)
 $uploadArgs = @(
     'upload', 'github',
     '-o', 'Releases',
@@ -349,33 +395,20 @@ $uploadArgs = @(
 if ($version -match '-(alpha|beta|rc)') {
     $uploadArgs += '--pre'
 }
-& vpk @uploadArgs
-if ($LASTEXITCODE -ne 0) { throw 'vpk upload failed' }
-
-# --- Optional: dual-publish to Cloudflare R2 (self-hosted feed) -------------
-# Fires only when R2 creds are present (CI secrets). WARNING: the app's live
-# update feed IS R2 only (update_service.rs UPDATE_FEED_URL) -- GitHub is NOT a
-# fallback. If R2 creds are absent here, the R2 feed goes stale and shipped
-# clients see no new update. Fix R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY /
-# R2_ENDPOINT in CI secrets. (arc: git log -- docs/design/self-hosted-distribution.md)
-if ($env:R2_ACCESS_KEY_ID -and $env:R2_SECRET_ACCESS_KEY -and $env:R2_ENDPOINT) {
-    Write-Host '=== vpk upload s3 (Cloudflare R2) ===' -ForegroundColor Cyan
-    $r2Args = @(
-        'upload', 's3',
-        '-o', 'Releases',
-        '--bucket', $(if ($env:R2_BUCKET) { $env:R2_BUCKET } else { 'rift-releases' }),
-        '--endpoint', $env:R2_ENDPOINT,
-        '--keyId', $env:R2_ACCESS_KEY_ID,
-        '--secret', $env:R2_SECRET_ACCESS_KEY,
-        '--channel', 'win'
-    )
-    & vpk @r2Args
-    if ($LASTEXITCODE -ne 0) { throw 'vpk upload s3 (R2) failed' }
-} else {
-    # In CI this branch is unreachable -- the R2 preflight above hard-fails on
-    # missing creds. Only a local (-Ci-less) run lands here, where skipping the
-    # dual-publish is fine (local builds aren't the shipped feed).
-    Write-Host 'R2 env not set -- skipping S3 dual-publish (local run; GitHub feed only).' -ForegroundColor DarkGray
+$ghUploadOk = $false
+foreach ($delaySec in @(0, 30, 90)) {
+    if ($delaySec -gt 0) {
+        Write-Host "  retrying vpk upload github in ${delaySec}s ..." -ForegroundColor Yellow
+        Start-Sleep -Seconds $delaySec
+    }
+    & vpk @uploadArgs
+    if ($LASTEXITCODE -eq 0) { $ghUploadOk = $true; break }
+}
+if (-not $ghUploadOk) {
+    if ($feedLive) {
+        throw "vpk upload github failed after 3 attempts. The R2 FEED IS ALREADY LIVE (clients are updating to v$version) -- rerun this workflow once GitHub recovers to restore the release page; the rerun re-publishes both halves safely."
+    }
+    throw 'vpk upload github failed after 3 attempts'
 }
 
 # --- Drop the portable zip from the published release --------------------
