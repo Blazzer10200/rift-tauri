@@ -1424,9 +1424,11 @@ async fn resolve_spawn(
         // its conservative default `max_tokens` to the /v1/messages request, so
         // a multi-step local turn (explanation + several tool calls) gets
         // guillotined mid-reply — the user sees "Response cut off — reached
-        // output length limit / Continue". 8192 lets a real turn finish while
-        // staying well inside the model's 16384 num_ctx (input + output).
-        cmd.env("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "8192");
+        // output length limit / Continue". 8192 (the default) suits Ollama's
+        // 16384 num_ctx; cloud providers (Kimi/DeepSeek via the provider
+        // registry) sync a bigger cap through local_llm_max_output.
+        let max_out = cfg.local_llm_max_output.unwrap_or(8192);
+        cmd.env("CLAUDE_CODE_MAX_OUTPUT_TOKENS", max_out.to_string());
     } else if routes_through_nothink_shim(thinking_on, &model) {
         // Cloud "thinking off": point the CLI at the in-process shim, which
         // injects `thinking:{type:"disabled"}` into /v1/messages and forwards to

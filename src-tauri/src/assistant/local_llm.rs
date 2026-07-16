@@ -30,27 +30,17 @@ pub struct LocalTestResult {
     output_tokens: Option<u64>,
 }
 
-#[tauri::command]
-pub async fn assistant_test_local_llm() -> Result<LocalTestResult, String> {
-    let cfg = load_config();
-    let base_url = cfg
-        .local_llm_base_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty() && is_valid_local_base_url(s))
-        .ok_or("No (valid) base URL configured")?
-        .trim_end_matches('/')
-        .to_string();
-    let model = cfg
-        .local_llm_model
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty() && is_valid_local_model_name(s))
-        .ok_or("No (valid) model configured")?
-        .to_string();
-    let local_key = crate::secrets::get(crate::secrets::LOCAL_LLM_API_KEY)
-        .unwrap_or_else(|| "local".to_string());
-
+/// Core of the connection test, parameterized so the provider registry
+/// (providers.rs) can probe any profile — active or not. POSTs directly to
+/// `{base_url}/v1/messages`; key never crosses to the renderer.
+pub(super) async fn probe_messages(
+    base_url: &str,
+    local_key: &str,
+    model: &str,
+) -> Result<LocalTestResult, String> {
+    if model.is_empty() || !is_valid_local_model_name(model) {
+        return Err("No (valid) model configured".to_string());
+    }
     // Hit the Anthropic `/v1/messages` API directly. The CLI fires two parallel
     // calls and, on an upstream 500, hangs until our timeout — burying the real
     // cause behind a generic "timed out". A direct POST surfaces the upstream
@@ -73,7 +63,7 @@ pub async fn assistant_test_local_llm() -> Result<LocalTestResult, String> {
 
     let resp = crate::certs::local_llm_client()
         .post(&url)
-        .header("x-api-key", &local_key)
+        .header("x-api-key", local_key)
         .header("anthropic-version", "2023-06-01")
         .header("content-type", "application/json")
         .json(&body)
@@ -133,30 +123,13 @@ pub async fn assistant_test_local_llm() -> Result<LocalTestResult, String> {
     })
 }
 
-/// Experimental: list the models the configured local endpoint advertises, so
-/// the Local LLM page can offer a picker instead of free-text. GETs the
-/// OpenAI-style `{base_url}/v1/models` (LiteLLM exposes it; the `/v1/messages`
-/// adapter shares the same proxy). The key stays backend-side — only the model
-/// id strings cross to the renderer. Returns [] (not an error) when the endpoint
-/// is unreachable or advertises nothing, so the picker degrades to free-text.
-#[tauri::command]
-pub async fn assistant_list_local_models() -> Result<Vec<String>, String> {
-    let cfg = load_config();
-    let base_url = cfg
-        .local_llm_base_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty() && is_valid_local_base_url(s))
-        .ok_or("No (valid) base URL configured")?
-        .trim_end_matches('/')
-        .to_string();
-    let local_key = crate::secrets::get(crate::secrets::LOCAL_LLM_API_KEY)
-        .unwrap_or_else(|| "local".to_string());
-
+/// Core of the model-list probe, parameterized for the provider registry.
+/// GETs the OpenAI-style `{base_url}/v1/models`; best-effort by contract.
+pub(super) async fn probe_models(base_url: &str, local_key: &str) -> Result<Vec<String>, String> {
     let url = format!("{base_url}/v1/models");
     let resp = crate::certs::local_llm_client()
         .get(&url)
-        .header("x-api-key", &local_key)
+        .header("x-api-key", local_key)
         .header("authorization", format!("Bearer {local_key}"))
         .timeout(std::time::Duration::from_secs(10))
         .send()

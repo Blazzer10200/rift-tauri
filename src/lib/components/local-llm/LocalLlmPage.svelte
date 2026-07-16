@@ -1,40 +1,36 @@
 <script lang="ts">
   import "$lib/styles/settings-controls.css";
   import { onMount } from "svelte";
-  import { FlaskConical, Loader2, Eye, EyeOff, RefreshCw, Check, Zap, ArrowRight, Gauge, Sparkles, AlertTriangle } from "lucide-svelte";
+  import { FlaskConical, Loader2, Eye, EyeOff, RefreshCw, Check, Zap, Plus, Trash2, Power, Gauge, Sparkles, AlertTriangle } from "lucide-svelte";
   import PageHero from "../shared/PageHero.svelte";
+  import { providers, PRESETS, draftIdFor, type PresetDef, type ProviderDto } from "../../state/providers.svelte";
   import { localLlm } from "../../state/localLlm.svelte";
+
+  // Which profile the cockpit below edits. null = the Claude panel.
+  let selectedId = $state<string | null>(null);
+  const selected = $derived(providers.list.find((p) => p.id === selectedId) ?? null);
+
+  // Draft fields — copied on select, persisted on blur via upsert.
+  let dName = $state("");
+  let dBase = $state("");
+  let dModel = $state("");
+  let saveError = $state("");
 
   let keyInput = $state("");
   let keyVisible = $state(false);
-
   let keySaving = $state(false);
+
   let testing = $state(false);
   let testResult = $state<{ ok: boolean; msg: string } | null>(null);
   let testMs = $state<number | null>(null);
   let testTokens = $state<number | null>(null);
-  let lastChecked = $state<Date | null>(null);
   let modelHint = $state("");
+  let confirmDelete = $state(false);
+  let switching = $state(false);
+
   let optimizeResult = $state<{ ok: boolean; msg: string } | null>(null);
   let optimizeTarget = $state(32768);
 
-  // Both speak the Anthropic /v1/messages API: current Ollama serves it natively
-  // at :11434, and a LiteLLM proxy fronts it at :4000.
-  const PRESETS = [
-    { label: "Ollama", url: "http://localhost:11434" },
-    { label: "LiteLLM", url: "http://localhost:4000" },
-  ] as const;
-
-  // Curated Ollama tags that hold up under Rift's MCP tool surface + agentic
-  // edits. Free-text field stays authoritative — these are one-click conveniences.
-  const RECOMMENDED = [
-    "qwen3-coder:30b",
-    "qwen2.5-coder:14b",
-    "qwen2.5-coder:7b",
-    "devstral:24b",
-  ] as const;
-
-  // Optimize targets. Disabled above the model's advertised ceiling.
   const CTX_TARGETS = [
     { label: "16K", value: 16384 },
     { label: "32K", value: 32768 },
@@ -42,129 +38,181 @@
     { label: "128K", value: 131072 },
   ] as const;
 
-  // Test needs a target — gate the button so an empty probe can't fire.
-  const canTest = $derived(
-    localLlm.enabled && localLlm.baseUrl.trim().length > 0 && localLlm.model.trim().length > 0,
+  const canTest = $derived(!!selected && dBase.trim().length > 0 && dModel.trim().length > 0);
+
+  // Ollama ctx guidance — meaningful only for the LIVE provider (the probe
+  // reads the active wire fields backend-side).
+  const ctx = $derived(localLlm.ctxInfo);
+  const showCtx = $derived(!!selected?.active && !!ctx && ctx.is_ollama);
+  const fmt = (n: number) => n.toLocaleString();
+  const cardBits = $derived([ctx?.family, ctx?.params, ctx?.quant].filter((s): s is string => !!s));
+
+  const tokPerSec = $derived(
+    testTokens != null && testMs != null && testMs > 0 ? Math.round(testTokens / (testMs / 1000)) : null,
   );
 
-  const hasEndpoint = $derived(localLlm.baseUrl.trim().length > 0);
-  const hasModel = $derived(localLlm.model.trim().length > 0);
-  const verified = $derived(testResult?.ok === true);
+  // Ctx probe is Ollama-only; probing a cloud or dead base just logs errors.
+  function probeCtxIfLocal() {
+    const base = providers.active?.base_url ?? "";
+    if (!/\/\/(localhost|127\.0\.0\.1)(:|\/|$)/.test(base)) return;
+    void localLlm.refresh().then(() => localLlm.refreshCtx());
+  }
 
-  // Readiness state machine — drives the rail badge + hero tone.
-  const readiness = $derived.by(() => {
-    if (!localLlm.enabled) return { key: "off", label: "Local mode off", sub: "Turn it on to configure an endpoint." };
-    if (!hasEndpoint || !hasModel) return { key: "incomplete", label: "Setup incomplete", sub: "Endpoint and model are required." };
-    if (!verified) return { key: "ready", label: "Ready to verify", sub: "Config looks complete — run a test." };
-    return { key: "verified", label: "Verified & live", sub: "Turns route through your endpoint." };
+  onMount(() => {
+    void providers.refresh().then(() => {
+      selectedId = providers.active?.id ?? null;
+      probeCtxIfLocal();
+    });
   });
 
-  const steps = $derived([
-    { label: "Endpoint", done: hasEndpoint, hint: hasEndpoint ? localLlm.baseUrl : "Not set", optional: false },
-    { label: "Model", done: hasModel, hint: hasModel ? localLlm.model : "Not set", optional: false },
-    { label: "API key", done: localLlm.hasKey, hint: localLlm.hasKey ? "Configured" : "Optional", optional: true },
-    { label: "Verified", done: verified, hint: verified && testMs != null ? `${testMs} ms round-trip` : "Not tested", optional: false },
-  ]);
-
-  // Context guidance — only meaningful for an Ollama endpoint with a model set.
-  const ctx = $derived(localLlm.ctxInfo);
-  const showCtx = $derived(localLlm.enabled && !!ctx && ctx.is_ollama);
-  const fmt = (n: number) => n.toLocaleString();
-
-  // Model card line — any subset of family / params / quant the probe surfaced.
-  const cardBits = $derived(
-    [ctx?.family, ctx?.params, ctx?.quant].filter((s): s is string => !!s),
-  );
-
-  // Approximate throughput: output tokens over the measured round-trip. Includes
-  // connect + first-token latency so it under-reads true generation speed — a
-  // floor, not a benchmark. Hidden when the endpoint reports no usage.
-  const tokPerSec = $derived(
-    testTokens != null && testMs != null && testMs > 0
-      ? Math.round(testTokens / (testMs / 1000))
-      : null,
-  );
-
-  onMount(() => { void localLlm.refresh().then(() => localLlm.refreshCtx()); });
-
-  // A config change invalidates a prior pass — drop the verified state so the
-  // rail never claims "live" against settings that were never tested.
-  function invalidateTest() { testResult = null; testMs = null; testTokens = null; lastChecked = null; }
-
-  async function toggleEnabled() {
-    try { await localLlm.setEnabled(!localLlm.enabled); } catch { /* reverted in store */ }
+  function resetTransient() {
+    testResult = null; testMs = null; testTokens = null;
+    modelHint = ""; saveError = ""; confirmDelete = false;
+    optimizeResult = null; keyInput = ""; keyVisible = false;
   }
 
-  async function applyPreset(url: string) {
-    localLlm.baseUrl = url;
-    invalidateTest();
-    await localLlm.saveBaseUrl();
+  function select(p: ProviderDto | null) {
+    selectedId = p?.id ?? null;
+    resetTransient();
+    if (p) { dName = p.name; dBase = p.base_url; dModel = p.model ?? ""; }
   }
 
-  async function saveBaseUrl() { invalidateTest(); await localLlm.saveBaseUrl(); void localLlm.refreshCtx(); }
-
-  async function saveModel() {
-    invalidateTest();
-    optimizeResult = null;
-    try { await localLlm.saveModel(); void localLlm.refreshCtx(); }
-    catch (e) { testResult = { ok: false, msg: String(e) }; }
+  async function saveDraft() {
+    if (!selected) return;
+    saveError = "";
+    testResult = null;
+    try {
+      await providers.upsert({
+        id: selected.id,
+        name: dName.trim() || selected.name,
+        base_url: dBase.trim(),
+        model: dModel.trim() || null,
+        models: selected.models,
+        preset: selected.preset,
+        max_output_tokens: selected.max_output_tokens,
+      });
+      const fresh = providers.list.find((p) => p.id === selected.id);
+      if (fresh) { dName = fresh.name; dBase = fresh.base_url; dModel = fresh.model ?? ""; }
+    } catch (e) {
+      console.error("save provider failed", e);
+      saveError = String(e);
+    }
   }
 
-  async function optimizeCtx() {
-    optimizeResult = null;
-    invalidateTest();
-    optimizeResult = await localLlm.optimize(optimizeTarget);
+  async function addProvider(def: PresetDef | null) {
+    const taken = new Set(providers.list.map((p) => p.id));
+    const id = draftIdFor(def?.preset ?? null, taken);
+    try {
+      await providers.upsert({
+        id,
+        name: def?.name ?? "Custom endpoint",
+        base_url: def?.base_url ?? "http://localhost:8000",
+        model: def?.models[0] ?? null,
+        models: def?.models ?? [],
+        preset: def?.preset ?? null,
+        max_output_tokens: def?.max_output_tokens ?? null,
+      });
+      const p = providers.list.find((x) => x.id === id);
+      if (p) select(p);
+    } catch (e) {
+      console.error("add provider failed", e);
+      saveError = String(e);
+    }
   }
 
   async function selectModel(m: string) {
-    localLlm.model = m;
-    await saveModel();
+    dModel = m;
+    await saveDraft();
+  }
+
+  async function detectModels() {
+    if (!selected) return;
+    modelHint = "";
+    await saveDraft();
+    const n = await providers.detectModels(selected.id);
+    modelHint = n === 0
+      ? "Endpoint lists no models — type one (normal for Kimi/DeepSeek/GLM)."
+      : `${n} model${n === 1 ? "" : "s"} found.`;
   }
 
   async function saveKey() {
+    if (!selected) return;
     keySaving = true;
-    try { await localLlm.saveKey(keyInput); keyInput = ""; }
-    catch (e) { console.error("set key failed", e); }
+    try { await providers.setKey(selected.id, keyInput); keyInput = ""; }
+    catch (e) { saveError = String(e); }
     finally { keySaving = false; }
   }
 
   async function clearKey() {
+    if (!selected) return;
     keySaving = true;
-    try { await localLlm.saveKey(null); keyInput = ""; }
-    catch (e) { console.error("clear key failed", e); }
+    try { await providers.setKey(selected.id, null); }
+    catch (e) { saveError = String(e); }
     finally { keySaving = false; }
   }
 
-  async function detectModels() {
-    modelHint = "";
-    const n = await localLlm.listModels();
-    modelHint = n === 0 ? "No models found at this endpoint." : `${n} model${n === 1 ? "" : "s"} found.`;
-  }
-
   async function testConnection() {
+    if (!selected) return;
+    await saveDraft();
     testing = true;
-    testResult = null;
-    testMs = null;
-    testTokens = null;
+    testResult = null; testMs = null; testTokens = null;
     const t0 = performance.now();
-    const r = await localLlm.test();
+    const r = await providers.test(selected.id);
     testMs = Math.round(performance.now() - t0);
     testTokens = r.tokens ?? null;
     testResult = { ok: r.ok, msg: r.msg };
-    lastChecked = new Date();
     testing = false;
+  }
+
+  async function activateSelected() {
+    if (!selected) return;
+    await saveDraft();
+    switching = true;
+    try {
+      await providers.activate(selected.id);
+      probeCtxIfLocal();
+    } catch (e) { saveError = String(e); }
+    finally { switching = false; }
+  }
+
+  async function backToClaude() {
+    switching = true;
+    try { await providers.activate(null); }
+    catch (e) { saveError = String(e); }
+    finally { switching = false; }
+  }
+
+  async function deleteSelected() {
+    if (!selected) return;
+    if (!confirmDelete) { confirmDelete = true; return; }
+    try {
+      await providers.remove(selected.id);
+      select(null);
+    } catch (e) { saveError = String(e); }
+  }
+
+  async function optimizeCtx() {
+    if (!selected) return;
+    optimizeResult = null;
+    optimizeResult = await localLlm.optimize(optimizeTarget);
+    // The optimize repoints the wire model directly — mirror it into the
+    // profile so the next activate doesn't resurrect the un-optimized tag.
+    if (optimizeResult.ok) {
+      dModel = optimizeResult.msg;
+      await saveDraft();
+    }
   }
 </script>
 
 <div class="sb-main">
   <PageHero
     eyebrow="Experimental"
-    title="Local LLM"
-    desc="Route turns through a local Anthropic-compatible endpoint (LiteLLM / Ollama) instead of your Claude session. Toggle off any time to return to normal Claude."
+    title="Models"
+    desc="Bring other frontier models into Rift — Kimi, DeepSeek, GLM, OpenRouter, or any Anthropic-compatible endpoint. Claude stays the default; switch back any time."
   >
     {#snippet chip()}
-      <span class="sb-chip {readiness.key}">
-        <span class="dot"></span>{localLlm.enabled ? readiness.label : "Off"}
+      <span class="sb-chip {providers.active ? 'verified' : ''}">
+        <span class="dot"></span>{providers.active ? providers.active.name : "Claude"}
       </span>
     {/snippet}
   </PageHero>
@@ -172,199 +220,168 @@
   <div class="sb-scroll">
     <div class="sb-wrap">
 
-      <!-- ── Mode master strip ── -->
-      <div class="st-block mode-bar">
-        <div class="mode-main">
-          <div class="mode-body">
-            <div class="mode-title">Local LLM mode</div>
-            <div class="mode-desc">When on, every turn spawns the CLI against your local endpoint with <code>--bare</code>. Bypasses cloud auth, effort tiers, and per-conversation model pinning.</div>
-          </div>
-          <button
-            class="rift-toggle" class:on={localLlm.enabled}
-            role="switch" aria-checked={localLlm.enabled} aria-label="Toggle local LLM mode"
-            disabled={!localLlm.loaded} type="button" onclick={toggleEnabled}
-          ><span class="rift-toggle-knob"></span></button>
+      <!-- ── Chat brain rail — who answers in Chat ── -->
+      <div class="st-block">
+        <div class="st-block-label">Chat brain</div>
+        <div class="prow">
+          <button class="pcard" type="button" class:live={!providers.active} class:sel={selectedId === null} onclick={() => select(null)}>
+            <span class="pcard-name">Claude</span>
+            <span class="pcard-sub">Claude Code sign-in</span>
+            {#if !providers.active}<span class="st-pill ok"><span class="dot"></span>live</span>{/if}
+          </button>
+          {#each providers.list as p (p.id)}
+            <button class="pcard" type="button" class:live={p.active} class:sel={selectedId === p.id} onclick={() => select(p)}>
+              <span class="pcard-name">{p.name}</span>
+              <span class="pcard-sub mono">{p.model || p.base_url}</span>
+              {#if p.active}<span class="st-pill ok"><span class="dot"></span>live</span>{/if}
+            </button>
+          {/each}
+        </div>
+        <div class="prow-add">
+          <span class="preset-lead"><Plus size={12} strokeWidth={2.5} /> Add:</span>
+          {#each PRESETS as def (def.preset)}
+            <button class="chip-btn" type="button" onclick={() => addProvider(def)}>{def.name}</button>
+          {/each}
+          <button class="chip-btn" type="button" onclick={() => addProvider(null)}>Custom URL</button>
         </div>
       </div>
 
-      <!-- ── Cockpit: status rail + config ── -->
-      <div class="cockpit">
-
-        <!-- Status rail -->
-        <aside class="st-block rail rail-{readiness.key}">
-          <div class="rail-state">
-            <span class="rail-dot"></span>
-            <div>
-              <div class="rail-label">{readiness.label}</div>
-              <div class="rail-sub">{readiness.sub}</div>
-            </div>
-          </div>
-
-          {#if localLlm.enabled}
-            <ol class="rail-steps">
-              {#each steps as s (s.label)}
-                <li class:done={s.done} class:opt={s.optional}>
-                  <span class="step-mark">{#if s.done}<Check size={12} strokeWidth={3} />{/if}</span>
-                  <span class="step-label">{s.label}{#if s.optional && !s.done}<span class="step-opt"> · optional</span>{/if}</span>
-                  <span class="step-hint mono">{s.hint}</span>
-                </li>
-              {/each}
-            </ol>
-
-            <div class="rail-verify">
-              <div class="rv-head">
-                <span class="rv-title">Verify connection</span>
-                <span class="rv-metrics">
-                  {#if tokPerSec != null}
-                    <span class="rv-latency" title="Approximate — output tokens over total round-trip"><Gauge size={11} strokeWidth={2.5} />~{tokPerSec} tok/s</span>
-                  {/if}
-                  {#if testMs != null}
-                    <span class="rv-latency"><Zap size={11} strokeWidth={2.5} />{testMs} ms</span>
-                  {/if}
-                </span>
-              </div>
-              <div class="rv-desc">Round-trips a one-line prompt and reports the reply.</div>
-              <div class="rv-actions">
-                {#if testResult}
-                  <span class="st-pill {testResult.ok ? 'ok' : 'warn'}"><span class="dot"></span>{testResult.ok ? "OK" : "Failed"}</span>
-                {/if}
-                {#if lastChecked}
-                  <span class="rv-stamp">checked {lastChecked.toLocaleTimeString()}</span>
-                {/if}
-                <button class="st-btn primary" type="button" disabled={!canTest || testing} onclick={testConnection}>
-                  {#if testing}<Loader2 size={14} class="st-spin" /> Testing…{:else}<FlaskConical size={14} /> Test{/if}
-                </button>
-              </div>
-              {#if testResult}
-                <div class="ll-result mono" class:err={!testResult.ok}>{testResult.msg}</div>
-              {/if}
-            </div>
-
-            <!-- API key — lives in the rail so the config column stays balanced -->
-            <div class="rail-key">
-              <div class="rk-head">
-                <span class="rv-title">API key</span>
-                {#if localLlm.hasKey}<span class="st-pill ok"><span class="dot"></span>Set</span>{/if}
-              </div>
-              <div class="rv-desc">OS keychain, never in config. Most local proxies accept any non-empty value. Sets <code>ANTHROPIC_API_KEY</code>.</div>
-              <div class="rk-actions">
-                {#if localLlm.hasKey}
-                  <button class="st-btn" type="button" disabled={!localLlm.enabled || keySaving} onclick={clearKey}>Clear key</button>
-                {:else}
-                  <span class="st-secret">
-                    <input
-                      id="ll-key" class="st-input mono" type={keyVisible ? "text" : "password"}
-                      bind:value={keyInput} disabled={!localLlm.enabled}
-                      placeholder="any non-empty value" style="width:100%; max-width:158px;"
-                      spellcheck="false" autocapitalize="off" autocomplete="off"
-                    />
-                    <button class="st-eye" type="button" onclick={() => (keyVisible = !keyVisible)} aria-label={keyVisible ? "Hide key" : "Show key"}>
-                      {#if keyVisible}<EyeOff size={14} />{:else}<Eye size={14} />{/if}
-                    </button>
-                  </span>
-                  <button class="st-btn primary" type="button" disabled={!localLlm.enabled || keySaving || !keyInput.trim()} onclick={saveKey}>
-                    {keySaving ? "Saving…" : "Save"}
-                  </button>
-                {/if}
-              </div>
-            </div>
-          {:else}
-            <!-- Off-state flow explainer -->
-            <div class="rail-flow">
-              <span class="flow-node">Rift</span>
-              <ArrowRight size={14} class="flow-arrow" />
-              <span class="flow-node">Endpoint</span>
-              <ArrowRight size={14} class="flow-arrow" />
-              <span class="flow-node">Local model</span>
-            </div>
-            <div class="rail-flow-note">Enable Local mode to point Rift at your own endpoint instead of the Claude cloud.</div>
-          {/if}
-        </aside>
-
-        <!-- Config -->
-        <div class="st-block config" data-disabled={!localLlm.enabled}>
-          <div class="st-block-label">Endpoint &amp; model</div>
-
-          <!-- Base URL + presets -->
+      {#if !selected}
+        <!-- ── Claude panel ── -->
+        <div class="st-block">
           <div class="st-row">
             <div class="st-row-body">
-              <label class="st-row-label" for="ll-base">Base URL</label>
-              <div class="st-row-desc">Must speak the Anthropic <code>/v1/messages</code> API — <strong>Ollama</strong> serves it natively (<code>:11434</code>), or a <strong>LiteLLM proxy</strong> (<code>:4000</code>). Sets <code>ANTHROPIC_BASE_URL</code>.</div>
+              <span class="st-row-label">Claude — via your Claude Code sign-in</span>
+              <div class="st-row-desc">The default brain. You pick the model and reasoning effort in the chat composer, and usage counts against your Claude plan. Choosing a provider above sends chats to that endpoint instead — Rift's effort tiers and usage limits don't apply there.</div>
             </div>
             <div class="st-row-ctl">
-              <input
-                id="ll-base" class="st-input mono" type="text"
-                bind:value={localLlm.baseUrl} onblur={saveBaseUrl} disabled={!localLlm.enabled}
-                placeholder="http://localhost:4000" style="width:100%; max-width:220px;"
-                spellcheck="false" autocapitalize="off" autocomplete="off"
-              />
+              {#if providers.active}
+                <button class="st-btn primary" type="button" disabled={switching} onclick={backToClaude}>
+                  {#if switching}<Loader2 size={14} class="st-spin" /> Switching…{:else}<Power size={14} /> Switch to Claude{/if}
+                </button>
+              {:else}
+                <span class="st-pill ok"><Check size={12} strokeWidth={3} />Active</span>
+              {/if}
             </div>
-            <div class="preset-row">
-              <span class="preset-lead">Quick start:</span>
-              {#each PRESETS as p (p.url)}
-                <button class="chip-btn" type="button" disabled={!localLlm.enabled} onclick={() => applyPreset(p.url)} class:active={localLlm.baseUrl.trim() === p.url}>{p.label}</button>
-              {/each}
+          </div>
+        </div>
+      {:else}
+        <!-- ── Selected provider cockpit ── -->
+        <div class="st-block">
+          <div class="st-block-label">
+            {selected.name}{#if selected.preset}<span class="lbl-tag mono">{selected.preset}</span>{/if}
+          </div>
+
+          <div class="st-row">
+            <div class="st-row-body">
+              <label class="st-row-label" for="pv-name">Name</label>
+              <div class="st-row-desc">Shown on the card above and on the model pill in chat.</div>
+            </div>
+            <div class="st-row-ctl">
+              <input id="pv-name" class="st-input" type="text" bind:value={dName} onblur={saveDraft}
+                style="width:100%; max-width:220px;" spellcheck="false" autocomplete="off" />
             </div>
           </div>
 
-          <!-- Model + detect + detected list -->
           <div class="st-row">
             <div class="st-row-body">
-              <label class="st-row-label" for="ll-model">Model</label>
+              <label class="st-row-label" for="pv-base">Base URL</label>
+              <div class="st-row-desc">The endpoint must support the Anthropic <code>/v1/messages</code> API. Rift sets it as <code>ANTHROPIC_BASE_URL</code> for every chat turn while this provider is live.</div>
+            </div>
+            <div class="st-row-ctl">
+              <input id="pv-base" class="st-input mono" type="text" bind:value={dBase} onblur={saveDraft}
+                placeholder="https://api.example.com/anthropic" style="width:100%; max-width:260px;"
+                spellcheck="false" autocapitalize="off" autocomplete="off" />
+            </div>
+          </div>
+
+          <div class="st-row">
+            <div class="st-row-body">
+              <label class="st-row-label" for="pv-model">Model</label>
               <div class="st-row-desc">
-                Passed as <code>--model</code>. Type one or <strong>Detect</strong> what the endpoint serves.
+                Type a model name, or click <strong>Detect</strong> to list what the endpoint serves.
                 {#if modelHint}<span class="st-detect-hint">{modelHint}</span>{/if}
               </div>
             </div>
             <div class="st-row-ctl">
-              <input
-                id="ll-model" class="st-input mono" type="text" list="ll-models"
-                bind:value={localLlm.model} onblur={saveModel} disabled={!localLlm.enabled}
-                placeholder="ollama/llama3" style="width:200px;"
-                spellcheck="false" autocapitalize="off" autocomplete="off"
-              />
-              <datalist id="ll-models">
-                {#each localLlm.models as m (m)}<option value={m}></option>{/each}
+              <input id="pv-model" class="st-input mono" type="text" list="pv-models" bind:value={dModel} onblur={saveDraft}
+                placeholder="model id" style="width:200px;" spellcheck="false" autocapitalize="off" autocomplete="off" />
+              <datalist id="pv-models">
+                {#each selected.models as m (m)}<option value={m}></option>{/each}
               </datalist>
-              <button class="st-btn" type="button" disabled={!localLlm.enabled || localLlm.detecting} onclick={detectModels}>
-                {#if localLlm.detecting}<Loader2 size={14} class="st-spin" /> Detecting…{:else}<RefreshCw size={14} /> Detect{/if}
+              <button class="st-btn" type="button" disabled={providers.list.length === 0} onclick={detectModels}>
+                <RefreshCw size={14} /> Detect
               </button>
             </div>
-            {#if localLlm.models.length > 0}
+            {#if selected.models.length > 0}
               <div class="model-list">
-                {#each localLlm.models as m (m)}
-                  <button class="chip-btn" type="button" disabled={!localLlm.enabled} onclick={() => selectModel(m)} class:active={localLlm.model.trim() === m}>
-                    {#if localLlm.model.trim() === m}<Check size={12} strokeWidth={3} />{/if}{m}
-                  </button>
-                {/each}
-              </div>
-            {:else}
-              <div class="model-list">
-                <span class="preset-lead">Good for tools:</span>
-                {#each RECOMMENDED as m (m)}
-                  <button class="chip-btn" type="button" disabled={!localLlm.enabled} onclick={() => selectModel(m)} class:active={localLlm.model.trim() === m}>
-                    {#if localLlm.model.trim() === m}<Check size={12} strokeWidth={3} />{/if}{m}
+                {#each selected.models as m (m)}
+                  <button class="chip-btn" type="button" onclick={() => selectModel(m)} class:active={dModel.trim() === m}>
+                    {#if dModel.trim() === m}<Check size={12} strokeWidth={3} />{/if}{m}
                   </button>
                 {/each}
               </div>
             {/if}
           </div>
 
-          <!-- Context window — Ollama's 4096 default silently truncates Rift's
-               prompt + tools + files → stalls / refused edits. Detect + one-click fix. -->
+          <div class="st-row">
+            <div class="st-row-body">
+              <span class="st-row-label">API key</span>
+              <div class="st-row-desc">Stored in your OS keychain, never in a config file. {#if selected.preset}Needs: {PRESETS.find((d) => d.preset === selected?.preset)?.keyHint ?? ""}.{/if}</div>
+            </div>
+            <div class="st-row-ctl">
+              {#if selected.has_key}
+                <span class="st-pill ok"><span class="dot"></span>Set</span>
+                <button class="st-btn" type="button" disabled={keySaving} onclick={clearKey}>Clear</button>
+              {:else}
+                <span class="st-secret">
+                  <input class="st-input mono" type={keyVisible ? "text" : "password"} bind:value={keyInput}
+                    placeholder="paste key" style="width:100%; max-width:170px;"
+                    spellcheck="false" autocapitalize="off" autocomplete="off" />
+                  <button class="st-eye" type="button" onclick={() => (keyVisible = !keyVisible)} aria-label={keyVisible ? "Hide key" : "Show key"}>
+                    {#if keyVisible}<EyeOff size={14} />{:else}<Eye size={14} />{/if}
+                  </button>
+                </span>
+                <button class="st-btn primary" type="button" disabled={keySaving || !keyInput.trim()} onclick={saveKey}>
+                  {keySaving ? "Saving…" : "Save"}
+                </button>
+              {/if}
+            </div>
+          </div>
+
+          <div class="st-row">
+            <div class="st-row-body">
+              <span class="st-row-label">Verify connection</span>
+              <div class="st-row-desc">Sends a one-line prompt and shows the reply — run this before switching your chats over.</div>
+              {#if testResult}
+                <div class="ll-result mono" class:err={!testResult.ok}>{testResult.msg}</div>
+              {/if}
+            </div>
+            <div class="st-row-ctl">
+              {#if testResult}
+                <span class="st-pill {testResult.ok ? 'ok' : 'warn'}"><span class="dot"></span>{testResult.ok ? "OK" : "Failed"}</span>
+              {/if}
+              {#if tokPerSec != null}
+                <span class="rv-latency" title="Approximate — output tokens over total round-trip"><Gauge size={11} strokeWidth={2.5} />~{tokPerSec} tok/s</span>
+              {/if}
+              {#if testMs != null}
+                <span class="rv-latency"><Zap size={11} strokeWidth={2.5} />{testMs} ms</span>
+              {/if}
+              <button class="st-btn primary" type="button" disabled={!canTest || testing} onclick={testConnection}>
+                {#if testing}<Loader2 size={14} class="st-spin" /> Testing…{:else}<FlaskConical size={14} /> Test{/if}
+              </button>
+            </div>
+          </div>
+
           {#if showCtx && ctx}
             <div class="st-row ctx-row" class:bad={localLlm.ctxUndersized}>
               <div class="st-row-body">
-                <label class="st-row-label">
-                  <Gauge size={14} strokeWidth={2} />
-                  Context window
-                </label>
+                <span class="st-row-label"><Gauge size={14} strokeWidth={2} /> Context window</span>
                 <div class="st-row-desc">
                   {#if localLlm.ctxUndersized}
                     Ollama is serving this model at
                     <strong>{ctx.num_ctx == null ? "the 4096-token default" : `only ${fmt(ctx.num_ctx)} tokens`}</strong>
-                    — too small for Rift's system prompt, tools, and files. This is the
-                    <strong>#1 cause of stalls and refused edits</strong> in local mode.
+                    — too small for Rift's system prompt, tools, and files.
                     {#if ctx.max_ctx}This model supports up to {fmt(ctx.max_ctx)}.{/if}
                   {:else}
                     Serving <strong>{fmt(ctx.num_ctx ?? 0)} tokens</strong> — enough headroom for
@@ -380,13 +397,10 @@
                   <div class="ctx-targets">
                     <span class="preset-lead">Target:</span>
                     {#each CTX_TARGETS as t (t.value)}
-                      <button
-                        class="chip-btn" type="button"
+                      <button class="chip-btn" type="button"
                         disabled={localLlm.optimizing || (!!ctx.max_ctx && t.value > ctx.max_ctx)}
                         class:active={optimizeTarget === t.value}
-                        title={!!ctx.max_ctx && t.value > ctx.max_ctx ? "Exceeds this model's ceiling" : ""}
-                        onclick={() => (optimizeTarget = t.value)}
-                      >{t.label}</button>
+                        onclick={() => (optimizeTarget = t.value)}>{t.label}</button>
                     {/each}
                   </div>
                 {/if}
@@ -409,14 +423,33 @@
             </div>
           {/if}
 
+          <!-- Footer actions -->
+          <div class="st-row card-foot">
+            <div class="st-row-body">
+              {#if saveError}<div class="ll-result mono err">{saveError}</div>{/if}
+            </div>
+            <div class="st-row-ctl">
+              <button class="st-btn danger" type="button" onclick={deleteSelected}>
+                <Trash2 size={14} /> {confirmDelete ? "Click again to confirm" : "Remove"}
+              </button>
+              {#if selected.active}
+                <button class="st-btn" type="button" disabled={switching} onclick={backToClaude}>
+                  {#if switching}<Loader2 size={14} class="st-spin" /> Switching…{:else}<Power size={14} /> Back to Claude{/if}
+                </button>
+              {:else}
+                <button class="st-btn primary" type="button" disabled={switching} onclick={activateSelected}>
+                  {#if switching}<Loader2 size={14} class="st-spin" /> Switching…{:else}<Power size={14} /> Use for chats{/if}
+                </button>
+              {/if}
+            </div>
+          </div>
         </div>
+      {/if}
 
-        <!-- Full-width footer — spans both cockpit columns -->
-        <div class="st-warn cockpit-foot">
-          Tool-calling fidelity depends on the local model — small models may struggle with Rift's MCP tools.
-        </div>
-
+      <div class="st-warn">
+        Heads up: Rift still runs everything through the Claude CLI — a provider only swaps which model answers. How well a model handles edits and tool calls varies; if one struggles, that's the model, not Rift. Switching the chat brain mid-conversation starts a fresh chat (the old one is saved in History).
       </div>
+
     </div>
   </div>
 </div>
@@ -424,85 +457,31 @@
 <style>
   .sb-main { position: relative; overflow: hidden; display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; background: transparent; color: var(--fg); }
 
-  /* Hero status chip — tinted per readiness state (snippet defined in-file → scoped here). */
   .sb-chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--fg-2); font: inherit; font-size: var(--fs-xs); font-weight: 600; }
   .sb-chip .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--fg-faint); }
-  .sb-chip.ready { background: var(--accent-soft); border-color: color-mix(in oklch, var(--accent) 30%, transparent); color: var(--accent); }
-  .sb-chip.ready .dot { background: var(--accent); }
-  .sb-chip.incomplete { background: var(--warn-soft); border-color: color-mix(in oklab, var(--warn) 28%, transparent); color: var(--warn); }
-  .sb-chip.incomplete .dot { background: var(--warn); }
   .sb-chip.verified { background: var(--ok-soft); border-color: color-mix(in oklch, var(--ok) 28%, transparent); color: var(--ok); }
   .sb-chip.verified .dot { background: var(--ok); }
 
   .sb-scroll { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; }
   .sb-wrap { max-width: 820px; margin: 0 auto; padding: 18px 40px 22px; display: flex; flex-direction: column; gap: 12px; }
 
-  /* ── Mode master strip ── */
-  .mode-bar { transition: border-color var(--dur-base) var(--ease-soft), background var(--dur-base) var(--ease-soft); }
-  .mode-bar:has(:global(.rift-toggle.on)) { border-color: color-mix(in oklch, var(--accent) 30%, var(--border)); background: color-mix(in oklab, var(--accent) 5%, var(--surface)); }
-  .mode-bar .mode-main { display: flex; align-items: center; gap: 16px; padding: 15px 18px; }
-  .mode-body { flex: 1 1 auto; min-width: 0; }
-  .mode-title { font-size: 14px; font-weight: 650; color: var(--fg); }
-  .mode-desc { font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 3px; line-height: 1.5; max-width: 72ch; }
-  .mode-desc code { font-family: var(--font-mono); color: var(--code-fg); background: var(--code-bg); border: 1px solid var(--code-border); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+  /* ── Chat-brain rail ── */
+  .prow { display: flex; flex-wrap: wrap; gap: 9px; padding: 13px 17px; }
+  .pcard { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 150px; max-width: 230px; padding: 10px 13px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--field); font: inherit; text-align: left; cursor: pointer; transition: background var(--dur-fast), border-color var(--dur-fast); }
+  .pcard:hover { background: var(--surface-hover); border-color: var(--border-strong); }
+  .pcard.sel { border-color: color-mix(in oklch, var(--accent) 45%, var(--border)); background: color-mix(in oklab, var(--accent) 6%, var(--field)); }
+  .pcard.live { border-color: color-mix(in oklch, var(--ok) 38%, var(--border)); }
+  .pcard-name { font-size: var(--fs-sm); font-weight: 650; color: var(--fg); }
+  .pcard-sub { font-size: 10.5px; color: var(--fg-muted); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pcard .st-pill { margin-top: 3px; }
 
-  /* ── Cockpit grid ── */
-  .cockpit { display: grid; grid-template-columns: minmax(0, 286px) minmax(0, 1fr); gap: 12px; align-items: start; }
-  .cockpit-foot { grid-column: 1 / -1; }
-  @media (max-width: 760px) { .cockpit { grid-template-columns: 1fr; } }
+  .prow-add { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; padding: 11px 17px 13px; border-top: 1px solid var(--border); }
+  .prow-add .preset-lead { display: inline-flex; align-items: center; gap: 4px; }
 
-  /* ── Status rail ── */
-  .rail { position: relative; padding: 16px 17px; gap: 16px; overflow: hidden; }
-  .rail::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 2px; background: var(--fg-faint); opacity: 0.7; }
-  .rail-incomplete::before { background: var(--warn); }
-  .rail-ready::before { background: var(--accent); }
-  .rail-verified::before { background: var(--ok); }
-  .rail-state { display: flex; align-items: flex-start; gap: 11px; }
-  .rail-dot { width: 10px; height: 10px; border-radius: 999px; margin-top: 4px; flex: none; background: var(--fg-faint); box-shadow: 0 0 0 4px color-mix(in oklab, var(--fg-faint) 18%, transparent); }
-  .rail-off .rail-dot { background: var(--fg-faint); box-shadow: 0 0 0 4px color-mix(in oklab, var(--fg-faint) 16%, transparent); }
-  .rail-incomplete .rail-dot { background: var(--warn); box-shadow: 0 0 0 4px var(--warn-soft); }
-  .rail-ready .rail-dot { background: var(--accent); box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent) 20%, transparent); }
-  .rail-verified .rail-dot { background: var(--ok); box-shadow: 0 0 0 4px var(--ok-soft); }
-  .rail-label { font-size: var(--fs-md); font-weight: 650; color: var(--fg); }
-  .rail-sub { font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 2px; line-height: 1.45; }
-
-  .rail-steps { list-style: none; margin: 0; padding: 14px 0 0; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 11px; }
-  .rail-steps li { display: grid; grid-template-columns: 18px 1fr auto; align-items: center; gap: 9px; }
-  .step-mark { width: 18px; height: 18px; border-radius: 999px; display: grid; place-items: center; border: 1.5px solid var(--border-strong); color: var(--accent-fg); background: transparent; }
-  .rail-steps li.done .step-mark { background: var(--ok); border-color: transparent; color: var(--accent-fg); }
-  .step-label { font-size: var(--fs-sm); font-weight: 600; color: var(--fg-2); }
-  .rail-steps li.done .step-label { color: var(--fg); }
-  .step-opt { font-weight: 500; color: var(--fg-subtle); }
-  .step-hint { font-size: var(--fs-xs); color: var(--fg-muted); max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
-
-  .rail-verify { border-top: 1px solid var(--border); padding-top: 14px; display: flex; flex-direction: column; gap: 8px; }
-  .rv-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .rv-title { font-size: var(--fs-sm); font-weight: 650; color: var(--fg); }
-  .rv-latency { display: inline-flex; align-items: center; gap: 3px; font-size: var(--fs-xs); font-weight: 650; color: var(--accent); }
-  .rv-desc { font-size: var(--fs-xs); color: var(--fg-muted); line-height: 1.45; }
-  .rv-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
-  .rv-stamp { font-size: 10.5px; color: var(--fg-subtle); }
-  .rail-verify .st-btn.primary { margin-left: auto; }
-  .ll-result { white-space: pre-wrap; word-break: break-word; color: var(--ok); font-size: var(--fs-xs); line-height: 1.5; background: var(--bg-inset, color-mix(in oklab, var(--fg) 5%, transparent)); border: 1px solid var(--border); border-radius: var(--radius); padding: 9px 11px; max-height: 160px; overflow: auto; }
-  .ll-result.err { color: var(--danger); }
-
-  /* ── API key (rail-resident) ── */
-  .rail-key { border-top: 1px solid var(--border); padding-top: 14px; display: flex; flex-direction: column; gap: 8px; }
-  .rk-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .rk-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
-  .rk-actions > .st-btn:only-child { margin-left: auto; }
-  .rail-key .st-btn.primary { margin-left: auto; }
-  .rk-actions .st-secret .st-input { width: 158px; }
-
-  .rail-flow { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 14px; border-top: 1px solid var(--border); }
-  .flow-node { font-size: var(--fs-xs); font-weight: 600; color: var(--fg-2); padding: 5px 11px; border-radius: 999px; background: var(--field); border: 1px solid var(--border); }
-  .rail-flow :global(.flow-arrow) { color: var(--fg-faint); }
-  .rail-flow-note { font-size: var(--fs-xs); color: var(--fg-muted); line-height: 1.5; }
-
-  /* ── Config blocks ── */
+  /* ── Blocks & rows (shared look with Settings) ── */
   .st-block { display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); box-shadow: inset 0 1px 0 color-mix(in oklab, white 4%, transparent), var(--shadow-sm); }
-  .st-block-label { font-size: 10px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: var(--fg-faint); padding: 11px 17px; border-bottom: 1px solid var(--border); }
-  .config[data-disabled="true"] { opacity: 0.55; }
+  .st-block-label { display: flex; align-items: center; gap: 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: var(--fg-faint); padding: 11px 17px; border-bottom: 1px solid var(--border); }
+  .lbl-tag { font-size: 9.5px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 1px 6px; }
 
   .st-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; padding: 14px 17px; }
   .st-row + .st-row { border-top: 1px solid var(--border); }
@@ -511,14 +490,18 @@
   .st-row-desc { font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 3px; line-height: 1.5; max-width: 60ch; }
   .st-row-desc code { font-family: var(--font-mono); color: var(--code-fg); background: var(--code-bg); border: 1px solid var(--code-border); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
   .st-row-ctl { flex: 0 1 auto; margin-left: auto; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+  .card-foot { background: color-mix(in oklab, var(--fg) 2.5%, transparent); }
 
-  /* presets + detected-model chips share the chip-btn look */
-  .preset-row, .model-list { flex-basis: 100%; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
   .preset-lead { font-size: var(--fs-xs); color: var(--fg-subtle); margin-right: 2px; }
+  .model-list { flex-basis: 100%; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
   .chip-btn { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 10px; border-radius: 999px; font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer; border: 1px solid var(--border); background: var(--field); color: var(--fg-2); font-family: var(--font-mono); transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast); }
   .chip-btn:hover:not(:disabled) { background: var(--surface-hover); border-color: var(--border-strong); color: var(--fg); }
   .chip-btn.active { background: var(--ok-soft); border-color: color-mix(in oklch, var(--ok) 32%, transparent); color: var(--ok); }
   .chip-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .rv-latency { display: inline-flex; align-items: center; gap: 3px; font-size: var(--fs-xs); font-weight: 650; color: var(--accent); }
+  .ll-result { white-space: pre-wrap; word-break: break-word; color: var(--ok); font-size: var(--fs-xs); line-height: 1.5; background: var(--bg-inset, color-mix(in oklab, var(--fg) 5%, transparent)); border: 1px solid var(--border); border-radius: var(--radius); padding: 9px 11px; max-height: 160px; overflow: auto; margin-top: 8px; }
+  .ll-result.err { color: var(--danger); }
 
   /* ── Context-window guidance row ── */
   .ctx-row .st-row-label { display: inline-flex; align-items: center; gap: 6px; }
@@ -526,23 +509,12 @@
   .ctx-row.bad .st-row-label :global(svg) { color: var(--warn); }
   .ctx-result { flex-basis: 100%; margin-top: 8px; white-space: pre-wrap; word-break: break-word; color: var(--ok); font-size: var(--fs-xs); line-height: 1.5; background: var(--bg-inset, color-mix(in oklab, var(--fg) 5%, transparent)); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 11px; }
   .ctx-result.err { color: var(--danger); }
-
-  /* Model card — family / params / quant tags from /api/show */
   .model-card { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .mc-tag { font-size: 10.5px; font-weight: 600; color: var(--code-fg); background: var(--code-bg); border: 1px solid var(--code-border); border-radius: 4px; padding: 2px 7px; }
-
-  /* Optimize target selector */
   .ctx-targets { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
 
-  /* Verify-head metrics cluster (tok/s + latency) */
-  .rv-metrics { display: inline-flex; align-items: center; gap: 10px; }
-
-  .st-note { padding: 10px 17px; font-size: var(--fs-xs); color: var(--fg-muted); }
   .st-detect-hint { color: var(--accent); font-weight: 600; margin-left: 2px; }
-
   .st-warn { display: block; font-size: var(--fs-xs); color: var(--warn); line-height: 1.5; padding: 10px 13px; background: var(--warn-soft); border: 1px solid color-mix(in oklab, var(--warn) 32%, transparent); border-radius: var(--r-card); }
-
-  /* toggle — canonical .rift-toggle from app.css */
 
   /* Input · button · status-pill kit → $lib/styles/settings-controls.css */
 </style>

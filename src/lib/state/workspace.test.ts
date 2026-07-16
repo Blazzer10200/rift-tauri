@@ -121,21 +121,21 @@ describe("setActive()", () => {
   });
 });
 
-// local-llm disabled 2026-06-25 (DISABLED set). Page + code kept for re-enable;
-// these guard that it stays un-navigable so a stale flip doesn't resurface it.
-describe("local-llm disabled", () => {
-  it("setActive('local-llm') is a no-op", () => {
+// local-llm re-enabled 2026-07-16 as the Models workspace (provider registry).
+// These guard that it stays navigable + a persisted activeId survives restarts.
+describe("local-llm enabled (Models workspace)", () => {
+  it("setActive('local-llm') navigates and latches everOpened", () => {
     fakeLS.setItem(ACTIVE_KEY, "chat");
     workspace.init();
     workspace.setActive("local-llm");
-    expect(workspace.activeId).toBe("chat");
-    expect(workspace.everOpened.has("local-llm")).toBe(false);
+    expect(workspace.activeId).toBe("local-llm");
+    expect(workspace.everOpened.has("local-llm")).toBe(true);
   });
 
-  it("stored activeId 'local-llm' falls back to 'chat' on init", () => {
+  it("stored activeId 'local-llm' is restored on init", () => {
     fakeLS.setItem(ACTIVE_KEY, "local-llm");
     workspace.init();
-    expect(workspace.activeId).toBe("chat");
+    expect(workspace.activeId).toBe("local-llm");
   });
 });
 
@@ -220,10 +220,10 @@ describe("migrateLegacy() — legacy shell keys (runs inside init)", () => {
     expect(workspace.activeId).toBe("settings");
   });
 
-  it("does NOT seed from a disabled legacy panel id (local-llm) — falls back to chat", () => {
+  it("seeds from a legacy local-llm panel id now that the workspace is enabled", () => {
     fakeLS.setItem("rift.ui.right-pane.v1", "local-llm");
     workspace.init();
-    expect(workspace.activeId).toBe("chat");
+    expect(workspace.activeId).toBe("local-llm");
   });
 
   it("does NOT override an already-set new-shell activeId", () => {

@@ -36,7 +36,9 @@ export const WORKSPACES: Record<WorkspaceId, WorkspaceDef> = {
   // Legacy "projects" id: aliases WorkspacePage to keep the Record exhaustive + handle persisted activeId (init() folds it → "home").
   projects:    { component: WorkspacePage,     title: "Workspace",   icon: FolderTree,    kbd: "3" },
   settings:    { component: SettingsPage,      title: "Settings",    icon: SettingsIcon,  kbd: "4" },
-  // Disabled 2026-06-25 — hidden from nav + un-navigable. Code/page kept intact for re-enable (flip `disabled` + drop from DISABLED set in workspace.svelte.ts).
-  "local-llm": { component: LocalLlmPage,       title: "Local LLM",   icon: Cpu,           kbd: "5", disabled: true },
+  // Re-enabled 2026-07-16 as the multi-model "Models" workspace (provider
+  // registry — docs/design/multi-model-providers.md). Id stays "local-llm"
+  // (persisted activeIds in the wild).
+  "local-llm": { component: LocalLlmPage,       title: "Models",      icon: Cpu,           kbd: "5" },
   "ai-health": { component: AiHealthPage,       title: "AI Health",   icon: HeartPulse,    kbd: "6" },
 };

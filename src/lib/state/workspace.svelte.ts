@@ -47,7 +47,8 @@ const LEGACY_KEYS_TO_SWEEP = [
   "rift.terminal.activeTabIdx",
 ] as const;
 
-const DISABLED: ReadonlySet<WorkspaceId> = new Set(["local-llm"]);
+// "local-llm" re-enabled 2026-07-16 as the Models workspace (provider registry).
+const DISABLED: ReadonlySet<WorkspaceId> = new Set([]);
 const DEFAULT_ORDER: readonly WorkspaceId[] = WORKSPACE_IDS;
 
 function isWorkspaceId(v: unknown): v is WorkspaceId {

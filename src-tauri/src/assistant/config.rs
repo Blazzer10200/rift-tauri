@@ -76,6 +76,20 @@ pub(super) struct AssistantConfig {
     pub(super) local_llm_base_url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) local_llm_model: Option<String>,
+    /// `CLAUDE_CODE_MAX_OUTPUT_TOKENS` for provider/local turns. `None` = the
+    /// Ollama-sized 8192 default; cloud providers (Kimi/DeepSeek) set more via
+    /// their profile. Wire field — synced from the active provider on activate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) local_llm_max_output: Option<u32>,
+    /// Multi-model provider registry (docs/design/multi-model-providers.md).
+    /// Named endpoint profiles over the SAME wire mechanism as local-LLM mode:
+    /// activating one copies its base_url/model/key into the local_llm_* fields
+    /// above + LOCAL_LLM_API_KEY, so turn.rs needs zero provider awareness.
+    #[serde(default)]
+    pub(super) providers: Vec<super::providers::ProviderProfile>,
+    /// Id of the active provider (mirrors local_llm_enabled). None = Claude.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) active_provider: Option<String>,
     /// When true, Rift launches itself with administrator privileges (Windows).
     /// Backed by a per-user Scheduled Task so no UAC prompt fires on launch — see
     /// `crate::elevation`. `None`/false = normal (standard-user) launch. The task
@@ -424,6 +438,19 @@ pub(super) fn load_config() -> AssistantConfig {
             }
         }
     }
+    // Provider-registry migration: a pre-registry local-LLM config becomes the
+    // "local" provider entry. In-memory + idempotent (persisted by whichever
+    // setter saves next); delete_provider clears the wire fields so a deleted
+    // entry can't resurrect here.
+    if cfg.providers.is_empty() {
+        if let Some(base) = cfg.local_llm_base_url.clone() {
+            cfg.providers
+                .push(super::providers::ProviderProfile::migrated_local(base, cfg.local_llm_model.clone()));
+            if cfg.local_llm_enabled && cfg.active_provider.is_none() {
+                cfg.active_provider = Some("local".to_string());
+            }
+        }
+    }
     cfg
 }
 
@@ -580,55 +607,6 @@ pub fn assistant_get_local_llm_config() -> Result<LocalLlmDto, String> {
         model: cfg.local_llm_model,
         has_key: crate::secrets::get(crate::secrets::LOCAL_LLM_API_KEY).is_some(),
     })
-}
-
-#[tauri::command]
-pub fn assistant_set_local_llm_enabled(value: bool) -> Result<(), String> {
-    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let mut cfg = load_config();
-    cfg.local_llm_enabled = value;
-    save_config(&cfg)
-}
-
-#[tauri::command]
-pub fn assistant_set_local_llm_base_url(value: Option<String>) -> Result<(), String> {
-    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    // Normalize: a bare `localhost:4000` (no scheme) would reach the CLI as a
-    // malformed ANTHROPIC_BASE_URL and fail confusingly — prepend http://.
-    let normalized = value
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .map(|s| if s.contains("://") { s } else { format!("http://{s}") });
-    if let Some(ref url) = normalized {
-        if !is_valid_local_base_url(url) {
-            return Err(format!("invalid base URL (need http(s):// + host): {url}"));
-        }
-    }
-    let mut cfg = load_config();
-    cfg.local_llm_base_url = normalized;
-    save_config(&cfg)
-}
-
-#[tauri::command]
-pub fn assistant_set_local_llm_model(value: Option<String>) -> Result<(), String> {
-    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
-    let trimmed = value.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-    if let Some(ref m) = trimmed {
-        if !is_valid_local_model_name(m) {
-            return Err(format!("invalid local model name: {m}"));
-        }
-    }
-    let mut cfg = load_config();
-    cfg.local_llm_model = trimmed;
-    save_config(&cfg)
-}
-
-#[tauri::command]
-pub fn assistant_set_local_llm_key(key: Option<String>) -> Result<(), String> {
-    match key.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        Some(k) => crate::secrets::set(crate::secrets::LOCAL_LLM_API_KEY, k),
-        None => crate::secrets::delete(crate::secrets::LOCAL_LLM_API_KEY),
-    }
 }
 
 #[tauri::command]

@@ -30,6 +30,7 @@ pub mod oneshot;
 pub mod permission;
 pub mod proc_tree;
 pub mod projects;
+pub mod providers;
 pub mod skills_catalog;
 pub mod turn;
 pub mod warm_pool;
@@ -63,6 +64,9 @@ pub use oneshot::*;
 // Local-LLM commands (test/list/context/optimize) split out of oneshot.rs
 // (2026-06-27). Glob re-export for the __cmd__ items.
 pub use local_llm::*;
+// Multi-model provider registry (2026-07-16, docs/design/multi-model-providers.md).
+// Glob re-export for the __cmd__ items.
+pub use providers::*;
 // "What's new in AI" feed (Workspace page): deterministic changelog+npm fetch +
 // opt-in AI digest in `news.rs`. Glob re-export for the __cmd__ items.
 pub use news::*;

@@ -4,7 +4,7 @@
   import { assistant } from "../../state/assistant.svelte";
   import { github } from "../../state/github.svelte";
   import GhPopover from "./GhPopover.svelte";
-  import { localLlm } from "../../state/localLlm.svelte";
+  import { providers } from "../../state/providers.svelte";
   import { workspace } from "../../state/workspace.svelte";
   import { notify } from "../../state/toast.svelte";
   import { clampEffort, modelFamily } from "../../state/assistant/helpers";
@@ -32,11 +32,9 @@
 
   // Mic-button visibility binds to stt.config.enabled, so load the backend
   // stt config eagerly — otherwise users with STT enabled wouldn't see the
-  // mic until they opened Settings → Speech once.
-  // localLlm.refresh() intentionally NOT called — local-LLM feature disabled 2026-06-25.
-  // Leaving `enabled` at its false default keeps every local-mode branch (pill,
-  // placeholders, gating) dead. Re-enable: restore refresh() + the nav page.
-  onMount(() => { void stt.init(); });
+  // mic until they opened Settings → Speech once. providers.refresh() seeds
+  // the multi-model pill/placeholder state (re-enabled 2026-07-16).
+  onMount(() => { void stt.init(); void providers.refresh(); });
 
   // RR2 unmount hygiene — the Composer is destroyed when its tab/split-pane
   // closes (parent gates rendering on tab presence). Without this, pending
@@ -171,7 +169,7 @@
   // reduced-motion.
   const IDLE_HINTS = $derived.by(() => {
     const hints = [
-      `Ask ${localLlm.askLabel} anything`,
+      `Ask ${providers.askLabel} anything`,
       "Type / for a command",
       "Mention a file with @",
     ];
@@ -358,7 +356,7 @@
   // `user` setting source, so personal entries can't run — hide accordingly.
   // Builtins always win a name collision.
   const customSlash = $derived.by<SlashCmd[]>(() => {
-    if (localLlm.enabled) return [];
+    if (providers.enabled) return [];
     const seen = new Set(SLASH_COMMANDS.map((c) => c.name));
     const out: SlashCmd[] = [];
     for (const c of assistant.customCommands) {
@@ -502,9 +500,9 @@
     // Claude Design rides the user's claude.ai login — it can't authenticate
     // under local-LLM mode (--bare strips the cloud session). Warn instead of
     // firing a turn that's doomed to fail at the design OAuth step.
-    if (c.name.startsWith("design-") && localLlm.enabled) {
+    if (c.name.startsWith("design-") && providers.enabled) {
       notify.warn("Claude Design needs cloud Claude", {
-        detail: "Turn off local-LLM mode in Settings to sync with claude.ai/design.",
+        detail: "Switch the chat brain back to Claude (Models page) to sync with claude.ai/design.",
       });
       return;
     }
@@ -1541,19 +1539,20 @@
         <LivePills {queue} />
 
         <div class="cbar-r">
-          {#if localLlm.enabled}
-            <!-- Experimental local-mode indicator (cont.127). The model/effort
-                 pill lies in local mode (cloud model pin is bypassed), so this
-                 shows what the turn actually runs against. Click → settings. -->
+          {#if providers.enabled}
+            <!-- Provider-mode indicator (cont.127, generalized 2026-07-16).
+                 The model/effort pill lies in provider mode (cloud model pin is
+                 bypassed), so this shows what the turn actually runs against.
+                 Click → Models page. -->
             <button
               type="button"
               class="local-pill"
               onclick={() => workspace.setActive("local-llm")}
-              use:tooltip={`Local LLM mode — turns run against ${localLlm.baseUrl || "your local endpoint"}\nClick to configure`}
-              aria-label="Local LLM mode active — configure"
+              use:tooltip={`${providers.active?.name ?? "Provider"} — turns run against ${providers.baseUrl || "your endpoint"}\nClick to configure`}
+              aria-label="Provider mode active — configure"
             >
               <Cpu size={12} />
-              <span class="local-pill-label">{localLlm.pillLabel}</span>
+              <span class="local-pill-label">{providers.pillLabel}</span>
             </button>
           {/if}
 
@@ -1561,7 +1560,7 @@
                bypasses the model pin + effort entirely, so showing cloud options
                (e.g. "Opus 4.8") would misrepresent what the turn runs against.
                The local-pill above already names the active local model. -->
-          {#if !localLlm.enabled}
+          {#if !providers.enabled}
           <button
             type="button"
             class="model-pill"
@@ -1588,7 +1587,7 @@
             <ChevronUp size={13} class="pill-chev" />
           </button>
 
-          {#if settingsOpen && !localLlm.enabled}
+          {#if settingsOpen && !providers.enabled}
             <SettingsMenu
               {settingsIdx}
               activeKind={settingsRows[settingsIdx]?.kind ?? null}
@@ -1599,7 +1598,7 @@
           {/if}
           {/if}
 
-          {#if !localLlm.enabled && paneCtxTokens > 0}
+          {#if !providers.enabled && paneCtxTokens > 0}
             <CtxRing
               pct={paneCtxPct}
               tokens={paneCtxTokens}
