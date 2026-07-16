@@ -86,24 +86,29 @@
 </script>
 
 <section class="news" aria-label="What's new in AI">
-  <div class="news-h" class:embedded>
-    {#if !embedded}<span class="news-title"><Newspaper size={13} /> What's new in AI</span>{/if}
-    <div class="news-h-r">
-      {#if news.checkedAt}
-        <span class="news-when" use:tooltip={"Last checked"}>{fmtAgo(news.checkedAt, now)}</span>
-      {/if}
-      <button
-        class="news-refresh"
-        type="button"
-        aria-label="Refresh feed"
-        use:tooltip={"Refresh"}
-        disabled={news.status === "checking"}
-        onclick={() => void news.maybeFetch(true)}
-      >
-        <RefreshCw size={13} class={news.status === "checking" ? "spin" : ""} />
-      </button>
+  <!-- Embedded (the Workspace strip) hands the whole toolbar — title, freshness,
+       refresh — to the host's disclosure header; rendering it here too stacked a
+       second orphaned control row under the strip. -->
+  {#if !embedded}
+    <div class="news-h">
+      <span class="news-title"><Newspaper size={13} /> What's new in AI</span>
+      <div class="news-h-r">
+        {#if news.checkedAt}
+          <span class="news-when" use:tooltip={"Last checked"}>{fmtAgo(news.checkedAt, now)}</span>
+        {/if}
+        <button
+          class="news-refresh"
+          type="button"
+          aria-label="Refresh feed"
+          use:tooltip={"Refresh"}
+          disabled={news.status === "checking"}
+          onclick={() => void news.maybeFetch(true)}
+        >
+          <RefreshCw size={13} class={news.status === "checking" ? "spin" : ""} />
+        </button>
+      </div>
     </div>
-  </div>
+  {/if}
 
   <!-- ── Tier 2 digest (opt-in) ── -->
   <div class="digest">
@@ -117,7 +122,7 @@
       <div class="digest-head">
         <span class="dg-label"><Sparkles size={12} /> AI digest</span>
         {#if news.digestAt}<span class="dg-when">· {fmtAgo(news.digestAt, now)}</span>{/if}
-        <button class="dg-redo" type="button" onclick={() => void news.summarize()}>Refresh</button>
+        <button class="dg-redo" type="button" use:tooltip={"Runs one Claude turn"} onclick={() => void news.summarize()}>Refresh</button>
       </div>
       <div class="digest-items">
         <!-- Key by index: the digest fully replaces on each summarize, and the
@@ -137,11 +142,14 @@
       </div>
       {#if news.digestError}<div class="digest-err"><AlertTriangle size={12} /> {news.digestError}</div>{/if}
     {:else}
+      <!-- Costs money → WARN language at the point of consent (DESIGN §8): amber
+           tint, cost line in the row itself. Accent = free; amber = spends. -->
       <button class="digest-cta" type="button" onclick={() => void news.summarize()}>
         <span class="dc-ic"><Sparkles size={15} /></span>
         <span class="dc-tx">
           <b>Summarize this week in AI</b>
           <small>Claude searches the web for the latest Anthropic &amp; Claude Code news.</small>
+          <small class="dc-cost">Runs one Claude turn — billed like a chat message.</small>
         </span>
       </button>
       {#if news.digestError}<div class="digest-err"><AlertTriangle size={12} /> {news.digestError}</div>{/if}
@@ -182,7 +190,7 @@
             {#if more > 0}
               <button class="rel-more" type="button" onclick={() => toggle(it.version)}>
                 <ChevronDown size={12} class={isOpen ? "flip" : ""} />
-                {isOpen ? "Show less" : `${more} more`}
+                {isOpen ? "Show less" : `${more} more notes`}
               </button>
             {/if}
           {/if}
@@ -214,15 +222,16 @@
   /* ── Tier-2 digest ── */
   .digest { display: flex; flex-direction: column; gap: 8px; }
   .digest-cta { display: flex; align-items: center; gap: 11px; padding: 12px 13px; text-align: left; cursor: pointer; font: inherit;
-    border-radius: var(--radius-xl); border: 1px solid var(--ghost-border);
-    background: linear-gradient(180deg, var(--accent-soft), transparent);
+    border-radius: var(--radius-xl); border: 1px solid color-mix(in oklab, var(--warn) 24%, var(--border));
+    background: linear-gradient(180deg, var(--warn-soft), transparent);
     transition: border-color var(--dur-fast), transform var(--dur-fast) var(--ease-page); }
-  .digest-cta:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .digest-cta:hover { border-color: color-mix(in oklab, var(--warn) 55%, var(--border)); transform: translateY(-1px); }
   .dc-ic { display: grid; place-items: center; width: 30px; height: 30px; flex: none; border-radius: var(--radius-lg);
-    background: var(--accent-soft); color: var(--accent); }
+    background: var(--warn-soft); color: var(--warn); }
   .dc-tx { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
   .dc-tx b { font-size: var(--fs-md); font-weight: 620; color: var(--fg); }
   .dc-tx small { font-size: var(--fs-sm); color: var(--fg-muted); }
+  .dc-tx .dc-cost { font-size: var(--fs-xs); color: var(--warn); }
 
   .digest-loading { display: flex; align-items: center; gap: 10px; padding: 13px 14px; border-radius: var(--radius-xl);
     border: 1px solid var(--ghost-border); background: linear-gradient(180deg, var(--accent-soft), transparent); }
@@ -243,7 +252,7 @@
   .dg-redo:hover { background: var(--surface-hover); color: var(--fg-2); }
   .digest-items { display: flex; flex-direction: column; gap: 6px; }
   .dg-item { display: flex; align-items: flex-start; gap: 9px; padding: 9px 11px; text-align: left; cursor: pointer; font: inherit;
-    border-radius: var(--radius-lg); border: 1px solid var(--border); background: var(--bg-elev-1);
+    border-radius: var(--radius-lg); border: 1px solid var(--island-border); background: var(--island-fill);
     transition: border-color var(--dur-fast), background var(--dur-fast), transform var(--dur-fast); }
   .dg-item:hover { border-color: var(--border-strong); background: var(--surface-hover); transform: translateY(-1px); }
   .dg-tag { display: inline-flex; align-items: center; gap: 4px; flex: none; margin-top: 1px; padding: 2px 7px; border-radius: 999px;
@@ -266,7 +275,7 @@
   .news-sub :global(svg) { color: var(--fg-faint); }
   .news-list { display: flex; flex-direction: column; gap: 8px; }
   .rel { display: flex; flex-direction: column; gap: 6px; padding: 11px 13px; border-radius: var(--radius-xl);
-    border: 1px solid var(--border); background: var(--bg-elev-1);
+    border: 1px solid var(--island-border); background: var(--island-fill);
     transition: border-color var(--dur-fast), box-shadow var(--dur-fast); }
   .rel:hover { border-color: var(--border-strong); box-shadow: 0 6px 18px -14px color-mix(in oklab, var(--fg) 35%, transparent); }
   .rel.maint { opacity: 0.78; }

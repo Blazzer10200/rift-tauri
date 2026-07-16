@@ -6,7 +6,7 @@
     ArrowRight, Filter, FolderGit2, GitBranch, Folder, MessageSquare,
     Sparkles, History, Activity as ActivityIcon, Loader2, Flame, Cpu, Wrench, DollarSign,
     Newspaper, ChevronDown, SplitSquareHorizontal, AlertTriangle, RotateCw,
-    TrendingUp, TrendingDown, Clock,
+    TrendingUp, TrendingDown, Clock, RefreshCw,
   } from "lucide-svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import NewsFeed from "./NewsFeed.svelte";
@@ -25,7 +25,8 @@
   import { notify } from "../../state/toast.svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import { globSummary } from "./globPreview";
-  import { greeting } from "./welcomeShared";
+  import { fmtAgo } from "./welcomeShared";
+  import { news } from "../../state/news.svelte";
   import { EMPTY_PULSE, pulseByRoot, relTime } from "./hubHelpers";
   import type { Project } from "../../state/assistant/types";
 
@@ -36,12 +37,12 @@
   const branch = $derived(assistant.workspaceBranch);
   const fileCount = $derived(assistant.workspaceFiles.length);
 
-  let nowHour = $state(new Date().getHours());
+  // Land at the top whenever the hub becomes the active surface — the page
+  // stays mounted (keep-alive), so without this it reopens mid-scroll.
+  let scrollEl = $state<HTMLDivElement | null>(null);
   $effect(() => {
-    const t = setInterval(() => { nowHour = new Date().getHours(); }, 60_000);
-    return () => clearInterval(t);
+    if (workspace.activeId === "home" || workspace.activeId === "projects") scrollEl?.scrollTo({ top: 0 });
   });
-  const greet = $derived(greeting(nowHour));
 
   // "What's new in AI" is reference content, not a launch target — it rides as a
   // collapsible strip below Projects (collapsed by default) so Projects owns the
@@ -340,20 +341,16 @@
 {/snippet}
 
 <div class="sb-main">
-  <div class="sb-scroll">
+  <div class="sb-scroll" bind:this={scrollEl}>
     <div class="sb-wrap">
 
       <!-- Header — greeting is the page title; New project sits top-right. -->
       <header class="head">
         <div class="head-id">
-          {#if hasRoot}
-            <h1 class="greet-line">
-              <span class="greet-hello">{greet}.</span>
-              <span class="greet-ctx"> What's next for <b>{ctxName}</b>?</span>
-            </h1>
-          {:else}
-            <h1 class="greet-line"><span class="greet-hello">{greet}.</span></h1>
-          {/if}
+          <!-- Mission control, not a second welcome — the warm greeting lives on
+               the chat home; this header names the surface + the active folder. -->
+          <span class="head-eyebrow">Workspace</span>
+          <h1 class="greet-line">{hasRoot ? ctxName : "Your projects"}</h1>
           {#if hasRoot}
             <div class="band-row">
               <span class="cue">
@@ -698,13 +695,25 @@
            Reference content, not a launch target, so it sits collapsed by
            default behind a disclosure and expands inline on demand. ─────────── -->
       <section class="news-strip" class:open={newsOpen}>
-        <button class="news-strip-h" type="button" onclick={toggleNews}
-          aria-expanded={newsOpen} aria-controls="ws-news-body">
-          <span class="nsh-ic"><Newspaper size={14} /></span>
-          <span class="nsh-tx">What's new in AI</span>
-          {#if !newsOpen}<span class="nsh-hint">Claude Code releases &amp; this week in AI</span>{/if}
-          <ChevronDown size={16} class={"nsh-chev" + (newsOpen ? " open" : "")} />
-        </button>
+        <!-- One header row owns the whole zone: disclosure + freshness + refresh
+             live together instead of a toolbar floating below the strip. -->
+        <div class="news-strip-h">
+          <button class="nsh-toggle" type="button" onclick={toggleNews}
+            aria-expanded={newsOpen} aria-controls="ws-news-body">
+            <span class="nsh-ic"><Newspaper size={14} /></span>
+            <span class="nsh-tx">What's new in AI</span>
+            {#if !newsOpen}<span class="nsh-hint">Claude Code releases &amp; this week in AI</span>{/if}
+            <ChevronDown size={16} class={"nsh-chev" + (newsOpen ? " open" : "")} />
+          </button>
+          {#if newsOpen}
+            {#if news.checkedAt}<span class="nsh-when" use:tooltip={"Last checked"}>{fmtAgo(news.checkedAt, statsNow)}</span>{/if}
+            <button class="nsh-refresh" type="button" aria-label="Refresh feed" use:tooltip={"Refresh"}
+              disabled={news.status === "checking"}
+              onclick={() => void news.maybeFetch(true)}>
+              <RefreshCw size={13} class={news.status === "checking" ? "nspin" : ""} />
+            </button>
+          {/if}
+        </div>
         {#if newsOpen}
           <div class="news-strip-body" id="ws-news-body">
             <NewsFeed embedded />
@@ -755,10 +764,8 @@
     text-transform: uppercase; color: var(--fg-faint); margin: 0 2px 11px; }
   .section-h :global(svg) { color: var(--fg-faint); }
 
-  .greet-line { font-size: 23px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.28; margin: 0; text-wrap: pretty; }
-  .greet-hello { color: var(--fg); }
-  .greet-ctx { color: var(--fg-subtle); font-weight: 400; }
-  .greet-ctx b { color: var(--fg-2); font-weight: 600; }
+  .head-eyebrow { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-faint); }
+  .greet-line { font-size: 23px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.28; margin: 0; text-wrap: pretty; color: var(--fg); }
   .band-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
   /* ── Hub v3 — action-first: Jump back in → Projects → Activity → News.
@@ -782,7 +789,7 @@
   /* Fun-fact line anchors to the side column's bottom when it has spare height. */
   .act-side .sig { margin-top: auto; }
   .act-card { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 20px;
-    padding: 13px 16px; border-radius: var(--radius-2xl); border: 1px solid var(--border); background: var(--bg-elev-1); }
+    padding: 13px 16px; border-radius: var(--radius-2xl); border: 1px solid var(--island-border); background: var(--island-fill); }
   .act-main { display: flex; flex-direction: column; gap: 11px; min-width: 0; }
   /* The chart flexes to fill the band's height (matched to the side column's
      stat-grid + mix), so there's no dead vertical void beside the tiles. */
@@ -1025,9 +1032,9 @@
   .proj-grid.solo { grid-template-columns: minmax(0, 1fr); }
   @media (max-width: 680px) { .proj-grid { grid-template-columns: minmax(0, 1fr); } }
   .pcard { display: flex; flex-direction: column; gap: 9px; padding: 11px 13px; text-align: left; cursor: pointer; font: inherit; min-width: 0;
-    border-radius: var(--radius-xl); border: 1px solid var(--border); background: var(--bg-elev-1);
+    border-radius: var(--radius-xl); border: 1px solid var(--island-border); background: var(--island-fill);
     transition: border-color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast), background var(--dur-fast); }
-  .pcard:hover { border-color: var(--border-strong); background: var(--bg-elev-2);
+  .pcard:hover { border-color: var(--border-strong); background: color-mix(in oklab, var(--fg) 4.5%, transparent);
     box-shadow: 0 8px 20px -16px color-mix(in oklab, var(--fg) 40%, transparent); transform: translateY(-1px); }
   .pcard:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
   .pcard.active { border-color: color-mix(in oklab, var(--accent) 34%, var(--border));
@@ -1090,11 +1097,20 @@
   /* Docked right under the Activity band (owner call — bottom-pinned footer
      read as orphaned); hairline keeps it read as reference, not more dashboard. */
   .news-strip { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
-  .news-strip-h { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; cursor: pointer; font: inherit; text-align: left;
-    border-radius: var(--radius-xl); border: 1px solid var(--border); background: var(--bg-elev-1);
+  .news-strip-h { display: flex; align-items: center; gap: 8px; padding-right: 8px;
+    border-radius: var(--radius-xl); border: 1px solid var(--island-border); background: var(--island-fill);
     transition: border-color var(--dur-fast), background var(--dur-fast); }
-  .news-strip-h:hover { border-color: var(--border-strong); background: var(--surface-hover); }
-  .news-strip.open .news-strip-h { background: color-mix(in oklab, var(--fg) 2.5%, transparent); }
+  .news-strip-h:hover { border-color: var(--border-strong); }
+  .nsh-toggle { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; padding: 10px 12px;
+    cursor: pointer; font: inherit; text-align: left; border-radius: inherit; }
+  .nsh-when { flex: none; font-size: var(--fs-xs); color: var(--fg-subtle); }
+  .nsh-refresh { display: grid; place-items: center; width: 26px; height: 26px; flex: none; border-radius: var(--radius);
+    color: var(--fg-faint); cursor: pointer; transition: background var(--dur-fast), color var(--dur-fast); }
+  .nsh-refresh:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg-2); }
+  .nsh-refresh:disabled { opacity: 0.6; cursor: default; }
+  :global(.news-strip .nspin) { animation: nspin 0.9s linear infinite; }
+  @keyframes nspin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { :global(.news-strip .nspin) { animation: none; } }
   .nsh-ic { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: var(--radius);
     background: var(--accent-soft); color: var(--accent); }
   .nsh-tx { font-size: var(--fs-md); font-weight: 620; color: var(--fg); flex: none; }
