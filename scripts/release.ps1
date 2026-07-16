@@ -279,7 +279,29 @@ if (-not $ortDlls) {
     Write-Host '  note: no onnxruntime/DirectML DLLs found next to exe (static ort link?) — verify Parakeet works on a clean install' -ForegroundColor Yellow
 }
 
+# Token needed by BOTH the delta-baseline download below and the upload step.
+# In CI, -Token carries the workflow GITHUB_TOKEN; locally, fall back to the gh
+# session token. ($Token was already stripped to printable ASCII up top.)
+$ghToken = if ($Token) { $Token } else { (gh auth token).Trim() }
+if (-not $ghToken) { throw 'no GitHub token -- pass -Token <pat> (CI) or run `gh auth login` (local)' }
+
+# --- Delta baseline ------------------------------------------------------
+# Deltas re-enabled (v0.112.0): vpk diffs against the PREVIOUS full .nupkg,
+# which must sit in the output dir at pack time -- CI runs on a fresh checkout,
+# so fetch it from the latest published release. Best-effort: on the first
+# release (or a download hiccup) we warn and pack full-only, never fail the
+# release over a missing baseline.
+Write-Host '=== vpk download github (delta baseline) ===' -ForegroundColor Cyan
+& vpk download github --repoUrl "https://github.com/$releaseRepo" --channel win -o 'Releases' --token $ghToken
+if ($LASTEXITCODE -ne 0) {
+    Write-Host '  no previous release baseline (first release or download failure) -- packing full-only' -ForegroundColor Yellow
+}
+
 # --- vpk pack ------------------------------------------------------------
+# Delta generation is vpk's default (BestSpeed) when a previous full package
+# exists in -o; clients on vN-1 then download a few-MB patch instead of the
+# whole app. (The old explicit `--delta None` was retired with the baseline
+# step above.)
 Write-Host '=== vpk pack ===' -ForegroundColor Cyan
 $packArgs = @(
     'pack',
@@ -291,10 +313,6 @@ $packArgs = @(
     '--packTitle', 'Rift',
     '--packAuthors', 'Blazzer',
     '--icon', "$staging/icon.ico",
-    # No delta packages: keeps the release asset list lean (one fewer .nupkg per
-    # release). Clients just download the full package -- a non-issue at this
-    # app size + user base. Revert to the default by dropping this flag.
-    '--delta', 'None',
     '-o', 'Releases'
 )
 if ($releaseNotesFile) {
@@ -317,13 +335,7 @@ if ($LASTEXITCODE -ne 0) { throw 'vpk pack failed' }
 # GithubSource(prerelease:true) reads the prerelease list, so pre-releases are
 # visible (unlike the old GH-release-API `/latest` path, which excluded them).
 Write-Host '=== vpk upload github ===' -ForegroundColor Cyan
-# In CI, -Token carries the workflow GITHUB_TOKEN; locally, fall back to the gh
-# session token.
-# $Token was already stripped to printable ASCII up top (shared with GH_TOKEN);
-# locally, fall back to the gh session token.
-$ghToken = if ($Token) { $Token } else { (gh auth token).Trim() }
-if (-not $ghToken) { throw 'no GitHub token -- pass -Token <pat> (CI) or run `gh auth login` (local)' }
-
+# ($ghToken resolved above the delta-baseline step -- shared with download.)
 $uploadArgs = @(
     'upload', 'github',
     '-o', 'Releases',

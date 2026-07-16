@@ -119,9 +119,16 @@ class UpdateStore {
    *  can retry the Download button or grab it manually from GitHub. */
   downloadError = $state("");
   /** Periodic re-check timer — Rift can stay open for days, so launch-only
-   *  checking would never surface a release shipped mid-session. */
+   *  checking would never surface a release shipped mid-session. 45 min (was
+   *  6h — the dominant hotfix-propagation latency: a release is published
+   *  ~8 min after tag, then running apps sat blind for hours). A GitHub
+   *  releases-feed read every 45 min is negligible traffic. */
   private autoTimer: ReturnType<typeof setInterval> | null = null;
-  private readonly AUTO_MS = 6 * 60 * 60 * 1000; // every 6h
+  private readonly AUTO_MS = 45 * 60 * 1000; // every 45 min
+  /** Focus-regain check debounce: an active user alt-tabbing back should pick
+   *  up a fresh hotfix within seconds — but never re-check more often than
+   *  this, however twitchy the window focus is. */
+  private readonly FOCUS_MIN_GAP_MS = 15 * 60 * 1000; // 15 min
   /** Backoff state for auto-retrying a failed check before the 6h auto-tick. */
   private refreshRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private refreshRetries = 0;
@@ -456,7 +463,16 @@ class UpdateStore {
   private startAutoCheck() {
     if (this.autoTimer != null) return;
     this.autoTimer = setInterval(() => void this.autoTick(), this.AUTO_MS);
+    // Focus-regain check: the fastest honest push-less propagation for an
+    // actively-used app. Debounced via lastCheckedAt so window-focus churn
+    // (alt-tab storms, screenshots) can't hammer the feed.
+    window.addEventListener("focus", this.onFocus);
   }
+
+  private onFocus = () => {
+    if (this.lastCheckedAt != null && Date.now() - this.lastCheckedAt < this.FOCUS_MIN_GAP_MS) return;
+    void this.autoTick();
+  };
 
   /** Background re-check — never disrupts an in-flight download or open dialog. */
   private async autoTick() {
@@ -469,6 +485,7 @@ class UpdateStore {
 
   /** Clear timers (HMR teardown / app teardown). */
   dispose() {
+    window.removeEventListener("focus", this.onFocus);
     if (this.autoTimer != null) {
       clearInterval(this.autoTimer);
       this.autoTimer = null;

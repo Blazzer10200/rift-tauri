@@ -2,12 +2,10 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.111.0 — Mission control + dictation that keeps up
+## v0.112.0 — Updates that arrive while they're still news
 
-- **ActivityHud — see and control what's running.** The pinned agents bar is now a full activity periscope: alongside live sub-agents it lists every shell process running under the current turn (real command, PID, elapsed). Hover a shell row for a per-process ✕ kill (PID-verified against the session's own process tree — it can never touch anything else), and a **Stop** button in the bar ends the whole turn, agents included (they can't die individually — the label is honest about that).
-- **Dictation start is snappier.** The mic used to re-scan your workspace (git branch + up to 4000 filenames) on every single press to build its vocabulary hint; that scan is now cached for 2 minutes and runs in parallel with mic init on a miss. Repeat presses start about as fast as the mic hardware allows.
-- **Early release no longer loses your words.** Releasing a push-to-talk key (hold-Ctrl+D / hold-Space) while the mic was still initializing used to silently no-op the stop — the mic kept recording and the ghosted words never committed. Stop/cancel now wait out an in-flight start, so a release is always a stop and the spoken tail always lands in the draft.
-- **Cleaner shell captions in the HUD.** Rows strip the CLI's internal launcher prefix (`bash.exe -c -l SNAPSHOT_FILE=…`) and lead with the command you'd recognize.
+- **Delta updates are back on.** Updating now downloads a small binary patch against your installed version instead of the whole app — the release pipeline diffs each release against the previous one (first-release and fallback cases still ship the full package automatically).
+- **Hotfixes reach you fast.** Rift now re-checks for updates every 45 minutes (was every 6 hours) and also checks when you bring the window back into focus (politely debounced) — so a just-published fix shows its update pill within minutes for anyone actively using the app.
 
 ## Known issues
 - **While elevated, dragging files from Explorer into the window doesn't work** (Windows blocks lower→higher integrity drag-drop); the attach button / file picker still works fine.
