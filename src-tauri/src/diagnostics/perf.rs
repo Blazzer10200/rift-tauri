@@ -350,9 +350,9 @@ fn percentile(sorted: &[u64], pct: f64, min_samples: usize) -> Option<u64> {
 /// afternoon ages out of the banner overnight.
 const RECENT_WINDOW_MS: u64 = 24 * 60 * 60 * 1000;
 
-/// Read `turns.ndjson` (+ `.old` if present) and compute the aggregate. Skips
-/// malformed lines rather than failing — a partial write at the tail must not
-/// blank the whole panel.
+/// `aggregate_at` with a real wall clock. Test-only convenience — prod goes
+/// through `aggregate_at` directly with the display window.
+#[cfg(test)]
 fn aggregate(lines: impl Iterator<Item = String>) -> TurnPerfStats {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
