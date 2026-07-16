@@ -1,4 +1,4 @@
-# run-dev-deelevated.ps1 — the ONE reliable way to launch Rift dev with working
+﻿# run-dev-deelevated.ps1 — the ONE reliable way to launch Rift dev with working
 # CDP from ANY shell (elevated or not), with zero orphan sprawl.
 #
 # WHY THIS EXISTS: WebView2 Runtime 150.x added a "trusted origin check" that
@@ -77,12 +77,19 @@ if (Test-Elevated) {
   Write-Output "[dev] shell IS elevated — de-elevating to medium IL (WebView2 150.x CDP fix)"
   $taskName = "RiftDevDeElevated"
   $user = "$env:USERDOMAIN\$env:USERNAME"
+  # schtasks chatters on stderr (benign "not found" / "/ST earlier than now"
+  # warnings); PS5.1 under EAP=Stop + redirect promotes that to a terminating
+  # NativeCommandError. Relax EAP for the block; fail loud via exit codes.
+  $eap = $ErrorActionPreference; $ErrorActionPreference = 'Continue'
   schtasks /Delete /TN $taskName /F *>$null
   # /RL LIMITED = run as the interactive user at their DEFAULT (medium) level.
   schtasks /Create /TN $taskName /TR "cmd.exe /c `"$batPath`"" /SC ONCE /ST 00:00 /RL LIMITED /F /RU $user *>$null
+  if ($LASTEXITCODE -ne 0) { throw "schtasks /Create failed (exit $LASTEXITCODE)" }
   schtasks /Run /TN $taskName *>$null
+  if ($LASTEXITCODE -ne 0) { throw "schtasks /Run failed (exit $LASTEXITCODE)" }
   Start-Sleep -Seconds 3
   schtasks /Delete /TN $taskName /F *>$null
+  $ErrorActionPreference = $eap
   Write-Output "[dev] launched at medium IL via scheduled task; task entry cleaned up."
 } else {
   Write-Output "[dev] shell is NOT elevated — launching directly at medium IL"
@@ -101,6 +108,6 @@ if ($WaitForCdp) {
     } catch { $bound = 0 }
     Start-Sleep -Seconds 3
   }
-  if ($bound -ge 2) { Write-Output "[dev] ✓ CDP :9222 is UP (~$($i*3)s). Start the wrapper (npm run cdp:serve) if not already running." }
-  else { Write-Output "[dev] ✗ CDP :9222 did NOT bind in ~180s. Run: bash scripts/cdp/c.sh doctor" }
+  if ($bound -ge 2) { Write-Output "[dev] OK - CDP :9222 is UP (~$($i*3)s). Start the wrapper (npm run cdp:serve) if not already running." }
+  else { Write-Output "[dev] FAIL - CDP :9222 did NOT bind in ~180s. Run: bash scripts/cdp/c.sh doctor" }
 }

@@ -23,10 +23,12 @@ describe("tool classifiers", () => {
   });
   it("classifies card tools and excludes both families from grouping", () => {
     expect(isCardTool("Agent")).toBe(true);
+    expect(isCardTool("Task")).toBe(true);
     expect(isCardTool("mcp__rift__TodoWrite")).toBe(true);
     expect(isGroupableChip("Read")).toBe(true);
     expect(isGroupableChip("Edit")).toBe(false);
     expect(isGroupableChip("Agent")).toBe(false);
+    expect(isGroupableChip("Task")).toBe(false);
   });
   it("strips the MCP prefix in shortToolName", () => {
     expect(shortToolName("mcp__rift__grep")).toBe("grep");

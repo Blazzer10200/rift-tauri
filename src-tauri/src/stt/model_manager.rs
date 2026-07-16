@@ -387,7 +387,32 @@ async fn download_file(
     };
     // For resumed downloads sha256 will be verified post-stream (full-file pass below).
 
-    while let Some(chunk) = stream.next().await {
+    // Stall guard (mirrors commands/update.rs): without it a half-open HF
+    // connection hangs the download forever with no progress or error.
+    const STALL_SECS: u64 = 90;
+    loop {
+        let next = match tokio::time::timeout(
+            std::time::Duration::from_secs(STALL_SECS),
+            stream.next(),
+        )
+        .await
+        {
+            Ok(n) => n,
+            Err(_) => {
+                emit_progress(
+                    app,
+                    model_id,
+                    progress_base.saturating_add(downloaded),
+                    progress_total,
+                    "error",
+                    Some(format!("stalled — no data for {STALL_SECS}s")),
+                );
+                return Err(format!(
+                    "download stalled — no data received for {STALL_SECS}s"
+                ));
+            }
+        };
+        let Some(chunk) = next else { break };
         if cancel.load(Ordering::Relaxed) {
             emit_progress(
                 app,

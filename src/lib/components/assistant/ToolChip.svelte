@@ -26,6 +26,7 @@
   import ReadResult from "./stream/ReadResult.svelte";
   import GrepResult from "./stream/GrepResult.svelte";
   import { stripAnsi, shortScope, trimCmd } from "./stream/streamModel";
+  import { isCardTool } from "./bubble/helpers";
 
   import { tooltip } from "$lib/actions/tooltip";
   const reducedMotion =
@@ -37,7 +38,7 @@
   const isAgent = $derived(/^(mcp__rift__)?(Agent|Task)$/.test(tool.name));
   const isTodoWrite = $derived(/^(mcp__rift__)?TodoWrite$/.test(tool.name));
   const isAskUser = $derived(/^mcp__rift__ask_user$/.test(tool.name));
-  const isCard = $derived(isAgent || isTodoWrite || isAskUser);
+  const isCard = $derived(isCardTool(tool.name));
   // Cards open by default; chips closed.
   let expanded = $state(untrack(() => isCard));
   // AskUser is fully owned by AskUserCard (state, store round-trip, card CSS) —

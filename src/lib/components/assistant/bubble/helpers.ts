@@ -14,7 +14,7 @@ export function shortToolName(name: string): string { return name.replace(/^mcp_
 // Card-style tools render first-class chrome (their body IS the message) —
 // never fold them into a collapsed tool group.
 export function isCardTool(name: string): boolean {
-  return /^(mcp__rift__)?Agent$/.test(name)
+  return /^(mcp__rift__)?(Agent|Task)$/.test(name)
     || /^(mcp__rift__)?TodoWrite$/.test(name)
     || /^mcp__rift__ask_user$/.test(name);
 }

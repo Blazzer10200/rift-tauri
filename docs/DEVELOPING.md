@@ -31,7 +31,7 @@ Rift drives the `claude` CLI, so it uses whatever auth the CLI has.
 
 - **Open a folder** (the workspace picker). Everything Claude does is scoped to that folder via Rift's local MCP server.
 - Type in the composer and send. Claude can `read_file` / `list_dir` / `grep` and run local git (`git_status` / `diff` / `log` / `pull` / `commit` / `push`) against the folder — all on your machine, no remote connections.
-- **Per-turn controls** sit on the composer: model (sonnet/opus/haiku), permission mode, thinking effort.
+- **Per-turn controls** sit on the composer: model (Fable/Opus/Sonnet — legacy models in the "More models" flyout), permission mode, thinking effort.
 - **Permission modes** — ask-before-edits, edit-automatically, plan, auto, or bypass. In the asking modes a gated tool surfaces an Allow/Deny bar before it runs.
 - **Tabs / panes** — open multiple concurrent chats; each carries its own model + permission mode + effort.
 

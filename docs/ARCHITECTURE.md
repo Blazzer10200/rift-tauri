@@ -49,7 +49,7 @@ Key properties:
 
 ## 4. Backend (`src-tauri/src/`)
 
-`lib.rs` is the Tauri entry: it registers ~86 `#[tauri::command]`s (most live per-domain in `commands/*.rs`; `stt::*` and `usage::limits` register directly from their own modules) and runs `VelopackApp::build().run()` early for install/update hooks. `main.rs` is the thin binary.
+`lib.rs` is the Tauri entry: it registers ~94 `#[tauri::command]`s (most live per-domain in `commands/*.rs`; `stt::*` and `usage::limits` register directly from their own modules) and runs `VelopackApp::build().run()` early for install/update hooks. `main.rs` is the thin binary.
 
 ### `assistant/` — the engine
 | File | Role |
