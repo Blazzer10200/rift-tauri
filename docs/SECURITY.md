@@ -55,7 +55,7 @@ there. (Verified by a full backend review 2026-06-15: 0 critical, 0 high.)
   are stripped from the child env. The single write tool (`gh_pr_create`) is
   trust-gated like `git_push` and validates title/body length + shape.
 - **CLI spawn isolation** (`turn.rs`). `session_id` (UUID), `model`,
-  `permission_mode`, and the local-LLM `ANTHROPIC_BASE_URL` (http/https + host)
+  `permission_mode`, and the provider/local-LLM `ANTHROPIC_BASE_URL` (http/https + host)
   are all format-validated before they reach an argv/env. The prompt is sent on
   stdin as stream-json, never as an argument. The child cwd defaults to
   `temp_dir()` (overridden to the workspace root) so it can never inherit the
