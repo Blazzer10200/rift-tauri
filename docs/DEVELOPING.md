@@ -162,7 +162,7 @@ Maintainers only. Versions bumped manually across all three files (`package.json
 
 When dependencies change, regenerate the bundled license notices: `python scripts/gen-third-party-notices.py` rewrites `THIRD-PARTY-NOTICES.md` (shipped inside the installer next to the exe) — commit the result.
 
-`release.ps1` drives `tauri build` → Velopack pack (`vpk`) → publish a GitHub release on this repo (single-repo — the separate `rift` releases repo was retired when the source went public; installed clients update from the Cloudflare R2 feed), with a SHA256 round-trip verify. **The `vpk` CLI version MUST equal the `velopack` crate version** (both pinned `=1.2.0`) — bump them together (`dotnet tool update -g vpk` + the Cargo pin).
+`release.ps1` drives `tauri build` → Velopack pack (`vpk`, delta baseline pulled from the R2 feed) → publish **feed-first**: Cloudflare R2 (the live update feed installed clients read) then the GitHub release on this repo (human download page, retried 3×; single-repo — the separate `rift` releases repo was retired when the source went public). **The `vpk` CLI version MUST equal the `velopack` crate version** (both pinned `=1.2.0`) — bump them together (`dotnet tool update -g vpk` + the Cargo pin).
 
 ### Ship flow + guard rails
 

@@ -74,6 +74,15 @@ jobs:
       # release. (Inline PS stays ASCII-only -- WinPS 5.1.)
       - name: Install vpk (pinned to velopack crate version)
         run: |
+          # Already at the pinned version -> skip the nuget roundtrip entirely
+          # (outage-proofing: no network call when the runner is already set up).
+          if (Get-Command vpk -ErrorAction SilentlyContinue) {
+            $banner = (& vpk -h 2>&1 | Select-String 'Velopack CLI ([0-9.]+)')
+            if ($banner -and $banner.Matches[0].Groups[1].Value -eq '1.2.0') {
+              Write-Host "vpk 1.2.0 already installed: $((Get-Command vpk).Source)"
+              exit 0
+            }
+          }
           $ok = $false
           if (Get-Command vpk -ErrorAction SilentlyContinue) {
             dotnet tool update -g vpk --version 1.2.0
@@ -203,9 +212,26 @@ jobs:
       # class of auth mismatch; no credential is needed to read a public release.
       - name: Verify published
         run: |
-          $tag  = $env:GITHUB_REF_NAME
-          # Must match the repo release.ps1 actually publishes to (this repo --
-          # single-repo since the `rift` releases repo was retired).
+          $tag = $env:GITHUB_REF_NAME
+          $ver = $tag.TrimStart('v')
+
+          # 1) THE FEED (client-critical): releases.win.json on R2 must list this
+          # version as a Full package -- this is what installed clients read.
+          # LOCKSTEP: URL must equal update_service.rs UPDATE_FEED_URL.
+          $feed = 'https://pub-4fb26c0fc8df484488e4415f112f2d28.r2.dev/releases.win.json'
+          Write-Host "Verifying feed carries v$ver ..."
+          $feedJson = Invoke-RestMethod -Uri $feed -Headers @{ 'Cache-Control' = 'no-cache' } -ErrorAction Stop
+          $hit = @($feedJson.Assets | Where-Object { $_.Type -eq 'Full' -and $_.Version -eq $ver })
+          if (-not $hit) {
+            $seen = (@($feedJson.Assets | Where-Object { $_.Type -eq 'Full' } | ForEach-Object { $_.Version }) | Sort-Object -Unique) -join ', '
+            throw "FEED STALE: releases.win.json does not list v$ver (has: $seen) -- clients will NOT see this update."
+          }
+          Write-Host "OK: feed lists v$ver -- clients can update."
+
+          # 2) GitHub release (human download page). Secondary: a miss here still
+          # fails the run (rerun restores the page) but the message must make the
+          # feed state unmistakable. Anonymous read on purpose -- see git history
+          # (a PAT-authed read false-failed v0.35.0).
           $repo = 'Blazzer10200/rift-tauri'
           Write-Host "Verifying $tag published to $repo (anonymous public read) ..."
           $headers = @{ 'User-Agent' = 'rift-release-verify'; 'Accept' = 'application/vnd.github+json' }
@@ -213,11 +239,11 @@ jobs:
           try {
             $rel = Invoke-RestMethod -Uri $uri -Headers $headers -ErrorAction Stop
           } catch {
-            throw "Release $tag not found in $repo -- publish did not land. ($($_.Exception.Message))"
+            throw "Release $tag not found in $repo (FEED IS LIVE -- clients are updating; rerun once GitHub recovers to restore the release page). ($($_.Exception.Message))"
           }
           $assets = @($rel.assets | ForEach-Object { $_.name })
           Write-Host "Assets: $($assets -join ', ')"
           if ($assets -notcontains 'Rift-win-Setup.exe') {
-            throw "Release $tag exists but Rift-win-Setup.exe asset is missing -- partial publish."
+            throw "Release $tag exists but Rift-win-Setup.exe asset is missing -- partial publish (feed is live; rerun to fix the page)."
           }
           Write-Host "OK: $tag published with installer asset."
