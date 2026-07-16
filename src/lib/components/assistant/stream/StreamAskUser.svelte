@@ -8,7 +8,7 @@
   import { assistant } from "$lib/state/assistant.svelte";
   import { parseAskUserResult, type StreamTool } from "./streamModel";
 
-  let { tool }: { tool: StreamTool } = $props();
+  let { tool, live = false }: { tool: StreamTool; live?: boolean } = $props();
 
   type AskQuestion = {
     question: string;
@@ -50,6 +50,16 @@
   let askError = $state<string | null>(null);
   const askRequestId = $derived(assistant.askUserRequestIdFor(tool.id));
   const askAnswered = $derived(tool.status === "done");
+  // Terminal-but-unanswered: the turn ended (timeout/stop/error/app restart)
+  // before the user clicked. Without this state the card kept rendering its
+  // interactive shell — orphaned Submit/Dismiss buttons over a question that
+  // could no longer be answered (and, when the turn died mid-input, over NO
+  // question at all). Render inert instead: question kept readable, no chrome
+  // that promises an action the backend can't honor anymore.
+  const askExpired = $derived(!askAnswered && (!live || tool.status === "error"));
+  // Live turn, but the tool input is still streaming in (questions [] until the
+  // input JSON finishes forming) — hold the buttons until there's a question.
+  const askForming = $derived(!askAnswered && !askExpired && askQuestions.length === 0);
 
   // The backend tool_result is plain text Claude reads ("Q: …\nA: …" pairs, or
   // a dismissal sentence). Rendering it raw in a <pre> read as an unstyled
@@ -144,15 +154,24 @@
   });
 </script>
 
-<div class="sask" class:answered={askAnswered}>
+<div class="sask" class:answered={askAnswered} class:expired={askExpired} class:dismissed={askDismissed}>
   <div class="sask-head">
     <span class="sask-head-ic" aria-hidden="true">
-      {#if askAnswered}<Check size={13} strokeWidth={2.5} />{:else}<MessageCircleQuestion size={13} />{/if}
+      {#if askAnswered && !askDismissed}<Check size={13} strokeWidth={2.5} />{:else}<MessageCircleQuestion size={13} />{/if}
     </span>
-    <span class="sask-head-label">{askAnswered ? "Your answer" : "Rift needs your input"}</span>
+    <span class="sask-head-label">{askAnswered ? (askDismissed ? "Dismissed" : "Your answer") : askExpired ? "Question expired" : "Rift needs your input"}</span>
   </div>
 
-  {#if askAnswered}
+  {#if askExpired}
+    <!-- Inert post-mortem: keep the question readable, drop every affordance. -->
+    {#each askQuestions as q, qi (qi)}
+      <div class="sask-question">
+        {#if q.header}<span class="sask-q-header">{q.header}</span>{/if}
+        <div class="sask-q-text">{q.question}</div>
+      </div>
+    {/each}
+    <div class="sask-hint">The turn ended before this was answered — reply in chat to continue.</div>
+  {:else if askAnswered}
     {#if askDismissed}
       <div class="sask-empty">Dismissed — no answer given.</div>
     {:else if answeredPairs.length > 0}
@@ -170,6 +189,8 @@
     {:else}
       <div class="sask-empty">(no answer recorded)</div>
     {/if}
+  {:else if askForming}
+    <div class="sask-empty">Preparing the question…</div>
   {:else}
     {#each askQuestions as q, qi (qi)}
       <div class="sask-question">
@@ -274,8 +295,6 @@
     </div>
     {#if askError}
       <div class="sask-hint" style="color:var(--danger)">{askError}</div>
-    {:else if tool.status === "error"}
-      <div class="sask-hint">This turn ended before you answered.</div>
     {:else if !askRequestId}
       <div class="sask-hint">Connecting to the chat session…</div>
     {/if}
@@ -298,10 +317,29 @@
     box-shadow: 0 1px 0 color-mix(in oklab, var(--accent) 10%, transparent) inset;
   }
   /* Answered: drop the call-to-action accent, settle into a quiet "done" card. */
-  .sask.answered {
+  .sask.answered,
+  .sask.expired {
     border-color: var(--border, color-mix(in oklab, var(--fg) 12%, transparent));
     background: color-mix(in oklab, var(--fg) 3%, transparent);
     box-shadow: none;
+  }
+  /* Expired: everything demotes to muted — a dead question must not compete
+     with the live conversation below it. */
+  .sask.expired .sask-head { color: var(--fg-muted, color-mix(in oklab, var(--fg) 45%, transparent)); }
+  .sask.expired .sask-head-ic {
+    color: var(--fg-muted, color-mix(in oklab, var(--fg) 45%, transparent));
+    background: color-mix(in oklab, var(--fg) 7%, transparent);
+  }
+  .sask.expired .sask-q-header {
+    color: var(--fg-muted, color-mix(in oklab, var(--fg) 45%, transparent));
+    background: color-mix(in oklab, var(--fg) 7%, transparent);
+  }
+  .sask.expired .sask-q-text { color: var(--fg-2, color-mix(in oklab, var(--fg) 62%, transparent)); }
+  /* Dismissed: answered-quiet card, but no green "success" tint — a dismissal
+     is neutral, not an achievement. */
+  .sask.dismissed .sask-head-ic {
+    color: var(--fg-muted, color-mix(in oklab, var(--fg) 45%, transparent));
+    background: color-mix(in oklab, var(--fg) 7%, transparent);
   }
 
   /* card header — a small labelled rail so the card reads as a deliberate

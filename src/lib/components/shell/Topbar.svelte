@@ -1,8 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { invoke } from "@tauri-apps/api/core";
-  import { X, SplitSquareHorizontal, AppWindow, PanelLeftOpen, Plus, Search } from "lucide-svelte";
+  import { X, PanelLeftOpen, Plus, Search } from "lucide-svelte";
   import { workspace } from "$lib/state/workspace.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { shell } from "$lib/state/shell.svelte";
@@ -10,10 +9,8 @@
   import { goHome } from "$lib/state/nav";
   import { WORKSPACES } from "../workspaces";
   import { tooltip } from "$lib/actions/tooltip";
-  import NotificationCenter from "./NotificationCenter.svelte";
 
   const win = getCurrentWindow();
-  const isChat = $derived(workspace.activeId === "chat");
 
   // Reflect real window state on the maximize/restore control (icon + label).
   let maximized = $state(false);
@@ -65,23 +62,9 @@
   <span class="topbar-title" data-tauri-drag-region>{title}</span>
 
   <div class="topbar-r">
-    <!-- Window utilities as direct one-click icons (the old ⋮ dropdown buried
-         notifications behind two clicks and duplicated the sidebar's search). -->
-    {#if isChat}
-      <button class="tb-ic" type="button" disabled={!assistant.canAddPane}
-        onclick={() => assistant.addPane()}
-        use:tooltip={assistant.canAddPane ? "Split editor · Ctrl+\\" : "Maximum panes open"}
-        aria-label="Split editor">
-        <SplitSquareHorizontal size={15} />
-      </button>
-    {/if}
-    <button class="tb-ic" type="button"
-      onclick={() => invoke("open_new_window").catch(console.error)}
-      use:tooltip={"New window"} aria-label="New window">
-      <AppWindow size={15} />
-    </button>
-    <NotificationCenter />
-
+    <!-- Window controls ONLY — Claude-Desktop-style calm chrome. App actions
+         (split editor, new window) live in the command palette + shortcuts;
+         notifications moved to the sidebar footer bell. -->
     <div class="winctl">
       <button class="wc" type="button" onclick={() => win.minimize().catch(console.error)} use:tooltip={"Minimize"} aria-label="Minimize"><span class="wc-min"></span></button>
       <button class="wc" type="button" onclick={() => win.toggleMaximize().catch(console.error)} use:tooltip={maximized ? "Restore" : "Maximize"} aria-label={maximized ? "Restore" : "Maximize"}><span class={maximized ? "wc-restore" : "wc-max"}></span></button>

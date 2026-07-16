@@ -297,7 +297,7 @@
             {@const spawn = liveTab?.agentSpawns.find((a) => a.id === seg.tool.id)}
             <StreamAgent tool={seg.tool} {spawn} />
           {:else if seg.tool.kind === "ask"}
-            <StreamAskUser tool={seg.tool} />
+            <StreamAskUser tool={seg.tool} live={streaming} />
           {:else if seg.tool.kind === "exitplan"}
             <StreamExitPlan tool={seg.tool} />
           {:else if seg.tool.kind === "shell"}

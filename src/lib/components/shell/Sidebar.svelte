@@ -8,6 +8,7 @@
   import RiftLogo from "./RiftLogo.svelte";
   import ConversationList from "./ConversationList.svelte";
   import ProjectSwitcher from "./ProjectSwitcher.svelte";
+  import NotificationCenter from "./NotificationCenter.svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import { goHome } from "$lib/state/nav";
   import { rootKey } from "$lib/utils/path";
@@ -182,6 +183,7 @@
         </button>
       {/each}
       <span class="fnav-spacer" aria-hidden="true"></span>
+      <NotificationCenter />
       <button
         class="fnav-item"
         class:on={isNavActive("settings")}

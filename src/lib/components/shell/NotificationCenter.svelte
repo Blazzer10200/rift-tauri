@@ -11,6 +11,7 @@
   import { fly, fade } from "svelte/transition";
   import { toast, type ToastSeverity, type NotifyRecord } from "$lib/state/toast.svelte";
   import { tooltip } from "$lib/actions/tooltip";
+  import { portal } from "$lib/actions/portal";
 
   const reducedMotion =
     typeof window !== "undefined" &&
@@ -25,6 +26,30 @@
   };
 
   let rootEl = $state<HTMLDivElement | null>(null);
+  let panelEl = $state<HTMLDivElement | null>(null);
+
+  // The bell lives in the sidebar footer now, so the panel opens UPWARD from
+  // the trigger. It portals to <body> (fixed coords measured at open) because
+  // the sidebar island clips overflow and its backdrop-filter would otherwise
+  // become the containing block and dislocate the panel.
+  let panelPos = $state({ left: 0, bottom: 0, maxH: 560 });
+  function toggleCenter() {
+    if (toast.centerOpen) {
+      toast.closeCenter();
+      return;
+    }
+    if (rootEl) {
+      const r = rootEl.getBoundingClientRect();
+      panelPos = {
+        left: Math.max(8, Math.min(r.left, window.innerWidth - 360 - 8)),
+        bottom: Math.max(8, window.innerHeight - r.top + 8),
+        // Growing upward from the bell — never taller than the space above it
+        // (the mini-peek sidebar parks the bell mid-screen, not at the bottom).
+        maxH: Math.max(180, r.top - 16),
+      };
+    }
+    toast.openCenter();
+  }
 
   // Recency buckets — relative to "now" each render. Records are already
   // newest-first in the store, so within a bucket they stay ordered.
@@ -67,7 +92,9 @@
 
   function onDocMousedown(ev: MouseEvent) {
     if (!toast.centerOpen) return;
-    if (rootEl && ev.target instanceof Node && rootEl.contains(ev.target)) return;
+    if (!(ev.target instanceof Node)) return;
+    // Panel is portaled to <body> — it's no longer inside rootEl, so check both.
+    if (rootEl?.contains(ev.target) || panelEl?.contains(ev.target)) return;
     toast.closeCenter();
   }
   function onKey(ev: KeyboardEvent) {
@@ -88,13 +115,13 @@
     class="nc-bell"
     class:active={toast.centerOpen}
     type="button"
-    onclick={() => (toast.centerOpen ? toast.closeCenter() : toast.openCenter())}
+    onclick={toggleCenter}
     use:tooltip={"Notifications"}
     aria-label="Notifications"
     aria-haspopup="dialog"
     aria-expanded={toast.centerOpen}
   >
-    <Bell size={15} />
+    <Bell size={17} />
     {#if toast.unreadCount > 0}
       <span class="nc-badge" transition:fade={{ duration: reducedMotion ? 0 : 120 }}>
         {toast.unreadCount > 9 ? "9+" : toast.unreadCount}
@@ -105,7 +132,10 @@
   {#if toast.centerOpen}
     <div
       class="panel"
-      transition:fly={{ y: reducedMotion ? 0 : -6, duration: reducedMotion ? 0 : 160 }}
+      use:portal
+      bind:this={panelEl}
+      style="left: {panelPos.left}px; bottom: {panelPos.bottom}px; max-height: min(560px, {panelPos.maxH}px);"
+      transition:fly={{ y: reducedMotion ? 0 : 6, duration: reducedMotion ? 0 : 160 }}
       role="dialog"
       aria-label="Notifications"
     >
@@ -193,19 +223,21 @@
      notifications deserve one-click access with a visible badge.) */
   .nc { position: relative; display: flex; }
 
+  /* Sized to the sidebar footer-nav items (40×34) so the bell reads as a
+     sibling of the workspace icons, not a stray control. */
   .nc-bell {
     position: relative;
-    width: 30px; height: 30px;
+    width: 40px; height: 34px;
     display: grid; place-items: center;
     border-radius: 8px;
-    color: var(--fg-subtle);
+    color: var(--fg-muted);
     transition: background var(--dur-fast), color var(--dur-fast);
   }
   .nc-bell:hover, .nc-bell.active { background: var(--surface-hover); color: var(--fg-2); }
 
   .nc-badge {
     position: absolute;
-    top: 2px; right: 2px;
+    top: 3px; right: 7px;
     min-width: 14px; height: 14px;
     padding: 0 3px;
     border-radius: 999px;
@@ -220,15 +252,12 @@
   }
 
   .panel {
-    /* Anchored below the bell (was fixed top:46px — that overlapped the bell
-       itself once the update banner pushed the topbar down, so clicking the
-       bell to close actually hit the panel header). */
-    position: absolute;
-    top: calc(100% + 8px);
-    right: 0;
+    /* Portaled to <body>, fixed coords measured at open — opens upward from
+       the sidebar-footer bell, escaping the sidebar island's overflow clip
+       and backdrop-filter containing block. */
+    position: fixed;
     width: 360px;
     max-width: calc(100vw - 24px);
-    max-height: min(560px, calc(100vh - 140px));
     display: flex;
     flex-direction: column;
     background: var(--bg-elev-1);
