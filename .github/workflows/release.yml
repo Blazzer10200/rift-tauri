@@ -94,19 +94,32 @@ jobs:
           Write-Host "vpk ready: $((Get-Command vpk).Source)"
 
       # The self-hosted runner doesn't ship the gh CLI (release.ps1 uses it for
-      # the release existence check + asset cleanup). Download the latest
-      # standalone zip and prepend its bin to PATH -- no choco/winget dependency.
+      # the release existence check + asset cleanup). Installed to a PERSISTENT
+      # dir on the runner (D:\tools\gh -- same disk as CARGO_HOME) so every run
+      # after the first skips the network entirely. The latest-version lookup is
+      # best-effort with a pinned fallback: the 2026-07-16 GitHub outage 503'd
+      # that exact api.github.com call and killed two release runs pre-build.
+      # gh here only reads/deletes release assets -- any modern version works.
       - name: Ensure gh CLI on PATH
         run: |
           if (Get-Command gh -ErrorAction SilentlyContinue) { Write-Host 'gh already present'; exit 0 }
-          $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/cli/cli/releases/latest' -Headers @{ 'User-Agent' = 'rift-runner'; 'Authorization' = "Bearer $env:GITHUB_TOKEN" }
-          $ver = $rel.tag_name.TrimStart('v')
-          $zip = Join-Path $env:RUNNER_TEMP 'gh.zip'
-          Invoke-WebRequest -Uri "https://github.com/cli/cli/releases/download/v$ver/gh_${ver}_windows_amd64.zip" -OutFile $zip
-          $dest = Join-Path $env:RUNNER_TEMP 'gh'
-          Expand-Archive -Path $zip -DestinationPath $dest -Force
-          $ghExe = Get-ChildItem -Path $dest -Recurse -Filter 'gh.exe' | Select-Object -First 1
-          if (-not $ghExe) { throw "gh.exe not found after extracting $zip" }
+          $toolDir = 'D:\tools\gh'
+          $ghExe = Get-ChildItem -Path $toolDir -Recurse -Filter 'gh.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $ghExe) {
+            $ver = $null
+            try {
+              $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/cli/cli/releases/latest' -Headers @{ 'User-Agent' = 'rift-runner'; 'Authorization' = "Bearer $env:GITHUB_TOKEN" }
+              $ver = $rel.tag_name.TrimStart('v')
+            } catch {
+              $ver = '2.62.0'
+              Write-Host "latest-gh lookup failed ($($_.Exception.Message)) -- falling back to pinned gh v$ver"
+            }
+            $zip = Join-Path $env:RUNNER_TEMP 'gh.zip'
+            Invoke-WebRequest -Uri "https://github.com/cli/cli/releases/download/v$ver/gh_${ver}_windows_amd64.zip" -OutFile $zip
+            Expand-Archive -Path $zip -DestinationPath $toolDir -Force
+            $ghExe = Get-ChildItem -Path $toolDir -Recurse -Filter 'gh.exe' | Select-Object -First 1
+            if (-not $ghExe) { throw "gh.exe not found after extracting $zip" }
+          }
           $bin = $ghExe.Directory.FullName
           Add-Content -Path $env:GITHUB_PATH -Value $bin
           & $ghExe.FullName --version
