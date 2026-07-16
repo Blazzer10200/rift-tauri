@@ -65,9 +65,31 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
+      # Self-healing: a runner crash mid-job can corrupt the global dotnet tool
+      # store ("Settings file 'DotnetToolSettings.xml' was not found" -- hit on
+      # v0.111.0 after the runner dropped offline mid-run). On update failure,
+      # nuke the store entry + shims and reinstall fresh instead of failing the
+      # release. (Inline PS stays ASCII-only -- WinPS 5.1.)
       - name: Install vpk (pinned to velopack crate version)
         run: |
-          if (Get-Command vpk -ErrorAction SilentlyContinue) { dotnet tool update -g vpk --version 1.2.0 } else { dotnet tool install -g vpk --version 1.2.0 }
+          $ok = $false
+          if (Get-Command vpk -ErrorAction SilentlyContinue) {
+            dotnet tool update -g vpk --version 1.2.0
+            if ($LASTEXITCODE -eq 0) { $ok = $true }
+            else {
+              Write-Host 'vpk update failed - repairing corrupt dotnet tool store'
+              dotnet tool uninstall -g vpk
+              Remove-Item -Recurse -Force "$env:USERPROFILE\.dotnet\tools\.store\vpk" -ErrorAction SilentlyContinue
+              Remove-Item -Force "$env:USERPROFILE\.dotnet\tools\vpk*" -ErrorAction SilentlyContinue
+            }
+          }
+          if (-not $ok) {
+            dotnet tool install -g vpk --version 1.2.0
+            if ($LASTEXITCODE -ne 0) { throw 'vpk install failed after store repair' }
+          }
+          & vpk -h | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'vpk installed but not runnable' }
+          Write-Host "vpk ready: $((Get-Command vpk).Source)"
 
       # The self-hosted runner doesn't ship the gh CLI (release.ps1 uses it for
       # the release existence check + asset cleanup). Download the latest
