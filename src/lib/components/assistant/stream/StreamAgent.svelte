@@ -44,7 +44,7 @@
   const blocks = $derived((spawn?.blocks ?? []) as Block[]);
   const toolSteps = $derived(blocks.filter((b) => b.type === "tool"));
 
-  // Live "now-doing" headline while running — shared with AgentHud via
+  // Live "now-doing" headline while running — shared with ActivityHud via
   // agentNowLine (toolCaption.ts) so the card and the pinned periscope can't
   // drift. This is what made the retired dock read as alive, not a spinner.
   const nowLine = $derived(status === "running" ? agentNowLine(blocks) : null);

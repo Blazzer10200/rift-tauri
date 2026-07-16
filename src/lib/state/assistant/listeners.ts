@@ -13,10 +13,15 @@ import { notify } from "../toast.svelte";
 export type ListenerTab = {
   turnEpoch: number;
   staleTerminalUntil: number;
+  shellRows: ShellRow[];
   onStream(raw: string): void;
   onDone(): void;
   onError(message: string): void;
 };
+
+/** One live shell process under the session's CLI child (ActivityHud row).
+ *  Mirrors `proc_tree::ShellRow`; `started_at` is epoch SECONDS. */
+export type ShellRow = { pid: number; exe: string; cmd: string; started_at: number };
 
 /** Structural slice of AssistantStore: session→tab routing + the
  *  once-per-session bg_task warn registry. `activeTab` must be a live
@@ -41,6 +46,11 @@ export type DonePayload = {
 export type ErrorPayload =
   | { session_id?: string; message?: string; turn_epoch?: number }
   | string;
+export type ShellRowsPayload = {
+  session_id?: string;
+  rows?: ShellRow[];
+  turn_epoch?: number;
+};
 
 /** `assistant://stream` — route by session_id to the right TabState so
  *  background tabs keep painting concurrently with the foreground. */
@@ -97,6 +107,17 @@ export function handleDoneEvent(host: ListenerHost, payload: DonePayload | null 
       });
     }
   }
+}
+
+/** `assistant://shell-rows` — live shell processes under this session's CLI
+ *  child (ActivityHud rows). Same epoch discipline as stream: a stale turn's
+ *  poller must not paint rows into the next turn's HUD. */
+export function handleShellRowsEvent(host: ListenerHost, payload: ShellRowsPayload | null | undefined): void {
+  const { session_id, rows, turn_epoch } = payload ?? {};
+  const tab = session_id ? host.tabBySession(session_id) : host.activeTab;
+  if (!tab || !Array.isArray(rows)) return;
+  if (isStaleTurnEpoch(tab.turnEpoch, turn_epoch)) return;
+  tab.shellRows = rows;
 }
 
 /** `assistant://error` — same legacy-string + epoch discipline as stream. */

@@ -107,7 +107,7 @@ export function captionForTool(name: string, input: Input = {}): string {
 
 /** Live "now-doing" headline for a running agent spawn: the pending tool or
  *  active thinking nearest the tail, else the most recent settled step.
- *  Shared by StreamAgent (inline card) + AgentHud (pinned periscope) so the
+ *  Shared by StreamAgent (inline card) + ActivityHud (pinned periscope) so the
  *  two readouts can never drift. Structurally typed — this module stays free
  *  of state imports (see basename note above). */
 export type AgentNowLine = { label: string; thinking: boolean };

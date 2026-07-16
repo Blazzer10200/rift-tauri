@@ -7,7 +7,7 @@
   import MessageBubble from "./MessageBubble.svelte";
   import StreamTurn from "./stream/StreamTurn.svelte";
   import PlanHud from "./stream/PlanHud.svelte";
-  import AgentHud from "./stream/AgentHud.svelte";
+  import ActivityHud from "./stream/ActivityHud.svelte";
   import { uiPrefs } from "$lib/state/ui-prefs.svelte";
   import AssistantWelcome from "./AssistantWelcome.svelte";
   import Composer from "./Composer.svelte";
@@ -624,7 +624,7 @@
              keyboard focus to <body>. -->
         <div class="hud-stack">
           <PlanHud {tab} {streaming} />
-          <AgentHud {tab} {streaming} />
+          <ActivityHud {tab} {tabId} {streaming} />
         </div>
       {/if}
 

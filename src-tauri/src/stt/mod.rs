@@ -404,24 +404,48 @@ fn lang_code(bcp47: &str) -> Option<String> {
     )
 }
 
-/// A short workspace-context string — project name, git branch, and a sample
-/// of open filenames — used to bias Whisper (and the Haiku cleanup pass)
-/// toward the user's project vocabulary. Empty when no folder is open.
+/// TTL cache over `workspace_context` — the walk behind it (git rev-parse +
+/// up to 4000 files) costs real milliseconds and used to run on EVERY mic
+/// start, which is the bulk of the press-to-first-feedback delay on repeat
+/// dictations. The project vocabulary it yields changes rarely; 120s is fresh
+/// enough. Keyed by root so a workspace switch invalidates immediately.
+static WS_CTX_CACHE: std::sync::Mutex<Option<(std::path::PathBuf, String, std::time::Instant)>> =
+    std::sync::Mutex::new(None);
+const WS_CTX_TTL: std::time::Duration = std::time::Duration::from_secs(120);
+
 fn workspace_context() -> String {
-    use std::fmt::Write as _;
     let root = match crate::assistant::current_root() {
         Some(r) => r,
         None => return String::new(),
     };
+    if let Ok(g) = WS_CTX_CACHE.lock() {
+        if let Some((r, ctx, at)) = g.as_ref() {
+            if *r == root && at.elapsed() < WS_CTX_TTL {
+                return ctx.clone();
+            }
+        }
+    }
+    let ctx = workspace_context_for(&root);
+    if let Ok(mut g) = WS_CTX_CACHE.lock() {
+        *g = Some((root, ctx.clone(), std::time::Instant::now()));
+    }
+    ctx
+}
+
+/// A short workspace-context string — project name, git branch, and a sample
+/// of open filenames — used to bias Whisper (and the Haiku cleanup pass)
+/// toward the user's project vocabulary. Empty when no folder is open.
+fn workspace_context_for(root: &std::path::Path) -> String {
+    use std::fmt::Write as _;
     let mut ctx = String::new();
     if let Some(name) = root.file_name().and_then(|n| n.to_str()) {
         let _ = write!(ctx, "Project: {name}.");
     }
-    if let Some(branch) = crate::assistant::workspace::workspace_branch_sync(&root) {
+    if let Some(branch) = crate::assistant::workspace::workspace_branch_sync(root) {
         let _ = write!(ctx, " Branch: {branch}.");
     }
     {
-        let files = crate::assistant::workspace::list_workspace_files_sync(&root);
+        let files = crate::assistant::workspace::list_workspace_files_sync(root);
         // Distinct basenames, first ~30. compose_prompt's 800-char cap is the
         // final backstop; this keeps the file list from dominating it.
         let mut names: Vec<&str> = Vec::new();
@@ -536,6 +560,16 @@ pub async fn stt_start_recording(
         drop(capture);
     });
 
+    // Fold the workspace context into the vocab slot so it biases the decoder
+    // toward project filenames/symbols; user vocab follows (trimmed first if
+    // the 800-char prompt budget is exceeded).
+    // RR11: workspace_context() spawns `git rev-parse` + walks up to 4000 files
+    // synchronously (workspace.rs mandates spawn_blocking for Tokio callers);
+    // running it inline here stalled a worker for seconds on record-start.
+    // Spawned BEFORE the capture wait so the walk (cache-miss case) and the
+    // WASAPI init overlap instead of stacking onto the press-to-ready delay.
+    let ws_ctx_task = tokio::task::spawn_blocking(workspace_context);
+
     // recv() would block the Tokio worker — offload to a blocking thread.
     // Bounded wait: a stalled audio subsystem (Bluetooth/WASAPI device-enum hang
     // on Windows) must not wedge stt_start_recording forever and burn a blocking
@@ -550,15 +584,7 @@ pub async fn stt_start_recording(
     .await
     .map_err(|e| format!("capture init join: {e}"))??;
 
-    // Fold the workspace context into the vocab slot so it biases the decoder
-    // toward project filenames/symbols; user vocab follows (trimmed first if
-    // the 800-char prompt budget is exceeded).
-    // RR11: workspace_context() spawns `git rev-parse` + walks up to 4000 files
-    // synchronously (workspace.rs mandates spawn_blocking for Tokio callers);
-    // running it inline here stalled a worker for seconds on record-start.
-    let workspace_ctx = tokio::task::spawn_blocking(workspace_context)
-        .await
-        .unwrap_or_default();
+    let workspace_ctx = ws_ctx_task.await.unwrap_or_default();
     let vocab = if workspace_ctx.is_empty() {
         cfg.vocab_text.clone()
     } else if cfg.vocab_text.trim().is_empty() {

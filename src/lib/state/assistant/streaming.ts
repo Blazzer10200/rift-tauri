@@ -1423,6 +1423,9 @@ export function finalizeInflightBlocks(tab: TabState) {
       a.completedAt == null ? { ...a, completedAt: now, isError: true } : a,
     );
   }
+  // Shell rows are live-turn-only: the backend poller dies with the turn, so
+  // anything left here is stale. Clear on every terminal path.
+  if (tab.shellRows.length > 0) tab.shellRows = [];
   if (tab.streamingMsgId) {
     mutateStreaming(tab, (m) => ({
       ...m,

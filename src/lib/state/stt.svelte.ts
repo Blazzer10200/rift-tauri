@@ -188,6 +188,13 @@ class SttStore {
   inputDevices = $state<string[]>([]);
   /** True once stt_start_recording has been invoked but before recording=true arrives via event. */
   whisperStartInvoked = $state(false);
+  /** The in-flight stt_start_recording invoke. Mic start takes real time
+   *  (capture init; model load on first use) — a push-to-talk release inside
+   *  that window used to hit stop()'s "nothing running" guard and no-op,
+   *  leaving the mic recording after the key was let go and the spoken ghost
+   *  words uncommitted. stop()/cancel() await this first so a release is
+   *  ALWAYS a stop, however fast. */
+  private startPending: Promise<unknown> | null = null;
 
   // --- Private fields ---
   /** Per-utterance final segments (Web Speech) — "scratch that" pops the tail. */
@@ -484,9 +491,11 @@ class SttStore {
         return false;
       }
       try {
-        await invoke("stt_start_recording", {
+        const pending = invoke("stt_start_recording", {
           model: isWhisper ? this.config.whisper_model : this.config.parakeet_model,
         });
+        this.startPending = pending;
+        await pending;
         // `recording` flips to true once the `stt://state: recording` event arrives.
         this.whisperStartInvoked = true;
         this.startSilenceWatch();
@@ -496,6 +505,8 @@ class SttStore {
         this.failToast();
         this.starting = false;
         return false;
+      } finally {
+        this.startPending = null;
       }
     }
 
@@ -556,6 +567,16 @@ class SttStore {
   private async stopInner(): Promise<string> {
     this.clearSilenceWatch();
     if (isLocalEngine(this.config.engine)) {
+      // A start is mid-flight (capture/model init) — wait it out, then stop.
+      // A push-to-talk release inside that window must still end the session;
+      // set whisperStartInvoked ourselves so the guard below can't no-op on
+      // microtask ordering. (Start failure → nothing running → guard returns.)
+      if (this.startPending) {
+        try {
+          await this.startPending;
+          this.whisperStartInvoked = true;
+        } catch { /* start failed — the guard below no-ops */ }
+      }
       if (!this.recording && !this.transcribing && !this.whisperStartInvoked) return this.lastTranscript;
       this.whisperStartInvoked = false;
       try {
@@ -599,6 +620,14 @@ class SttStore {
     this.pendingSend = false;
     this.ghostTail = "";
     if (isLocalEngine(this.config.engine)) {
+      // A start still mid-invoke must be waited out too (mirrors stopInner) —
+      // cancelling during capture/model init used to leave the mic recording.
+      if (this.startPending) {
+        try {
+          await this.startPending;
+          this.whisperStartInvoked = true;
+        } catch { /* start failed — nothing to cancel */ }
+      }
       // Include whisperStartInvoked: cancel can fire in the gap between
       // stt_start_recording returning and the `recording` state event landing —
       // recording is still false then, so without this the backend keeps

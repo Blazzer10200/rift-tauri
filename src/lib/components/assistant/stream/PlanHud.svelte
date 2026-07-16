@@ -27,7 +27,7 @@
   );
 
   let open = $state(false);
-  // Duplication guard (owner ask 2026-07-08, mirrors AgentHud): the bar only
+  // Duplication guard (owner ask 2026-07-08, mirrors ActivityHud): the bar only
   // shows while the inline plan card it mirrors is OFF-screen — it's an
   // overflow affordance, not a second copy. Declared above the deriveds that
   // read it (Svelte 5 TDZ — see the pinned $effect.pre gotcha).
@@ -119,7 +119,7 @@
       planCardInView = false;
       return;
     }
-    // Boundary polish (mirrors AgentHud): yield immediately on card-in-view,
+    // Boundary polish (mirrors ActivityHud): yield immediately on card-in-view,
     // debounce the appear so threshold-hover during auto-scroll can't flicker
     // the bar. Pessimistic start kills the one-frame flash on re-arm.
     let showTimer: ReturnType<typeof setTimeout> | null = null;
@@ -213,7 +213,7 @@
   .phud-sentinel { display: none; }
 
   /* Positioning moved to the shared .hud-stack in AssistantPane (2026-07-08,
-     AgentHud arrival) — the stack owns centering/width/z so plan + agent bars
+     ActivityHud arrival) — the stack owns centering/width/z so plan + agent bars
      stack with a gap instead of overlapping at the same absolute spot. */
   .phud {
     width: 100%;

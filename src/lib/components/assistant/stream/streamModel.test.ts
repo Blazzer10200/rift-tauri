@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { messageToTurn, parseAskUserResult, groupNames, workLineMode, isFillerSay, classifySay, outputPeek, groupBlocks, shellFlavor, resultMeta, splitOutput, nextRevealTier, isPlanArtifact, REVEAL_COLLAPSED, REVEAL_EXPANDED, REVEAL_SLACK, stripAnsi, ansiLines, classifyShellLine, shellCheckKind, parseCheckSummary, parseGrepLine, parseReadOutput, splitOutputFold, FOLD_TAIL, trimCmd } from "./streamModel";
+import { messageToTurn, parseAskUserResult, groupNames, workLineMode, isFillerSay, classifySay, outputPeek, groupBlocks, shellFlavor, resultMeta, splitOutput, nextRevealTier, isPlanArtifact, REVEAL_COLLAPSED, REVEAL_EXPANDED, REVEAL_SLACK, stripAnsi, ansiLines, classifyShellLine, shellCheckKind, parseCheckSummary, parseGrepLine, parseReadOutput, splitOutputFold, FOLD_TAIL, trimCmd, shellLabel } from "./streamModel";
 import type { StreamTool } from "./streamModel";
 import type { ChatMessage } from "$lib/state/assistant.svelte";
 
@@ -811,6 +811,22 @@ describe("adaptTool — test/lint upgrade + raw ANSI on shell results", () => {
     expect(toolOf(msg([read]))!.input).toEqual({ file_path: "/a/b.ts", offset: 40 });
     const grep = { ...tool("Grep", "done", { pattern: "foo" }), result: "a.ts:1:foo" };
     expect(toolOf(msg([grep]))!.input).toEqual({ pattern: "foo" });
+  });
+});
+
+describe("shellLabel — strips the CLI's snapshot-wrapper prefix from HUD shell rows", () => {
+  it("strips pathed bash.exe with -c -l and env assignment (real CLI wrapper shape)", () => {
+    expect(shellLabel("C:\\Program Files\\Git\\bin\\bash.exe -c -l SNAPSHOT_FILE=/tmp/snap.sh cargo test --workspace"))
+      .toBe("cargo test --workspace");
+  });
+  it("strips bare powershell with flag-style args", () => {
+    expect(shellLabel("powershell -NoProfile -Command npm run build")).toBe("npm run build");
+  });
+  it("strips cmd.exe /c", () => {
+    expect(shellLabel('"C:\\Windows\\System32\\cmd.exe" /c dir /b')).toBe("dir /b");
+  });
+  it("leaves an unwrapped command untouched", () => {
+    expect(shellLabel("cargo build --release")).toBe("cargo build --release");
   });
 });
 

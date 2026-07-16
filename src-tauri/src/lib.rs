@@ -264,6 +264,7 @@ pub fn run() {
             commands::assistant_fetch_ai_news,
             commands::assistant_summarize_ai_news,
             commands::assistant_stop,
+            commands::assistant_kill_shell,
             commands::assistant_answer_ask_user,
             commands::assistant_answer_permission,
             commands::assistant_list_conversations,

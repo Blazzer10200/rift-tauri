@@ -1,30 +1,36 @@
 <script lang="ts">
-  // Pinned agent HUD — the periscope for running sub-agents / workflow / skill
-  // spawns. The inline StreamAgent cards are the source of truth but scroll
-  // away with the stream; while spawns are LIVE this bar keeps the fleet
-  // glanceable at the top of the pane. Collapsed: count + the most recent
-  // spawn's live "now-doing" line. Expanded: one row per spawn; clicking a row
-  // jumps the transcript to its inline card.
+  // Pinned activity HUD (né AgentHud) — the periscope for running sub-agents /
+  // workflow / skill spawns AND the live shell processes under this session's
+  // CLI child. The inline StreamAgent cards are the source of truth for agents
+  // but scroll away with the stream; while anything is LIVE this bar keeps the
+  // fleet glanceable at the top of the pane. Collapsed: counts + the most
+  // recent spawn's live "now-doing" line. Expanded: one row per spawn (click
+  // jumps to its inline card) + one row per shell (hover reveals a per-PID
+  // kill — the ONE thing that CAN die individually; agents can't, so the only
+  // agent-scoped control is the honest whole-turn Stop in the bar).
   //
   // NOT a dock revival (cont.252 guard stands): no sub-transcripts render
   // here, nothing persists — rows only point back into the transcript.
   // Owner-approved 2026-07-08 ("agents get left behind" ask).
   //
-  // Lifecycle mirrors PlanHud: visible only while a spawn is live during a
-  // streaming turn (streaming = the honest liveness signal; the turn-end sweep
-  // closes every spawn), then a brief linger showing the settled fleet.
-  import { Bot, Check, ChevronDown, AlertCircle, Brain, Loader2 } from "lucide-svelte";
+  // Lifecycle mirrors PlanHud: visible only while a spawn/shell is live during
+  // a streaming turn (streaming = the honest liveness signal; the turn-end
+  // sweep closes every spawn + clears shellRows), then a brief linger showing
+  // the settled fleet.
+  import { Bot, Check, ChevronDown, AlertCircle, Brain, Loader2, Square, Terminal, X } from "lucide-svelte";
   import { fade } from "svelte/transition";
+  import { invoke } from "@tauri-apps/api/core";
   import { agentNowLine } from "../toolCaption";
-  import { fmtDur } from "./streamModel";
-  import type { Block, TabState } from "$lib/state/assistant.svelte";
+  import { fmtDur, shellLabel, trimCmd } from "./streamModel";
+  import { assistant, type Block, type TabState } from "$lib/state/assistant.svelte";
+  import type { ShellRow } from "$lib/state/assistant/listeners";
 
   // Svelte transitions don't respect prefers-reduced-motion on their own.
   const reduceMotion =
     typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  let { tab = null, streaming = false }:
-    { tab?: TabState | null; streaming?: boolean } = $props();
+  let { tab = null, tabId = null, streaming = false }:
+    { tab?: TabState | null; tabId?: string | null; streaming?: boolean } = $props();
 
   type Spawn = TabState["agentSpawns"][number];
   // Per-TURN fleet: agentSpawns accumulates across a conversation's turns
@@ -45,6 +51,11 @@
   const done = $derived(total - running.length);
   const anyError = $derived(spawns.some((s) => s.isError));
   const allDone = $derived(total > 0 && running.length === 0);
+
+  // Live shell processes under the CLI child (backend poller, cleared on every
+  // turn terminal). No linger of their own: rows vanish when the process does.
+  const shells = $derived(tab?.shellRows ?? []);
+  const anyLive = $derived(running.length > 0 || shells.length > 0);
 
   // Headline = the newest running spawn's live activity ("recon · Searching
   // for auth…"). Newest, not first: the most recently spawned agent is the one
@@ -94,14 +105,14 @@
   });
   $effect(() => () => { if (lingerTimer) clearTimeout(lingerTimer); });
 
-  const hudLive = $derived((streaming && running.length > 0) || linger);
+  const hudLive = $derived((streaming && anyLive) || linger);
   const visible = $derived(hudLive && !cardsInView);
   $effect(() => { if (!visible) open = false; });
 
   // 1s ticker for the per-row elapsed clocks while anything runs.
   let now = $state(0);
   $effect(() => {
-    if (!visible || running.length === 0) return;
+    if (!visible || !anyLive) return;
     now = Date.now();
     const h = setInterval(() => { now = Date.now(); }, 1000);
     return () => clearInterval(h);
@@ -109,6 +120,33 @@
   function spawnSecs(s: Spawn): number | null {
     if (s.completedAt != null) return (s.completedAt - s.startedAt) / 1000;
     return now > 0 ? Math.max(0, (now - s.startedAt) / 1000) : null;
+  }
+  // sysinfo start_time is epoch SECONDS (coarser than the spawn clocks above).
+  function shellSecs(sh: ShellRow): number | null {
+    return now > 0 ? Math.max(0, now / 1000 - sh.started_at) : null;
+  }
+
+  // Per-PID kill — backend re-verifies the PID is a live descendant of this
+  // session's CLI child before killing (a dead/foreign PID is a safe no-op).
+  const killing = new Set<number>();
+  async function killShell(pid: number) {
+    const sid = tab?.cliSessionId;
+    if (!sid || killing.has(pid)) return;
+    killing.add(pid);
+    try {
+      await invoke("assistant_kill_shell", { sessionId: sid, pid });
+    } catch (e) {
+      console.warn("assistant_kill_shell failed", e);
+    } finally {
+      killing.delete(pid);
+    }
+  }
+
+  // Whole-turn stop — the only honest agent-scoped control (individual
+  // sub-agents live inside the CLI process and can't be killed one by one).
+  function stopTurn(e: MouseEvent) {
+    e.stopPropagation();
+    void assistant.stop(tabId ?? undefined);
   }
 
   // Row click → jump the transcript to that spawn's inline card. Scoped to
@@ -187,32 +225,45 @@
 
 <span class="ahud-sentinel" bind:this={sentinelEl} aria-hidden="true"></span>
 {#if visible}
-  <div class="ahud" class:complete={allDone} class:open bind:this={hudEl}
+  <div class="ahud" class:complete={allDone && shells.length === 0} class:open bind:this={hudEl}
     out:fade={{ duration: reduceMotion ? 0 : 160 }}>
-    <button
-      class="ahud-bar"
-      type="button"
-      aria-expanded={open}
-      aria-label={open ? "Collapse agents" : "Expand agents"}
-      onclick={() => (open = !open)}
-    >
-      <span class="ahud-ic" aria-hidden="true">
-        {#if allDone}
-          {#if anyError}<AlertCircle size={13} />{:else}<Check size={13} strokeWidth={2.5} />{/if}
-        {:else}
-          <Bot size={13} strokeWidth={2} />
-        {/if}
-      </span>
-      <span class="ahud-text">
-        {#if allDone}
-          {total} agent{total === 1 ? "" : "s"} finished
-        {:else}
-          {running.length} agent{running.length === 1 ? "" : "s"}{headline ? ` · ${headline}` : ""}
-        {/if}
-      </span>
-      <span class="ahud-count">{done}/{total}</span>
-      <span class="ahud-chev" aria-hidden="true"><ChevronDown size={12} /></span>
-    </button>
+    <div class="ahud-bar">
+      <button
+        class="ahud-toggle"
+        type="button"
+        aria-expanded={open}
+        aria-label={open ? "Collapse activity" : "Expand activity"}
+        onclick={() => (open = !open)}
+      >
+        <span class="ahud-ic" aria-hidden="true">
+          {#if !anyLive && allDone}
+            {#if anyError}<AlertCircle size={13} />{:else}<Check size={13} strokeWidth={2.5} />{/if}
+          {:else if running.length > 0}
+            <Bot size={13} strokeWidth={2} />
+          {:else}
+            <Terminal size={13} strokeWidth={2} />
+          {/if}
+        </span>
+        <span class="ahud-text">
+          {#if running.length > 0}
+            {running.length} agent{running.length === 1 ? "" : "s"}{headline ? ` · ${headline}` : ""}{shells.length > 0 ? ` · ${shells.length} shell${shells.length === 1 ? "" : "s"}` : ""}
+          {:else if shells.length > 0}
+            {shells.length} shell{shells.length === 1 ? "" : "s"} running · {trimCmd(shellLabel(shells[shells.length - 1].cmd), 48)}
+          {:else}
+            {total} agent{total === 1 ? "" : "s"} finished
+          {/if}
+        </span>
+        {#if total > 0}<span class="ahud-count">{done}/{total}</span>{/if}
+        <span class="ahud-chev" aria-hidden="true"><ChevronDown size={12} /></span>
+      </button>
+      {#if streaming && anyLive}
+        <button class="ahud-stop" type="button" onclick={stopTurn}
+          title="Stop this turn — ends every agent and shell it started">
+          <Square size={9} strokeWidth={2.5} />
+          Stop
+        </button>
+      {/if}
+    </div>
     {#if open}
       <ul class="ahud-list">
         {#each spawns as s (s.id)}
@@ -237,6 +288,21 @@
               {/if}
               {#if secs != null}<span class="ahud-dur">{fmtDur(secs)}</span>{/if}
             </button>
+          </li>
+        {/each}
+        {#each shells as sh (sh.pid)}
+          {@const secs = shellSecs(sh)}
+          <li>
+            <div class="ahud-row ahud-shell">
+              <span class="ahud-mark" aria-hidden="true"><Terminal size={12} /></span>
+              <span class="ahud-pill ahud-pid">PID {sh.pid}</span>
+              <span class="ahud-cmd" title={sh.cmd}>{trimCmd(shellLabel(sh.cmd), 90)}</span>
+              {#if secs != null}<span class="ahud-dur">{fmtDur(secs)}</span>{/if}
+              <button class="ahud-kill" type="button" onclick={() => killShell(sh.pid)}
+                title="Kill this process" aria-label={`Kill PID ${sh.pid}`}>
+                <X size={11} strokeWidth={2.5} />
+              </button>
+            </div>
           </li>
         {/each}
       </ul>
@@ -268,13 +334,29 @@
   }
   .ahud.complete { border-color: color-mix(in oklab, var(--ok) 45%, var(--border-strong)); }
 
-  .ahud-bar {
+  .ahud-bar { display: flex; align-items: stretch; width: 100%; height: 32px; }
+  .ahud-toggle {
+    flex: 1; min-width: 0;
     display: flex; align-items: center; gap: 9px;
-    width: 100%; height: 32px; padding: 0 12px 0 11px;
+    padding: 0 12px 0 11px;
     background: none; border: 0; cursor: pointer;
     font-size: 12px; color: var(--fg-2); text-align: left;
   }
-  .ahud-bar:hover { background: color-mix(in oklab, var(--fg) 4%, transparent); }
+  .ahud-toggle:hover { background: color-mix(in oklab, var(--fg) 4%, transparent); }
+  /* Whole-turn stop — quiet until hovered, then honest danger. */
+  .ahud-stop {
+    flex: none;
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 0 11px;
+    background: none; border: 0; cursor: pointer;
+    border-left: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+    font-size: 11px; font-weight: 600; color: var(--fg-subtle);
+    transition: color var(--dur-fast), background var(--dur-fast);
+  }
+  .ahud-stop:hover {
+    color: var(--danger);
+    background: color-mix(in oklab, var(--danger) 8%, transparent);
+  }
   .ahud-ic {
     display: grid; place-items: center;
     width: 16px; height: 16px; flex: none;
@@ -344,6 +426,33 @@
     flex: none; margin-left: auto;
     font-family: var(--font-mono); font-size: 10px;
     font-variant-numeric: tabular-nums; color: var(--fg-faint);
+  }
+
+  /* Shell rows — same rhythm as agent rows; div (not button: the kill nests). */
+  .ahud-shell { cursor: default; }
+  .ahud-shell .ahud-mark { color: var(--fg-subtle); }
+  .ahud-pid {
+    background: color-mix(in oklab, var(--fg) 7%, transparent);
+    border-color: var(--border);
+    color: var(--fg-muted);
+  }
+  .ahud-cmd {
+    flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: var(--font-mono); font-size: 11px; color: var(--fg-2);
+  }
+  .ahud-kill {
+    flex: none;
+    display: grid; place-items: center;
+    width: 18px; height: 18px;
+    background: none; border: 0; border-radius: 5px; cursor: pointer;
+    color: var(--fg-faint); opacity: 0;
+    transition: opacity var(--dur-fast), color var(--dur-fast), background var(--dur-fast);
+  }
+  .ahud-shell:hover .ahud-kill, .ahud-kill:focus-visible { opacity: 1; }
+  .ahud-kill:hover {
+    color: var(--danger);
+    background: color-mix(in oklab, var(--danger) 10%, transparent);
   }
 
   @media (prefers-reduced-motion: reduce) {

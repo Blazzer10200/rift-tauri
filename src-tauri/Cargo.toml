@@ -1,6 +1,6 @@
 [package]
 name = "rift-tauri"
-version = "0.110.0"
+version = "0.111.0"
 description = "Rift — local-workspace coding assistant powered by Claude"
 authors = ["Blazzer"]
 license = "MIT"
@@ -147,6 +147,11 @@ whisper-rs = { version = "0.14", default-features = false, optional = true }
 # over `ort` (ONNX Runtime 1.24, auto-downloaded prebuilt binaries at build
 # time). Model files fetched by model_manager from HF istupakov/…-onnx.
 parakeet-rs = { version = "0.3.6", features = ["directml"], optional = true }
+
+# ActivityHud shell rows — enumerate live shell descendants of the streaming
+# CLI child (pid/ppid/cmdline/start_time) so the HUD can list + kill background
+# shells. `system` feature only: no disk/network/component probes compiled in.
+sysinfo = { version = "0.33", default-features = false, features = ["system"] }
 
 [target.'cfg(windows)'.dependencies]
 # #61 GUI stale-PATH: CLI discovery reads the registry PATH (HKCU\Environment +

@@ -69,10 +69,13 @@ import {
   handleStreamEvent,
   handleDoneEvent,
   handleErrorEvent,
+  handleShellRowsEvent,
   type ListenerHost,
   type StreamPayload,
   type DonePayload,
   type ErrorPayload,
+  type ShellRowsPayload,
+  type ShellRow,
 } from "./assistant/listeners";
 
 // Run before any per-workspace thinking pin is read (field init below +
@@ -313,6 +316,11 @@ export class TabState {
     // on legacy/Task entries → treated as "agent" by the dock.
     kind?: "agent" | "skill";
   }[]>([]);
+
+  /** Live shell processes under this session's CLI child (ActivityHud rows).
+   *  Pushed by the backend per-turn poller over `assistant://shell-rows`;
+   *  cleared on every turn terminal (the poller dies with the turn). */
+  shellRows = $state<ShellRow[]>([]);
 
   /** Live bindings for `mcp__rift__ask_user` tool calls: toolUseId →
    *  bridge requestId. Populated when the tool_use envelope and the
@@ -1116,6 +1124,10 @@ class AssistantStore {
       await listen<ErrorPayload>(
         "assistant://error",
         (e) => handleErrorEvent(listenerHost, e.payload),
+      ),
+      await listen<ShellRowsPayload>(
+        "assistant://shell-rows",
+        (e) => handleShellRowsEvent(listenerHost, e.payload),
       ),
     );
     await this.refreshAuth();

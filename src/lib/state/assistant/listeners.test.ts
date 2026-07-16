@@ -11,6 +11,7 @@ import {
   handleStreamEvent,
   handleDoneEvent,
   handleErrorEvent,
+  handleShellRowsEvent,
   type ListenerHost,
   type ListenerTab,
 } from "./listeners";
@@ -28,6 +29,7 @@ function makeTab(epoch = 0): FakeTab {
   const tab: FakeTab = {
     turnEpoch: epoch,
     staleTerminalUntil: 0,
+    shellRows: [],
     streamed: [],
     doneCount: 0,
     errors: [],
@@ -209,5 +211,32 @@ describe("handleErrorEvent", () => {
     const tab = makeTab(3);
     handleErrorEvent(makeHost({ tabs: { s1: tab } }), { session_id: "s1", message: "live err", turn_epoch: 3 });
     expect(tab.errors).toEqual(["live err"]);
+  });
+});
+
+describe("handleShellRowsEvent", () => {
+  const row = { pid: 4242, exe: "pwsh.exe", cmd: "pwsh -c npm run dev", started_at: 1_700_000_000 };
+
+  it("session_id routes rows to the owning tab; empty rows clear", () => {
+    const tab = makeTab();
+    const host = makeHost({ tabs: { s1: tab } });
+    handleShellRowsEvent(host, { session_id: "s1", rows: [row] });
+    expect(tab.shellRows).toEqual([row]);
+    handleShellRowsEvent(host, { session_id: "s1", rows: [] });
+    expect(tab.shellRows).toEqual([]);
+  });
+
+  it("missing/invalid rows payload is dropped", () => {
+    const tab = makeTab();
+    tab.shellRows = [row];
+    handleShellRowsEvent(makeHost({ tabs: { s1: tab } }), { session_id: "s1" });
+    handleShellRowsEvent(makeHost({ tabs: { s1: tab } }), null);
+    expect(tab.shellRows).toEqual([row]);
+  });
+
+  it("#80: stale-epoch rows must not paint into the next turn's HUD", () => {
+    const tab = makeTab(3);
+    handleShellRowsEvent(makeHost({ tabs: { s1: tab } }), { session_id: "s1", rows: [row], turn_epoch: 2 });
+    expect(tab.shellRows).toEqual([]);
   });
 });

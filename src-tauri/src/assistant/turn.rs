@@ -328,6 +328,10 @@ const SESSION_LOST_EVENT: &str = "assistant://session-lost";
 /// tool name + input + suggestions. Frontend answers via
 /// `assistant_answer_permission`.
 const PERMISSION_EVENT: &str = "assistant://permission-request";
+/// ActivityHud shell rows: emitted by the per-turn poller whenever the set of
+/// live shell processes under this session's CLI child changes. Payload
+/// `{session_id, rows: [{pid, exe, cmd, started_at}], turn_epoch}`.
+const SHELL_ROWS_EVENT: &str = "assistant://shell-rows";
 /// Emitted as the prompt-enhancer wand streams its rewrite token-by-token.
 /// Payload: `{request_id, delta}` per chunk, then `{request_id, done:true}` on
 /// success (the command's return value is the authoritative final text).
@@ -2815,6 +2819,15 @@ fn continuation_frame_kind(line: &str) -> Option<&'static str> {
     }
 }
 
+/// Abort a spawned task when dropped — `stream_one_turn` has many return
+/// points and the shell-rows poller must die with the turn on every one.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// Stream ONE turn: write the user envelope, forward NDJSON, handle the control
 /// channel (init ack, `can_use_tool` permission asks), and return when `result`
 /// lands / stdout EOFs / a fatal write fails. Ported
@@ -2829,6 +2842,39 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
         user_line, preread, handshake_done, bg_evict, turn_start, turn_epoch,
     } = ctx;
     let mut preread = preread;
+
+    // ActivityHud shell rows: while this turn streams, poll the CLI child's
+    // process tree for live shell descendants (foreground Bash/PowerShell
+    // tools + `run_in_background` shells) and push CHANGES to the frontend.
+    // Dropped (→ aborted) on every return path of this fn; the frontend also
+    // clears its rows on every turn terminal, so a lost final empty-emit is
+    // harmless. Snapshots run on the blocking pool (~ms each).
+    let _shell_poll = {
+        let app = app_out.clone();
+        let win = win_label.to_string();
+        let sid = stream_sid.to_string();
+        AbortOnDrop(tokio::spawn(async move {
+            let mut last: Option<Vec<super::proc_tree::ShellRow>> = None;
+            let mut tick = tokio::time::interval(std::time::Duration::from_millis(1500));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tick.tick().await;
+                let Some(pid) = get_session_pid(&sid) else { continue };
+                let Ok(rows) =
+                    tokio::task::spawn_blocking(move || super::proc_tree::shell_rows(pid)).await
+                else {
+                    continue;
+                };
+                if last.as_ref() == Some(&rows) {
+                    continue;
+                }
+                let _ = app.emit_to(&win, SHELL_ROWS_EVENT, serde_json::json!({
+                    "session_id": sid, "rows": rows, "turn_epoch": turn_epoch,
+                }));
+                last = Some(rows);
+            }
+        }))
+    };
 
     // A reused turn entered with the handshake already done. If such a turn sees
     // stdout EOF before any `result`, the warm child died while parked (a write
@@ -3525,6 +3571,31 @@ pub async fn assistant_stop(
             Err(e) => Err(format!("spawn kill: {e}")),
         }
     }
+}
+
+/// ActivityHud per-row kill: tree-kill ONE background shell under this
+/// session's CLI child. The PID is client-supplied, so it MUST verify as a
+/// live descendant of the tracked CLI child first — a recycled, foreign, or
+/// already-dead PID is a no-op success (nothing was killed, and for a dead
+/// row the goal is already met — mirrors `assistant_stop`'s "already gone"
+/// semantics). Killing by image name is never on the table.
+#[tauri::command]
+pub async fn assistant_kill_shell(session_id: String, pid: u32) -> Result<(), String> {
+    if !is_valid_session_id(&session_id) {
+        return Err(format!("invalid session_id: must be a UUID (got {} chars)", session_id.len()));
+    }
+    let Some(root) = get_session_pid(&session_id) else {
+        return Ok(()); // turn already over — the shell tree died with it
+    };
+    let verified = tokio::task::spawn_blocking(move || super::proc_tree::is_descendant(root, pid))
+        .await
+        .map_err(|e| format!("verify join: {e}"))?;
+    if !verified {
+        log::info!("assistant_kill_shell: PID {pid} not a live descendant of session child {root} — skipping");
+        return Ok(());
+    }
+    kill_child_tree_async(pid).await;
+    Ok(())
 }
 
 

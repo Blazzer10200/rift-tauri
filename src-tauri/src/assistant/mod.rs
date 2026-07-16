@@ -27,6 +27,7 @@ pub mod news;
 pub mod nothink;
 pub mod oneshot;
 pub mod permission;
+pub mod proc_tree;
 pub mod projects;
 pub mod skills_catalog;
 pub mod turn;

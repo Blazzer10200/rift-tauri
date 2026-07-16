@@ -191,6 +191,19 @@ const hostOf = (u: string) => { try { return new URL(u).host; } catch { return u
 // its head (`cd "C:/long/path" && …` eats the whole budget). Drop a leading
 // cd-prefix, then middle-ellipsize so both the verb and the tail survive.
 // Exported: ToolChip's history captions share it.
+// ActivityHud shell rows: the CLI launches tool shells through a snapshot
+// wrapper ("C:\…\bash.exe -c -l SNAPSHOT_FILE=… <script>"), which buries the
+// user-meaningful part. Strip interpreter + leading flags + env assignments so
+// the row leads with the actual script. Exported for ActivityHud + vitest.
+export const shellLabel = (cmd: string): string =>
+  cmd
+    // interpreter, with or without an absolute path, quoted or not
+    .replace(/^"?(?:[A-Za-z]:[^"]*?[\\/])?(bash|pwsh|powershell|cmd|sh|zsh)(\.exe)?"?\s+/i, "")
+    // any leading flags in any order (-c, -l, /c, -NoProfile, -Command, …)
+    .replace(/^(?:(?:-{1,2}[A-Za-z][\w-]*|\/c)\s+)*/i, "")
+    // leading env assignments (SNAPSHOT_FILE=… etc.), possibly quote-opened
+    .replace(/^['"]?(?:[A-Z_][A-Z0-9_]*=\S+\s+)*/, "");
+
 export const trimCmd = (s: string, n = 70): string => {
   const cmd = s.replace(/^cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*(?:&&|;)\s*/, "");
   if (cmd.length <= n) return cmd;

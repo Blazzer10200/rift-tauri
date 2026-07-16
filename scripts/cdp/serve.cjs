@@ -159,7 +159,11 @@ function classifyTargets(list) {
     const isMain = (t) =>
         /^https?:\/\/localhost:1420(\/|$)/.test(t.url || '') ||
         /^tauri:\/\/localhost/.test(t.url || '');
-    const main = pages.find(isMain) || pages[0] || null;
+    // Another Tauri dev app sharing :9222 (e.g. Sweep) can ALSO sit on
+    // localhost:1420 — target order shifts on reload, so anchor on the page
+    // that titles itself Rift before falling back to URL-only matching.
+    const rift = pages.find((t) => /^rift\b/i.test(t.title || '') && isMain(t));
+    const main = rift || pages.find(isMain) || pages[0] || null;
     const browser = pages.find(t => t !== main) || null;
     return { main, browser, pages };
 }

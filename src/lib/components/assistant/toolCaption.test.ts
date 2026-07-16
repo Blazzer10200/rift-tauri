@@ -90,7 +90,7 @@ describe("captionForGroup", () => {
   });
 });
 
-// Shared by StreamAgent (card) + AgentHud (periscope) — the tail-first scan.
+// Shared by StreamAgent (card) + ActivityHud (periscope) — the tail-first scan.
 describe("agentNowLine", () => {
   it("prefers the pending tool nearest the tail", () => {
     expect(agentNowLine([
