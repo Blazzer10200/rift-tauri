@@ -3,11 +3,13 @@
 # `Blazzer10200/rift` releases repo is retired). Replaces running
 # `scripts/release.ps1` by hand on a dev machine.
 #
-# Ship flow:
+# Ship flow (push the TAG FIRST -- one runner, FIFO queue: tag-first puts this
+# release job ahead of the redundant `check` run the main push triggers, saving
+# ~3 min of queue wait; check still runs after, harmlessly):
 #   pwsh scripts/bump.ps1 X.Y.Z   # writes the 3 lockstep files
 #   <edit docs/CHANGELOG.md top entry to vX.Y.Z>
 #   git commit -am "release vX.Y.Z"
-#   git tag vX.Y.Z && git push origin main --tags
+#   git tag -a vX.Y.Z -m "..." && git push origin vX.Y.Z && git push origin main
 #
 # Auth: the built-in GITHUB_TOKEN (permissions: contents: write below) -- releases
 # publish to this same repo, so no PAT is needed. The old RELEASES_TOKEN secret
@@ -114,17 +116,49 @@ jobs:
       - name: npm ci
         run: npm ci
 
+      # Gate dedup: check.yml runs these exact gates (and more) on every push to
+      # main. If a COMPLETED check run for THIS sha already SUCCEEDED, the inline
+      # gates below are redundant -- skip them (~2 min saved when tagging an
+      # already-checked commit). Queued/missing/cancelled -> run inline (with one
+      # runner, a same-moment check can never be mid-run while we execute). A
+      # FAILED check fails the release loudly -- a tag must never ship red code.
+      - name: Resolve prior check verdict
+        id: gates
+        run: |
+          $uri = "https://api.github.com/repos/$env:GITHUB_REPOSITORY/actions/workflows/check.yml/runs?head_sha=$env:GITHUB_SHA&per_page=5"
+          $mode = 'inline'
+          try {
+            $resp = Invoke-RestMethod -Uri $uri -Headers @{ 'Authorization' = "Bearer $env:GITHUB_TOKEN"; 'User-Agent' = 'rift-release'; 'Accept' = 'application/vnd.github+json' }
+            $done = @($resp.workflow_runs | Where-Object { $_.status -eq 'completed' })
+            if ($done.Count -ge 1) {
+              $conc = $done[0].conclusion
+              if ($conc -eq 'success') { $mode = 'skip' }
+              elseif ($conc -eq 'failure') { throw "check workflow FAILED for $env:GITHUB_SHA -- fix main before tagging a release" }
+            }
+          } catch {
+            if ("$_" -match 'check workflow FAILED') { throw }
+            Write-Host "verdict lookup failed ($_) -- running gates inline"
+          }
+          Write-Host "gates: $mode"
+          "mode=$mode" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding ascii
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
       # Test gate: the tag-driven release used to build+publish with NO test gate
       # (tests lived only in the separate, push-triggered `check` workflow, which
       # cancel-in-progress can kill before a tag ships). v0.31.0 shipped a build
       # whose `cargo test` had gone red in check. These three steps run on the
       # warm self-hosted target/ and fail the job BEFORE the build/publish below,
-      # so a tag can never ship un-tested code again.
+      # so a tag can never ship un-tested code again (skipped ONLY when check.yml
+      # already proved this exact sha green -- see gate dedup above).
       - name: cargo test
+        if: steps.gates.outputs.mode == 'inline'
         run: cargo test --manifest-path src-tauri/Cargo.toml
       - name: svelte-check
+        if: steps.gates.outputs.mode == 'inline'
         run: npm run check
       - name: vitest
+        if: steps.gates.outputs.mode == 'inline'
         run: npm test
 
       # release.ps1 -Ci: skips the dirty-tree refusal, asserts GITHUB_REF_NAME
