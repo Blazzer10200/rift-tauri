@@ -3,7 +3,6 @@ type Density = "compact" | "regular" | "comfy";
 type CodePrefs = { fontSize: number; tabWidth: number; ligatures: boolean };
 
 const STORAGE_KEY = "rift.ui.density.v1";
-const RAIL_PINNED_KEY = "rift.ui.rail-pinned.v1";
 const ACCENT_KEY = "rift.ui.accent.v1";
 const CODE_KEY = "rift.ui.code.v1";
 const STREAM_MODE_KEY = "rift.ui.stream-mode.v1";
@@ -88,7 +87,6 @@ const DEFAULT_CODE: CodePrefs = { fontSize: 12, tabWidth: 2, ligatures: false };
 
 class UiPrefs {
   density = $state<Density>("compact");
-  railPinned = $state(false);
   accentHue = $state(163);
   vividness = $state(DEFAULT_VIVIDNESS);
   code = $state<CodePrefs>({ ...DEFAULT_CODE });
@@ -110,7 +108,6 @@ class UiPrefs {
     if (raw === "compact" || raw === "regular" || raw === "comfy") {
       this.density = raw;
     }
-    this.railPinned = localStorage.getItem(RAIL_PINNED_KEY) === "1";
 
     const accentRaw = localStorage.getItem(ACCENT_KEY);
     if (accentRaw !== null) {
@@ -126,6 +123,8 @@ class UiPrefs {
 
     // Texture picker retired 2026-07-11 — single fixed dots field now.
     localStorage.removeItem("rift.ui.dotfield.v1");
+    // railPinned retired 2026-07-16 — --rail-w now published live by Sidebar.
+    localStorage.removeItem("rift.ui.rail-pinned.v1");
 
     try {
       const c = JSON.parse(localStorage.getItem(CODE_KEY) ?? "null");
@@ -160,12 +159,6 @@ class UiPrefs {
     this.density = d;
     localStorage.setItem(STORAGE_KEY, d);
     this.apply();
-  }
-
-  toggleRailPinned() {
-    this.railPinned = !this.railPinned;
-    localStorage.setItem(RAIL_PINNED_KEY, this.railPinned ? "1" : "0");
-    this.applyRail();
   }
 
   setAccentHue(h: number) {
@@ -253,15 +246,8 @@ class UiPrefs {
   private apply() {
     if (typeof document === "undefined") return;
     document.documentElement.dataset.density = this.density;
-    this.applyRail();
     this.applyAccent();
     this.applyCode();
-  }
-
-  private applyRail() {
-    if (typeof document !== "undefined") {
-      document.documentElement.style.setProperty("--rail-w", this.railPinned ? "220px" : "48px");
-    }
   }
 
   private applyAccent() {

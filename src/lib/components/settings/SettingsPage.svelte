@@ -543,7 +543,7 @@
             <div class="card-tt">Accent color <span class="ap-dot" style="background: oklch(0.72 var(--accent-c) var(--accent-h));"></span>
               <button class="st-btn card-tt-act" type="button" onclick={() => uiPrefs.resetAccent()} use:tooltip={"Back to the stock emerald look"}><RotateCcw size={13} /> Reset</button>
             </div>
-            <div class="card-sub">The highlight color used across Rift — buttons, toggles, and selection. Pick a swatch or dial in your own hue. Only the accent changes; your background stays put.</div>
+            <div class="card-sub">The highlight color used across Rift — buttons, toggles, selection, focus rings. Pick a swatch or dial in your own hue; the whole app follows.</div>
               <div class="swatches">
                 {#each ACCENTS as a (a.id)}
                   <button class="sw" class:sel={uiPrefs.accentHue === a.hue} type="button" style="background: oklch(0.72 0.16 {a.hue});" onclick={() => uiPrefs.setAccentHue(a.hue)} aria-pressed={uiPrefs.accentHue === a.hue} use:tooltip={a.label}>
@@ -1356,8 +1356,8 @@
   @media (prefers-reduced-motion: reduce) { .set-col > .card { animation: none; } }
 
   /* card */
-  /* island dialect: translucent tint + hairline (no shadow) so the canvas glow
-     reads through settings the same way it does the stream + sidebar. */
+  /* island dialect: translucent tint + hairline (no shadow) — a tint tile on
+     the main island's slab, same language as the stream tool rows. */
   .card { background: var(--island-fill); border: 1px solid var(--island-border); border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; scroll-margin-top: 12px; transition: border-color var(--dur-fast); }
   .card:hover { border-color: var(--border-strong); }
 

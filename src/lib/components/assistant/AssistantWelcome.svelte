@@ -107,7 +107,7 @@
       .filter((c) => rootKey(c.workspaceRoot) === key)
       .slice()
       .sort((a, b) => (b.lastActivityAt ?? b.updatedAt) - (a.lastActivityAt ?? a.updatedAt))
-      .slice(0, 4);
+      .slice(0, 6);
   });
 
 </script>
@@ -359,29 +359,8 @@
   /* ── Warm launchpad — greeting · project strip · resume · new-to-rift ──── */
   /* spec-margined children, so the .wel-inner column gap is dropped here. */
   .wel-inner.home-launchpad { position: relative; gap: 0; max-width: 680px; text-align: left; }
-  /* Aurora — a faint accent wash drifting behind the greeting so the home
-     surface reads designed, not flat black. Sits under content (z -1).
-     EXPLICIT radii + a 100%-fade endpoint keep the ellipse fully inside the
-     box — the v0.98.0 farthest-corner gradient was still ~4% green where the
-     box clipped it, which rendered as a hard-edged rectangle on real windows. */
-  .wel-inner.home-launchpad::before {
-    content: "";
-    position: absolute;
-    top: -240px; left: -220px;
-    width: 1000px; height: 720px;
-    background: radial-gradient(470px 320px at 50% 46%,
-      color-mix(in oklab, var(--accent) 8%, transparent),
-      color-mix(in oklab, var(--accent) 3%, transparent) 55%,
-      transparent 100%);
-    pointer-events: none;
-    z-index: -1;
-    animation: aurora-drift 18s ease-in-out infinite alternate;
-  }
-  @keyframes aurora-drift {
-    from { transform: translate3d(0, 0, 0); }
-    to   { transform: translate3d(48px, 20px, 0) scale(1.05); }
-  }
-  @media (prefers-reduced-motion: reduce) { .wel-inner.home-launchpad::before { animation: none; } }
+  /* No local atmosphere — the canvas (AppShell) owns the lighting model;
+     page-level washes stacked on it read as blotches (owner call 2026-07-16). */
   .wel-inner.home-launchpad > :nth-child(4) { animation-delay: 200ms; }
   .greet { display: flex; flex-direction: column; gap: 8px; }
   .greet-eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 10.5px; font-weight: 700;

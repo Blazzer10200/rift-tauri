@@ -4,26 +4,15 @@
   // grouped by recency. Live toasts still pop bottom-right (ToastHost) and
   // archive in here. Severity → icon/tone mapping mirrors ToastHost so a record
   // looks identical whether it's a live toast or a history row.
-  import {
-    Bell, X, CheckCircle2, AlertTriangle, AlertCircle, Info,
-    CheckCheck, Trash2, BellOff,
-  } from "lucide-svelte";
+  import { Bell, X, CheckCheck, Trash2, BellOff } from "lucide-svelte";
   import { fly, fade } from "svelte/transition";
-  import { toast, type ToastSeverity, type NotifyRecord } from "$lib/state/toast.svelte";
+  import { toast, type NotifyRecord } from "$lib/state/toast.svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import { portal } from "$lib/actions/portal";
 
   const reducedMotion =
     typeof window !== "undefined" &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-  const SEVERITY_ICON: Record<ToastSeverity, typeof Info> = {
-    ok: CheckCircle2,
-    warn: AlertTriangle,
-    danger: AlertCircle,
-    info: Info,
-    muted: Bell,
-  };
 
   let rootEl = $state<HTMLDivElement | null>(null);
   let panelEl = $state<HTMLDivElement | null>(null);
@@ -176,30 +165,29 @@
           {#each groups as group (group.key)}
             <div class="group-label">{group.label}</div>
             {#each group.items as r (r.id)}
-              {@const Icon = SEVERITY_ICON[r.severity]}
               <div
                 class="row"
                 class:unread={!r.read}
                 data-severity={r.severity}
                 transition:fade={{ duration: reducedMotion ? 0 : 120 }}
               >
-                <span class="row-kind" data-severity={r.severity}>
-                  <Icon size={13} />
-                </span>
+                <span class="row-dot" data-severity={r.severity}></span>
                 <div class="row-text">
-                  <span class="row-title">
-                    {r.title}{#if (r.count ?? 1) > 1}<span class="row-count">×{r.count}</span>{/if}
+                  <span class="row-top">
+                    <span class="row-title">
+                      {r.title}{#if (r.count ?? 1) > 1}<span class="row-count">×{r.count}</span>{/if}
+                    </span>
+                    <span class="row-time">{relTime(r.ts)}</span>
                   </span>
                   {#if r.detail}
                     <span class="row-detail" class:mono={r.mono}>{r.detail}</span>
                   {/if}
-                  <span class="row-time">{relTime(r.ts)}</span>
+                  {#if r.action}
+                    <button class="row-action" type="button" onclick={() => fireAction(r)}>
+                      {r.action.label}
+                    </button>
+                  {/if}
                 </div>
-                {#if r.action}
-                  <button class="row-action" type="button" onclick={() => fireAction(r)}>
-                    {r.action.label}
-                  </button>
-                {/if}
                 <button
                   class="row-close"
                   type="button"
@@ -254,18 +242,18 @@
   .panel {
     /* Portaled to <body>, fixed coords measured at open — opens upward from
        the sidebar-footer bell, escaping the sidebar island's overflow clip
-       and backdrop-filter containing block. */
+       and backdrop-filter containing block. Floating-island tier: island
+       radius + hairline, opaque fill (backdrop-filter is banned on fixed
+       overlays — WebView2 mis-composites it). */
     position: fixed;
-    width: 360px;
+    width: 340px;
     max-width: calc(100vw - 24px);
     display: flex;
     flex-direction: column;
-    background: var(--bg-elev-1);
+    background: color-mix(in oklab, var(--fg) 2.2%, var(--bg-elev-1));
     border: 1px solid var(--border-strong);
-    border-radius: 12px;
-    box-shadow:
-      0 18px 48px -16px oklch(0 0 0 / 0.6),
-      0 2px 8px -4px oklch(0 0 0 / 0.4);
+    border-radius: var(--island-radius);
+    box-shadow: var(--shadow-float);
     overflow: hidden;
     z-index: 2100;
   }
@@ -301,14 +289,17 @@
     color: var(--fg-faint);
   }
 
+  /* Rows are dot-led — severity is a small colored dot on the first text
+     line (same language as status pills + toasts), not a boxed icon tile.
+     Unread = full-strength dot + bright title; read rows recede. */
   .row {
     --tone: var(--info);
     position: relative;
     display: grid;
-    grid-template-columns: auto 1fr auto auto;
+    grid-template-columns: auto 1fr;
     align-items: start;
     gap: 10px;
-    padding: 9px 10px 9px 14px;
+    padding: 8px 10px 8px 12px;
     margin: 0 6px;
     border-radius: 9px;
     transition: background var(--dur-fast);
@@ -318,38 +309,37 @@
   .row[data-severity="warn"]   { --tone: var(--warn); }
   .row[data-severity="danger"] { --tone: var(--danger); }
   .row[data-severity="info"]   { --tone: var(--info); }
-  .row[data-severity="muted"]  { --tone: var(--border-strong); }
+  .row[data-severity="muted"]  { --tone: var(--fg-faint); }
 
-  /* Unread accent rail on the left edge. */
-  .row.unread::before {
-    content: "";
-    position: absolute;
-    left: 5px; top: 11px; bottom: 11px;
-    width: 2px;
-    border-radius: 2px;
+  .row-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
     background: var(--tone);
-  }
-
-  .row-kind {
-    width: 26px; height: 26px;
-    border-radius: 7px;
-    display: inline-flex; align-items: center; justify-content: center;
-    background: var(--bg-elev-3);
-    color: var(--fg-muted);
+    opacity: 0.4;
+    margin-top: 6px;
     flex-shrink: 0;
-    margin-top: 1px;
+    transition: opacity var(--dur-fast), box-shadow var(--dur-fast);
   }
-  .row-kind[data-severity="ok"]     { background: var(--ok-soft);     color: var(--ok); }
-  .row-kind[data-severity="warn"]   { background: var(--warn-soft);   color: var(--warn); }
-  .row-kind[data-severity="danger"] { background: var(--danger-soft); color: var(--danger); }
-  .row-kind[data-severity="info"]   { background: var(--info-soft);   color: var(--info); }
+  .row.unread .row-dot {
+    opacity: 1;
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--tone) 18%, transparent);
+  }
 
   .row-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .row-top {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    min-width: 0;
+  }
   .row-title {
+    flex: 1;
+    min-width: 0;
     font-size: var(--fs-sm);
-    color: var(--fg);
+    color: var(--fg-2);
     line-height: 1.35;
   }
+  .row.unread .row-title { color: var(--fg); font-weight: 500; }
   .row-detail {
     font-size: var(--fs-xs);
     color: var(--fg-subtle);
@@ -360,7 +350,7 @@
   .row-count {
     margin-left: 6px;
     font-size: 10px;
-    font-weight: 700;
+    font-weight: 600;
     font-family: var(--font-mono);
     color: var(--fg-subtle);
     background: var(--bg-elev-3);
@@ -368,31 +358,39 @@
     padding: 1px 5px;
     vertical-align: 1px;
   }
-  .row-time { font-size: 10.5px; color: var(--fg-faint); margin-top: 1px; }
+  .row-time {
+    font-size: 10.5px;
+    color: var(--fg-faint);
+    flex-shrink: 0;
+    transition: opacity var(--dur-fast);
+  }
+  .row:hover .row-time { opacity: 0; }
 
   .row-action {
-    align-self: center;
+    align-self: flex-start;
+    margin-top: 4px;
     font-size: var(--fs-xs);
     color: var(--accent);
     font-weight: 600;
-    padding: 4px 9px;
+    padding: 3px 8px;
     border-radius: 7px;
     background: color-mix(in oklab, var(--accent) 12%, transparent);
     border: 1px solid color-mix(in oklab, var(--accent) 24%, transparent);
-    flex-shrink: 0;
     transition: background var(--dur-fast);
   }
   .row-action:hover { background: color-mix(in oklab, var(--accent) 22%, transparent); }
 
+  /* Close swaps in over the timestamp on hover — one quiet corner, no
+     dedicated column reserving space in every row. */
   .row-close {
-    align-self: center;
+    position: absolute;
+    top: 7px; right: 8px;
     width: 22px; height: 22px;
     display: inline-flex; align-items: center; justify-content: center;
     border-radius: 6px;
     color: var(--fg-faint);
     opacity: 0;
     transition: background var(--dur-fast), color var(--dur-fast), opacity var(--dur-fast);
-    flex-shrink: 0;
   }
   .row:hover .row-close { opacity: 1; }
   .row-close:hover { background: var(--surface-hover); color: var(--fg); }

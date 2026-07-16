@@ -12,6 +12,19 @@ import type { TurnRecord } from "./types";
 // hint once, not a nag (same pattern as send.ts's fableSunsetNoticed).
 const warned = new Set<"deadWait" | "staleCache" | "toolErrors" | "mcpInit">();
 
+// Context-nearly-full is latched PER CONVERSATION with hysteresis, not
+// per-session — every long thread deserves its own heads-up, but only one
+// until compaction actually drops usage back down (re-arm below 70%).
+const CTX_WARN_PCT = 85;
+const CTX_REARM_PCT = 70;
+const ctxWarned = new Map<string, boolean>();
+
+/** Pure threshold+hysteresis decision so the latch logic stays testable. */
+export function ctxAlertTransition(pct: number, latched: boolean): { fire: boolean; latched: boolean } {
+  if (latched) return { fire: false, latched: pct >= CTX_REARM_PCT };
+  return pct >= CTX_WARN_PCT ? { fire: true, latched: true } : { fire: false, latched: false };
+}
+
 // MCP statuses that mean the rift server is genuinely dead. "pending" (still
 // starting) and "disabled" (user turned it off deliberately) are healthy-ish;
 // unknown future statuses are ignored rather than false-alarmed.
@@ -93,6 +106,26 @@ export function askUserStaleNudge(store: AssistantStore, tab: TabState) {
  *  post-compaction). */
 export function checkTurnHealth(store: AssistantStore, tab: TabState, convoId: string | undefined) {
   const rec = convoId ? lastTurnFor(store, convoId) : null;
+
+  // Context nearly full — the CLI will auto-compact mid-turn without warning
+  // once it runs out of headroom. Saying so at 85% lets the user pick the
+  // compaction point (a natural break) instead of having one forced on them.
+  if (convoId) {
+    const pct = store.ctxPctFor(tab);
+    const t = ctxAlertTransition(pct, ctxWarned.get(convoId) ?? false);
+    ctxWarned.set(convoId, t.latched);
+    if (t.fire) {
+      toast.push({
+        severity: "warn",
+        title: `Context is ${Math.round(pct)}% full`,
+        detail: "Claude will auto-compact soon. Compacting at a natural break keeps the recap cleaner.",
+        action: {
+          label: "Compact",
+          onClick: () => void store.send("/compact", convoId),
+        },
+      });
+    }
+  }
 
   // Background-tab completion — the user isn't looking at this tab, so the
   // outcome would otherwise be invisible until they switch back.

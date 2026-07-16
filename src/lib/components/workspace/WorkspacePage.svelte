@@ -1037,10 +1037,11 @@
   .pcard:hover { border-color: var(--border-strong); background: color-mix(in oklab, var(--fg) 4.5%, transparent);
     box-shadow: 0 8px 20px -16px color-mix(in oklab, var(--fg) 40%, transparent); transform: translateY(-1px); }
   .pcard:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
-  .pcard.active { border-color: color-mix(in oklab, var(--accent) 34%, var(--border));
-    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 6%, var(--bg-elev-1)), var(--bg-elev-1) 75%);
-    box-shadow: 0 14px 36px -24px color-mix(in oklab, var(--accent) 55%, transparent); }
-  .pcard.active:hover { border-color: color-mix(in oklab, var(--accent) 50%, var(--border)); }
+  /* Active card speaks accent twice (pill + Continue) — the frame stays quiet:
+     a cooled border + faint wash, no glow halo (owner: calm it, 2026-07-16). */
+  .pcard.active { border-color: color-mix(in oklab, var(--accent) 22%, var(--border));
+    background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 5%, var(--bg-elev-1)), var(--bg-elev-1) 75%); }
+  .pcard.active:hover { border-color: color-mix(in oklab, var(--accent) 34%, var(--border)); }
   .pcard-top { display: flex; align-items: center; gap: 11px; min-width: 0; }
   /* Identity hue (--ph, hashed from the project name) instead of the shared
      accent — each project wears its own color across card/switcher/chips. */

@@ -61,8 +61,22 @@ is furniture; the conversation stream is the protagonist. The test for any chang
 | raised | elev-2 + `--border-strong` | hover, featured |
 | floating | elev-3 + `--shadow`/`--shadow-lg` | menus, popovers, dialogs |
 
-Focus is always `--ring`, always visible for keyboard. No decorative gradients —
-at most a single faint radial page glow behind everything.
+Focus is always `--ring`, always visible for keyboard. Atmosphere doctrine
+(settled 2026-07-16, four owner calls): the CANVAS is plain — flat `--bg`, no
+glow, no texture, matching the sidebar's calm. The MAIN ISLAND is an ONYX SLAB —
+a machined material surface, not a lit stage — and owns ALL atmosphere (AppShell
+`.main` + its pseudos, clipped by the island radius): the SAME opaque gradient
+fill as the sidebar island (fg 4%→1.8% over 280px — the two docked islands are
+panels cut from one slab, owner call 2026-07-16) + a grounded foot,
+a machined bevel (inset dark 1px seam + a 1px accent-cooled top-edge catch,
+both box-shadows), and static SVG film grain at ≤3% (banding-killer). Tonal
+gradients are strictly VERTICAL — a diagonal satin sheen was tried and rejected
+same day (owner: "sideways glares"); angled washes read as glare on a screen,
+not finish. Quality reads as CRAFT — edges, tonal depth, finish — never
+as illumination or pattern. NO other page, pane, or component adds its own
+wash/glow/grain behind content — local atmosphere layers stack into blotches
+(see §8). Tight component effects (a button aura, a dialog head-glow) are fine;
+surface-scale washes are not.
 
 ## 6. Motion
 
@@ -128,9 +142,43 @@ seed rules below.
   differentiate with hairline separators or tint tiles (fill/border, smaller
   radius, no shadow — settings cards, jump-back-in, stream tool rows), never a
   second full island. The status bar is the main island's footer, not its own
-  surface. Intentional divergences, don't "fix" them: sidebar keeps its opaque
-  gradient fill (list rows must not fight the dotted canvas); HUDs keep frosted
+  surface. Both docked islands (sidebar, main) share the same opaque gradient
+  fill since 2026-07-16 (see §5) — `--island-fill` remains the recipe for the
+  floating tier. Intentional divergence, don't "fix" it: HUDs keep frosted
   `--surface` 84% + `--border-strong` (floating layers earn a firmer edge).
+- DON'T equate "quiet" with invisible (2026-07-16, canvas — owner: "still not
+  impressed… something more immersed"). A whisper-level glow read as no background
+  at all. The canvas light must be plainly visible in a side-by-side — restraint
+  applies to chrome and components, not to the stage they sit on.
+- DON'T stack atmosphere layers (2026-07-16, canvas — owner: "shit stacked on top
+  of shit"). Drifting aurora blobs over glow over dots over grain — PLUS pane- and
+  page-local washes from earlier eras — composited into murky blotches. The fix was
+  subtraction: ONE light source + ONE vignette on the canvas, and every page-local
+  wash/glow/grain deleted (AssistantPane .atmos, AssistantWelcome launchpad aurora).
+  Atmosphere is a single lighting model, not a collection of effects; before adding
+  any background treatment, grep for the ones already there.
+- DON'T scatter specks on the canvas (2026-07-16, owner: "I'm talking about the
+  dotted background — that's what I'm absolutely getting at"). The 30px dot grid
+  read as visual noise, not craft. The brief that replaced it: "more of a
+  development space, professional grade" — answered with RULED structure (the
+  blueprint grid: continuous 1px lines, minor+major cells, masked into the light),
+  not scattered points. Generalized: canvas texture must read as engineered
+  structure (lines, alignment) or be invisible (grain); dots/specks/particles are
+  noise and stay banned. Second refinement same day (owner: "going outside of the
+  frame"): pattern textures stay INSIDE the frame of the surface they belong to.
+  Final call same day (owner: "something different other than the grid… and this
+  brightness effect… easy on the eyes"): the grid AND the accent spotlight both
+  retired. The surviving language is MATERIAL — satin luster, machined bevel,
+  tonal crown/foot — quality shown through finish and edges, not through
+  illumination or pattern. Reach for craft cues first when asked for "quality."
+- DON'T leave page-conditional material variants behind after a material change
+  (2026-07-16, owner: "the sidebar does not match the other pages… this is some
+  stuff you need to catch"). The sidebar had a `.home`-only frosted-glass flavor
+  from the glow-canvas era — invisible in code reviews of the new slab, obvious
+  the moment the hub opened. When a surface's material changes, grep for EVERY
+  conditional variant of that surface (`class:x` + its style overrides) and
+  either port it to the new material or delete it. The sidebar now carries the
+  full slab recipe (fill + foot + bevel + grain) identical to AppShell `.main`.
 - DON'T ship a control that spends the user's money without saying so AT the control
   (2026-07-14, fast-mode incident — owner: "it's charging me, that is a huge gap").
   Porting an upstream feature means porting its cost disclosure too (the CLI showed

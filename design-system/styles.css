@@ -81,7 +81,7 @@
   --ease-page:    cubic-bezier(0.22, 1, 0.36, 1);  /* decelerate — entrances */
   --ease-soft:    cubic-bezier(0.4, 0, 0.2, 1);    /* standard — layout shifts */
   --dur-page:     400ms;
-  --dur-page-out: 240ms;
+  --dur-page-out: 140ms;
   --dur-rise:     460ms;   /* a content block rises */
   --dur-fast:     140ms;
   --dur-base:     240ms;

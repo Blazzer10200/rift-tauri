@@ -888,8 +888,14 @@
           <p class="ah-muted">Couldn't load your history: {statsError}</p>
         {:else if stats === null}
           <!-- Still fetching — don't flash the "no conversations yet" copy at a
-               user with hundreds of sessions while the async load races in. -->
+               user with hundreds of sessions while the async load races in.
+               Skeleton tiles keep the grid cell from reading as a dead zone. -->
           <p class="ah-muted">Reading your history…</p>
+          <div class="ah-tiles" aria-hidden="true">
+            {#each { length: 4 } as _, i (i)}
+              <div class="ah-tile ah-tile-skel"><div class="ah-skel ah-skel-v"></div><div class="ah-skel ah-skel-k"></div></div>
+            {/each}
+          </div>
         {:else if !hasHistory}
           <p class="ah-muted">Once you've had a few conversations, your usage breakdown shows up here.</p>
         {:else if totals}
@@ -1319,6 +1325,14 @@
      word (was display:flex + align-items:center — which floated the badge
      vertically against multi-line labels and collided with the wrapped text). */
   .ah-tile-k { font-size: 11.5px; color: var(--fg-subtle); margin-top: 2px; line-height: 1.45; }
+  /* Loading skeleton — quiet pulsing blocks in the tile grid so the card holds
+     its shape while history stats load, instead of a near-empty cell. */
+  .ah-tile-skel { pointer-events: none; }
+  .ah-skel { border-radius: 5px; background: color-mix(in oklab, var(--fg) 8%, transparent); animation: ah-skel-pulse 1.4s var(--ease-soft) infinite; }
+  .ah-skel-v { width: 58px; height: 20px; }
+  .ah-skel-k { width: 86px; height: 10px; margin-top: 8px; }
+  @keyframes ah-skel-pulse { 0%, 100% { opacity: 0.5; } 50% { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .ah-skel { animation: none; } }
   /* WS1: signal tints — a faint wash + colored inset ring on the tile whose
      verdict matters, reusing the shared accent/warn/danger tokens. */
   .ah-tile.ok { background: color-mix(in srgb, var(--accent) 8%, var(--bg-inset)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 38%, transparent); }

@@ -37,6 +37,14 @@
     workspace.setActive(id);
   }
 
+  // Publish the rail's real layout footprint as --rail-w (registered <length>
+  // in app.css so it tweens on collapse). Consumers that center on the MAIN
+  // island, not the window — e.g. ToastHost — read it. Peek doesn't count:
+  // the floating island overlays content without moving the layout.
+  $effect(() => {
+    document.documentElement.style.setProperty("--rail-w", `${shell.collapsed ? 0 : shell.width}px`);
+  });
+
   // ── scope segment data ────────────────────────────────────────────────
   // Live count of chats in the current scope — mirrors ConversationList's own
   // filter so the number the segment shows matches the list below it.
@@ -113,7 +121,6 @@
 >
   <aside
     class="sidebar"
-    class:home={isNavActive("home")}
     class:mini
     inert={shell.collapsed && !shell.peek}
     style="width:{mini ? MINI_W : shell.width - 16}px"
@@ -222,13 +229,17 @@
      (island covering the trigger would flicker the hover state). */
   .side-rail.peeking .sidebar { transform: none; opacity: 1; pointer-events: auto;
     top: 54px;
-    box-shadow: var(--shadow-float); }
+    box-shadow:
+      var(--shadow-float),
+      inset 0 1px 0 oklch(0.92 calc(var(--accent-c) * 0.25) var(--accent-h) / 0.07),
+      inset 0 0 0 1px oklch(0 0 0 / 0.22); }
   .side-rail.collapsed .side-resize { display: none; }
 
   /* Handle rides the island's right edge (8px inside the rail). */
   .side-resize { position: absolute; top: 48px; right: 4px; width: 8px; height: calc(100% - 64px); z-index: 6; cursor: col-resize; -webkit-app-region: no-drag; }
   .side-resize::after { content: ""; position: absolute; top: 0; right: 3px; width: 2px; height: 100%; border-radius: 2px; background: transparent; transition: background var(--dur-fast); }
-  .side-resize:hover::after, .side-rail.resizing .side-resize::after { background: var(--accent); }
+  .side-resize:hover::after { background: color-mix(in oklab, var(--fg) 22%, transparent); }
+  .side-rail.resizing .side-resize::after { background: color-mix(in oklab, var(--accent) 55%, transparent); }
 
   /* The island card — inset from the window edges, rounded, hairline-bordered.
      Pinned it reads as furniture (lift, no shadow); .peeking above adds the
@@ -238,14 +249,29 @@
     padding: 0 10px 10px;
     border-radius: var(--island-radius);
     border: 1px solid var(--island-border);
-    /* fill intentionally diverges from --island-fill: opaque gradient so list
-       rows never fight the dotted canvas showing through */
-    background: linear-gradient(180deg, color-mix(in oklab, var(--fg) 4%, var(--bg)), color-mix(in oklab, var(--fg) 1.8%, var(--bg)) 280px);
+    /* Same onyx slab as AppShell .main — fill, grounded foot, machined bevel,
+       grain (::after). The two docked islands are panels cut from one slab;
+       keep every layer in lockstep. */
+    background:
+      linear-gradient(0deg, oklch(0 0 0 / 0.16) 0%, transparent 12%),
+      linear-gradient(180deg, color-mix(in oklab, var(--fg) 4%, var(--bg)), color-mix(in oklab, var(--fg) 1.8%, var(--bg)) 280px);
+    box-shadow:
+      inset 0 1px 0 oklch(0.92 calc(var(--accent-c) * 0.25) var(--accent-h) / 0.07),
+      inset 0 0 0 1px oklch(0 0 0 / 0.22);
     overflow: hidden;
     box-sizing: border-box;
+    isolation: isolate;
     transition: transform 0.36s var(--ease-page), top 0.36s var(--ease-page), opacity var(--dur-base) var(--ease-page), box-shadow var(--dur-base) var(--ease-page); }
-  .sidebar.home { background: color-mix(in oklab, var(--bg) 72%, transparent);
-    backdrop-filter: blur(18px) saturate(1.1); -webkit-backdrop-filter: blur(18px) saturate(1.1); }
+  .sidebar::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 160px 160px;
+    opacity: 0.03;
+  }
   /* Mini peek flavor — the flyout hugs its content instead of spanning the
      window: height comes from the capped list, bottom edge floats free.
      max-height pairs with the peek's top:54 (+8px bottom breathing room). */

@@ -487,13 +487,6 @@
   ondrop={onPaneDrop}
   tabindex={focused ? -1 : 0}
 >
-  <!-- Atmosphere layer — faint static accent top-glow + film grain. Calmed
-       (no breathing) so the backdrop stays quiet behind an assistant terminal;
-       accent-only vocabulary, no drift, no motion. -->
-  <div class="atmos" aria-hidden="true">
-    <span class="atmos-glow"></span>
-    <span class="atmos-grain"></span>
-  </div>
   {#if assistant.splitActive}
     <div class="pane-head" class:focused>
       <span class="pane-label" use:tooltip={`Pane ${paneIdx + 1} of ${assistant.panes.length}`}>{paneIdx + 1}</span>
@@ -947,44 +940,6 @@
     background: var(--bg);
     border-color: color-mix(in oklab, var(--accent) 22%, transparent);
   }
-  /* ── Atmosphere ─────────────────────────────────────────────────────
-     Pure accent + grain. Matches the existing UpdateDialog head-glow +
-     EmptyState glyph-halo vocabulary — same color family, same restraint.
-     No info/ok colors, no garish drift. Sits behind chat content. */
-  .atmos {
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    overflow: hidden;
-    pointer-events: none;
-  }
-  /* Ambient lift — a soft, FULLY hue-neutral pool of light behind the hero
-     plus a faint floor vignette. Deliberately no accent anywhere: even a 3%
-     accent whisper read as a visible colored blob against every texture
-     (owner call, cont.264). Neutral fg-mix only. */
-  .atmos-glow {
-    position: absolute;
-    inset: 0;
-    background:
-      radial-gradient(120% 80% at 50% 34%,
-        color-mix(in oklab, var(--fg) 2.5%, transparent) 0%,
-        color-mix(in oklab, var(--fg) 1.5%, transparent) 34%,
-        transparent 66%),
-      radial-gradient(140% 60% at 50% 118%,
-        color-mix(in oklab, #000 26%, transparent) 0%,
-        transparent 60%);
-    opacity: 0.85;
-  }
-  /* Tiny film grain via inline SVG turbulence — adds organic texture so
-     the dark surface doesn't read as a flat void. ~3% opacity, no anim. */
-  .atmos-grain {
-    position: absolute;
-    inset: 0;
-    opacity: 0.04;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.5 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
-    background-size: 200px 200px;
-    mix-blend-mode: overlay;
-  }
   /* ── Merged home ⇄ conversation column ──────────────────────────────────
      One flex column per pane. HOME centers its content (welcome + hero
      composer) as a unit and scrolls if it overflows; CONVERSATION lets the
@@ -997,11 +952,16 @@
     display: flex; flex-direction: column;
   }
   .csurf-col.is-home {
-    justify-content: safe center;
     overflow-y: auto;
     padding: 30px 32px;
     scrollbar-width: none;
   }
+  /* Weighted centering via grow-spacers (54/46) — the welcome unit sits a
+     touch below true center so the band under the composer stays smaller than
+     the headroom above the greeting. Spacers collapse to zero when content
+     overflows, so short windows just scroll (same safety `safe center` gave). */
+  .csurf-col.is-home::before { content: ""; flex: 54 0 0; }
+  .csurf-col.is-home::after { content: ""; flex: 46 0 0; }
   .csurf-col.is-home::-webkit-scrollbar { width: 0; height: 0; display: none; }
   .csurf-col.is-home > :global(*) {
     width: 100%; max-width: 680px;
@@ -1012,6 +972,8 @@
   /* Engaged posture — welcome unmounted, composer sunk to the working edge.
      The FLIP in setEngaged animates the journey; this is the destination. */
   .csurf-col.is-home.engaged { justify-content: flex-end; }
+  .csurf-col.is-home.engaged::before { flex: 1 0 0; }
+  .csurf-col.is-home.engaged::after { flex: 0 0 0; }
 
   .composer-host {
     position: relative;

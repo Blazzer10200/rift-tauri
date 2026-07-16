@@ -280,8 +280,7 @@
 </div>
 
 <style>
-  /* One continuous surface across home, conversation, and settings: a single
-     base tone + a static dotted field span the whole window, so there's no hard
+  /* One continuous surface across home, conversation, and settings — no hard
      seam between the reading column and the rest of the app. Pinned to the
      viewport via position:fixed (the percentage height chain collapses in prod). */
   .app {
@@ -289,7 +288,10 @@
     inset: 0;
     display: flex;
     flex-direction: column;
-    background: var(--app-bg, var(--bg));
+    /* Plain flat canvas — matches the sidebar's calm (owner call 2026-07-16).
+       All atmosphere lives INSIDE the main island; the window around it is
+       just the base tone. */
+    background: var(--bg);
     color: var(--fg);
     font-family: var(--font-ui);
     font-size: 13px;
@@ -297,18 +299,6 @@
     overflow: hidden;
     transition: background 1s var(--ease-soft);
   }
-  .app::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    z-index: 0;
-    pointer-events: none;
-    background: radial-gradient(circle at center, color-mix(in oklab, var(--fg) 4.5%, transparent) 0.8px, transparent 1.5px);
-    background-size: 30px 30px;
-    -webkit-mask-image: radial-gradient(125% 105% at 50% 24%, #000 16%, transparent 80%);
-    mask-image: radial-gradient(125% 105% at 50% 24%, #000 16%, transparent 80%);
-  }
-
   .app-body {
     flex: 1;
     min-height: 0;
@@ -319,8 +309,8 @@
   }
   /* Main island — the content surface floats on the same canvas as the
      sidebar island: inset gutters, rounded hairline card, translucent lift so
-     the ambient glow + dotted field still read through it. The topbar rides
-     inside as the island's header. */
+     the ambient glow still reads through it. The topbar rides inside as the
+     island's header. */
   .main {
     flex: 1;
     min-width: 0;
@@ -330,9 +320,36 @@
     margin: 8px 8px 8px 0;
     border-radius: var(--island-radius);
     border: 1px solid var(--island-border);
-    background: var(--island-fill);
+    /* Onyx slab — the island reads as a machined surface, not a lit stage
+       (owner calls 2026-07-16: no grid, no brightness, no diagonal sheen).
+       Fill is the SAME opaque gradient as the sidebar island (owner: "blended
+       in with the sidebar") + a grounded foot and machined bevel. Strictly
+       vertical gradients — angled washes read as glare. */
+    background:
+      linear-gradient(0deg, oklch(0 0 0 / 0.16) 0%, transparent 12%),
+      linear-gradient(180deg, color-mix(in oklab, var(--fg) 4%, var(--bg)), color-mix(in oklab, var(--fg) 1.8%, var(--bg)) 280px);
+    /* Machined bevel: a dark seam just inside the hairline border, plus the
+       faintest accent-cooled light catching the top edge. */
+    box-shadow:
+      inset 0 1px 0 oklch(0.92 calc(var(--accent-c) * 0.25) var(--accent-h) / 0.07),
+      inset 0 0 0 1px oklch(0 0 0 / 0.22);
     overflow: hidden;
+    position: relative;
+    isolation: isolate;
     transition: margin-left 0.36s var(--ease-page);
+  }
+  /* Film grain — static SVG noise at whisper opacity, scoped to the island
+     like everything else. Kills banding on the island's light gradient.
+     Desaturated in the SVG itself (feColorMatrix) so it never tints. */
+  .main::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 160px 160px;
+    opacity: 0.03;
   }
   /* Rail collapsed → rail width is 0, so the island keeps its own left gutter. */
   .app-body.rail-collapsed .main { margin-left: 8px; }

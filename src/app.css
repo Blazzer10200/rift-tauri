@@ -87,8 +87,8 @@
   /* island — the app-wide surface language (docked tier). Floating layers add
      --shadow-float on top. One recipe; consumers reference these, never re-roll. */
   --island-radius: 14px;
-  --island-border: color-mix(in oklab, var(--border) 92%, transparent);
-  --island-fill:   color-mix(in oklab, var(--fg) 2.2%, transparent);
+  --island-border: var(--border);
+  --island-fill:   color-mix(in oklab, var(--fg) 2.8%, transparent);
 
   /* shadow */
   --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.40);
@@ -100,7 +100,7 @@
   --ease-page:    cubic-bezier(0.22, 1, 0.36, 1);   /* decelerate — entrances */
   --ease-soft:    cubic-bezier(0.4, 0, 0.2, 1);      /* standard — layout shifts */
   --dur-page:     400ms;   /* a screen enters */
-  --dur-page-out: 240ms;   /* a screen leaves */
+  --dur-page-out: 140ms;   /* a screen leaves — fast, so the old page never ghosts under the new one */
   --dur-rise:     460ms;   /* a content block rises */
   --stagger:      62ms;    /* gap between staggered blocks */
   --dur-fast:     140ms;   /* control hover / small state flip */
@@ -154,9 +154,9 @@ body {
   font-size: var(--fs-md);
   font-feature-settings: "cv02","cv03","cv04","cv11","ss01";
   font-variant-ligatures: none;
-  background:
-    radial-gradient(1200px 700px at 50% -10%, oklch(0.205 0.004 250) 0%, transparent 60%),
-    var(--bg);
+  /* Plain flat canvas — all atmosphere lives inside the main island
+     (AppShell .main); the window base is just the tone. */
+  background: var(--bg);
   color: var(--fg);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -188,16 +188,15 @@ body {
 /* selection */
 ::selection { background: var(--accent-soft); color: var(--fg); }
 
-/* Rail collapse/expand animates the --rail-w VALUE, never the grid track.
-   Registering it as an interpolable <length> lets the var tween on <html>;
-   the .body grid-template-columns track + .activitybar width both read it and
-   follow per-frame, so the grid property itself is never transitioned (Chromium
-   can't interpolate a minmax/fr track list). applyRail() sets the value on
-   documentElement; the transition here is what makes the change glide. */
+/* --rail-w = the sidebar rail's live LAYOUT width (0 when collapsed; peek
+   overlays without moving layout). Sidebar.svelte publishes it on <html>;
+   consumers that align to the MAIN island rather than the window (ToastHost's
+   top-center stack) read it. Registered as an interpolable <length> so the
+   value tweens on collapse and those consumers glide with the island. */
 @property --rail-w {
   syntax: "<length>";
   inherits: true;
-  initial-value: 48px;
+  initial-value: 0px;
 }
 @media (prefers-reduced-motion: no-preference) {
   html { transition: --rail-w var(--dur-page-out, 240ms) var(--ease-soft); }
