@@ -119,6 +119,18 @@ seed rules below.
   content, only the high-frequency items — with a quiet seam back to the full
   version. Full-height + full-width floating over content reads as a glitch, not
   an affordance.
+- DO speak island as ONE dialect, ONE level deep (2026-07-15, app-wide rollout).
+  The recipe lives in tokens — `--island-radius` / `--island-border` /
+  `--island-fill` (+ `.island` / `.island-float` utilities in app.css) — never
+  re-roll the literals. Two tiers only: docked (border + tint, no shadow:
+  sidebar, main card) and floating (+ `--shadow-float`: peek, HUDs, palette,
+  popovers). Nesting ceiling is canvas → island → content: INSIDE an island,
+  differentiate with hairline separators or tint tiles (fill/border, smaller
+  radius, no shadow — settings cards, jump-back-in, stream tool rows), never a
+  second full island. The status bar is the main island's footer, not its own
+  surface. Intentional divergences, don't "fix" them: sidebar keeps its opaque
+  gradient fill (list rows must not fight the dotted canvas); HUDs keep frosted
+  `--surface` 84% + `--border-strong` (floating layers earn a firmer edge).
 - DON'T ship a control that spends the user's money without saying so AT the control
   (2026-07-14, fast-mode incident — owner: "it's charging me, that is a huge gap").
   Porting an upstream feature means porting its cost disclosure too (the CLI showed

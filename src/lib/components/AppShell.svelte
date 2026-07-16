@@ -263,9 +263,11 @@
         <main class="workspace">
           <WorkspaceShell />
         </main>
+        <!-- Footer INSIDE the island — one surface, one level; the bar inherits
+             the island's fill and rounded bottom corners. -->
+        <StatusBar />
       </div>
     </div>
-    <StatusBar />
   {/if}
 
   <UpdateDialog />
@@ -326,9 +328,9 @@
     display: flex;
     flex-direction: column;
     margin: 8px 8px 8px 0;
-    border-radius: 14px;
-    border: 1px solid color-mix(in oklab, var(--border) 92%, transparent);
-    background: color-mix(in oklab, var(--fg) 2.2%, transparent);
+    border-radius: var(--island-radius);
+    border: 1px solid var(--island-border);
+    background: var(--island-fill);
     overflow: hidden;
     transition: margin-left 0.36s var(--ease-page);
   }

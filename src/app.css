@@ -84,6 +84,12 @@
   --r-card:    12px;   /* cards; some surfaces go up to 18px */
   --radius-2xl: 16px;  /* large hero/dashboard cards */
 
+  /* island — the app-wide surface language (docked tier). Floating layers add
+     --shadow-float on top. One recipe; consumers reference these, never re-roll. */
+  --island-radius: 14px;
+  --island-border: color-mix(in oklab, var(--border) 92%, transparent);
+  --island-fill:   color-mix(in oklab, var(--fg) 2.2%, transparent);
+
   /* shadow */
   --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.40);
   --shadow:    0 4px 14px oklch(0 0 0 / 0.45);
@@ -342,6 +348,16 @@ input.slider-zoom::-webkit-slider-thumb { transform: scale(1.35); }
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
+
+/* islands — docked tier sits on the canvas (no shadow); floating tier hovers
+   and earns elevation. Nesting rule: canvas → island → content, ONE level —
+   inside an island use hairline separators or tint tiles, never a second island. */
+.island {
+  border-radius: var(--island-radius);
+  border: 1px solid var(--island-border);
+  background: var(--island-fill);
+}
+.island-float { box-shadow: var(--shadow-float); }
 
 /* ─── dialog shell ─── */
 /* No backdrop-filter anywhere in the dialog stack — WebView2 mis-composites it

@@ -411,8 +411,13 @@
   .greet-switch :global(svg) { color: var(--fg-faint); }
 
   /* jump back in — compact list rows (Claude-Desktop density), not cards:
-     title-led, time right-aligned, resume arrow revealed on hover. */
-  .resume { display: flex; flex-direction: column; gap: 8px; margin-top: 22px; }
+     title-led, time right-aligned, resume arrow revealed on hover. The section
+     itself rides a quiet tint tile (island dialect, no shadow — one level max). */
+  .resume { display: flex; flex-direction: column; gap: 8px; margin-top: 22px;
+    padding: 12px 10px 10px; border-radius: 12px;
+    border: 1px solid var(--island-border);
+    background: var(--island-fill); }
+  .resume > :global(.wo-label) { padding: 0 9px; }
   .resume-list { display: flex; flex-direction: column; gap: 1px; }
   .resume-item { display: flex; align-items: center; gap: 9px; width: 100%; height: 32px; padding: 0 9px;
     border-radius: 8px; border: 0; background: transparent; color: var(--fg-2); font: inherit; text-align: left;

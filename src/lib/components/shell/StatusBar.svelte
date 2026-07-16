@@ -118,8 +118,10 @@
 </footer>
 
 <style>
+  /* Rides inside the main island as its footer — hairline separator only, fill
+     comes from the island (no second surface). */
   .statusbar { flex: none; height: 27px; display: flex; align-items: center; gap: 13px; padding: 0 16px;
-    border-top: 1px solid var(--border); background: color-mix(in oklab, var(--bg) 82%, transparent);
+    border-top: 1px solid var(--border); background: transparent;
     font-size: 11px; color: var(--fg-subtle); position: relative; z-index: 1; }
   .sb-item { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
   .sb-item :global(svg) { color: var(--fg-faint); flex: none; }

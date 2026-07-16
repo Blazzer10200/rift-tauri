@@ -1356,7 +1356,9 @@
   @media (prefers-reduced-motion: reduce) { .set-col > .card { animation: none; } }
 
   /* card */
-  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; scroll-margin-top: 12px; transition: border-color var(--dur-fast); }
+  /* island dialect: translucent tint + hairline (no shadow) so the canvas glow
+     reads through settings the same way it does the stream + sidebar. */
+  .card { background: var(--island-fill); border: 1px solid var(--island-border); border-radius: 12px; padding: 16px 18px; margin-bottom: 16px; scroll-margin-top: 12px; transition: border-color var(--dur-fast); }
   .card:hover { border-color: var(--border-strong); }
 
   /* Claude tab — CLI version chip + billing route strip */

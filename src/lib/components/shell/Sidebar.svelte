@@ -236,8 +236,10 @@
   .sidebar { position: absolute; top: 8px; bottom: 8px; left: 8px;
     display: flex; flex-direction: column; gap: 4px; min-height: 0;
     padding: 0 10px 10px;
-    border-radius: 14px;
-    border: 1px solid color-mix(in oklab, var(--border) 92%, transparent);
+    border-radius: var(--island-radius);
+    border: 1px solid var(--island-border);
+    /* fill intentionally diverges from --island-fill: opaque gradient so list
+       rows never fight the dotted canvas showing through */
     background: linear-gradient(180deg, color-mix(in oklab, var(--fg) 4%, var(--bg)), color-mix(in oklab, var(--fg) 1.8%, var(--bg)) 280px);
     overflow: hidden;
     box-sizing: border-box;
