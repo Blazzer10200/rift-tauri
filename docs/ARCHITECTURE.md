@@ -49,15 +49,16 @@ Key properties:
 
 ## 4. Backend (`src-tauri/src/`)
 
-`lib.rs` is the Tauri entry: it registers ~94 `#[tauri::command]`s (most live per-domain in `commands/*.rs`; `stt::*` and `usage::limits` register directly from their own modules) and runs `VelopackApp::build().run()` early for install/update hooks. `main.rs` is the thin binary.
+`lib.rs` is the Tauri entry: it registers ~95 `#[tauri::command]`s (most live per-domain in `commands/*.rs`; `stt::*` and `usage::limits` register directly from their own modules) and runs `VelopackApp::build().run()` early for install/update hooks. `main.rs` is the thin binary.
 
 ### `assistant/` — the engine
 | File | Role |
 |---|---|
 | `turn.rs` | Live-turn nervous system: session registry, CLI spawn, stream/permission/error event emit, stop, per-turn env snapshot. The hot file. |
-| `mcp_server.rs` | stdio JSON-RPC MCP server: `read_file` / `list_dir` / `grep` + `git_*` + the bridge-gated UI tools (dispatched from here, implemented in `mcp_bridge.rs`). Workspace-scoped, trust-gated. |
+| `mcp_server.rs` | stdio JSON-RPC MCP server: `read_file` / `list_dir` / `grep` + `git_*` + `gh_*` + the bridge-gated UI tools (dispatched from here, implemented in `mcp_bridge.rs`). Workspace-scoped, trust-gated. |
 | `mcp_bridge.rs` | The bridge-gated UI MCP tools — `ask_user` / `open_browser` / `notify` + the loopback `bridge_call` round-trip. Split out of `mcp_server.rs` (v0.60.0). |
 | `git_local.rs` | Hardened `run_git` (no shell, args pre-split, env stripped, non-interactive) + path/message validators. Backs the `git_*` MCP tools in `mcp_server.rs` (there is no `commands/git.rs`). |
+| `gh_remote.rs` | GitHub via the user's own `gh` CLI (tokenless; repo pinned to `origin`): `gh_checks` / `gh_run_view` / `gh_pr_list` / `gh_pr_view` / `gh_pr_diff` MCP tools + trust-gated `gh_pr_create`, and the `gh_branch_status` command behind the UI branch chip + popover. |
 | `bridge.rs` | Loopback TCP UI bridge (127.0.0.1, ephemeral port, 192-bit token) so MCP tools can round-trip `ask_user`/`open_browser`/`notify` through the running webview. |
 | `convo_store.rs` | On-disk conversation persistence + export. |
 | `oneshot.rs` | One-off CLI calls (prompt-enhance, title, usage-analyze) outside the live turn loop. |

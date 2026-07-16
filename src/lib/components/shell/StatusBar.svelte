@@ -1,6 +1,8 @@
 <script lang="ts">
   import { GitBranch, ShieldCheck } from "lucide-svelte";
   import { assistant } from "$lib/state/assistant.svelte";
+  import { github } from "$lib/state/github.svelte";
+  import GhPopover from "../assistant/GhPopover.svelte";
   import { usage, limitZone } from "$lib/state/usage.svelte";
   import { workspace } from "$lib/state/workspace.svelte";
   import { elevation } from "$lib/state/elevation.svelte";
@@ -36,6 +38,17 @@
   });
 
   let usageOpen = $state(false);
+
+  // GitHub chip status — the bar is always mounted, so gate on a resolved
+  // branch (the lazy loaders elsewhere fill it) and let the store min-gap.
+  $effect(() => {
+    if (assistant.workspaceBranch) github.maybeRefresh(assistant.activeRoot);
+  });
+  let ghOpen = $state(false);
+  let ghAnchor = $state<HTMLElement | null>(null);
+  const ghActive = $derived(
+    !!github.status && ["ok", "no_auth", "no_gh", "error"].includes(github.status.state),
+  );
 
   function fmtReset(iso: string | null): string {
     if (!iso) return "";
@@ -81,7 +94,19 @@
     {repoName}
   </button>
   {#if assistant.workspaceBranch}
-    <span class="sb-item"><GitBranch size={11} />{assistant.workspaceBranch}</span>
+    {#if ghActive}
+      <button class="sb-item sb-btn" type="button" bind:this={ghAnchor}
+        onclick={() => (ghOpen = !ghOpen)} use:tooltip={"GitHub — branch status"}
+        aria-haspopup="dialog" aria-expanded={ghOpen}>
+        <GitBranch size={11} />{assistant.workspaceBranch}
+        {#if github.dot !== "none"}<span class="gh-dot {github.dot}"></span>{/if}
+      </button>
+    {:else}
+      <span class="sb-item"><GitBranch size={11} />{assistant.workspaceBranch}</span>
+    {/if}
+  {/if}
+  {#if ghOpen && ghAnchor}
+    <GhPopover anchor={ghAnchor} onClose={() => (ghOpen = false)} />
   {/if}
   <span class="sb-sep"></span>
   <span class="sb-item sb-date">{today}</span>

@@ -1,0 +1,237 @@
+<script lang="ts">
+  // GitHub branch popover — opens from the branch chip (welcome / composer /
+  // status bar). Floating tier (rift-menu shell + portal). Read-only surface:
+  // the two "do something" actions inject a prompt into the composer so every
+  // write flows through the assistant's normal permission system.
+  import { ExternalLink, GitBranch, GitPullRequest, RefreshCw, Sparkles } from "lucide-svelte";
+  import { openUrl } from "@tauri-apps/plugin-opener";
+  import { portal } from "$lib/actions/portal";
+  import { tooltip } from "$lib/actions/tooltip";
+  import { assistant } from "$lib/state/assistant.svelte";
+  import { github } from "$lib/state/github.svelte";
+  import { ghFixPrompt, ghPrPrompt, ghRelTime, ghSyncLabel } from "$lib/state/githubHelpers";
+
+  let { anchor, onClose }: { anchor: HTMLElement; onClose: () => void } = $props();
+
+  let panelEl = $state<HTMLElement | null>(null);
+  const s = $derived(github.status);
+  const run = $derived(s?.state === "ok" ? (s.run ?? null) : null);
+  const pr = $derived(s?.state === "ok" ? (s.pr ?? null) : null);
+  const sync = $derived(s?.state === "ok" ? ghSyncLabel(s.ahead, s.behind) : null);
+  const runFailed = $derived(
+    !!run && ["failure", "startup_failure", "timed_out"].includes(run.conclusion ?? ""),
+  );
+  // Offer "Draft a PR" only where one makes sense: no open PR, and not sitting
+  // on the default-ish branch.
+  const canDraftPr = $derived(
+    !pr && !!s?.branch && !["main", "master", "HEAD"].includes(s.branch),
+  );
+
+  // Anchor-relative position; flips above when the chip sits low (status bar).
+  let pos = $state({ left: 0, top: 0 });
+  $effect(() => {
+    const r = anchor.getBoundingClientRect();
+    const w = 320;
+    const h = panelEl?.offsetHeight ?? 240;
+    const left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8);
+    const top = r.bottom + h + 12 > window.innerHeight ? r.top - h - 8 : r.bottom + 8;
+    pos = { left, top };
+  });
+
+  function onDocMousedown(ev: MouseEvent) {
+    if (!(ev.target instanceof Node)) return;
+    if (anchor.contains(ev.target) || panelEl?.contains(ev.target)) return;
+    onClose();
+  }
+  function onKey(ev: KeyboardEvent) {
+    if (ev.key === "Escape") onClose();
+  }
+  $effect(() => {
+    window.addEventListener("mousedown", onDocMousedown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDocMousedown);
+      window.removeEventListener("keydown", onKey);
+    };
+  });
+
+  // Opening the popover is an explicit "show me now" — bypass the min-gap.
+  $effect(() => {
+    void github.refresh(assistant.activeRoot, { force: true });
+  });
+
+  function inject(prompt: string) {
+    const cur = assistant.composerDraft;
+    assistant.composerDraft = cur ? `${cur}\n\n${prompt}` : prompt;
+    onClose();
+  }
+</script>
+
+<div
+  class="rift-menu gh-pop"
+  use:portal
+  bind:this={panelEl}
+  style="left: {pos.left}px; top: {pos.top}px;"
+  role="dialog"
+  aria-label="GitHub branch status"
+>
+  <header class="gp-head">
+    <span class="gp-repo" use:tooltip={s?.repo ?? ""}>
+      <GitBranch size={12} />
+      <span class="gp-branch">{s?.branch ?? "…"}</span>
+      {#if s?.repo}<span class="gp-sep">·</span><span class="gp-reponame">{s.repo}</span>{/if}
+    </span>
+    <span class="gp-actions">
+      <button
+        class="gp-icon"
+        type="button"
+        onclick={() => void github.refresh(assistant.activeRoot, { force: true })}
+        use:tooltip={"Refresh"}
+        aria-label="Refresh GitHub status"
+      >
+        <RefreshCw size={12} class={github.loading ? "gp-spin" : ""} />
+      </button>
+      {#if s?.url}
+        <button
+          class="gp-icon"
+          type="button"
+          onclick={() => void openUrl(s.url!)}
+          use:tooltip={"Open repository on GitHub"}
+          aria-label="Open on GitHub"
+        >
+          <ExternalLink size={12} />
+        </button>
+      {/if}
+    </span>
+  </header>
+
+  {#if !s || (github.loading && s.state !== "ok")}
+    <div class="gp-note">Checking GitHub…</div>
+  {:else if s.state === "no_gh"}
+    <div class="gp-note">
+      GitHub features need the GitHub CLI.
+      <button class="gp-link" type="button" onclick={() => void openUrl("https://cli.github.com")}>Install gh</button>
+      then sign in with <code>gh auth login</code>.
+    </div>
+  {:else if s.state === "no_auth"}
+    <div class="gp-note">
+      The GitHub CLI isn't signed in — run <code>gh auth login</code> in a terminal, then refresh.
+    </div>
+  {:else if s.state === "error"}
+    <div class="gp-note">GitHub check failed: {s.detail ?? "unknown error"}</div>
+  {:else if s.state === "ok"}
+    {#if sync}
+      <div class="gp-row">
+        <span class="gp-dot idle"></span>
+        <span class="gp-row-t">{sync}</span>
+      </div>
+    {/if}
+
+    <div class="gp-row">
+      <span class="gp-dot {github.dot}"></span>
+      {#if run}
+        <span class="gp-row-t" use:tooltip={run.displayTitle ?? ""}>
+          {run.workflowName ?? "CI"}
+          <span class="gp-muted">
+            — {run.status === "completed" ? (run.conclusion ?? "done") : (run.status ?? "").replace("_", " ")}
+            {#if run.createdAt}&nbsp;· {ghRelTime(run.createdAt)}{/if}
+          </span>
+        </span>
+        {#if run.url}
+          <button class="gp-icon" type="button" onclick={() => void openUrl(run.url!)} use:tooltip={"View run on GitHub"} aria-label="View run">
+            <ExternalLink size={11} />
+          </button>
+        {/if}
+      {:else}
+        <span class="gp-row-t gp-muted">No workflow runs on this branch</span>
+      {/if}
+    </div>
+
+    <div class="gp-row">
+      <GitPullRequest size={12} class="gp-row-ic" />
+      {#if pr}
+        <span class="gp-row-t" use:tooltip={pr.title ?? ""}>
+          #{pr.number} {pr.title}
+          {#if pr.isDraft}<span class="gp-muted">· draft</span>
+          {:else if pr.reviewDecision === "APPROVED"}<span class="gp-ok">· approved</span>
+          {:else if pr.reviewDecision === "CHANGES_REQUESTED"}<span class="gp-err">· changes requested</span>{/if}
+        </span>
+        {#if pr.url}
+          <button class="gp-icon" type="button" onclick={() => void openUrl(pr.url!)} use:tooltip={"Open PR on GitHub"} aria-label="Open PR">
+            <ExternalLink size={11} />
+          </button>
+        {/if}
+      {:else}
+        <span class="gp-row-t gp-muted">No open pull request</span>
+      {/if}
+    </div>
+
+    {#if runFailed || canDraftPr}
+      <div class="rift-menu-divider"></div>
+      {#if runFailed && run}
+        <button class="rift-menu-row" type="button" onclick={() => inject(ghFixPrompt(run))}>
+          <span class="rift-menu-row-ic"><Sparkles size={13} /></span>
+          <span class="rift-menu-row-t">Ask Claude to fix the failing run</span>
+        </button>
+      {/if}
+      {#if canDraftPr}
+        <button class="rift-menu-row" type="button" onclick={() => inject(ghPrPrompt())}>
+          <span class="rift-menu-row-ic"><GitPullRequest size={13} /></span>
+          <span class="rift-menu-row-t">Draft a pull request with Claude</span>
+        </button>
+      {/if}
+    {/if}
+  {/if}
+</div>
+
+<style>
+  .gh-pop {
+    position: fixed;
+    width: 320px;
+    z-index: 950;
+    padding: 8px;
+  }
+  .gp-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 2px 4px 8px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 6px;
+  }
+  .gp-repo { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--fg-2); font-size: var(--fs-sm); }
+  .gp-repo :global(svg) { color: var(--fg-faint); flex: none; }
+  .gp-branch { font-weight: 600; color: var(--fg); white-space: nowrap; }
+  .gp-sep { color: var(--fg-faint); }
+  .gp-reponame { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-subtle);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gp-actions { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+  .gp-icon { display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border: 0; border-radius: 5px; background: transparent;
+    color: var(--fg-subtle); cursor: pointer; flex: none; }
+  .gp-icon:hover { background: var(--surface-hover); color: var(--fg-2); }
+  :global(.gp-spin) { animation: gp-rotate 0.9s linear infinite; }
+  @keyframes gp-rotate { to { transform: rotate(360deg); } }
+
+  .gp-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; min-width: 0; }
+  .gp-row :global(.gp-row-ic) { color: var(--fg-faint); flex: none; }
+  .gp-row-t { font-size: var(--fs-sm); color: var(--fg-2); min-width: 0; flex: 1;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gp-muted { color: var(--fg-subtle); }
+  .gp-ok { color: var(--ok); }
+  .gp-err { color: var(--danger); }
+  .gp-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--fg-faint); }
+  .gp-dot.ok { background: var(--ok); }
+  .gp-dot.err { background: var(--danger); }
+  .gp-dot.busy { background: var(--warn); animation: gp-breathe var(--pulse-live) ease-in-out infinite; }
+  @keyframes gp-breathe { 50% { opacity: 0.35; } }
+
+  .gp-note { padding: 8px 6px; font-size: var(--fs-sm); color: var(--fg-muted); line-height: 1.5; }
+  .gp-note code { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-2); }
+  .gp-link { border: 0; background: transparent; padding: 0; font: inherit;
+    color: var(--accent); cursor: pointer; }
+  .gp-link:hover { text-decoration: underline; }
+
+  @media (prefers-reduced-motion: reduce) {
+    :global(.gp-spin) { animation: none; }
+    .gp-dot.busy { animation: none; }
+  }
+</style>

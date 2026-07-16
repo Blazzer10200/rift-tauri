@@ -2,12 +2,13 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.116.0 — Deep-clean pass: sturdier downloads, honest agent cards
+## v0.117.0 — GitHub, woven in: the branch chip comes alive
 
-- **Voice-model downloads can't hang forever anymore.** A stalled connection (half-open Wi-Fi, blocked host) now errors out cleanly after 90 seconds with a visible message instead of sitting on a frozen progress bar.
-- **Sub-agent cards stay cards.** A persisted `Task` agent spawn could previously get folded into a collapsed "N tools" group in old transcripts; agent cards are now always rendered first-class, matching live behavior.
-- **Dev launcher fixed for stock Windows PowerShell** — `run-dev-deelevated.ps1` was unrunnable under PS 5.1 (encoding + stderr traps); it now works from any shell, elevated or not.
-- **Full-repo audit, clean bill of health.** Backend, frontend, FE↔BE contracts, dependency and dead-code sweep, and docs all deep-reviewed: every lockstep verified, no critical findings, all 610 frontend + 182 backend tests green, zero console errors on a live tour.
+- **The branch chip now carries a CI status dot.** If the open folder's `origin` is a GitHub repo and the `gh` CLI is signed in, the chip (welcome card, composer, status bar) shows a live dot: gray idle, amber breathing while a run is in flight, green on success, red on failure. Non-GitHub folders look exactly like before.
+- **Click the chip for a GitHub popover** — ahead/behind sync with origin, the latest workflow run (with a link out), and the branch's open PR with review state. Two one-click actions hand the work to Claude: **"Ask Claude to fix the failing run"** (pulls the failed job logs and gets to work) and **"Draft a pull request"** (reviews the branch diff, then asks before creating).
+- **Claude gets matching GitHub tools**: `gh_checks`, `gh_run_view` (with failed-log tails), `gh_pr_list` / `gh_pr_view` / `gh_pr_diff`, and `gh_pr_create` — the one write tool, gated to Standard trust just like `git_push`.
+- **Tokenless by design.** Everything rides your own `gh` login — Rift never sees or stores a GitHub credential — and every call is pinned to the workspace's `origin` repo through a whitelist parser, so neither the model nor the UI can point the tools somewhere else. No `gh` installed / not signed in? The popover says so and links the fix; nothing else changes.
+- Status refreshes lazily: on chip appearance, on window focus (60s minimum gap), and immediately after a push or PR creation.
 
 ## Known issues
 - **While elevated, dragging files from Explorer into the window doesn't work** (Windows blocks lower→higher integrity drag-drop); the attach button / file picker still works fine.

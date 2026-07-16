@@ -18,6 +18,7 @@ pub mod cli_install;
 pub mod config;
 pub mod convo_store;
 pub mod env_checks;
+pub mod gh_remote;
 pub mod git_local;
 pub mod local_llm;
 pub mod mcp_bridge;

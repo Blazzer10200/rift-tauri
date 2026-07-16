@@ -31,6 +31,7 @@ Rift drives the `claude` CLI, so it uses whatever auth the CLI has.
 
 - **Open a folder** (the workspace picker). Everything Claude does is scoped to that folder via Rift's local MCP server.
 - Type in the composer and send. Claude can `read_file` / `list_dir` / `grep` and run local git (`git_status` / `diff` / `log` / `pull` / `commit` / `push`) against the folder — all on your machine, no remote connections.
+- **GitHub (optional):** if the folder's `origin` is a GitHub repo and the [`gh` CLI](https://cli.github.com) is signed in, the branch chip grows a CI status dot — click it for ahead/behind, the latest workflow run, and the branch's PR, plus one-click "ask Claude to fix the failing run" / "draft a PR". Claude gets matching tools (`gh_checks` / `gh_run_view` / `gh_pr_list` / `gh_pr_view` / `gh_pr_diff`, and `gh_pr_create` at Standard trust). Rift stores no token — everything rides your own `gh` login, and the repo is always pinned to `origin`.
 - **Per-turn controls** sit on the composer: model (Fable/Opus/Sonnet — legacy models in the "More models" flyout), permission mode, thinking effort.
 - **Permission modes** — ask-before-edits, edit-automatically, plan, auto, or bypass. In the asking modes a gated tool surfaces an Allow/Deny bar before it runs.
 - **Tabs / panes** — open multiple concurrent chats; each carries its own model + permission mode + effort.

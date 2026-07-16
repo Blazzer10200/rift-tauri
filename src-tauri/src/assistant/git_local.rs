@@ -38,7 +38,7 @@ const MAX_MSG_BYTES: usize = 4 * 1024;
 
 /// Truncate `s` to at most `limit` bytes on a UTF-8 char boundary, appending a
 /// note when it had to cut. Shared by every tool that returns raw git output.
-fn truncate_bytes(s: &str, limit: usize) -> std::borrow::Cow<'_, str> {
+pub(crate) fn truncate_bytes(s: &str, limit: usize) -> std::borrow::Cow<'_, str> {
     if s.len() <= limit {
         return std::borrow::Cow::Borrowed(s);
     }
@@ -53,7 +53,7 @@ fn truncate_bytes(s: &str, limit: usize) -> std::borrow::Cow<'_, str> {
 
 /// Validate a ref / branch / remote name. Strict allowlist; rejects anything
 /// that could be parsed as a git flag.
-fn validate_ref(kind: &str, s: &str) -> Result<String, String> {
+pub(crate) fn validate_ref(kind: &str, s: &str) -> Result<String, String> {
     if s.is_empty() || s.len() > 200 {
         return Err(format!("invalid {kind}: must be 1-200 chars"));
     }
@@ -151,7 +151,7 @@ pub(crate) fn validate_message(s: &str) -> Result<String, String> {
 
 // ─── git invocation ─────────────────────────────────────────────────────────
 
-fn workspace_root(roots: &[PathBuf]) -> Result<&PathBuf, String> {
+pub(crate) fn workspace_root(roots: &[PathBuf]) -> Result<&PathBuf, String> {
     roots
         .first()
         .ok_or_else(|| "no workspace root configured (open a folder in Rift first)".to_string())
@@ -300,13 +300,13 @@ pub(crate) fn run_git(root: &Path, args: &[&str]) -> Result<GitOut, String> {
 /// (which IS the Tauri binary). Each pipe is drained through `Read::take` so the
 /// in-memory buffer can never exceed `MAX_OUT_BYTES + 1` per stream regardless
 /// of how much git produces; the callers still `truncate_bytes` for display.
-struct CappedOut {
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
-    code: Option<i32>,
+pub(crate) struct CappedOut {
+    pub(crate) stdout: Vec<u8>,
+    pub(crate) stderr: Vec<u8>,
+    pub(crate) code: Option<i32>,
 }
 
-fn drain_child_capped(mut child: std::process::Child) -> std::io::Result<CappedOut> {
+pub(crate) fn drain_child_capped(mut child: std::process::Child) -> std::io::Result<CappedOut> {
     use std::io::Read;
     let drain = |pipe: Option<Box<dyn Read + Send>>| -> Vec<u8> {
         let mut buf = Vec::new();
@@ -327,7 +327,7 @@ fn drain_child_capped(mut child: std::process::Child) -> std::io::Result<CappedO
 }
 
 /// Current branch name, or "HEAD" (detached) — used as the default push target.
-fn current_branch(root: &Path) -> Result<String, String> {
+pub(crate) fn current_branch(root: &Path) -> Result<String, String> {
     let out = run_git(root, &["rev-parse", "--abbrev-ref", "HEAD"])?;
     if !out.ok() {
         return Err(format!("not a git repository (or no commits yet): {}", out.err_text()));

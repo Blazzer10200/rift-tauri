@@ -28,7 +28,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::assistant::git_local;
+use crate::assistant::{gh_remote, git_local};
 use super::mcp_bridge::{
     bridge_enabled, tool_ask_user, tool_notify, tool_open_browser, tool_read_browser_console,
     tool_read_browser_page,
@@ -670,7 +670,83 @@ fn tools_list_payload() -> Value {
             "required": []
         }
     }));
+    // GitHub tools (gh_remote.rs) — ride the user's own `gh` CLI auth, repo
+    // pinned to the workspace's `origin`. Read set always listed (they degrade
+    // to a clear error when gh is missing/unauthed); `gh_pr_create` is the one
+    // write and needs Standard trust like git_push.
+    tools.push(json!({
+        "name": "gh_checks",
+        "description": "List recent GitHub Actions runs for this workspace's GitHub repo (from its `origin` remote). Read-only; uses the user's own `gh` CLI login — no token is stored by Rift. Defaults to the current branch, last 5 runs. Returns JSON (status, conclusion, workflow, url). Use to answer 'did CI pass?'.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "branch": { "type": "string", "description": "Branch to list runs for. Default = current branch." },
+                "limit": { "type": "integer", "description": "Number of runs (1-20). Default 5.", "minimum": 1, "maximum": 20 }
+            },
+            "required": []
+        }
+    }));
+    tools.push(json!({
+        "name": "gh_run_view",
+        "description": "Inspect one GitHub Actions run by id: jobs with per-step conclusions (JSON) by default, or set `failed_logs: true` to get the tail of the failing jobs' logs — the fastest way to diagnose a red run. Read-only; uses the user's `gh` CLI.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "run_id": { "type": "integer", "description": "The run's databaseId (from gh_checks)." },
+                "failed_logs": { "type": "boolean", "description": "Return failing-job log tails instead of the job summary." }
+            },
+            "required": ["run_id"]
+        }
+    }));
+    tools.push(json!({
+        "name": "gh_pr_list",
+        "description": "List pull requests on this workspace's GitHub repo. Read-only; uses the user's `gh` CLI. Returns JSON (number, title, state, head branch, review decision, url).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "state": { "type": "string", "enum": ["open", "closed", "merged", "all"], "description": "Filter by state. Default open." },
+                "limit": { "type": "integer", "description": "Max PRs (1-20). Default 10.", "minimum": 1, "maximum": 20 }
+            },
+            "required": []
+        }
+    }));
+    tools.push(json!({
+        "name": "gh_pr_view",
+        "description": "View one pull request in detail: title, body, review decision, mergeability, CI check rollup, and change stats. Read-only; uses the user's `gh` CLI. Follow with gh_pr_diff to read the code changes.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "number": { "type": "integer", "description": "PR number." }
+            },
+            "required": ["number"]
+        }
+    }));
+    tools.push(json!({
+        "name": "gh_pr_diff",
+        "description": "Read a pull request's full diff (unified format, truncated at 64 KB). Read-only; uses the user's `gh` CLI. Use for reviewing a PR's actual code changes.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "number": { "type": "integer", "description": "PR number." }
+            },
+            "required": ["number"]
+        }
+    }));
     if trust_at_least("standard") {
+        tools.push(json!({
+            "name": "gh_pr_create",
+            "description": "Open a pull request on this workspace's GitHub repo from the CURRENT branch (it must already be pushed). Uses the user's `gh` CLI auth. Provide a clear `title` and a `body` that summarizes the changes; `base` defaults to the repo's default branch. Set `draft: true` for a draft PR.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string", "description": "PR title (single line, ≤250 chars)." },
+                    "body": { "type": "string", "description": "PR description (markdown, ≤8 KB)." },
+                    "base": { "type": "string", "description": "Base branch. Default = repo default branch." },
+                    "draft": { "type": "boolean", "description": "Create as a draft PR." }
+                },
+                "required": ["title"]
+            }
+        }));
         tools.push(json!({
             "name": "git_pull",
             "description": "Pull the current branch from upstream in the user's Rift workspace. Fast-forward only by default; `rebase: true` rebases. Refuses on a dirty working tree (stash/commit first). Surfaces merge errors verbatim — never silently merges.",
@@ -821,6 +897,12 @@ fn handle_request(req: RpcRequest, roots: &[PathBuf]) -> Option<RpcResponse> {
                 "git_pull" if trust_at_least("standard") => git_local::tool_git_pull(&args, roots),
                 "git_commit" if trust_at_least("standard") => git_local::tool_git_commit(&args, roots),
                 "git_push" if trust_at_least("standard") => git_local::tool_git_push(&args, roots),
+                "gh_checks" => gh_remote::tool_gh_checks(&args, roots),
+                "gh_run_view" => gh_remote::tool_gh_run_view(&args, roots),
+                "gh_pr_list" => gh_remote::tool_gh_pr_list(&args, roots),
+                "gh_pr_view" => gh_remote::tool_gh_pr_view(&args, roots),
+                "gh_pr_diff" => gh_remote::tool_gh_pr_diff(&args, roots),
+                "gh_pr_create" if trust_at_least("standard") => gh_remote::tool_gh_pr_create(&args, roots),
                 "ask_user" if bridge_enabled() => tool_ask_user(&args),
                 "open_browser" if bridge_enabled() => tool_open_browser(&args),
                 "read_browser_page" if bridge_enabled() => tool_read_browser_page(&args),

@@ -44,6 +44,16 @@ there. (Verified by a full backend review 2026-06-15: 0 critical, 0 high.)
   (`GIT_DIR`, `GIT_CONFIG_GLOBAL/SYSTEM`, `GIT_EXEC_PATH`, …) and made
   non-interactive (`GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=""`, `GIT_SSH_COMMAND`
   with `BatchMode=yes`), stdin to null, 30s kill timer.
+- **GitHub tool hardening** (`gh_remote.rs`). Same execution posture as
+  `git_local.rs` (no shell, pre-split args, stdin null, 30s kill timer, capped
+  output) with two GitHub-specific rules: **tokenless** — every call shells to
+  the user's own `gh` CLI, so Rift never reads or stores a GitHub credential;
+  and **repo pinning** — `-R owner/repo` is derived from the workspace's
+  `origin` remote via a prefix-whitelisted parser on every call (lookalike
+  hosts like `github.com.evil.com` rejected), so neither the model nor the UI
+  can point the tools at an arbitrary repository. `GH_REPO`/`GH_HOST`/`GH_DEBUG`
+  are stripped from the child env. The single write tool (`gh_pr_create`) is
+  trust-gated like `git_push` and validates title/body length + shape.
 - **CLI spawn isolation** (`turn.rs`). `session_id` (UUID), `model`,
   `permission_mode`, and the local-LLM `ANTHROPIC_BASE_URL` (http/https + host)
   are all format-validated before they reach an argv/env. The prompt is sent on

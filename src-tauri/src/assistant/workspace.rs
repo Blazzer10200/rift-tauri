@@ -211,7 +211,7 @@ pub fn assistant_local_scratch_path() -> Option<String> {
 /// the pane header still showed the stale one (cross-contamination). A stale
 /// override → `None` (honest empty result); only a genuinely ABSENT override
 /// falls back to the global default.
-fn resolve_root(override_path: Option<String>) -> Option<PathBuf> {
+pub(crate) fn resolve_root(override_path: Option<String>) -> Option<PathBuf> {
     match override_path.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(p) => {
             let path = PathBuf::from(p);

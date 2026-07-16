@@ -416,6 +416,19 @@ input.slider-zoom::-webkit-slider-thumb { transform: scale(1.35); }
 }
 .ctx-chip svg { color: var(--fg-faint); flex: none; }
 .ctx-chip .cc-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 180px; }
+/* Interactive flavor — the branch chip becomes a button when GitHub status is
+   live (click opens the branch popover). Same footprint, quiet hover. */
+button.ctx-chip { font: inherit; cursor: pointer; }
+button.ctx-chip:hover { background: color-mix(in oklch, var(--bg-elev-2) 85%, transparent);
+  border-color: var(--border-strong); color: var(--fg-2); }
+/* GitHub CI dot — semantic status colors only (DESIGN §2), rides inside the
+   branch chip (welcome / composer / status bar). */
+.gh-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--fg-faint); }
+.gh-dot.ok { background: var(--ok); }
+.gh-dot.err { background: var(--danger); box-shadow: 0 0 5px color-mix(in oklab, var(--danger) 45%, transparent); }
+.gh-dot.busy { background: var(--warn); animation: gh-dot-breathe var(--pulse-live) ease-in-out infinite; }
+@keyframes gh-dot-breathe { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .gh-dot.busy { animation: none; } }
 
 /* Branch pill — Workspace greeting band capsule (Welcome now uses .ctx-chip;
    was a verbatim duplicate in both). Accent-soft capsule w/ git branch. */

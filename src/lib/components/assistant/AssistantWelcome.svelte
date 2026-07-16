@@ -6,6 +6,8 @@
   } from "lucide-svelte";
   import { openPath } from "@tauri-apps/plugin-opener";
   import { assistant } from "../../state/assistant.svelte";
+  import { github } from "../../state/github.svelte";
+  import GhPopover from "./GhPopover.svelte";
   import { workspace } from "../../state/workspace.svelte";
   import RiftLogo from "$lib/components/shell/RiftLogo.svelte";
   import ClaudeConnect from "$lib/components/onboarding/ClaudeConnect.svelte";
@@ -55,6 +57,12 @@
   $effect(() => {
     if (sharedRootMatches && assistant.workspaceBranch == null) void assistant.loadWorkspaceBranch();
   });
+  // GitHub chip status (CI dot + popover) — lazy, min-gap inside the store.
+  $effect(() => {
+    if (sharedRootMatches) github.maybeRefresh(paneRoot);
+  });
+  let ghOpen = $state(false);
+  let ghAnchor = $state<HTMLElement | null>(null);
 
   // Per-pane root: this pane's own folder (or the global default), so two
   // panes showing the welcome can advertise different project dirs.
@@ -67,6 +75,12 @@
   // pane had none (loader's `!root → workspaceFiles = []` write re-triggers
   // the load effect). #74 family — the loader itself stays untouched.
   const sharedRootMatches = $derived(paneRoot != null && paneRoot === assistant.activeRoot);
+  // Chip is clickable only when there's a GitHub story to tell (GitHub origin,
+  // regardless of gh install/auth state — the popover explains what to fix).
+  const ghActive = $derived(
+    sharedRootMatches && !!github.status &&
+    ["ok", "no_auth", "no_gh", "error"].includes(github.status.state),
+  );
   const hasRoot = $derived(paneRoot != null);
   const recents = $derived(assistant.workspace.recent);
 
@@ -137,7 +151,18 @@
            triple-state what the sidebar switcher + status bar already show. -->
       <div class="ctx-row">
         <span class="ctx-facts">
-          {#if branch}<span class="ctx-chip"><GitBranch size={11} /><span class="cc-label">{branch}</span></span>{/if}
+          {#if branch}
+            {#if ghActive}
+              <button class="ctx-chip" type="button" bind:this={ghAnchor}
+                onclick={() => (ghOpen = !ghOpen)} use:tooltip={"GitHub — branch status"}
+                aria-haspopup="dialog" aria-expanded={ghOpen}>
+                <GitBranch size={11} /><span class="cc-label">{branch}</span>
+                {#if github.dot !== "none"}<span class="gh-dot {github.dot}"></span>{/if}
+              </button>
+            {:else}
+              <span class="ctx-chip"><GitBranch size={11} /><span class="cc-label">{branch}</span></span>
+            {/if}
+          {/if}
           {#if fileCount > 0}<span class="ctx-chip"><Folder size={11} /><span class="cc-label">{fileCount.toLocaleString()} files</span></span>{/if}
           <span class="ctx-path" use:tooltip={paneRoot ?? ""}>{shortPath(paneRoot!)}</span>
         </span>
@@ -150,6 +175,9 @@
           </button>
         </span>
       </div>
+      {#if ghOpen && ghAnchor}
+        <GhPopover anchor={ghAnchor} onClose={() => (ghOpen = false)} />
+      {/if}
 
       <!-- Jump back in — the project's freshest threads, one click to resume. -->
       {#if resumables.length > 0}

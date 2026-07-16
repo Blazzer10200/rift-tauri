@@ -20,6 +20,7 @@ import type { Block, ChatMessage, StreamEnvelope, ThinkingBlock, ToolBlock } fro
 import { ctxWindowForModelId, flattenToolResult, previewToolInput } from "./helpers";
 import { checkMcpInitHealth } from "./healthAlerts";
 import { browserDock } from "../browserDock.svelte";
+import { github } from "../github.svelte";
 
 // S124: agentSpawns appends per Task/Agent/Skill and is never reset within a
 // conversation (the dock shows the running history), so a long session grew it
@@ -759,6 +760,9 @@ function appendToolUse(tab: TabState, block: { id: string; name: string; input?:
     DESIGN_DOCK_OPENED.add(tab);
     browserDock.openUrl("https://claude.ai/design");
   }
+  // GitHub chip: a remote-mutating tool ran this turn — mark for a forced
+  // status refresh at turn end (flushed in the `result` envelope).
+  if (/(?:^|_)(git_push|gh_pr_create)$/.test(block.name)) github.noteRemoteMutation();
   tab.activity = {
     ...tab.activity,
     currentLabel: tab.shortToolLabel ? tab.shortToolLabel(block.name, block.input) : block.name,
@@ -1168,6 +1172,9 @@ export function onStreamLine(tab: TabState, raw: string) {
       break;
     }
     case "result": {
+      // GitHub chip: the turn is over — if it pushed / opened a PR, the remote
+      // state changed; refresh the branch status once.
+      github.flushRemoteMutation();
       if (typeof env.total_cost_usd === "number") {
         tab.totalCostUsd = (tab.totalCostUsd ?? 0) + env.total_cost_usd;
         const turnCost = env.total_cost_usd;

@@ -2,6 +2,8 @@
   import { Send, Square, X, Mic, Loader2, Wand2, Paperclip,
     Sparkles, Eye, ChevronUp, Undo2, Cpu, Folder, GitBranch } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
+  import { github } from "../../state/github.svelte";
+  import GhPopover from "./GhPopover.svelte";
   import { localLlm } from "../../state/localLlm.svelte";
   import { workspace } from "../../state/workspace.svelte";
   import { notify } from "../../state/toast.svelte";
@@ -89,6 +91,15 @@
   $effect(() => {
     if (!hero && assistant.workspace.current && assistant.workspaceBranch == null) void assistant.loadWorkspaceBranch();
   });
+  // GitHub chip status (CI dot + popover) — lazy, min-gap inside the store.
+  $effect(() => {
+    if (!hero && assistant.workspace.current) github.maybeRefresh(assistant.activeRoot);
+  });
+  let ghOpen = $state(false);
+  let ghAnchor = $state<HTMLElement | null>(null);
+  const ghActive = $derived(
+    !!github.status && ["ok", "no_auth", "no_gh", "error"].includes(github.status.state),
+  );
   // Per-pane context readout — the bare assistant.ctx* getters delegate to the
   // focused activeTab, so in split-pane both composers showed the focused
   // pane's ctx%. Read this pane's own tab instead.
@@ -1259,12 +1270,25 @@
             <span class="cc-label">{wsFolderName}</span>
           </span>
           {#if assistant.workspaceBranch}
-            <span class="ctx-chip" use:tooltip={"Current git branch"}>
-              <GitBranch size={11} />
-              <span class="cc-label">{assistant.workspaceBranch}</span>
-            </span>
+            {#if ghActive}
+              <button class="ctx-chip" type="button" bind:this={ghAnchor}
+                onclick={() => (ghOpen = !ghOpen)} use:tooltip={"GitHub — branch status"}
+                aria-haspopup="dialog" aria-expanded={ghOpen}>
+                <GitBranch size={11} />
+                <span class="cc-label">{assistant.workspaceBranch}</span>
+                {#if github.dot !== "none"}<span class="gh-dot {github.dot}"></span>{/if}
+              </button>
+            {:else}
+              <span class="ctx-chip" use:tooltip={"Current git branch"}>
+                <GitBranch size={11} />
+                <span class="cc-label">{assistant.workspaceBranch}</span>
+              </span>
+            {/if}
           {/if}
         </div>
+        {#if ghOpen && ghAnchor}
+          <GhPopover anchor={ghAnchor} onClose={() => (ghOpen = false)} />
+        {/if}
       {/if}
       <!-- WELL: attachments + input only. All chrome (border/glass/focus-ring/
            streaming edge) lives here; controls sit on the flat bar BELOW. -->

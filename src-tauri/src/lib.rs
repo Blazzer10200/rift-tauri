@@ -280,6 +280,7 @@ pub fn run() {
             commands::assistant_list_workspace_files,
             commands::assistant_list_custom_commands,
             commands::assistant_workspace_branch,
+            assistant::gh_remote::gh_branch_status,
             commands::assistant_local_scratch_path,
             commands::assistant_list_projects,
             commands::assistant_save_project,

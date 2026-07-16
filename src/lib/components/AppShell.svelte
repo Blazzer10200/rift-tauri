@@ -20,6 +20,7 @@
   import { cliUpdate } from "../state/cliUpdate.svelte";
   import { news } from "../state/news.svelte";
   import { assistant } from "../state/assistant.svelte";
+  import { github } from "../state/github.svelte";
   import { toast, notify } from "../state/toast.svelte";
   import { isFileDrag, attachImageFiles, summarizeAttach } from "./assistant/composer/helpers";
   import { goHome } from "../state/nav";
@@ -99,6 +100,9 @@
     const PROBE_MIN_GAP_MS = 60_000;
     const onReturn = () => {
       if (document.visibilityState !== "visible") return;
+      // GitHub chip: CI may have finished while the user was away — same
+      // focus-regain moment, own 60s min-gap inside the store.
+      github.maybeRefresh(assistant.activeRoot);
       if (assistant.authChecking) return;
       const last = assistant.authLastProbed;
       if (last !== null && Date.now() - last < PROBE_MIN_GAP_MS) return;
