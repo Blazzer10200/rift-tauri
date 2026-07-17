@@ -10,6 +10,11 @@ export type GhRunInfo = {
   event?: string;
   createdAt?: string;
   url?: string;
+  /** Branch (or TAG, for release runs) the run actually ran on. */
+  headBranch?: string;
+  /** Present on red runs: first failing job + its first failing step. */
+  failedJob?: string;
+  failedStep?: string;
 };
 
 export type GhPrInfo = {
@@ -86,8 +91,11 @@ export function ghRelTime(iso: string | undefined, now: number = Date.now()): st
 export function ghFixPrompt(run: GhRunInfo): string {
   const id = run.databaseId ? ` (run ${run.databaseId})` : "";
   const what = [run.workflowName, run.displayTitle].filter(Boolean).join(" — ");
+  const where = run.failedJob
+    ? ` The failing job is "${run.failedJob}"${run.failedStep ? ` at step "${run.failedStep}"` : ""}.`
+    : "";
   return (
-    `The latest GitHub Actions run on this branch failed${id}: ${what || "see gh_checks"}. ` +
+    `The latest GitHub Actions run on this branch failed${id}: ${what || "see gh_checks"}.${where} ` +
     `Use gh_run_view with failed_logs: true to read the failure, find the root cause in the code, and fix it.`
   );
 }

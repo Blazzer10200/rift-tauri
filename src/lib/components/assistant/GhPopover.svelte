@@ -141,6 +141,7 @@
           {run.workflowName ?? "CI"}
           <span class="gp-muted">
             — {run.status === "completed" ? (run.conclusion ?? "done") : (run.status ?? "").replace("_", " ")}
+            {#if run.headBranch && run.headBranch !== s.branch}&nbsp;· {run.headBranch}{/if}
             {#if run.createdAt}&nbsp;· {ghRelTime(run.createdAt)}{/if}
           </span>
         </span>
@@ -153,6 +154,11 @@
         <span class="gp-row-t gp-muted">No workflow runs on this branch</span>
       {/if}
     </div>
+    {#if runFailed && run?.failedJob}
+      <div class="gp-subrow">
+        Failed in <span class="gp-err">{run.failedJob}</span>{#if run.failedStep}&nbsp;› {run.failedStep}{/if}
+      </div>
+    {/if}
 
     <div class="gp-row">
       <GitPullRequest size={12} class="gp-row-ic" />
@@ -219,6 +225,8 @@
   @keyframes gp-rotate { to { transform: rotate(360deg); } }
 
   .gp-row { display: flex; align-items: center; gap: 8px; padding: 5px 6px; min-width: 0; }
+  .gp-subrow { padding: 0 6px 5px 21px; font-size: var(--fs-sm); color: var(--fg-subtle);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .gp-row :global(.gp-row-ic) { color: var(--fg-faint); flex: none; }
   .gp-row-t { font-size: var(--fs-sm); color: var(--fg-2); min-width: 0; flex: 1;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

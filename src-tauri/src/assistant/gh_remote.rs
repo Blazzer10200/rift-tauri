@@ -352,6 +352,61 @@ pub fn tool_gh_pr_create(args: &Value, roots: &[PathBuf]) -> Result<String, Stri
 
 // ─── UI aggregate (branch chip + popover) ───────────────────────────────────
 
+const FAIL_CONCLUSIONS: [&str; 3] = ["failure", "startup_failure", "timed_out"];
+
+/// Red completed run → add `failedJob`/`failedStep` (first failing job + its
+/// first failing step) so the popover can say WHAT broke. One extra `gh run
+/// view`, spent only on failures; any miss leaves the run untouched.
+fn attach_failure_detail(root: &Path, repo: &str, mut run: Value) -> Value {
+    let is_red = run.get("status").and_then(Value::as_str) == Some("completed")
+        && run
+            .get("conclusion")
+            .and_then(Value::as_str)
+            .is_some_and(|c| FAIL_CONCLUSIONS.contains(&c));
+    let Some(id) = run.get("databaseId").and_then(Value::as_u64) else { return run };
+    if !is_red {
+        return run;
+    }
+    let Ok(out) = run_gh(root, &["run", "view", &id.to_string(), "-R", repo, "--json", "jobs"]) else {
+        return run;
+    };
+    if !out.ok() {
+        return run;
+    }
+    let Ok(v) = serde_json::from_str::<Value>(&out.stdout) else { return run };
+    let failed_job = v
+        .get("jobs")
+        .and_then(Value::as_array)
+        .and_then(|jobs| {
+            jobs.iter().find(|j| {
+                j.get("conclusion")
+                    .and_then(Value::as_str)
+                    .is_some_and(|c| FAIL_CONCLUSIONS.contains(&c))
+            })
+        });
+    if let Some(job) = failed_job {
+        if let Some(obj) = run.as_object_mut() {
+            if let Some(name) = job.get("name").and_then(Value::as_str) {
+                obj.insert("failedJob".into(), json!(name));
+            }
+            let step = job.get("steps").and_then(Value::as_array).and_then(|steps| {
+                steps
+                    .iter()
+                    .find(|s| {
+                        s.get("conclusion")
+                            .and_then(Value::as_str)
+                            .is_some_and(|c| FAIL_CONCLUSIONS.contains(&c))
+                    })
+                    .and_then(|s| s.get("name").and_then(Value::as_str))
+            });
+            if let Some(step) = step {
+                obj.insert("failedStep".into(), json!(step));
+            }
+        }
+    }
+    run
+}
+
 /// One-call status snapshot for the branch chip. Never errors — every failure
 /// mode collapses into a `state` the UI can render (missing gh, no auth,
 /// non-GitHub origin, plain non-repo folder).
@@ -406,16 +461,42 @@ pub(crate) fn branch_status_sync(root: &Path) -> Value {
             .and_then(|v| v.as_array().and_then(|a| a.first().cloned()))
             .unwrap_or(Value::Null)
     }
+    // Local HEAD sha: lets the chip claim tag-triggered runs (release builds
+    // have head_branch = the TAG, so a branch-scoped list misses them; the
+    // commit sha still matches).
+    let head_sha = run_git(root, &["rev-parse", "HEAD"])
+        .ok()
+        .filter(|o| o.ok())
+        .map(|o| o.stdout.trim().to_string())
+        .unwrap_or_default();
     let (run, detail, pr) = if branch == "HEAD" {
         (Value::Null, Value::Null, Value::Null)
     } else {
         std::thread::scope(|scope| {
             let run_h = scope.spawn(|| {
+                // Unscoped newest-first window, filtered locally: first run on
+                // this branch OR on the local HEAD commit (tag runs). Nothing
+                // in the window → null ("no recent runs on this branch").
                 match run_gh(root, &[
-                    "run", "list", "-R", &repo, "--branch", &branch, "--limit", "1",
-                    "--json", "databaseId,workflowName,displayTitle,status,conclusion,event,createdAt,url",
+                    "run", "list", "-R", &repo, "--limit", "20",
+                    "--json", "databaseId,workflowName,displayTitle,status,conclusion,event,createdAt,url,headBranch,headSha",
                 ]) {
-                    Ok(out) if out.ok() => (first_of_json_array(&out), Value::Null),
+                    Ok(out) if out.ok() => {
+                        let picked = serde_json::from_str::<Value>(&out.stdout)
+                            .ok()
+                            .and_then(|v| v.as_array().and_then(|runs| {
+                                runs.iter()
+                                    .find(|r| {
+                                        r.get("headBranch").and_then(Value::as_str) == Some(branch.as_str())
+                                            || (!head_sha.is_empty()
+                                                && r.get("headSha").and_then(Value::as_str)
+                                                    == Some(head_sha.as_str()))
+                                    })
+                                    .cloned()
+                            }))
+                            .unwrap_or(Value::Null);
+                        (attach_failure_detail(root, &repo, picked), Value::Null)
+                    }
                     Ok(out) => (Value::Null, json!(out.err_text())),
                     Err(e) => (Value::Null, json!(e)),
                 }

@@ -63,5 +63,12 @@ describe("prompts", () => {
     expect(p).toContain("run 99");
     expect(p).toContain("check — fix: thing");
     expect(p).toContain("gh_run_view");
+    expect(p).not.toContain("failing job");
+  });
+  it("fix prompt pinpoints the failing job and step when known", () => {
+    const p = ghFixPrompt({ databaseId: 7, workflowName: "release", failedJob: "build", failedStep: "vpk pack" });
+    expect(p).toContain('The failing job is "build" at step "vpk pack".');
+    const jobOnly = ghFixPrompt({ workflowName: "release", failedJob: "build" });
+    expect(jobOnly).toContain('The failing job is "build".');
   });
 });
