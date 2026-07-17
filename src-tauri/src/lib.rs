@@ -197,8 +197,9 @@ pub fn run() {
             // thinking:disabled into /v1/messages so Ollama-class models skip
             // their forced reasoning dump. Replaces the external Node proxy.
             // Non-fatal — turn.rs falls back to the raw base URL if it can't bind.
+            let nothink_app = app_handle.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(e) = assistant::nothink::start().await {
+                if let Err(e) = assistant::nothink::start(nothink_app).await {
                     log::error!("assistant nothink shim failed to start: {e}");
                 }
             });

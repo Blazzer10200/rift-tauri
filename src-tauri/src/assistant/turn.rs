@@ -654,6 +654,9 @@ pub async fn assistant_send(
     session_id: String,
     is_first_turn: bool,
     model: Option<String>,
+    // Per-turn provider route (split-pane): a profile id, `"claude"` for an
+    // explicit pure-Claude tab, or None (legacy) = the global wire fields.
+    provider: Option<String>,
     attachments: Option<Vec<AssistantAttachment>>,
     dyslexia_mode: Option<bool>,
     thinking_effort: Option<String>,
@@ -665,7 +668,7 @@ pub async fn assistant_send(
     turn_epoch: Option<u64>,
 ) -> Result<(), String> {
     run_or_prewarm(
-        app, window, prompt, session_id, is_first_turn, model, attachments,
+        app, window, prompt, session_id, is_first_turn, model, provider, attachments,
         dyslexia_mode, thinking_effort, thinking_enabled, permission_mode, fast_mode,
         prior_context_summary, root, turn_epoch.unwrap_or(0), false,
     ).await
@@ -693,6 +696,7 @@ pub async fn assistant_prewarm(
     window: tauri::Window,
     session_id: String,
     model: Option<String>,
+    provider: Option<String>,
     thinking_effort: Option<String>,
     thinking_enabled: Option<bool>,
     permission_mode: Option<String>,
@@ -723,7 +727,7 @@ pub async fn assistant_prewarm(
         }
     }
     run_or_prewarm(
-        app, window, String::new(), session_id, is_first_turn.unwrap_or(true), model,
+        app, window, String::new(), session_id, is_first_turn.unwrap_or(true), model, provider,
         /*attachments*/ None, /*dyslexia*/ None, thinking_effort, thinking_enabled,
         permission_mode, fast_mode, /*prior_context_summary*/ None, root, /*turn_epoch*/ 0, true,
     ).await
@@ -755,6 +759,7 @@ async fn run_or_prewarm(
     session_id: String,
     is_first_turn: bool,
     model: Option<String>,
+    provider: Option<String>,
     attachments: Option<Vec<AssistantAttachment>>,
     dyslexia_mode: Option<bool>,
     thinking_effort: Option<String>,
@@ -795,7 +800,7 @@ async fn run_or_prewarm(
     // and per-turn envelope. Extracted so this orchestrator stays readable; the
     // body is behavior-identical to the former inline prologue.
     let ResolvedSpawn { cmd, key, user_line, mcp_guard, model, live_switch_ok } = resolve_spawn(
-        &app, &window_label, &prompt, &session_id, is_first_turn, model, attachments,
+        &app, &window_label, &prompt, &session_id, is_first_turn, model, provider, attachments,
         dyslexia_mode, thinking_effort, thinking_enabled, permission_mode, fast_mode,
         prior_context_summary, root, prewarm,
     )
@@ -878,6 +883,7 @@ async fn resolve_spawn(
     session_id: &str,
     is_first_turn: bool,
     model: Option<String>,
+    provider: Option<String>,
     attachments: Option<Vec<AssistantAttachment>>,
     dyslexia_mode: Option<bool>,
     thinking_effort: Option<String>,
@@ -889,22 +895,34 @@ async fn resolve_spawn(
     prewarm: bool,
 ) -> Result<ResolvedSpawn, String> {
     let cfg = load_config();
+    // Per-turn provider resolution (split-pane: each tab names its own brain,
+    // so a sibling pane's switch can't rewrite this turn's target mid-chat).
+    let pctx = super::providers::resolve_provider_ctx(&cfg, provider.as_deref())?;
     let api_key = current_api_key_with(&cfg);
     let use_api_key = api_key.is_some();
     let mut model = model.unwrap_or_else(|| DEFAULT_MODEL.to_string());
-    if !is_valid_model_name(&model) {
+    // Provider model ids allow `/` and `:` (openrouter/ollama); Claude stays strict.
+    let model_ok = if pctx.is_some() {
+        is_valid_local_model_name(&model)
+    } else {
+        is_valid_model_name(&model)
+    };
+    if !model_ok {
         return Err(format!("invalid model: {model}"));
     }
     // Set when the picker model differs from the session pin on a resumed turn —
     // a deliberate mid-chat switch. Drives the re-pin at the save site below.
     let mut model_switched = false;
-    if cfg.local_llm_enabled {
-        // Local-LLM mode (experimental): use the configured local model verbatim
-        // and skip cloud-only machinery (model pin, Fable guard) — there are no
-        // thinking-block signatures to preserve and no Anthropic model ids in
-        // play. Env injection + `--effort` bypass happen at the spawn site below.
-        if let Some(lm) = cfg.local_llm_model.as_deref().filter(|s| is_valid_local_model_name(s)) {
-            model = lm.to_string();
+    if let Some(p) = &pctx {
+        // Provider turn: skip cloud-only machinery (model pin, Fable guard) —
+        // there are no thinking-block signatures to preserve and no Anthropic
+        // model ids in play. An EXPLICIT (per-tab) route trusts the FE-sent
+        // provider model; the legacy global fallback keeps the profile-pin
+        // override (pre-provider-aware callers still send a Claude id here).
+        if !p.explicit || model == DEFAULT_MODEL {
+            if let Some(lm) = p.model.as_deref().filter(|s| is_valid_local_model_name(s)) {
+                model = lm.to_string();
+            }
         }
     } else {
         // Model pin vs picker on resume: the SAME selection keeps the pinned id
@@ -1018,7 +1036,7 @@ async fn resolve_spawn(
     // keep the empty roots → no-tools fallback intact (mirrors the `use_full_config`
     // computation below; recomputed here because that binding is resolved later).
     let scratch_eligible =
-        cfg.use_full_config.unwrap_or(true) && !use_api_key && !cfg.local_llm_enabled;
+        cfg.use_full_config.unwrap_or(true) && !use_api_key && pctx.is_none();
     let roots: Vec<PathBuf> = if let Some(p) = pinned_cwd.clone() {
         vec![p]
     } else if let Some(r) = tab_root {
@@ -1089,7 +1107,7 @@ async fn resolve_spawn(
     // identity-correcting, structured-tool-call-enforcing local variant.
     // `mcp_config_path.is_some()` is exactly the "tools path" (workspace open +
     // MCP config provisioned); the no-workspace / fallback paths keep NO_WS.
-    let addendum = if cfg.local_llm_enabled && mcp_config_path.is_some() {
+    let addendum = if pctx.is_some() && mcp_config_path.is_some() {
         RIFT_SYSTEM_ADDENDUM_LOCAL
     } else {
         addendum
@@ -1115,7 +1133,7 @@ async fn resolve_spawn(
     // Rift's `--mcp-config` the strict source instead of a contradictory
     // `--bare` + piggyback combo.
     let use_full_config =
-        cfg.use_full_config.unwrap_or(true) && !use_api_key && !cfg.local_llm_enabled;
+        cfg.use_full_config.unwrap_or(true) && !use_api_key && pctx.is_none();
 
     let attachments = attachments.unwrap_or_default();
     validate_attachments(&attachments)?;
@@ -1400,22 +1418,19 @@ async fn resolve_spawn(
     // URL + local key override anything set in the api-key branch — local wins.
     // Additive + flag-gated; off = the spawn is byte-identical to cloud. Yank =
     // delete this block + the model/effort guards above/below.
-    if cfg.local_llm_enabled {
+    if let Some(p) = &pctx {
         if !use_api_key {
             cmd.arg("--bare");
         }
         // Re-validate at the sink: the setter guards writes, but a hand-edited
         // config.json could still carry a non-http(s) scheme. Skip if invalid.
-        if let Some(base) = cfg
-            .local_llm_base_url
-            .as_deref()
-            .filter(|s| !s.is_empty() && super::config::is_valid_local_base_url(s))
-        {
+        if let Some(base) = p.base_url.as_deref() {
             // Route through Rift's in-process no-think shim when it's bound: it
             // injects `thinking:{type:"disabled"}` into /v1/messages (the only
             // switch that suppresses Ollama's forced reasoning) and forwards to
-            // `base`, read fresh per-request. This replaces the external
-            // `rift-nothink-proxy.mjs`. If the shim failed to bind, fall back to
+            // this provider's base, resolved fresh per-request via the `/p/<id>`
+            // route — per-provider so two panes on DIFFERENT providers can
+            // stream concurrently. If the shim failed to bind, fall back to
             // the raw base URL (user can still run the external proxy).
             //
             // Effort-capable providers (Kimi/DeepSeek/GLM — profile.effort) with
@@ -1423,16 +1438,16 @@ async fn resolve_spawn(
             // blocks + `--effort`, and the shim would lobotomize their reasoning.
             // Thinking OFF still rides the shim (the disabled-injection is the
             // only real off switch — same rationale as cloud, #68).
-            let target = if cfg.local_llm_effort && thinking_on {
+            let target = if p.effort && thinking_on {
                 base.to_string()
             } else {
-                super::nothink::shim_base_url().unwrap_or_else(|| base.to_string())
+                super::nothink::shim_base_url()
+                    .map(|s| format!("{s}/p/{}", p.id))
+                    .unwrap_or_else(|| base.to_string())
             };
             cmd.env("ANTHROPIC_BASE_URL", target);
         }
-        let local_key = crate::secrets::get(crate::secrets::LOCAL_LLM_API_KEY)
-            .unwrap_or_else(|| "local".to_string());
-        cmd.env("ANTHROPIC_API_KEY", local_key);
+        cmd.env("ANTHROPIC_API_KEY", &p.key);
         // Local models get a generous output cap. Without this the CLI applies
         // its conservative default `max_tokens` to the /v1/messages request, so
         // a multi-step local turn (explanation + several tool calls) gets
@@ -1440,7 +1455,7 @@ async fn resolve_spawn(
         // output length limit / Continue". 8192 (the default) suits Ollama's
         // 16384 num_ctx; cloud providers (Kimi/DeepSeek via the provider
         // registry) sync a bigger cap through local_llm_max_output.
-        let max_out = cfg.local_llm_max_output.unwrap_or(8192);
+        let max_out = p.max_output.unwrap_or(8192);
         cmd.env("CLAUDE_CODE_MAX_OUTPUT_TOKENS", max_out.to_string());
     } else if routes_through_nothink_shim(thinking_on, &model) {
         // Cloud "thinking off": point the CLI at the in-process shim, which
@@ -1521,7 +1536,7 @@ async fn resolve_spawn(
     // CLI's default effort traffic already works against them). Ollama/LiteLLM
     // profiles keep the wholesale skip (4xx or silently ignore it).
     let send_effort = Some(send_effort_flag(thinking_on, effort_level));
-    if (!cfg.local_llm_enabled || cfg.local_llm_effort) && model != "haiku" && caps.effort {
+    if pctx.as_ref().is_none_or(|p| p.effort) && model != "haiku" && caps.effort {
         if let Some(level) = send_effort {
             cmd.arg("--effort").arg(level);
         }
@@ -1530,7 +1545,7 @@ async fn resolve_spawn(
     // model is Opus-family AND the headless settings-key path is confirmed on
     // this CLI (caps.fast_mode). Local-LLM mode skips wholesale like effort.
     let fast_on = fast_mode.unwrap_or(false)
-        && !cfg.local_llm_enabled
+        && pctx.is_none()
         && model_fast_eligible(&model)
         && caps.fast_mode;
     // `--settings` merges additively over user/project/local settings. Two keys
@@ -1543,7 +1558,7 @@ async fn resolve_spawn(
     // separate args would silently drop a key. Compact single-line JSON
     // (.cmd-shim batch-arg validator, Rust 1.77+ CVE-2024-24576). Haiku is
     // excluded wholesale (no extended thinking / workflow / fast).
-    if !cfg.local_llm_enabled && model != "haiku" && caps.settings_flag {
+    if pctx.is_none() && model != "haiku" && caps.settings_flag {
         let mut settings = serde_json::Map::new();
         if caps.effort && thinking_on && effort_tier == "ultra" {
             settings.insert("ultracode".into(), serde_json::Value::Bool(true));
@@ -1558,7 +1573,7 @@ async fn resolve_spawn(
 
     log::info!(
         "resolve_spawn: spawn session_id={} first_turn={} model={} effort={} thinking_on={} fast={} perm={} use_full_config={} mcp={} api_key={} local_llm={} cli_ver={:?} caps=[effort={} perm_tool={} excl_dyn={} partial={} budget={} settings={}]",
-        session_id, is_first_turn, model, effort_level, thinking_on, fast_on, permission_mode, use_full_config, mcp_config_path.is_some(), use_api_key, cfg.local_llm_enabled,
+        session_id, is_first_turn, model, effort_level, thinking_on, fast_on, permission_mode, use_full_config, mcp_config_path.is_some(), use_api_key, pctx.as_ref().map(|p| p.id.as_str()).unwrap_or("-"),
         caps.version, caps.effort, caps.permission_prompt_tool, caps.exclude_dynamic_sections, caps.include_partial_messages, caps.max_budget_usd, caps.settings_flag
     );
     log::debug!(
@@ -1679,13 +1694,17 @@ async fn resolve_spawn(
     // baked into the child's env at spawn, so a key rotation or endpoint change
     // forces a respawn even though the bools above are unchanged.
     let cred_fp = api_key.as_deref().map(warm_pool::fingerprint).unwrap_or(0);
-    let local_llm_fp = if cfg.local_llm_enabled {
-        let base = cfg.local_llm_base_url.as_deref().unwrap_or("");
-        let local_key = crate::secrets::get(crate::secrets::LOCAL_LLM_API_KEY).unwrap_or_default();
-        // effort folds in: it flips the baked ANTHROPIC_BASE_URL target
-        // (direct vs shim) + the --effort arg, so toggling the capability on
-        // the Models page must cold-respawn the warm child.
-        warm_pool::fingerprint(&format!("{base}\u{0}{local_key}\u{0}{}", cfg.local_llm_effort))
+    let local_llm_fp = if let Some(p) = &pctx {
+        // id + base + key + effort: a per-tab provider switch, endpoint edit,
+        // key rotation, OR effort-capability flip (it changes the baked
+        // ANTHROPIC_BASE_URL target + the --effort arg) must cold-respawn.
+        warm_pool::fingerprint(&format!(
+            "{}\u{0}{}\u{0}{}\u{0}{}",
+            p.id,
+            p.base_url.as_deref().unwrap_or(""),
+            p.key,
+            p.effort
+        ))
     } else {
         0
     };
@@ -1697,7 +1716,7 @@ async fn resolve_spawn(
         use_full_config,
         use_api_key,
         cred_fp,
-        local_llm_enabled: cfg.local_llm_enabled,
+        local_llm_enabled: pctx.is_some(),
         local_llm_fp,
         thinking_on,
         // Key on the flag actually SENT (thinking-off wires `--effort low`
@@ -1723,7 +1742,7 @@ async fn resolve_spawn(
         user_line,
         mcp_guard: _mcp_guard,
         model,
-        live_switch_ok: caps.live_switch && !cfg.local_llm_enabled,
+        live_switch_ok: caps.live_switch && pctx.is_none(),
     })
 }
 

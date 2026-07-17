@@ -20,14 +20,56 @@
 //! mode, else Anthropic (`RIFT_CLOUD_UPSTREAM`, default api.anthropic.com).
 //! Default cloud (thinking on) never sets ANTHROPIC_BASE_URL → byte-identical.
 
-use std::sync::OnceLock;
-use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::{LazyLock, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use futures::StreamExt;
+use tauri::Emitter;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 static SHIM: OnceLock<u16> = OnceLock::new();
+
+/// For surfacing upstream trouble (429/5xx) to the UI — the CLI retries these
+/// SILENTLY (observed live: Moonshot 429 → up to 10 retries, minutes of dead
+/// air the user reads as "Rift is broken"), and this shim is the only place
+/// Rift actually sees the response status.
+static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
+
+/// (status, provider-route, last-emit) — re-emit only on change or after 10s so
+/// a retry storm doesn't flood the frontend with toasts.
+static LAST_STATUS: Mutex<Option<(u16, String, Instant)>> = Mutex::new(None);
+
+/// Consecutive retryable failures (408/429/5xx) per upstream route. The CLI
+/// retries these SILENTLY up to ~10 times (minutes of dead air on a saturated
+/// endpoint); after GIVE_UP_AFTER in a row we convert the next one into a
+/// non-retryable 400 so the turn ENDS with a visible error instead of hanging.
+/// Any 2xx resets the route's count.
+static FAIL_STREAK: LazyLock<Mutex<HashMap<String, u32>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+const GIVE_UP_AFTER: u32 = 5;
+
+/// Tell the frontend an upstream /v1/messages call came back non-2xx. The FE
+/// maps it onto whichever tab is streaming on that provider.
+fn emit_upstream_status(status: u16, provider: Option<&str>, target: &str) {
+    let Some(app) = APP.get() else { return };
+    let route = provider.unwrap_or("").to_string();
+    {
+        let mut last = LAST_STATUS.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some((s, r, at)) = last.as_ref() {
+            if *s == status && *r == route && at.elapsed() < Duration::from_secs(10) {
+                return;
+            }
+        }
+        *last = Some((status, route.clone(), Instant::now()));
+    }
+    log::warn!("nothink shim: upstream {status} on /v1/messages ({target})");
+    let _ = app.emit(
+        "assistant://provider-upstream",
+        serde_json::json!({ "status": status, "provider": provider }),
+    );
+}
 
 /// One pooled HTTP client for all shim→upstream requests. `reqwest::Client::new()`
 /// per request opened a fresh connection (no keep-alive) on every /v1/messages
@@ -54,7 +96,8 @@ pub fn shim_base_url() -> Option<String> {
 /// Bind the shim listener exactly once. Idempotent. Non-fatal on failure —
 /// turn.rs falls back to the raw base URL (i.e. the external proxy is still
 /// expected) when this is `None`.
-pub async fn start() -> Result<u16, String> {
+pub async fn start(app: tauri::AppHandle) -> Result<u16, String> {
+    let _ = APP.set(app);
     if let Some(p) = SHIM.get() {
         return Ok(*p);
     }
@@ -193,36 +236,65 @@ async fn handle_conn(mut stream: TcpStream) -> Result<(), String> {
         .await
         .map_err(|_| "request read timed out (30s)".to_string())??;
 
-    // Resolve the upstream target fresh each request — the Base-URL setter can
-    // change it mid-session. Two callers point the CLI here (turn.rs):
-    //   • local mode → forward to the configured local endpoint;
-    //   • cloud "thinking off" → forward to Anthropic (the injected
+    // Resolve the upstream target fresh each request — profiles/the Base-URL
+    // setter can change mid-session. Three callers point the CLI here (turn.rs):
+    //   • provider turn (per-tab route) → `/p/<id>/…` names the profile; we
+    //     resolve THAT provider's base per request, so two panes streaming on
+    //     DIFFERENT providers stay independent;
+    //   • legacy local mode (bare path) → the global wire fields;
+    //   • cloud "thinking off" (bare path) → forward to Anthropic (the injected
     //     `thinking:{disabled}` is the only switch that suppresses extended
     //     thinking, since the CLI always sends a thinking block).
-    let cfg = super::config::load_config();
-    let target = if cfg.local_llm_enabled {
+    let (target, fwd_path, provider_route) = if let Some(rest) = req.path.strip_prefix("/p/") {
+        let (id, tail) = match rest.split_once('/') {
+            Some((id, tail)) => (id, format!("/{tail}")),
+            None => (rest, "/".to_string()),
+        };
+        let cfg = super::config::load_config();
         match cfg
-            .local_llm_base_url
-            .as_deref()
-            .map(str::trim)
-            .filter(|s| !s.is_empty() && super::config::is_valid_local_base_url(s))
+            .providers
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| p.base_url.trim().trim_end_matches('/').to_string())
+            .filter(|b| super::config::is_valid_local_base_url(b))
         {
-            Some(t) => t.trim_end_matches('/').to_string(),
+            Some(b) => (b, tail, Some(id.to_string())),
             None => {
-                return write_plain(&mut stream, 502, "nothink shim: no valid local_llm_base_url").await;
+                return write_plain(
+                    &mut stream,
+                    502,
+                    &format!("nothink shim: unknown provider route: {id}"),
+                )
+                .await;
             }
         }
     } else {
-        std::env::var("RIFT_CLOUD_UPSTREAM")
-            .ok()
-            .filter(|s| !s.trim().is_empty() && super::config::is_valid_local_base_url(s.trim()))
-            .unwrap_or_else(|| "https://api.anthropic.com".to_string())
-            .trim_end_matches('/')
-            .to_string()
+        let cfg = super::config::load_config();
+        let target = if cfg.local_llm_enabled {
+            match cfg
+                .local_llm_base_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty() && super::config::is_valid_local_base_url(s))
+            {
+                Some(t) => t.trim_end_matches('/').to_string(),
+                None => {
+                    return write_plain(&mut stream, 502, "nothink shim: no valid local_llm_base_url").await;
+                }
+            }
+        } else {
+            std::env::var("RIFT_CLOUD_UPSTREAM")
+                .ok()
+                .filter(|s| !s.trim().is_empty() && super::config::is_valid_local_base_url(s.trim()))
+                .unwrap_or_else(|| "https://api.anthropic.com".to_string())
+                .trim_end_matches('/')
+                .to_string()
+        };
+        (target, req.path.clone(), None)
     };
 
     let is_messages = req.method.eq_ignore_ascii_case("POST")
-        && req.path.split(['?', '#']).next().unwrap_or("") == "/v1/messages";
+        && fwd_path.split(['?', '#']).next().unwrap_or("") == "/v1/messages";
 
     // Rewrite the body's `thinking` field to disabled (the one switch that works
     // on Ollama's /v1/messages). Non-JSON or unparseable → forward unchanged.
@@ -245,7 +317,7 @@ async fn handle_conn(mut stream: TcpStream) -> Result<(), String> {
         }
     }
 
-    let url = format!("{target}{}", req.path);
+    let url = format!("{target}{fwd_path}");
     let mut rb = upstream_client().request(
         reqwest::Method::from_bytes(req.method.as_bytes())
             .map_err(|e| format!("bad method: {e}"))?,
@@ -277,6 +349,49 @@ async fn handle_conn(mut stream: TcpStream) -> Result<(), String> {
 
     // Status line.
     let status = upstream.status();
+    // Surface upstream trouble the CLI would swallow: auth failures, rate
+    // limits, and server errors on the messages endpoint. 429 especially — the
+    // CLI silently retries for minutes and the UI would otherwise show nothing.
+    let code = status.as_u16();
+    if is_messages && (matches!(code, 401 | 403 | 408 | 429) || code >= 500) {
+        emit_upstream_status(code, provider_route.as_deref(), &target);
+    }
+    // Give-up guard: after GIVE_UP_AFTER consecutive retryable responses on
+    // this route, answer the CLI with a 400 (non-retryable) carrying an honest
+    // message — the turn ends with a visible error instead of silent retry
+    // dead-air. Streak resets here so a manual retry gets a fresh window.
+    if is_messages {
+        let key = provider_route.clone().unwrap_or_else(|| target.clone());
+        let retryable = matches!(code, 408 | 429) || code >= 500;
+        let give_up = {
+            let mut m = FAIL_STREAK.lock().unwrap_or_else(|p| p.into_inner());
+            if retryable {
+                let n = m.entry(key.clone()).or_insert(0);
+                *n += 1;
+                let hit = *n >= GIVE_UP_AFTER;
+                if hit {
+                    m.remove(&key);
+                }
+                hit
+            } else {
+                if status.is_success() {
+                    m.remove(&key);
+                }
+                false
+            }
+        };
+        if give_up {
+            let who = provider_route.as_deref().unwrap_or("the upstream");
+            log::warn!("nothink shim: {key} returned {code} {GIVE_UP_AFTER}x in a row — ending the turn");
+            return write_anthropic_error(
+                &mut stream,
+                &format!(
+                    "Rift: {who} endpoint returned {code} {GIVE_UP_AFTER} times in a row — ending this turn instead of retrying silently. Wait a minute, then send again."
+                ),
+            )
+            .await;
+        }
+    }
     let reason = status.canonical_reason().unwrap_or("");
     let mut head = format!("HTTP/1.1 {} {}\r\n", status.as_u16(), reason);
     // Pass response headers through, dropping framing headers we re-derive:
@@ -359,6 +474,27 @@ fn strip_clear_thinking(v: &mut serde_json::Value) {
         }
         _ => {}
     }
+}
+
+/// A 400 in Anthropic's error envelope — the ONE status class the CLI treats
+/// as terminal (4xx-not-408/429), so the turn surfaces the message and stops.
+async fn write_anthropic_error(stream: &mut TcpStream, msg: &str) -> Result<(), String> {
+    let body = serde_json::json!({
+        "type": "error",
+        "error": { "type": "invalid_request_error", "message": msg },
+    })
+    .to_string();
+    let head = format!(
+        "HTTP/1.1 400 Bad Request\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+        body.len()
+    );
+    stream
+        .write_all(head.as_bytes())
+        .await
+        .map_err(|e| e.to_string())?;
+    stream.write_all(body.as_bytes()).await.map_err(|e| e.to_string())?;
+    let _ = stream.shutdown().await;
+    Ok(())
 }
 
 async fn write_plain(stream: &mut TcpStream, code: u16, msg: &str) -> Result<(), String> {

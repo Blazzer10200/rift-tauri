@@ -150,8 +150,25 @@ class ProvidersStore {
   list = $state<ProviderDto[]>([]);
   loaded = $state(false);
 
+  /** The FOCUSED PANE's provider — per-tab (split-pane fix), resolving the
+   *  follow-global `undefined` against the Models-page default. Every composer
+   *  glue getter below rides this, so pill/placeholder/effort/ctx-gauge all
+   *  track the pane you're typing in, not a sibling's. */
   get active(): ProviderDto | null {
+    return this.byId(assistant.providerIdFor(assistant.activeTab));
+  }
+  /** The Models-page default (backend `active` flag) — pane-independent. */
+  get defaultProvider(): ProviderDto | null {
     return this.list.find((p) => p.active) ?? null;
+  }
+  byId(id: string | null | undefined): ProviderDto | null {
+    return id ? (this.list.find((p) => p.id === id) ?? null) : null;
+  }
+  /** The model the focused pane's next provider turn uses — the tab's own
+   *  pick, else the profile pin. Drives pill label + picker highlight. */
+  get selectedModel(): string | null {
+    const tabPick = assistant.activeTab?.providerModel?.trim();
+    return tabPick || this.active?.model?.trim() || null;
   }
   /** Composer glue — true when turns route to a provider instead of Claude. */
   get enabled(): boolean {
@@ -159,12 +176,12 @@ class ProvidersStore {
   }
   get pillLabel(): string {
     const a = this.active;
-    return a ? a.model?.trim() || a.name : "Model";
+    return a ? this.selectedModel || a.name : "Model";
   }
   /** Who the composer is addressing — "Ask <model> anything" placeholders. */
   get askLabel(): string {
     const a = this.active;
-    return a ? a.model?.trim() || a.name : "Claude";
+    return a ? this.selectedModel || a.name : "Claude";
   }
   get baseUrl(): string {
     return this.active?.base_url ?? "";
@@ -173,6 +190,9 @@ class ProvidersStore {
   async refresh() {
     try {
       this.list = await invoke<ProviderDto[]>("assistant_list_providers");
+      // Mirror the global default into the assistant store (avoids a circular
+      // import) — tabs w/ provider === undefined follow it until first send.
+      assistant.defaultProviderId = this.defaultProvider?.id ?? null;
     } catch (e) {
       console.error("list providers failed", e);
     } finally {
@@ -186,34 +206,20 @@ class ProvidersStore {
     await this.refresh();
   }
 
-  /** The composer picker's model rows for the active provider — the pinned
-   *  model first, then the profile's list, deduped. Never empty while a
+  /** The composer picker's model rows for the pane's provider — the selected
+   *  model first, then the profile pin + list, deduped. Never empty while a
    *  provider with a model is active. */
   get activeModels(): string[] {
     const a = this.active;
     if (!a) return [];
+    const sel = this.selectedModel;
     const pinned = a.model?.trim();
-    return [...new Set([...(pinned ? [pinned] : []), ...a.models])];
+    return [...new Set([...(sel ? [sel] : []), ...(pinned ? [pinned] : []), ...a.models])];
   }
 
   /** Composer glue — the effort ladder applies to the active provider. */
   get effortCapable(): boolean {
     return this.active?.effort ?? false;
-  }
-
-  /** Switch the ACTIVE provider onto another of its models (composer picker).
-   *  Same-provider switches keep the session — no thinking-signature hazard on
-   *  third-party endpoints (design doc §session rules); the SpawnKey model
-   *  change cold-respawns the warm child on the next turn. */
-  async setModel(model: string) {
-    const p = this.active;
-    const m = model.trim();
-    if (!p || !m || p.model === m) return;
-    await this.upsert({
-      id: p.id, name: p.name, base_url: p.base_url, model: m,
-      models: p.models, preset: p.preset, max_output_tokens: p.max_output_tokens,
-      effort: p.effort,
-    });
   }
 
   async remove(id: string) {
@@ -260,17 +266,24 @@ class ProvidersStore {
     return found.length;
   }
 
-  /** Switch turns onto a provider (id) or back to Claude (null). A mid-chat
-   *  switch resets to a fresh session — cloud and provider turns can't share
-   *  one CLI session (different auth); the old chat flushes to History. */
+  /** Switch turns onto a provider (id) or back to Claude (null). Sets the
+   *  global default AND points the FOCUSED tab at it — other panes/tabs keep
+   *  their own brain (the v0.120 split-pane leak fix). A mid-chat switch
+   *  resets that tab to a fresh session — cloud and provider turns can't
+   *  share one CLI session (different auth); the old chat flushes to History. */
   async activate(id: string | null) {
-    const prev = this.active?.id ?? null;
-    if (prev === id) return;
-    await invoke("assistant_activate_provider", { id });
-    await this.refresh();
-    if (assistant.messages.length > 0) {
-      await assistant.clearConversation();
-      const name = id ? (this.active?.name ?? "provider") : "Claude";
+    if ((this.defaultProvider?.id ?? null) !== id) {
+      await invoke("assistant_activate_provider", { id });
+      await this.refresh();
+    }
+    if (assistant.providerIdFor(assistant.activeTab) === id) {
+      await assistant.setTabProvider(id); // same brain — just pins the choice
+      return;
+    }
+    const midChat = assistant.messages.length > 0;
+    await assistant.setTabProvider(id);
+    if (midChat) {
+      const name = id ? (this.byId(id)?.name ?? "provider") : "Claude";
       toast.push({
         severity: "info",
         title: id ? `Switched to ${name}` : "Switched back to Claude",

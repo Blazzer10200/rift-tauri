@@ -215,7 +215,7 @@
      sibling of the workspace icons, not a stray control. */
   .nc-bell {
     position: relative;
-    width: 40px; height: 34px;
+    width: 36px; height: 30px;
     display: grid; place-items: center;
     border-radius: 8px;
     color: var(--fg-muted);

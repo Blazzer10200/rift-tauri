@@ -170,6 +170,9 @@ import {
 // Post-turn health pass — bg-tab completion toasts + once-per-session
 // dead-wait / stale-cache / tool-error warnings.
 import { checkTurnHealth, askUserStaleNudge } from "./assistant/healthAlerts";
+// Two-way with providers.svelte.ts (it mirrors defaultProviderId into this
+// store) — safe: both sides only touch the other at call time, never at init.
+import { providers } from "./providers.svelte";
 
 /** Per-conversation streaming state. One TabState per open chat tab; the
  *  AssistantStore holds a Map keyed by Rift convoId and delegates all
@@ -251,6 +254,15 @@ export class TabState {
    *  mid-chat; the picker surfaces the divergence + offers "New chat in <model>".
    *  null = first turn hasn't run yet (no pin), so a switch still takes effect. */
   pinnedModel = $state<ModelSel | null>(null);
+  /** Provider profile id THIS chat's turns run on. Per-tab so a sibling
+   *  pane's switch can't rewire this chat mid-flight (the v0.120 split-pane
+   *  leak: picking Fable in pane B flipped pane A's Kimi chat too).
+   *  `undefined` = follow the global default (Models page pick) — pinned to
+   *  the resolved value on the first send, exactly like `pinnedModel`;
+   *  `null` = explicitly Claude; string = explicitly that provider. */
+  provider = $state<string | null | undefined>(undefined);
+  /** Model within the provider for THIS chat (null = the profile's pin). */
+  providerModel = $state<string | null>(null);
   /** open_browser landing on a backgrounded tab parks its URL here instead of
    *  hijacking the focused pane's dock; AssistantPage consumes it when this tab
    *  regains focus. In-memory only — a stale preview URL isn't worth persisting. */
@@ -808,6 +820,11 @@ class AssistantStore {
   // to assistant_send so the CLI uses sonnet/opus/haiku per their choice.
   // Initialized from localStorage so the choice survives reloads.
   model = $state<ModelSel>(loadModel());
+  /** Global default provider (the Models-page pick) — mirrored here by the
+   *  providers store (providers.svelte.ts imports this store; the mirror
+   *  avoids a circular import). Tabs with `provider === undefined` follow it
+   *  until their first send pins them. */
+  defaultProviderId = $state<string | null>(null);
   // Extended-thinking effort tier (CLI `--effort` ladder): "none"→low ·
   // "smart"→medium (default) · "deep"→high · "ultra"→xhigh + ultracode.
   // Haiku ignores this server-side. Persisted to localStorage.
@@ -929,6 +946,46 @@ class AssistantStore {
   get sessionModelDiverged(): boolean {
     const pinned = this.sessionPinnedModel;
     return pinned !== null && pinned !== this.effectiveModel;
+  }
+
+  /** The provider a tab's next turn runs on — resolves the follow-global
+   *  `undefined` against the Models-page default. null = Claude. */
+  providerIdFor(tab: TabState | null): string | null {
+    if (!tab) return this.defaultProviderId;
+    return tab.provider === undefined ? this.defaultProviderId : tab.provider;
+  }
+
+  /** Point the ACTIVE chat at a provider (id) or back at Claude (null) — THIS
+   *  tab only; other panes/tabs keep their own brain (the split-pane fix). A
+   *  mid-chat switch resets to a fresh session in place — different auth can't
+   *  share a CLI session; the old chat flushes to History. */
+  async setTabProvider(id: string | null) {
+    const tab = this.activeTab;
+    if (!tab) return;
+    if (this.providerIdFor(tab) === id) {
+      tab.provider = id; // same brain — just pin the explicit choice
+      return;
+    }
+    const midChat = tab.messages.length > 0;
+    if (midChat) await this.clearConversation();
+    // clearConversation re-keys the SAME TabState; re-read in case the tab
+    // was closed during the await.
+    const live = this.activeTab;
+    if (!live) return;
+    live.provider = id;
+    live.providerModel = null;
+    this.telemetry.event("provider.change", { to: id ?? "claude", midChat });
+  }
+
+  /** Switch THIS chat onto another of its provider's models (composer picker).
+   *  Session survives — no thinking-signature hazard on third-party endpoints
+   *  (design doc §session rules); the SpawnKey model change cold-respawns the
+   *  warm child on the next turn. */
+  setTabProviderModel(model: string) {
+    const tab = this.activeTab;
+    const m = model.trim();
+    if (!tab || !m) return;
+    tab.providerModel = m;
   }
 
   setModel(v: ModelSel) {
@@ -1212,6 +1269,33 @@ class AssistantStore {
       // (broadcast_convos_changed skips the origin, so this only fires for
       // changes made elsewhere) → re-pull our list so the sidebar stays in sync.
       await listen("convos-changed", () => void this.refreshConversations()),
+      // Upstream provider trouble (nothink shim → assistant://provider-upstream):
+      // the CLI silently retries 429/5xx for minutes, so without this a provider
+      // turn's dead air reads as "Rift hung" — or worse, gets blamed on
+      // Anthropic. Backend throttles re-emits (10s / status change).
+      await listen<{ status: number; provider: string | null }>(
+        "assistant://provider-upstream",
+        (e) => {
+          // Only meaningful while some tab is actually streaming.
+          if (![...this.tabs.values()].some((t) => t.streaming)) return;
+          const st = e.payload.status;
+          const prov = e.payload.provider
+            ? (providers.byId(e.payload.provider)?.name ?? e.payload.provider)
+            : "The provider";
+          const authFail = st === 401 || st === 403;
+          toast.push({
+            severity: "warn",
+            title: st === 429
+              ? `${prov} is rate-limiting (429)`
+              : authFail
+                ? `${prov} rejected the API key (${st})`
+                : `${prov} endpoint error (${st})`,
+            detail: authFail
+              ? "Check the key on the Models page — turns keep failing until it's fixed."
+              : "Rift retries a few times, then ends the turn with a visible error instead of hanging.",
+          });
+        },
+      ),
       await listen<{
         request_id: string;
         session_id: string;

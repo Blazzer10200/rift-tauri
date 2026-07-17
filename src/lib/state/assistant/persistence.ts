@@ -34,6 +34,8 @@ type SaveableTab = {
   cliSessionId: string;
   titleGenerated: boolean;
   modelOverride: ModelSel | null;
+  provider: string | null | undefined;
+  providerModel: string | null;
   lastTurnUsage: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
   // Per-project scope: the folder this tab's turns run in. Stamped onto the
   // saved record so the sidebar can filter chats to the open project.
@@ -200,6 +202,11 @@ export function buildSaveRecord(
     messages: tab.messages,
     cliSessionId: tab.cliSessionId || convoId,
     lastTurnUsage: tab.lastTurnUsage ?? undefined,
+    // Saved chats always carry a resolved brain: send() pins `provider` on the
+    // first turn, so `undefined` here only means "never sent" — save as null
+    // (Claude) rather than leaking the follow-global marker to disk.
+    provider: tab.provider ?? null,
+    providerModel: tab.providerModel ?? null,
     // Scope the convo to the tab's OWN folder, else the GLOBAL workspace
     // default — never `host.activeRoot`, which is the focused pane's root and
     // would misfile a background/unfiled tab under an unrelated project (a
@@ -414,6 +421,15 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     // ui-audit #5: the saved model scopes to THIS tab only — opening an old
     // chat must not rewrite the global new-chat default (or toast about it).
     tab.modelOverride = asModelSel(convo.model);
+    // Per-tab brain: records carry the provider the chat ran on. Legacy
+    // records (field absent) with messages hydrate as EXPLICIT Claude — every
+    // pre-provider-aware chat ran on Claude, and follow-global would resume a
+    // Claude session through whatever provider is now the default (mixed-auth
+    // resume). Only a legacy record with no turns stays follow-global.
+    tab.provider = typeof convo.provider === "string"
+      ? convo.provider
+      : convo.provider === null || (convo.messages?.length ?? 0) > 0 ? null : undefined;
+    tab.providerModel = typeof convo.providerModel === "string" ? convo.providerModel : null;
     // The saved model is the model the chat's turns were running on — hydrate
     // it as the switch-detection baseline (send() compares the next pick
     // against it) so the picker's "this chat" tag + the mid-chat switch

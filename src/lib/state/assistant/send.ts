@@ -113,6 +113,12 @@ export async function send(
   const tab = store.ensureTab(convoId, convoId);
   // The model THIS tab's turns run on — per-tab override, else the global pick.
   const effModel = tab.modelOverride ?? store.model;
+  // Per-tab brain (split-pane): resolve the chat's provider and PIN it on the
+  // first send — exactly like pinnedModel below — so a sibling pane's switch
+  // can never rewire this chat mid-flight.
+  const effProvider = store.providerIdFor(tab);
+  if (tab.provider === undefined) tab.provider = effProvider;
+  const providerTurn = effProvider != null;
   const isFirstTurn = !tab.convoCreatedAt;
   if (!tab.cliSessionId) {
     tab.cliSessionId = convoId;
@@ -125,7 +131,7 @@ export async function send(
   // no capture yet) seeds it; a later differing pick is a deliberate mid-chat
   // switch — the backend honors it and re-pins (turn.rs), and the transcript
   // marker is inserted just before this turn's bubbles below.
-  if (!tab.pinnedModel) {
+  if (!providerTurn && !tab.pinnedModel) {
     tab.pinnedModel = effModel;
   }
   // A real turn — advance the sidebar's activity clock. Tab-switch auto-saves
@@ -189,7 +195,7 @@ export async function send(
     });
   }
   // turn.rs swaps Fable to Opus silently once the limited run ends — warn ahead.
-  if (!fableSunsetNoticed && effModel === "claude-fable-5"
+  if (!providerTurn && !fableSunsetNoticed && effModel === "claude-fable-5"
       && Date.now() >= FABLE_SUNSET_MS - 7 * 86_400_000) {
     fableSunsetNoticed = true;
     notify.warn(
@@ -214,6 +220,8 @@ export async function send(
     cliSessionId: tab.cliSessionId,
     isFirstTurn,
     model: effModel,
+    provider: effProvider,
+    providerModel: providerTurn ? tab.providerModel : null,
     effort: sendEffort,
     effortFlag: effortToFlag(sendEffort, effModel),
     promptLen: trimmed.length,
@@ -276,7 +284,7 @@ export async function send(
   // Mid-chat model switch → drop an inline marker above this turn's bubbles so
   // the change is visible where it happened, then track the new running model
   // (which also clears the picker's divergence note — the switch took effect).
-  if (tab.pinnedModel && tab.pinnedModel !== effModel) {
+  if (!providerTurn && tab.pinnedModel && tab.pinnedModel !== effModel) {
     tab.messages = [...tab.messages, {
       id: crypto.randomUUID(),
       role: "system",
@@ -322,7 +330,12 @@ export async function send(
       sessionId: tab.cliSessionId,
       turnEpoch: tab.turnEpoch,
       isFirstTurn,
-      model: effModel,
+      // Provider turns send the tab's provider model (undefined → the profile
+      // pin wins backend-side); Claude turns keep the ModelSel id.
+      model: providerTurn ? (tab.providerModel ?? undefined) : effModel,
+      // Per-tab brain: "claude" = explicitly Claude (never the global wire
+      // fields — a sibling pane's provider must not bleed into this turn).
+      provider: effProvider ?? "claude",
       attachments: turnAttachments.length > 0 ? turnAttachments : null,
       dyslexiaMode: accessibility.dyslexiaMode,
       thinkingEffort: sendEffort,
@@ -331,7 +344,7 @@ export async function send(
       // Sent pre-gated by model family so an ineligible model never carries a
       // stale global `on` into the SpawnKey; the backend re-gates by CLI
       // version (caps.fast_mode) on top.
-      fastMode: store.fastMode && fastEligible(effModel),
+      fastMode: !providerTurn && store.fastMode && fastEligible(effModel),
       // priorContextSummary is intentionally omitted (defaults to None backend-
       // side): the CLI does compaction natively in-process now, so Rift never
       // re-injects a prior-conversation summary. The backend keeps the param as a

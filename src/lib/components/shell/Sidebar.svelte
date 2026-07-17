@@ -28,6 +28,11 @@
     return workspace.activeId === id;
   }
 
+  // Sliding-thumb position in the dock — items are fixed-width (36px + 2px
+  // gap), so the offset is arithmetic, no measuring. -1 (settings active or
+  // legacy id) hides the thumb.
+  const dockIdx = $derived(footNav.indexOf(workspace.activeId));
+
   // Per-icon hover micro-motion hook (CSS targets .snav-ic-<key>).
   const ICON_KEY: Record<WorkspaceId, string> = {
     home: "home", chat: "chat", projects: "projects", "local-llm": "local", settings: "settings", "ai-health": "health",
@@ -175,20 +180,27 @@
     </div>
 
     <nav class="foot-nav" aria-label="Workspaces">
-      {#each footNav as id (id)}
-        {@const def = WORKSPACES[id]}
-        <button
-          class="fnav-item"
-          class:on={isNavActive(id)}
-          type="button"
-          onclick={() => goto(id)}
-          use:tooltip={def.title}
-          aria-label={def.title}
-          aria-current={isNavActive(id) ? "page" : undefined}
-        >
-          <def.icon class="snav-ic snav-ic-{ICON_KEY[id]}" size={17} />
-        </button>
-      {/each}
+      <!-- Destinations sit in an inset dock well (same seg idiom as the scope
+           toggle) with a sliding thumb under the active one; utilities
+           (notifications, settings) stay outside on the right so the two
+           groups read as distinct rather than one anonymous icon soup. -->
+      <div class="fnav-dock" role="presentation">
+        <span class="fnav-thumb" aria-hidden="true" class:show={dockIdx >= 0} style="transform:translateX({2 + dockIdx * 38}px)"></span>
+        {#each footNav as id (id)}
+          {@const def = WORKSPACES[id]}
+          <button
+            class="fnav-item"
+            class:on={isNavActive(id)}
+            type="button"
+            onclick={() => goto(id)}
+            use:tooltip={def.title}
+            aria-label={def.title}
+            aria-current={isNavActive(id) ? "page" : undefined}
+          >
+            <def.icon class="snav-ic snav-ic-{ICON_KEY[id]}" size={17} />
+          </button>
+        {/each}
+      </div>
       <span class="fnav-spacer" aria-hidden="true"></span>
       <NotificationCenter />
       <button
@@ -311,17 +323,31 @@
   .count-note { font-size: 10.5px; font-weight: 500; color: var(--fg-faint); font-variant-numeric: tabular-nums; padding-right: 2px; }
 
   /* footer icon nav — destinations collapse from full rows to a compact icon
-     strip so the conversation list owns nearly the whole rail. */
-  .foot-nav { display: flex; align-items: center; gap: 2px; flex: none; padding-top: 8px; margin-top: 4px;
+     strip so the conversation list owns nearly the whole rail. The four
+     workspaces sit in an inset dock well (seg idiom: --bg-inset + hairline +
+     sliding thumb); the bell + settings stay outside as loose utilities. */
+  .foot-nav { display: flex; align-items: center; gap: 4px; flex: none; padding-top: 8px; margin-top: 4px;
     border-top: 1px solid color-mix(in oklab, var(--border) 60%, transparent); }
-  .fnav-item { position: relative; width: 40px; height: 34px; display: grid; place-items: center; border-radius: 8px;
+  .fnav-dock { position: relative; display: inline-flex; gap: 2px; padding: 2px; border-radius: 10px;
+    border: 1px solid var(--border); background: var(--bg-inset); }
+  .fnav-thumb { position: absolute; top: 2px; left: 0; width: 36px; height: 30px; border-radius: 8px;
+    background: var(--surface-active); opacity: 0;
+    transition: transform var(--dur-fast) var(--ease-page), opacity var(--dur-fast); }
+  .fnav-thumb.show { opacity: 1; }
+  @media (prefers-reduced-motion: reduce) { .fnav-thumb { transition: none; } }
+  .fnav-item { position: relative; z-index: 1; width: 36px; height: 30px; display: grid; place-items: center; border-radius: 8px;
     color: var(--fg-muted); transition: background var(--dur-fast), color var(--dur-fast), transform var(--dur-fast); }
   .fnav-item:active { transform: scale(0.92); }
   .fnav-item:hover { background: var(--surface-hover); color: var(--fg-2); }
   .fnav-item.on { color: var(--accent); background: color-mix(in oklab, var(--fg) 8%, transparent); }
+  /* inside the dock the thumb carries the active surface — the button itself
+     stays transparent so the two backgrounds don't stack. */
+  .fnav-dock .fnav-item.on { background: transparent; }
+  .fnav-dock .fnav-item:hover:not(.on) { background: var(--surface-hover); }
   .fnav-item:hover :global(.snav-ic-home)     { transform: translateY(-2.5px) scale(1.06); }
   .fnav-item:hover :global(.snav-ic-chat)     { transform: rotate(-10deg) scale(1.06); }
   .fnav-item:hover :global(.snav-ic-health)   { transform: scale(1.1); }
+  .fnav-item:hover :global(.snav-ic-local)    { transform: rotate(90deg) scale(1.06); }
   .fnav-item:hover :global(.snav-ic-settings) { transform: rotate(140deg); }
   .fnav-spacer { flex: 1; }
 

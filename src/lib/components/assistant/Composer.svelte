@@ -109,7 +109,7 @@
   // path's plan-cap clamp doesn't apply to third-party endpoints.
   const paneCtxWindow = $derived.by(() => {
     if (!providers.enabled) return assistant.ctxWindowFor(tab);
-    const model = tab?.lastModelId ?? providers.active?.model ?? null;
+    const model = tab?.lastModelId ?? providers.selectedModel;
     const known = providerModelCtxKnown(model);
     if (known != null) return known;
     const rep = tab?.reportedCtxWindow;
@@ -485,7 +485,7 @@
     if (settingsOpen) {
       const i = settingsRows.findIndex((r) =>
         (r.kind === "model" && r.model.id === paneEffectiveModel)
-        || (r.kind === "pmodel" && r.id === providers.active?.model));
+        || (r.kind === "pmodel" && r.id === providers.selectedModel));
       settingsIdx = i >= 0 ? i : 0;
     }
   });
@@ -502,15 +502,17 @@
     else if (row.kind === "provider") pickProvider(row.id);
     else { settingsOpen = false; void tick().then(() => ta?.focus()); }
   }
-  /** Same-provider model switch from the picker — keeps the session. */
+  /** Same-provider model switch from the picker — THIS tab only, keeps the
+   *  session (no profile-pin rewrite, so sibling panes are untouched). */
   function pickProviderModel(id: string) {
-    void providers.setModel(id).catch((e) => notify.danger("Model switch failed", { detail: String(e) }));
+    assistant.setTabProviderModel(id);
     settingsOpen = false;
     void tick().then(() => ta?.focus());
   }
-  /** Activate a provider (or null = back to Claude). Mid-chat switches reset
-   *  to a fresh session inside the store (different auth can't share a CLI
-   *  session) — it toasts the flush-to-History itself. */
+  /** Activate a provider (or null = back to Claude) for THIS tab (+ the
+   *  global default). Mid-chat switches reset to a fresh session inside the
+   *  store (different auth can't share a CLI session) — it toasts the
+   *  flush-to-History itself. */
   function pickProvider(id: string | null) {
     void providers.activate(id).catch((e) => notify.danger("Provider switch failed", { detail: String(e) }));
     settingsOpen = false;

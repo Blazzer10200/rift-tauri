@@ -122,6 +122,84 @@ fn sync_wire(cfg: &mut AssistantConfig, p: &ProviderProfile) -> Result<(), Strin
     Ok(())
 }
 
+/// Per-turn resolved provider target. Split-pane: each tab carries its own
+/// provider, so the spawn path resolves a profile PER TURN instead of trusting
+/// the global wire fields (which a sibling pane's switch could have rewritten
+/// mid-chat — the v0.120 "picked Fable in pane B, pane A's Kimi chat flipped
+/// too" leak). `None` = pure Claude.
+pub(super) struct ProviderCtx {
+    pub id: String,
+    /// Trimmed + validated; `None` = profile carries an unusable base URL
+    /// (legacy fallback keeps the old skip-the-env behavior then).
+    pub base_url: Option<String>,
+    pub key: String,
+    pub model: Option<String>,
+    pub max_output: Option<u32>,
+    pub effort: bool,
+    /// True when the turn NAMED its provider (per-tab route) — the FE then also
+    /// sent the provider model in `model`, which wins over the profile pin.
+    /// Legacy global-fallback turns keep the profile-pin override instead.
+    pub explicit: bool,
+}
+
+/// Resolve what a turn should run against. `provider` is the per-turn wire
+/// value: `"claude"` forces pure Claude regardless of the global toggle, a
+/// profile id selects that provider, and `None` (legacy callers: oneshot,
+/// pre-provider-aware frontends) falls back to the global wire fields exactly
+/// as before.
+pub(super) fn resolve_provider_ctx(
+    cfg: &AssistantConfig,
+    provider: Option<&str>,
+) -> Result<Option<ProviderCtx>, String> {
+    match provider {
+        Some("claude") => Ok(None),
+        Some(id) => {
+            let p = cfg
+                .providers
+                .iter()
+                .find(|p| p.id == id)
+                .ok_or_else(|| format!("unknown provider: {id}"))?;
+            let base = p.base_url.trim().trim_end_matches('/').to_string();
+            if !is_valid_local_base_url(&base) {
+                // Explicit route fails loud — silently running a provider tab
+                // against Anthropic with the provider's key would be worse.
+                return Err(format!("provider {id}: invalid base URL: {base}"));
+            }
+            Ok(Some(ProviderCtx {
+                id: p.id.clone(),
+                base_url: Some(base),
+                key: crate::secrets::get(&provider_key_name(&p.id))
+                    .unwrap_or_else(|| "local".to_string()),
+                model: p.model.clone(),
+                max_output: p.max_output_tokens,
+                effort: p.effort,
+                explicit: true,
+            }))
+        }
+        None => {
+            if !cfg.local_llm_enabled {
+                return Ok(None);
+            }
+            let base = cfg
+                .local_llm_base_url
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty() && is_valid_local_base_url(s))
+                .map(|s| s.trim_end_matches('/').to_string());
+            Ok(Some(ProviderCtx {
+                id: cfg.active_provider.clone().unwrap_or_else(|| "local".to_string()),
+                base_url: base,
+                key: crate::secrets::get(crate::secrets::LOCAL_LLM_API_KEY)
+                    .unwrap_or_else(|| "local".to_string()),
+                model: cfg.local_llm_model.clone(),
+                max_output: cfg.local_llm_max_output,
+                effort: cfg.local_llm_effort,
+                explicit: false,
+            }))
+        }
+    }
+}
+
 /// Renderer-facing view. Never carries key material — only `has_key`.
 #[derive(Serialize)]
 pub struct ProviderDto {

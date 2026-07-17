@@ -70,7 +70,7 @@
     // re-position when the panel's height changes (ladder show/hide on model
     // swap, provider-mode row-count changes)
     const _m = assistant.effectiveModel; void _m;
-    const _p = providers.active?.model; void _p;
+    const _p = providers.selectedModel; void _p;
     void tick().then(position);
   });
   // Mount-once resize listener — kept separate so a reposition-dep change above
@@ -233,7 +233,7 @@
       <span class="head-tag">experimental</span>
     </div>
     {#each providers.activeModels as id, i (id)}
-      {@const sel = id === providers.active?.model}
+      {@const sel = id === providers.selectedModel}
       <button
         type="button"
         role="menuitemradio"
