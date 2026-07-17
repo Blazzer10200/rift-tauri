@@ -4,7 +4,6 @@
   import { X, PanelLeftOpen } from "lucide-svelte";
   import { shell } from "$lib/state/shell.svelte";
   import { tooltip } from "$lib/actions/tooltip";
-  import TabsPill from "./TabsPill.svelte";
 
   const win = getCurrentWindow();
 
@@ -40,10 +39,9 @@
   {/if}
 
   <div class="topbar-r">
-    <!-- Calm chrome: window controls + the #13 tabs pill (chat tabs have no
-         other visible surface). Other app actions live in the command palette
-         + shortcuts; notifications moved to the sidebar footer bell. -->
-    <TabsPill />
+    <!-- Calm chrome: window controls only. Other app actions live in the
+         command palette + shortcuts; notifications moved to the sidebar
+         footer bell. -->
     <div class="winctl">
       <button class="wc" type="button" onclick={() => win.minimize().catch(console.error)} use:tooltip={"Minimize"} aria-label="Minimize"><span class="wc-min"></span></button>
       <button class="wc" type="button" onclick={() => win.toggleMaximize().catch(console.error)} use:tooltip={maximized ? "Restore" : "Maximize"} aria-label={maximized ? "Restore" : "Maximize"}><span class={maximized ? "wc-restore" : "wc-max"}></span></button>
