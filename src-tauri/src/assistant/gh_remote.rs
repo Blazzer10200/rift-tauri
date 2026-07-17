@@ -396,43 +396,43 @@ pub(crate) fn branch_status_sync(root: &Path) -> Value {
         }
     }
 
-    // Latest workflow run + open PR for this branch. Partial failures degrade
-    // to nulls with a detail note — a flaky network must not blank the chip.
-    let mut detail = Value::Null;
-    let run = if branch == "HEAD" {
-        Value::Null
+    // Latest workflow run + open PR for this branch — the two slow network
+    // calls, run IN PARALLEL (scoped threads; run_gh is already blocking +
+    // self-contained). Partial failures degrade to nulls with a detail note —
+    // a flaky network must not blank the chip.
+    fn first_of_json_array(out: &GhOut) -> Value {
+        serde_json::from_str::<Value>(&out.stdout)
+            .ok()
+            .and_then(|v| v.as_array().and_then(|a| a.first().cloned()))
+            .unwrap_or(Value::Null)
+    }
+    let (run, detail, pr) = if branch == "HEAD" {
+        (Value::Null, Value::Null, Value::Null)
     } else {
-        match run_gh(root, &[
-            "run", "list", "-R", &repo, "--branch", &branch, "--limit", "1",
-            "--json", "databaseId,workflowName,displayTitle,status,conclusion,event,createdAt,url",
-        ]) {
-            Ok(out) if out.ok() => serde_json::from_str::<Value>(&out.stdout)
-                .ok()
-                .and_then(|v| v.as_array().and_then(|a| a.first().cloned()))
-                .unwrap_or(Value::Null),
-            Ok(out) => {
-                detail = json!(out.err_text());
-                Value::Null
-            }
-            Err(e) => {
-                detail = json!(e);
-                Value::Null
-            }
-        }
-    };
-    let pr = if branch == "HEAD" {
-        Value::Null
-    } else {
-        match run_gh(root, &[
-            "pr", "list", "-R", &repo, "--head", &branch, "--state", "open", "--limit", "1",
-            "--json", "number,title,isDraft,reviewDecision,url",
-        ]) {
-            Ok(out) if out.ok() => serde_json::from_str::<Value>(&out.stdout)
-                .ok()
-                .and_then(|v| v.as_array().and_then(|a| a.first().cloned()))
-                .unwrap_or(Value::Null),
-            _ => Value::Null,
-        }
+        std::thread::scope(|scope| {
+            let run_h = scope.spawn(|| {
+                match run_gh(root, &[
+                    "run", "list", "-R", &repo, "--branch", &branch, "--limit", "1",
+                    "--json", "databaseId,workflowName,displayTitle,status,conclusion,event,createdAt,url",
+                ]) {
+                    Ok(out) if out.ok() => (first_of_json_array(&out), Value::Null),
+                    Ok(out) => (Value::Null, json!(out.err_text())),
+                    Err(e) => (Value::Null, json!(e)),
+                }
+            });
+            let pr_h = scope.spawn(|| {
+                match run_gh(root, &[
+                    "pr", "list", "-R", &repo, "--head", &branch, "--state", "open", "--limit", "1",
+                    "--json", "number,title,isDraft,reviewDecision,url",
+                ]) {
+                    Ok(out) if out.ok() => first_of_json_array(&out),
+                    _ => Value::Null,
+                }
+            });
+            let (run, detail) = run_h.join().unwrap_or((Value::Null, json!("run fetch panicked")));
+            let pr = pr_h.join().unwrap_or(Value::Null);
+            (run, detail, pr)
+        })
     };
 
     json!({

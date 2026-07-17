@@ -19,6 +19,8 @@ class GithubState {
   #lastFetched = 0;
   /** Set when a turn used git_push / gh_pr_create — flushed at turn end. */
   #remoteMutated = false;
+  /** Monotonic fetch id: a newer refresh supersedes any in-flight result. */
+  #epoch = 0;
 
   async refresh(root: string | null, opts: { force?: boolean } = {}): Promise<void> {
     if (!root) {
@@ -27,20 +29,39 @@ class GithubState {
       return;
     }
     const now = Date.now();
-    if (!opts.force && this.loadedFor === root && now - this.#lastFetched < MIN_GAP_MS) return;
-    if (this.loading) return;
+    const sameRoot = this.loadedFor === root;
+    if (!opts.force && sameRoot && now - this.#lastFetched < MIN_GAP_MS) return;
+    // Redundant same-root call while one is already in flight → drop. A
+    // DIFFERENT root or a forced call supersedes the in-flight fetch instead:
+    // the old blanket `if (loading) return` silently dropped root switches and
+    // popover force-refreshes, leaving the previous repo's status on screen.
+    if (this.loading && sameRoot && !opts.force) return;
+    const epoch = ++this.#epoch;
     this.loading = true;
     // Root switch: drop the old repo's snapshot instead of flashing it.
-    if (this.loadedFor !== root) this.status = null;
+    if (!sameRoot) this.status = null;
     try {
       const s = await invoke<GhStatus>("gh_branch_status", { root });
+      if (epoch !== this.#epoch) return; // superseded — a newer refresh owns the state
       this.status = s;
     } catch (e) {
-      this.status = { state: "error", detail: String(e) };
+      if (epoch !== this.#epoch) return;
+      // Keep branch/repo from the prior same-root snapshot so the popover
+      // header doesn't blank to "…" on a transient failure.
+      const prev = sameRoot ? this.status : null;
+      this.status = {
+        state: "error",
+        branch: prev?.branch,
+        repo: prev?.repo,
+        url: prev?.url,
+        detail: String(e),
+      };
     } finally {
-      this.loadedFor = root;
-      this.#lastFetched = Date.now();
-      this.loading = false;
+      if (epoch === this.#epoch) {
+        this.loadedFor = root;
+        this.#lastFetched = Date.now();
+        this.loading = false;
+      }
     }
   }
 

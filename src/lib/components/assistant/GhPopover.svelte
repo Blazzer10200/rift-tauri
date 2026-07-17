@@ -28,8 +28,13 @@
   );
 
   // Anchor-relative position; flips above when the chip sits low (status bar).
+  // Re-measures when status content lands ($effect runs post-DOM-flush): the
+  // panel is short while "Checking GitHub…" and grows after the fetch — a
+  // flipped-above popover would otherwise keep its stale, overlapping top.
   let pos = $state({ left: 0, top: 0 });
   $effect(() => {
+    void s;
+    void github.loading;
     const r = anchor.getBoundingClientRect();
     const w = 320;
     const h = panelEl?.offsetHeight ?? 240;
@@ -120,12 +125,14 @@
   {:else if s.state === "error"}
     <div class="gp-note">GitHub check failed: {s.detail ?? "unknown error"}</div>
   {:else if s.state === "ok"}
-    {#if sync}
-      <div class="gp-row">
-        <span class="gp-dot idle"></span>
+    <div class="gp-row">
+      <span class="gp-dot idle"></span>
+      {#if sync}
         <span class="gp-row-t">{sync}</span>
-      </div>
-    {/if}
+      {:else}
+        <span class="gp-row-t gp-muted">No upstream branch — not published yet</span>
+      {/if}
+    </div>
 
     <div class="gp-row">
       <span class="gp-dot {github.dot}"></span>
