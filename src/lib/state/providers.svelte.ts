@@ -16,6 +16,7 @@ export type ProviderDto = {
   models: string[];
   preset: string | null;
   max_output_tokens: number | null;
+  effort: boolean;
   has_key: boolean;
   active: boolean;
 };
@@ -29,6 +30,7 @@ export type ProviderDraft = {
   models: string[];
   preset: string | null;
   max_output_tokens: number | null;
+  effort: boolean;
 };
 
 export type PresetDef = {
@@ -37,9 +39,33 @@ export type PresetDef = {
   base_url: string;
   models: string[];
   max_output_tokens: number | null;
+  /** Endpoint honors Anthropic extended-thinking (`--effort` + `thinking`
+   *  blocks) — true for the reasoning clouds, false where the no-think shim
+   *  must keep suppressing forced reasoning (Ollama) or support is unknown. */
+  effort: boolean;
   keyHint: string;
   desc: string;
 };
+
+/** Known context windows for preset provider models (docs/design/
+ *  multi-model-providers.md, verified 2026-07-16). Best-effort label table —
+ *  prefix-matched, degrades to the conservative 200K default when a model
+ *  isn't listed. The CLI-reported window (tab.reportedCtxWindow) beats this. */
+const PROVIDER_MODEL_CTX: [string, number][] = [
+  ["kimi-k3", 1_000_000],
+  ["kimi-k2", 262_144],
+  ["deepseek-v4", 1_000_000],
+  ["glm-4.7", 200_000],
+  ["glm-4.5", 200_000],
+];
+export function providerModelCtxKnown(model: string | null | undefined): number | null {
+  const m = (model ?? "").trim().toLowerCase();
+  const hit = PROVIDER_MODEL_CTX.find(([prefix]) => m.startsWith(prefix));
+  return hit ? hit[1] : null;
+}
+export function providerModelCtx(model: string | null | undefined): number {
+  return providerModelCtxKnown(model) ?? 200_000;
+}
 
 // Endpoint bookmarks, verified 2026-07-16 against first-party docs (sources in
 // docs/design/multi-model-providers.md). Model lists are DEFAULTS from those
@@ -53,6 +79,7 @@ export const PRESETS: PresetDef[] = [
     base_url: "https://api.moonshot.ai/anthropic",
     models: ["kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"],
     max_output_tokens: 32768,
+    effort: true,
     keyHint: "Moonshot API key",
     desc: "Kimi K3 / K2.7 through Moonshot's Anthropic-compatible endpoint.",
   },
@@ -62,6 +89,7 @@ export const PRESETS: PresetDef[] = [
     base_url: "https://api.deepseek.com/anthropic",
     models: ["deepseek-v4-pro", "deepseek-v4-flash"],
     max_output_tokens: 32768,
+    effort: true,
     keyHint: "DeepSeek API key",
     desc: "DeepSeek V4 — also auto-maps Claude model names server-side.",
   },
@@ -71,6 +99,7 @@ export const PRESETS: PresetDef[] = [
     base_url: "https://api.z.ai/api/anthropic",
     models: ["GLM-4.7", "GLM-4.5-Air"],
     max_output_tokens: 32768,
+    effort: true,
     keyHint: "Z.ai API key",
     desc: "GLM-4.7 / 4.5-Air through Z.ai's Anthropic-compatible endpoint.",
   },
@@ -80,6 +109,7 @@ export const PRESETS: PresetDef[] = [
     base_url: "https://openrouter.ai/api",
     models: [],
     max_output_tokens: 32768,
+    effort: false,
     keyHint: "OpenRouter API key",
     desc: "One key, the whole catalog (GPT, Gemini, Llama…). Use Detect to list models.",
   },
@@ -89,6 +119,7 @@ export const PRESETS: PresetDef[] = [
     base_url: "http://localhost:11434",
     models: [],
     max_output_tokens: null,
+    effort: false,
     keyHint: "any non-empty value",
     desc: "Local open-weights models — Ollama serves /v1/messages natively.",
   },
@@ -98,6 +129,7 @@ export const PRESETS: PresetDef[] = [
     base_url: "http://localhost:4000",
     models: [],
     max_output_tokens: null,
+    effort: false,
     keyHint: "proxy key (any value for most setups)",
     desc: "Self-hosted proxy — routes to anything LiteLLM supports.",
   },
@@ -154,6 +186,36 @@ class ProvidersStore {
     await this.refresh();
   }
 
+  /** The composer picker's model rows for the active provider — the pinned
+   *  model first, then the profile's list, deduped. Never empty while a
+   *  provider with a model is active. */
+  get activeModels(): string[] {
+    const a = this.active;
+    if (!a) return [];
+    const pinned = a.model?.trim();
+    return [...new Set([...(pinned ? [pinned] : []), ...a.models])];
+  }
+
+  /** Composer glue — the effort ladder applies to the active provider. */
+  get effortCapable(): boolean {
+    return this.active?.effort ?? false;
+  }
+
+  /** Switch the ACTIVE provider onto another of its models (composer picker).
+   *  Same-provider switches keep the session — no thinking-signature hazard on
+   *  third-party endpoints (design doc §session rules); the SpawnKey model
+   *  change cold-respawns the warm child on the next turn. */
+  async setModel(model: string) {
+    const p = this.active;
+    const m = model.trim();
+    if (!p || !m || p.model === m) return;
+    await this.upsert({
+      id: p.id, name: p.name, base_url: p.base_url, model: m,
+      models: p.models, preset: p.preset, max_output_tokens: p.max_output_tokens,
+      effort: p.effort,
+    });
+  }
+
   async remove(id: string) {
     await invoke("assistant_delete_provider", { id });
     await this.refresh();
@@ -192,6 +254,7 @@ class ProvidersStore {
       await this.upsert({
         id: p.id, name: p.name, base_url: p.base_url, model: p.model,
         models: merged, preset: p.preset, max_output_tokens: p.max_output_tokens,
+        effort: p.effort,
       }).catch((e) => console.error("persist detected models failed", e));
     }
     return found.length;

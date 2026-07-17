@@ -31,6 +31,13 @@ pub struct ProviderProfile {
     /// CLAUDE_CODE_MAX_OUTPUT_TOKENS for this provider's turns (None = 8192).
     #[serde(default)]
     pub(super) max_output_tokens: Option<u32>,
+    /// Endpoint honors Anthropic extended-thinking (`--effort` + native
+    /// `thinking` blocks). Preset default: true for the reasoning clouds
+    /// (Kimi/DeepSeek/GLM), false for Ollama/LiteLLM/OpenRouter. Conservative
+    /// default false — unknown capability stays hidden (design doc §capability
+    /// drift). Gates the composer effort ladder + the direct (shim-less) route.
+    #[serde(default)]
+    pub(super) effort: bool,
 }
 
 impl ProviderProfile {
@@ -46,6 +53,7 @@ impl ProviderProfile {
             models: Vec::new(),
             preset: Some("ollama".to_string()),
             max_output_tokens: None,
+            effort: false,
         }
     }
 }
@@ -102,6 +110,7 @@ fn sync_wire(cfg: &mut AssistantConfig, p: &ProviderProfile) -> Result<(), Strin
     cfg.local_llm_base_url = Some(p.base_url.trim_end_matches('/').to_string());
     cfg.local_llm_model = p.model.clone();
     cfg.local_llm_max_output = p.max_output_tokens;
+    cfg.local_llm_effort = p.effort;
     if p.id != "local" {
         match crate::secrets::get(&provider_key_name(&p.id)) {
             Some(k) => crate::secrets::set(crate::secrets::LOCAL_LLM_API_KEY, &k)?,
@@ -123,6 +132,7 @@ pub struct ProviderDto {
     models: Vec<String>,
     preset: Option<String>,
     max_output_tokens: Option<u32>,
+    effort: bool,
     has_key: bool,
     active: bool,
 }
@@ -136,6 +146,7 @@ fn to_dto(p: &ProviderProfile, active: Option<&str>) -> ProviderDto {
         models: p.models.clone(),
         preset: p.preset.clone(),
         max_output_tokens: p.max_output_tokens,
+        effort: p.effort,
         has_key: crate::secrets::get(&provider_key_name(&p.id)).is_some(),
         active: active == Some(p.id.as_str()),
     }
@@ -187,6 +198,7 @@ pub fn assistant_delete_provider(id: String) -> Result<(), String> {
         cfg.local_llm_base_url = None;
         cfg.local_llm_model = None;
         cfg.local_llm_max_output = None;
+        cfg.local_llm_effort = false;
     }
     // "local"'s key slot is the shared wire slot — only clear it when no OTHER
     // provider's copied key is live in there.

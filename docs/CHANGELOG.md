@@ -2,12 +2,13 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.119.0 — Tabs you can see + a full-app tune-up
+## v0.120.0 — Provider models, the full nine yards
 
-- **Chat tabs are finally visible.** A quiet "N tabs" pill now sits in the titlebar whenever you have more than one chat tab open. Click it to see every tab — switch, close, or open a new one by mouse. (Before this, Ctrl+T made an invisible tab and Ctrl+Tab was the only way back.)
-- **GitHub chip sees release runs.** Tag-triggered CI runs (your releases) now show up in the branch popover instead of silently missing, and a failed run tells you exactly which job and step broke — the "ask Rift to fix it" prompt carries that detail too.
-- **Failures speak up.** Attaching an image that can't be read, or a dictation engine that fails to start, now shows a clear message instead of doing nothing.
-- **Under-the-hood hardening** from a full-app review: fixed a rare leak that could strand a ~450MB background helper after a mid-turn eviction, smoother streaming on very large tool calls, and a batch of internal dead code removed.
+- **Pick provider models right in the chat.** The composer's model menu now lists your provider's models (Kimi, DeepSeek, GLM, OpenRouter…) with the same picker and keyboard flow Claude gets — switch models mid-chat without losing the conversation.
+- **Reasoning effort for providers.** Reasoning-capable endpoints (Kimi / DeepSeek / GLM by default — toggleable per provider on the Models page) get the full Low→X-High effort ladder, and their native thinking now streams into the transcript instead of being silently suppressed.
+- **An honest context gauge.** The ring now knows kimi-k3 carries a 1M window (and friends their real sizes) instead of assuming 200K for every provider model.
+- **The status bar tells the truth.** While a provider is live, the connection chip and the disclaimer name that model — not Claude — and the chip jumps straight to the Models page.
+- **Fixed:** the Models page opened with blank fields (and a wrong effort toggle) for the already-active provider until you re-clicked its card.
 
 ## Known issues
 - **While elevated, dragging files from Explorer into the window doesn't work** (Windows blocks lower→higher integrity drag-drop); the attach button / file picker still works fine.

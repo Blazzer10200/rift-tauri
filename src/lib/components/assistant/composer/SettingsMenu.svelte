@@ -5,17 +5,19 @@
   // ←/→ effort nudges); this child renders, handles clicks, and owns the
   // pointer-drag slider. Derives re-compute here from the shared modelMatrix
   // + assistant store — same pure helpers the parent uses, so they can't drift.
-  import { Check, ChevronRight, HelpCircle, Plus, Zap } from "lucide-svelte";
+  import { ArrowUpRight, Check, ChevronRight, Cpu, HelpCircle, Plus, Zap } from "lucide-svelte";
   import { tick } from "svelte";
   import { assistant } from "../../../state/assistant.svelte";
+  import { providers, providerModelCtx } from "../../../state/providers.svelte";
+  import { workspace } from "../../../state/workspace.svelte";
   import { fastEligible } from "../../../state/assistant/helpers";
   import { usage, limitZone, type ScopedLimit } from "../../../state/usage.svelte";
   import { portal } from "$lib/actions/portal";
   import { tooltip } from "$lib/actions/tooltip";
   import {
     MODEL_OPTIONS, currentModels, legacyModels, modelShortcut, modelWindowSuffix,
-    dialStopsFor, dialIdxFor, clampEffortIdx,
-    type ModelOpt,
+    dialStopsFor, dialIdxFor, clampEffortIdx, providerEffortCaps, settingsRowsFor,
+    type ModelOpt, type SettingsRow,
   } from "./modelMatrix";
 
   let {
@@ -23,12 +25,16 @@
     activeKind,
     anchor,
     onPickModel,
+    onPickProviderModel,
+    onPickProvider,
     onRequestClose,
   }: {
     settingsIdx: number;
-    activeKind: "model" | "effort" | null;
+    activeKind: SettingsRow["kind"] | null;
     anchor: HTMLElement | null;
     onPickModel: (m: ModelOpt) => void;
+    onPickProviderModel: (id: string) => void;
+    onPickProvider: (id: string | null) => void;
     onRequestClose: () => void;
   } = $props();
 
@@ -61,8 +67,10 @@
     return () => window.removeEventListener("mousedown", onDocMousedown);
   });
   $effect(() => {
-    // re-position when the panel's height changes (ladder show/hide on model swap)
+    // re-position when the panel's height changes (ladder show/hide on model
+    // swap, provider-mode row-count changes)
     const _m = assistant.effectiveModel; void _m;
+    const _p = providers.active?.model; void _p;
     void tick().then(position);
   });
   // Mount-once resize listener — kept separate so a reposition-dep change above
@@ -83,8 +91,36 @@
   // fastest (thinking off, `--effort low`); each higher rung sends its flag.
   // Writes go through assistant.setThinkingDial so both backing fields flip
   // atomically (one cache-bust hint, not two).
-  const effortStops = $derived(dialStopsFor(currentModel));
+  // Provider mode (a third-party brain is active): the panel lists the active
+  // profile's models instead of the Claude table, and the ladder derives from
+  // the PROFILE's effort capability (Kimi/DeepSeek/GLM honor the tiers;
+  // Ollama/unknown hide it). Same DIAL_STOPS wire mechanics either way.
+  const providerMode = $derived(providers.enabled);
+  const effortStops = $derived(
+    providerMode ? dialStopsFor(providerEffortCaps(providers.effortCapable)) : dialStopsFor(currentModel),
+  );
   const dialApplies = $derived(effortStops.length > 0); // a model with effort
+  // The SAME row list Composer navigates (settingsRowsFor) — cursor highlight
+  // for pmodel/provider rows keys off it so keyboard + render can't drift.
+  const rows = $derived(settingsRowsFor({
+    providerMode,
+    providerModels: providers.activeModels,
+    providerIds: providers.list.map((p) => p.id),
+    dialApplies,
+  }));
+  function cursorOnPModel(id: string): boolean {
+    const r = rows[settingsIdx];
+    return r?.kind === "pmodel" && r.id === id;
+  }
+  function cursorOnProvider(id: string): boolean {
+    const r = rows[settingsIdx];
+    return r?.kind === "provider" && r.id === id;
+  }
+  /** Ctx tag for a provider model — best-effort table, 200K conservative. */
+  function providerCtxTag(id: string): string {
+    const w = providerModelCtx(id);
+    return w >= 1_000_000 ? "1M context" : `${Math.round(w / 1000)}K context`;
+  }
   const effortIdx = $derived(dialIdxFor(effortStops, assistant.thinkingEnabled, assistant.thinkingEffort));
   const currentEffort = $derived(effortStops[effortIdx] ?? effortStops[0]);
   function setEffortByIdx(i: number) {
@@ -103,6 +139,12 @@
     xhigh: "Maximum reasoning depth with autonomous workflows. Slowest and most thorough.",
   };
   const modelCaption = $derived.by(() => {
+    if (providerMode) {
+      const a = providers.active;
+      if (!a) return "";
+      if (!dialApplies) return `${a.model?.trim() || a.name} runs via ${a.name} — reasoning is managed by the endpoint.`;
+      return CAPTIONS[currentEffort.id] ?? "";
+    }
     const m = currentModel;
     if (!m) return "";
     if (!m.effort) return `${m.label} ${m.version} responds immediately — it doesn't use extended reasoning.`;
@@ -181,6 +223,41 @@
     </button>
   {/snippet}
 
+  {#if providerMode}
+    <!-- Provider mode — the active profile's models replace the Claude table.
+         "Experimental" lives in the section head (design doc §risks: degraded
+         model behavior must never read as a Rift bug) instead of per-row
+         badges, so long model ids keep one clean line. -->
+    <div class="rift-menu-head">
+      <Cpu size={11} aria-hidden="true" /> {providers.active?.name ?? "Provider"}
+      <span class="head-tag">experimental</span>
+    </div>
+    {#each providers.activeModels as id, i (id)}
+      {@const sel = id === providers.active?.model}
+      <button
+        type="button"
+        role="menuitemradio"
+        aria-checked={sel}
+        class="pop-item model-row pm"
+        class:sel
+        class:active={cursorOnPModel(id)}
+        use:tooltip={`${id} — via ${providers.active?.name ?? "provider"}. Switching keeps this chat.`}
+        onmousedown={(e) => { e.preventDefault(); onPickProviderModel(id); }}
+      >
+        <span class="pi-name">
+          <span class="model-name">{id}</span>
+          <span class="pi-tag">{providerCtxTag(id)}</span>
+        </span>
+        <span class="model-trail">
+          {#if sel}
+            <Check size={14} class="pop-ck" />
+          {:else if i < 9}
+            <kbd class="model-num">{i + 1}</kbd>
+          {/if}
+        </span>
+      </button>
+    {/each}
+  {:else}
   <div class="rift-menu-head">Model</div>
   {#each currentModels as m (m.id)}
     {@render modelRow(m)}
@@ -260,6 +337,7 @@
       <span class="fast-switch" class:on={assistant.fastMode} aria-hidden="true"><i></i></span>
     </button>
   {/if}
+  {/if}
 
   {#if dialApplies}
     <div class="rift-menu-divider"></div>
@@ -310,6 +388,58 @@
     </div>
   {/if}
   <p class="model-caption" class:warn={dialApplies && currentEffort.id === "xhigh"}>{modelCaption}</p>
+
+  {#if providerMode}
+    <!-- Brain switch + config jump — mouse-only footer (not in the keyboard
+         row list; models + effort stay the arrow-nav surface). -->
+    <div class="rift-menu-divider"></div>
+    <button
+      type="button"
+      class="pop-item brain-row"
+      use:tooltip={"Switch back to Claude — starts a fresh chat (different auth can't share a session)"}
+      onmousedown={(e) => { e.preventDefault(); onPickProvider(null); }}
+    >
+      <span class="pi-name"><span class="model-name">Use Claude</span></span>
+      <span class="model-trail"><ChevronRight size={14} class="more-chev" /></span>
+    </button>
+    <button
+      type="button"
+      class="pop-item brain-row"
+      use:tooltip={"Models page — endpoints, keys, model lists, reasoning capability"}
+      onmousedown={(e) => { e.preventDefault(); onRequestClose(); workspace.setActive("local-llm"); }}
+    >
+      <span class="pi-name"><span class="model-name">Manage providers</span></span>
+      <span class="model-trail"><ArrowUpRight size={14} class="more-chev" /></span>
+    </button>
+  {:else if providers.list.length > 0}
+    <!-- Saved providers — one-click brain switch (Claude Code parity: every
+         brain reachable from the composer pill; config stays on the Models
+         page). Rows ARE keyboard-navigable (settingsRowsFor appends them). -->
+    <div class="rift-menu-divider"></div>
+    <div class="rift-menu-head">Providers <span class="head-tag">experimental</span></div>
+    {#each providers.list as p (p.id)}
+      <button
+        type="button"
+        role="menuitemradio"
+        aria-checked={false}
+        class="pop-item model-row pm"
+        class:active={cursorOnProvider(p.id)}
+        use:tooltip={p.has_key || p.preset === "ollama" || p.preset === "litellm"
+          ? `${p.name} — switch turns to ${p.base_url}. Starts a fresh chat.`
+          : `${p.name} — no API key saved yet. Add one on the Models page first.`}
+        onmousedown={(e) => { e.preventDefault(); onPickProvider(p.id); }}
+      >
+        <span class="pi-name">
+          <Cpu size={12} class="prov-glyph" aria-hidden="true" />
+          <span class="model-name">{p.name}</span>
+          {#if p.model}<span class="pi-tag">{p.model}</span>{/if}
+        </span>
+        <span class="model-trail">
+          {#if !p.has_key && p.preset !== "ollama" && p.preset !== "litellm"}<span class="pi-tag warn-tag">no key</span>{/if}
+        </span>
+      </button>
+    {/each}
+  {/if}
 </div>
 
 <style>
@@ -355,6 +485,24 @@
     font-size: var(--sm-eyebrow); font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
     color: var(--fg-faint); padding: 9px 9px 6px;
   }
+  /* Head-level "experimental" marker (provider sections) — one quiet badge in
+     the eyebrow instead of per-row noise. */
+  :global(.settings-menu .rift-menu-head .head-tag) {
+    margin-left: auto;
+    font-size: 8.5px; font-weight: 600; letter-spacing: 0.08em;
+    color: var(--fg-faint);
+    border: 1px solid color-mix(in oklab, var(--fg) 14%, transparent);
+    border-radius: 4px; padding: 1px 5px;
+  }
+  /* Provider rows — long free-text model ids must ellipsize, never wrap. */
+  :global(.settings-menu .model-row.pm .pi-name) { min-width: 0; }
+  :global(.settings-menu .model-row.pm .model-name) {
+    max-width: 158px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  :global(.settings-menu .model-row.pm .prov-glyph) { flex: none; color: var(--accent); }
+  /* Footer brain-switch rows — quiet utility rows, same voice as "More models". */
+  :global(.settings-menu .brain-row .model-name) { color: var(--fg-muted); font-weight: 500; }
+  :global(.settings-menu .brain-row:hover .model-name) { color: var(--fg-2); }
   /* "More models" flyout — legacy generations fold behind this trigger row
      (desktop-picker parity). The flyout expands in-flow below the trigger with
      an indent rail, so it reads as a nested group, not a second panel. */

@@ -14,6 +14,7 @@
   let dName = $state("");
   let dBase = $state("");
   let dModel = $state("");
+  let dEffort = $state(false);
   let saveError = $state("");
 
   let keyInput = $state("");
@@ -60,7 +61,7 @@
 
   onMount(() => {
     void providers.refresh().then(() => {
-      selectedId = providers.active?.id ?? null;
+      select(providers.active ?? null);
       probeCtxIfLocal();
     });
   });
@@ -74,7 +75,7 @@
   function select(p: ProviderDto | null) {
     selectedId = p?.id ?? null;
     resetTransient();
-    if (p) { dName = p.name; dBase = p.base_url; dModel = p.model ?? ""; }
+    if (p) { dName = p.name; dBase = p.base_url; dModel = p.model ?? ""; dEffort = p.effort; }
   }
 
   async function saveDraft() {
@@ -90,9 +91,10 @@
         models: selected.models,
         preset: selected.preset,
         max_output_tokens: selected.max_output_tokens,
+        effort: dEffort,
       });
       const fresh = providers.list.find((p) => p.id === selected.id);
-      if (fresh) { dName = fresh.name; dBase = fresh.base_url; dModel = fresh.model ?? ""; }
+      if (fresh) { dName = fresh.name; dBase = fresh.base_url; dModel = fresh.model ?? ""; dEffort = fresh.effort; }
     } catch (e) {
       console.error("save provider failed", e);
       saveError = String(e);
@@ -111,6 +113,7 @@
         models: def?.models ?? [],
         preset: def?.preset ?? null,
         max_output_tokens: def?.max_output_tokens ?? null,
+        effort: def?.effort ?? false,
       });
       const p = providers.list.find((x) => x.id === id);
       if (p) select(p);
@@ -122,6 +125,11 @@
 
   async function selectModel(m: string) {
     dModel = m;
+    await saveDraft();
+  }
+
+  async function toggleEffort() {
+    dEffort = !dEffort;
     await saveDraft();
   }
 
@@ -322,6 +330,22 @@
                 {/each}
               </div>
             {/if}
+          </div>
+
+          <div class="st-row">
+            <div class="st-row-body">
+              <span class="st-row-label">Reasoning effort</span>
+              <div class="st-row-desc">
+                The endpoint honors Anthropic extended-thinking — Rift shows the effort ladder in
+                the composer and sends <code>--effort</code> per turn. On for the reasoning clouds
+                (Kimi / DeepSeek / GLM); keep it off for Ollama and proxies that reject a
+                <code>thinking</code> block.
+              </div>
+            </div>
+            <div class="st-row-ctl">
+              <button class="rift-toggle" class:on={dEffort} role="switch" aria-checked={dEffort}
+                aria-label="Reasoning effort" type="button" onclick={() => void toggleEffort()}><span class="rift-toggle-knob"></span></button>
+            </div>
           </div>
 
           <div class="st-row">

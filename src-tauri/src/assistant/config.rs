@@ -81,6 +81,16 @@ pub(super) struct AssistantConfig {
     /// their profile. Wire field — synced from the active provider on activate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) local_llm_max_output: Option<u32>,
+    /// Provider honors Anthropic extended-thinking (`--effort` + a native
+    /// `thinking` block). Wire field — synced from the active provider. When
+    /// true + thinking on, turn.rs routes DIRECT to the base URL (skipping the
+    /// no-think shim) and sends `--effort`; false = legacy always-shimmed path.
+    #[serde(default)]
+    pub(super) local_llm_effort: bool,
+    /// One-shot guard for the load-time effort back-fill (reasoning-cloud
+    /// presets saved before the `effort` field existed get it flipped on once).
+    #[serde(default)]
+    pub(super) effort_backfilled: bool,
     /// Multi-model provider registry (docs/design/multi-model-providers.md).
     /// Named endpoint profiles over the SAME wire mechanism as local-LLM mode:
     /// activating one copies its base_url/model/key into the local_llm_* fields
@@ -448,6 +458,22 @@ pub(super) fn load_config() -> AssistantConfig {
                 .push(super::providers::ProviderProfile::migrated_local(base, cfg.local_llm_model.clone()));
             if cfg.local_llm_enabled && cfg.active_provider.is_none() {
                 cfg.active_provider = Some("local".to_string());
+            }
+        }
+    }
+    // Effort back-fill: profiles saved before the `effort` field existed
+    // deserialize false, but for the reasoning-cloud presets the capability is
+    // an endpoint fact, not a user choice — flip them on ONCE. In-memory +
+    // idempotent like the migration above; any later save persists the flag,
+    // after which a deliberate per-profile off sticks.
+    if !cfg.effort_backfilled {
+        cfg.effort_backfilled = true;
+        for p in cfg.providers.iter_mut() {
+            if matches!(p.preset.as_deref(), Some("kimi" | "deepseek" | "glm")) && !p.effort {
+                p.effort = true;
+                if cfg.active_provider.as_deref() == Some(p.id.as_str()) {
+                    cfg.local_llm_effort = true;
+                }
             }
         }
     }

@@ -1417,7 +1417,17 @@ async fn resolve_spawn(
             // `base`, read fresh per-request. This replaces the external
             // `rift-nothink-proxy.mjs`. If the shim failed to bind, fall back to
             // the raw base URL (user can still run the external proxy).
-            let target = super::nothink::shim_base_url().unwrap_or_else(|| base.to_string());
+            //
+            // Effort-capable providers (Kimi/DeepSeek/GLM — profile.effort) with
+            // thinking ON skip the shim entirely: they honor native `thinking`
+            // blocks + `--effort`, and the shim would lobotomize their reasoning.
+            // Thinking OFF still rides the shim (the disabled-injection is the
+            // only real off switch — same rationale as cloud, #68).
+            let target = if cfg.local_llm_effort && thinking_on {
+                base.to_string()
+            } else {
+                super::nothink::shim_base_url().unwrap_or_else(|| base.to_string())
+            };
             cmd.env("ANTHROPIC_BASE_URL", target);
         }
         let local_key = crate::secrets::get(crate::secrets::LOCAL_LLM_API_KEY)
@@ -1505,8 +1515,13 @@ async fn resolve_spawn(
     // kills the multi-second pre-pass; if the shim ever starts working again the
     // injected disabled-block still wins on top of this.)
     // `--effort` gated on caps.effort: an older CLI without the flag rejects it.
+    // Effort-capable providers (cfg.local_llm_effort, synced from the active
+    // profile) get the flag too — their Anthropic-compat endpoints implement
+    // the thinking tiers (vendors ship first-party Claude Code guides, so the
+    // CLI's default effort traffic already works against them). Ollama/LiteLLM
+    // profiles keep the wholesale skip (4xx or silently ignore it).
     let send_effort = Some(send_effort_flag(thinking_on, effort_level));
-    if !cfg.local_llm_enabled && model != "haiku" && caps.effort {
+    if (!cfg.local_llm_enabled || cfg.local_llm_effort) && model != "haiku" && caps.effort {
         if let Some(level) = send_effort {
             cmd.arg("--effort").arg(level);
         }
@@ -1667,7 +1682,10 @@ async fn resolve_spawn(
     let local_llm_fp = if cfg.local_llm_enabled {
         let base = cfg.local_llm_base_url.as_deref().unwrap_or("");
         let local_key = crate::secrets::get(crate::secrets::LOCAL_LLM_API_KEY).unwrap_or_default();
-        warm_pool::fingerprint(&format!("{base}\u{0}{local_key}"))
+        // effort folds in: it flips the baked ANTHROPIC_BASE_URL target
+        // (direct vs shim) + the --effort arg, so toggling the capability on
+        // the Models page must cold-respawn the warm child.
+        warm_pool::fingerprint(&format!("{base}\u{0}{local_key}\u{0}{}", cfg.local_llm_effort))
     } else {
         0
     };

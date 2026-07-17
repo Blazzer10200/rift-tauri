@@ -4,8 +4,7 @@
   import { assistant } from "../../state/assistant.svelte";
   import { github } from "../../state/github.svelte";
   import GhPopover from "./GhPopover.svelte";
-  import { providers } from "../../state/providers.svelte";
-  import { workspace } from "../../state/workspace.svelte";
+  import { providers, providerModelCtx, providerModelCtxKnown } from "../../state/providers.svelte";
   import { notify } from "../../state/toast.svelte";
   import { clampEffort, modelFamily } from "../../state/assistant/helpers";
   import { requestPrewarm, resetPrewarmDedup } from "../../state/assistant/prewarm";
@@ -24,6 +23,7 @@
   import {
     MODEL_OPTIONS, MODE_OPTIONS,
     dialStopsFor, dialIdxFor, clampEffortIdx, permToneFor,
+    providerEffortCaps, settingsRowsFor, type SettingsRow,
     type ModelOpt, type ModeOpt,
   } from "./composer/modelMatrix";
   import { stt } from "../../state/stt.svelte";
@@ -102,8 +102,25 @@
   // focused activeTab, so in split-pane both composers showed the focused
   // pane's ctx%. Read this pane's own tab instead.
   const paneCtxTokens = $derived(assistant.ctxTokensFor(tab));
-  const paneCtxPct = $derived(assistant.ctxPctFor(tab));
-  const paneCtxWindow = $derived(assistant.ctxWindowFor(tab));
+  // Provider mode swaps the window source: the verified known-model table
+  // first (the CLI reports a generic 200K for models it doesn't know, so a
+  // table hit beats the report — kimi-k3 is 1M, not 200K), then the
+  // CLI-reported window, then the conservative 200K default. The Claude
+  // path's plan-cap clamp doesn't apply to third-party endpoints.
+  const paneCtxWindow = $derived.by(() => {
+    if (!providers.enabled) return assistant.ctxWindowFor(tab);
+    const model = tab?.lastModelId ?? providers.active?.model ?? null;
+    const known = providerModelCtxKnown(model);
+    if (known != null) return known;
+    const rep = tab?.reportedCtxWindow;
+    if (rep && model && rep.model === model) return rep.window;
+    return providerModelCtx(model);
+  });
+  const paneCtxPct = $derived(
+    providers.enabled
+      ? (paneCtxWindow > 0 ? Math.min(100, (paneCtxTokens / paneCtxWindow) * 100) : 0)
+      : assistant.ctxPctFor(tab),
+  );
   // Per-pane model — `assistant.effectiveModel` delegates to the focused
   // activeTab (modelOverride ?? store.model), so in split-pane the background
   // pane's pill / settings highlight / data-model showed the FOCUSED pane's
@@ -403,7 +420,14 @@
   // ONE ladder over the store pair (thinkingEnabled, thinkingEffort): rung 0 =
   // fastest (thinking off → wire `--effort low`), higher rungs reason at their
   // tier. See modelMatrix DIAL_STOPS for the wire-truth rationale.
-  const effortStops = $derived(dialStopsFor(currentModel));
+  // Provider mode: the ladder derives from the ACTIVE PROFILE's capability
+  // (effort-capable clouds get the full ladder; Ollama/unknown hide it), same
+  // store pair on the wire — turn.rs sends `--effort` for capable providers.
+  const effortStops = $derived(
+    providers.enabled
+      ? dialStopsFor(providerEffortCaps(providers.effortCapable))
+      : dialStopsFor(currentModel),
+  );
   const dialApplies = $derived(effortStops.length > 0);
   const effortIdx = $derived(dialIdxFor(effortStops, assistant.thinkingEnabled, assistant.thinkingEffort));
   const currentEffort = $derived(effortStops[effortIdx] ?? effortStops[0]);
@@ -420,7 +444,9 @@
   // Clamps the tier directly — the ladder's rung 0 (effort:null) is not a tier,
   // so a stops-membership check would false-positive on `none`.
   $effect(() => {
-    if (!dialApplies) return;
+    // Claude-only: the clamp keys off Claude model ceilings; provider ladders
+    // have no per-tier rejection matrix (providerEffortCaps → full ladder).
+    if (!dialApplies || providers.enabled) return;
     const clamped = clampEffort(assistant.thinkingEffort, paneEffectiveModel);
     if (clamped !== assistant.thinkingEffort) assistant.setThinkingEffort(clamped);
   });
@@ -443,22 +469,23 @@
     assistant.setPermissionMode(MODE_OPTIONS[(i + 1) % MODE_OPTIONS.length].id);
   }
 
-  // Flat, navigable row list spanning all three sections of the unified
-  // settings panel. Effort is dropped on Haiku (ignored server-side), exactly
-  // as the old standalone effort pill was hidden there. Drives ArrowUp/Down
-  // + the active highlight; mouse clicks call the per-kind pick fns directly.
-  type SettingsRow =
-    | { kind: "model"; model: ModelOpt }
-    | { kind: "effort" };
-  const settingsRows = $derived.by<SettingsRow[]>(() => {
-    const rows: SettingsRow[] = MODEL_OPTIONS.map((m) => ({ kind: "model" as const, model: m }));
-    if (dialApplies) rows.push({ kind: "effort" });
-    return rows;
-  });
+  // Flat, navigable row list spanning the unified settings panel — built by
+  // the SAME settingsRowsFor helper SettingsMenu renders from, so keyboard
+  // cursor and rendered order can never disagree. Effort is dropped on Haiku
+  // (ignored server-side) and on effort-incapable providers. Drives
+  // ArrowUp/Down + the active highlight; mouse clicks call the pick fns.
+  const settingsRows = $derived(settingsRowsFor({
+    providerMode: providers.enabled,
+    providerModels: providers.activeModels,
+    providerIds: providers.list.map((p) => p.id),
+    dialApplies,
+  }));
   // Re-seed the cursor to the current model row whenever the panel opens.
   $effect(() => {
     if (settingsOpen) {
-      const i = settingsRows.findIndex((r) => r.kind === "model" && r.model.id === paneEffectiveModel);
+      const i = settingsRows.findIndex((r) =>
+        (r.kind === "model" && r.model.id === paneEffectiveModel)
+        || (r.kind === "pmodel" && r.id === providers.active?.model));
       settingsIdx = i >= 0 ? i : 0;
     }
   });
@@ -471,7 +498,23 @@
   });
   function pickRow(row: SettingsRow) {
     if (row.kind === "model") pickModel(row.model);
+    else if (row.kind === "pmodel") pickProviderModel(row.id);
+    else if (row.kind === "provider") pickProvider(row.id);
     else { settingsOpen = false; void tick().then(() => ta?.focus()); }
+  }
+  /** Same-provider model switch from the picker — keeps the session. */
+  function pickProviderModel(id: string) {
+    void providers.setModel(id).catch((e) => notify.danger("Model switch failed", { detail: String(e) }));
+    settingsOpen = false;
+    void tick().then(() => ta?.focus());
+  }
+  /** Activate a provider (or null = back to Claude). Mid-chat switches reset
+   *  to a fresh session inside the store (different auth can't share a CLI
+   *  session) — it toasts the flush-to-History itself. */
+  function pickProvider(id: string | null) {
+    void providers.activate(id).catch((e) => notify.danger("Provider switch failed", { detail: String(e) }));
+    settingsOpen = false;
+    void tick().then(() => ta?.focus());
   }
 
   // Tab (or picking a command that wants arguments): insert `/name ` into the
@@ -1042,10 +1085,16 @@
         setEffortByIdx(effortIdx + (e.key === "ArrowRight" ? 1 : -1));
         return;
       }
-      // Digit 1–N jumps straight to that model row.
+      // Digit 1–N jumps straight to that model row (provider models in
+      // provider mode — same positional mapping the menu's kbd hints show).
       if (/^[1-9]$/.test(e.key)) {
-        const m = MODEL_OPTIONS[Number(e.key) - 1];
-        if (m) { e.preventDefault(); pickModel(m); return; }
+        if (providers.enabled) {
+          const id = providers.activeModels[Number(e.key) - 1];
+          if (id) { e.preventDefault(); pickProviderModel(id); return; }
+        } else {
+          const m = MODEL_OPTIONS[Number(e.key) - 1];
+          if (m) { e.preventDefault(); pickModel(m); return; }
+        }
       }
       if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault();
@@ -1549,45 +1598,35 @@
         <LivePills {queue} />
 
         <div class="cbar-r">
-          {#if providers.enabled}
-            <!-- Provider-mode indicator (cont.127, generalized 2026-07-16).
-                 The model/effort pill lies in provider mode (cloud model pin is
-                 bypassed), so this shows what the turn actually runs against.
-                 Click → Models page. -->
-            <button
-              type="button"
-              class="local-pill"
-              onclick={() => workspace.setActive("local-llm")}
-              use:tooltip={`${providers.active?.name ?? "Provider"} — turns run against ${providers.baseUrl || "your endpoint"}\nClick to configure`}
-              aria-label="Provider mode active — configure"
-            >
-              <Cpu size={12} />
-              <span class="local-pill-label">{providers.pillLabel}</span>
-            </button>
-          {/if}
-
-          <!-- Cloud model + effort picker. Hidden in local mode — local routing
-               bypasses the model pin + effort entirely, so showing cloud options
-               (e.g. "Opus 4.8") would misrepresent what the turn runs against.
-               The local-pill above already names the active local model. -->
-          {#if !providers.enabled}
+          <!-- Model + effort picker — ONE pill across brains (cont.127 →
+               unified 2026-07-17). Claude mode shows the family dot; provider
+               mode swaps in the Cpu glyph + the active provider's model so the
+               pill always names what the turn actually runs against. Both open
+               the same unified SettingsMenu (models · effort · brain switch). -->
           <button
             type="button"
             class="model-pill"
             class:open={settingsOpen}
+            class:provider={providers.enabled}
             class:ultra={dialApplies && currentEffort?.id === "xhigh"}
-            data-model={currentModel ? modelFamily(currentModel.id) : ""}
+            data-model={!providers.enabled && currentModel ? modelFamily(currentModel.id) : ""}
             bind:this={modelWrap}
             onclick={() => { settingsOpen = !settingsOpen; permOpen = false; void tick().then(() => ta?.focus()); }}
             aria-haspopup="listbox"
             aria-expanded={settingsOpen}
             aria-label="Model & effort"
-            use:tooltip={dialApplies
+            use:tooltip={providers.enabled
+              ? `${providers.active?.name ?? "Provider"} — turns run against ${providers.baseUrl || "your endpoint"}${dialApplies ? `\n${currentEffort?.label} effort — ${effortIdx === 0 ? "replies immediately" : "reasons before replying"}` : ""}`
+              : dialApplies
               ? `Model · effort\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel} · ${currentEffort?.label} effort — ${effortIdx === 0 ? "replies immediately" : "reasons before replying"}`
               : `Model\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel} · no extended thinking`}
           >
-            <span class="model-dot" aria-hidden="true"></span>
-            <span class="pill-label">{currentModel ? `${currentModel.label} ${currentModel.version}` : paneEffectiveModel}</span>
+            {#if providers.enabled}
+              <Cpu size={12} class="pill-cpu" aria-hidden="true" />
+            {:else}
+              <span class="model-dot" aria-hidden="true"></span>
+            {/if}
+            <span class="pill-label">{providers.enabled ? providers.pillLabel : currentModel ? `${currentModel.label} ${currentModel.version}` : paneEffectiveModel}</span>
             {#if dialApplies}
               <span class="pill-effort" class:dim={effortIdx === 0}>{currentEffort?.label}</span>
             {/if}
@@ -1597,18 +1636,19 @@
             <ChevronUp size={13} class="pill-chev" />
           </button>
 
-          {#if settingsOpen && !providers.enabled}
+          {#if settingsOpen}
             <SettingsMenu
               {settingsIdx}
               activeKind={settingsRows[settingsIdx]?.kind ?? null}
               anchor={modelWrap}
               onPickModel={pickModel}
+              onPickProviderModel={pickProviderModel}
+              onPickProvider={pickProvider}
               onRequestClose={() => (settingsOpen = false)}
             />
           {/if}
-          {/if}
 
-          {#if !providers.enabled && paneCtxTokens > 0}
+          {#if paneCtxTokens > 0}
             <CtxRing
               pct={paneCtxPct}
               tokens={paneCtxTokens}
@@ -1917,7 +1957,7 @@
     .pill-label { max-width: 64px; }
   }
   @container (max-width: 380px) {
-    .perm-label, .local-pill-label { display: none; }
+    .perm-label { display: none; }
     .cbtn.reveal { display: none; }
     .pill-label { max-width: 56px; }
   }
@@ -2421,26 +2461,12 @@
   .model-pill:hover :global(.pill-chev), .model-pill.open :global(.pill-chev) { opacity: 1; }
   .model-pill.open :global(.pill-chev) { transform: rotate(180deg); color: var(--fg-muted); }
 
-  /* Experimental local-mode pill (cont.127) — accent-tinted so the active
-     "talking to a local model" state reads at a glance, distinct from the
-     neutral model/perm pills. Only mounts when local mode is on. */
-  .local-pill {
-    align-self: center;
-    display: inline-flex; align-items: center; gap: 5px;
-    height: 30px; padding: 0 10px;
-    background: var(--accent-soft);
-    border: 1px solid color-mix(in oklab, var(--accent) 38%, transparent);
-    border-radius: 9px;
-    color: var(--accent);
-    cursor: pointer; font: inherit;
-    transition: background var(--dur-fast) ease-out, border-color var(--dur-fast) ease-out;
-  }
-  .local-pill:hover { background: color-mix(in oklab, var(--accent) 22%, transparent); border-color: color-mix(in oklab, var(--accent) 55%, transparent); }
-  .local-pill :global(svg) { color: var(--accent); flex-shrink: 0; }
-  .local-pill-label {
-    font-size: 11px; font-weight: 600; line-height: 1; letter-spacing: 0.01em;
-    max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
+  /* Provider mode — the unified pill keeps the model-pill anatomy but tints
+     accent + swaps the family dot for the Cpu glyph, so "talking to a
+     third-party brain" still reads at a glance (was .local-pill, cont.127). */
+  .model-pill.provider { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 38%, transparent); background: var(--accent-soft); }
+  .model-pill.provider:hover { background: color-mix(in oklab, var(--accent) 22%, transparent); border-color: color-mix(in oklab, var(--accent) 55%, transparent); }
+  .model-pill.provider :global(.pill-cpu) { color: var(--accent); flex-shrink: 0; }
 
   /* Context chips row — layout only; the chip itself (.ctx-chip/.cc-label)
      lives in app.css, shared w/ the Welcome launchpad (one chip dialect). */

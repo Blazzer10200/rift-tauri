@@ -63,7 +63,7 @@ Key properties:
 | `convo_store.rs` | On-disk conversation persistence + export. |
 | `oneshot.rs` | One-off CLI calls (prompt-enhance, title, usage-analyze) outside the live turn loop. |
 | `local_llm.rs` | Ollama context-probe/optimize commands + the shared `probe_messages`/`probe_models` HTTP probes `providers.rs` tests through. Split out of `oneshot.rs` (v0.60.0). |
-| `providers.rs` | Multi-model provider registry (Kimi / DeepSeek / GLM / OpenRouter / local): named endpoint profiles; activating one copies base_url/model/key into the `local_llm_*` wire fields + `LOCAL_LLM_API_KEY`, so `turn.rs` needs zero provider awareness. Per-provider keys in the OS keychain. |
+| `providers.rs` | Multi-model provider registry (Kimi / DeepSeek / GLM / OpenRouter / local): named endpoint profiles; activating one copies base_url/model/key/effort into the `local_llm_*` wire fields + `LOCAL_LLM_API_KEY`, so `turn.rs` needs zero provider awareness. Effort-capable profiles get the composer effort ladder + a direct (no-shim) route when thinking is on. Per-provider keys in the OS keychain. |
 | `warm_pool.rs` | Persistent per-session CLI child (warm process) so subsequent turns skip cold-start; idle-evicts, transparently respawns on dead pipe. |
 | `projects.rs` | Named folder aliases with include/exclude file scoping (`assistant_list/save/delete_project`); validates globs via the shared `glob_to_regex`. |
 | `permission.rs` · `ask_user.rs` · `config.rs` · `workspace.rs` · `auth_update.rs` · `cli_install.rs` · `cli_caps.rs` · `env_checks.rs` · `nothink.rs` | permission plumbing · UI-ask registry · per-turn config (effort/model clamps) · workspace roots · auth probe · CLI install detection · CLI capability probe · environment preflight · thinking-flag handling. |
