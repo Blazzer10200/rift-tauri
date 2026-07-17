@@ -182,6 +182,10 @@ export async function send(
   // turn emits, so the listeners can tell a stale event from the live turn.
   tab.turnEpoch += 1;
   tab.beginTurn();
+  // Manual /compact rides to the CLI as a normal turn (runSlash falls through)
+  // but produces no tools/text until the boundary — flag it so the live turn
+  // says "Compacting conversation…" instead of a generic "Working…".
+  tab.compactingTurn = /^\/compact\b/i.test(trimmed);
   store.lastNotice = null;
   // #184: clear stale error banner so it doesn't bleed into the new turn.
   tab.lastError = null;

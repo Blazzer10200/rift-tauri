@@ -212,6 +212,12 @@ export class TabState {
 
   messages = $state<ChatMessage[]>([]);
   streaming = $state(false);
+  /** True while the in-flight turn is a manual /compact — the CLI compacts
+   *  natively with no tools/text until the boundary lands, so without this the
+   *  whole turn reads as a generic "Working…" hang. Drives the dedicated
+   *  "Compacting conversation…" live status in StreamTurn. Set by send(),
+   *  reset every beginTurn(). */
+  compactingTurn = $state(false);
   tasks = $state<{ id: string; content: string; status: "pending" | "in_progress" | "completed" }[]>([]);
   taskCreateCount = $state(0);
   activity = $state<{ currentLabel: string | null; turnStartedAt: number | null }>({

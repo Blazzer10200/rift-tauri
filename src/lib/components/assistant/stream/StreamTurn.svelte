@@ -128,6 +128,10 @@
   // the #1 "why is this so slow" illusion (a 124s ask_user looks like a 124s
   // stall). Freeze the clock, calm the chrome, and say so plainly.
   const awaitingInput = $derived(liveTool?.kind === "ask");
+  // Manual /compact turn: the CLI compacts natively — no tools, no text, just
+  // silence until the compact_boundary lands — so the generic "Working…" read
+  // as a hang. Dedicated status + reassurance note below keep it honest.
+  const compacting = $derived(streaming && !!liveTab?.compactingTurn);
 
   // Live footer meta — spec's `Unfurling… 5s · 312 tokens`. 1s ticker drives
   // elapsed + tokens; both pull from the assistant store (turnStartedAt +
@@ -164,9 +168,11 @@
       ? `Worked for ${fmtDur(turn.totalSecs)}`
       : awaitingInput
         ? "Waiting for you"
-        : thinkingNow
-          ? (liveSecs != null ? `Thinking… ${fmtDur(liveSecs)}` : "Thinking…")
-          : "Working…"
+        : compacting
+          ? "Compacting conversation…"
+          : thinkingNow
+            ? (liveSecs != null ? `Thinking… ${fmtDur(liveSecs)}` : "Thinking…")
+            : "Working…"
   );
   // Completed-turn hover timestamp — `message.ts` stamped at send (2026-07-02+);
   // absent on older convos, hidden while live (the head already ticks then).
@@ -210,14 +216,18 @@
     // still showing "Thinking…" — the model was working, but the footer read as
     // a 45s hang. thinkingNow gates the head; gate the stall on it too so the
     // two never contradict.
-    if (!streaming || liveTool || liveTokens != null || liveSecs == null || reasoningNow) return 0;
+    // Compaction is a legitimately silent turn (summary runs CLI-side, nothing
+    // streams until the boundary) — the watchdog copy would call it a stall.
+    if (!streaming || liveTool || liveTokens != null || liveSecs == null || reasoningNow || compacting) return 0;
     if (liveSecs >= 150) return 3;
     if (liveSecs >= 60) return 2;
     if (liveSecs >= 20) return 1;
     return 0;
   });
   const footerVerb = $derived(
-    liveTool
+    compacting
+      ? "Summarizing older messages"
+      : liveTool
       ? VERB_ING[liveTool.kind]
       : stallLevel === 3
         ? "No response — ending soon"
@@ -322,7 +332,7 @@
   {/each}
   </div>
 
-  {#if streaming && !thinkingNow}
+  {#if streaming && (compacting || !thinkingNow)}
     <!-- While a pure reasoning pass is live the HEAD already shows "Thinking… Xs"
          — the footer would just duplicate it (and there's no action/tokens to
          report yet), so it's suppressed until a tool or token lands. -->
@@ -347,7 +357,13 @@
         </span>
       {/if}
     </div>
-    {#if stallLevel >= 3}
+    {#if compacting}
+      <div class="scompact-note">
+        Older messages are being condensed into a short summary to free up
+        context. Nothing is deleted — the full transcript stays right here,
+        and the chat continues where it left off once the summary lands.
+      </div>
+    {:else if stallLevel >= 3}
       <div class="sstall-note">
         No output yet after a long wait — this can be a slow response or a stuck
         local Claude process. Rift will end the turn automatically if nothing

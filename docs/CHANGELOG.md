@@ -2,13 +2,10 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.121.0 — Every pane gets its own brain
+## v0.122.0 — Compacting says so
 
-- **Model choice is per-chat now.** Each tab and split pane pins its own provider + model — switching brains in one pane no longer rewires the chat sitting next to it. The pill, picker, effort ladder, and context ring all follow the pane you're typing in.
-- **No more silent dead turns.** When a provider endpoint misbehaves (Kimi rate-limiting, auth failures, server errors), Rift now toasts the real status — and after 5 failures in a row it ends the turn with an honest error instead of letting the CLI retry silently for minutes.
-- **Blame lands where it belongs.** The "slow turn start" hint names the actual endpoint (e.g. Kimi — Moonshot) when a provider chat stalls — it no longer pins provider slowness on the Anthropic API.
-- **Old chats stay on Claude.** Reopening a conversation from before this release can't accidentally resume it through whatever provider is now your default.
-- **Tidier sidebar footer.** The workspace icons sit in a proper dock with a sliding highlight under the active one; notifications and Settings stand apart on the right.
+- **/compact no longer hides behind "Working…".** While the CLI condenses your conversation, the turn now says what's actually happening: the header reads "Compacting conversation…", the footer shows "Summarizing older messages" with the live timer, and a short note explains that nothing is deleted — the full transcript stays put and the chat picks up right where it left off. The before → after context pill still lands when it finishes.
+- **No false alarms mid-compact.** Compaction is legitimately silent until the summary lands; the stall watchdog ("Waiting on the model…") no longer fires during that quiet stretch.
 
 ## Known issues
 - **While elevated, dragging files from Explorer into the window doesn't work** (Windows blocks lower→higher integrity drag-drop); the attach button / file picker still works fine.

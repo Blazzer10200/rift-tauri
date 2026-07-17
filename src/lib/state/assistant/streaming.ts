@@ -76,6 +76,7 @@ export function beginTurn(tab: TabState) {
   tab.lastStreamEventAt = null;
   tab.liveOutputTokens = 0;
   tab.committedOutputTokens = 0;
+  tab.compactingTurn = false;
   tab.liveOutputChars = 0;
   tab.activity = { currentLabel: null, turnStartedAt: Date.now() };
   // RR10: re-anchor the task-id counter to the live tasks length each turn.

@@ -137,6 +137,12 @@
   color: var(--fg-faint); max-width: 52ch;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
 
+/* Compaction turn — a manual /compact is legitimately silent until the
+   boundary lands; same quiet-note voice as the stall note, calm not amber. */
+.scompact-note { margin: 4px 0 2px; font-size: var(--fs-sm); line-height: 1.45;
+  color: var(--fg-faint); max-width: 52ch;
+  animation: blockIn var(--dur-base) var(--ease-page) both; }
+
 /* Awaiting human input — the turn is parked on YOU (a pending ask_user), not
    the model. Kill the shimmer + the racing clock illusion: a calm accent verb
    ("Waiting for your answer") + a quiet hint. This is the fix for the "why is
