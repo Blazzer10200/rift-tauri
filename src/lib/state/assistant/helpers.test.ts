@@ -1,15 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ChatMessage, ToolBlock } from "./types";
 import {
   FABLE_DISABLED, FABLE_SUNSET_MS, clampEffort, effortToFlag, fableAvailable,
-  fastEligible, flattenToolResult, isStaleTurnEpoch, loadEffort, messagesHaveContextSignals,
+  fastEligible, flattenToolResult, isStaleTurnEpoch, loadEffort,
   migrateThinkingPins, modelFamily, previewToolInput, ctxWindowForModelId,
   modelNativeWindow, planContextCap,
 } from "./helpers";
-
-const tool = (name: string, status: ToolBlock["status"], extra: Partial<ToolBlock> = {}): ToolBlock =>
-  ({ type: "tool", id: `t_${name}`, name, input: {}, result: null, isError: false, status, ...extra });
-const msg = (blocks: ChatMessage["blocks"], id = "m1"): ChatMessage => ({ id, role: "assistant", blocks });
 
 afterEach(() => vi.useRealTimers());
 
@@ -242,14 +237,6 @@ describe("flattenToolResult + previewToolInput", () => {
     expect(previewToolInput("X", { command: "c".repeat(150) })).toBe("c".repeat(120) + "…");
     expect(previewToolInput("X", {})).toBeNull();
     expect(previewToolInput("X", undefined)).toBeNull();
-  });
-});
-
-describe("messagesHaveContextSignals", () => {
-  it("bails true on the first write/web tool, false otherwise", () => {
-    expect(messagesHaveContextSignals([msg([tool("Read", "done")])])).toBe(false);
-    expect(messagesHaveContextSignals([msg([tool("Edit", "done")])])).toBe(true);
-    expect(messagesHaveContextSignals([])).toBe(false);
   });
 });
 

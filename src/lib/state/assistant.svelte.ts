@@ -1538,6 +1538,20 @@ class AssistantStore {
    *  close drops to empty state w/ currentConvoId=null. */
   closeTab(id: string) { return tabsCloseTab(this, id); }
 
+  /** #13 minimal tab surface — display rows for the topbar TabsPill dropdown.
+   *  Keeps `tabs` internal-by-convention: components read this, not the Map. */
+  get tabSummaries(): { id: string; title: string; streaming: boolean }[] {
+    return this.openTabs.map((id) => {
+      const t = this.tabs.get(id);
+      const meta = this.conversations.find((c) => c.id === id);
+      return {
+        id,
+        title: t?.convoTitle || meta?.title || "New chat",
+        streaming: t?.streaming ?? false,
+      };
+    });
+  }
+
   /** Open a fresh empty tab. Mints currentConvoId up-front so the tab can
    *  render before the first send; convoCreatedAt stays null so send() still
    *  flags isFirstTurn=true and the CLI gets --session-id, not --resume. */

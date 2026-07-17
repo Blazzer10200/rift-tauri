@@ -51,12 +51,12 @@ type UpdateInfoDto = {
   notesMarkdown: string;
 };
 
-export type UpdateInfo = UpdateInfoDto & {
+type UpdateInfo = UpdateInfoDto & {
   /** Synthesized client-side from the version tag — the canonical release page. */
   releaseUrl: string;
 };
 
-export type UpdateState =
+type UpdateState =
   | "idle"
   | "checking"
   | "available"

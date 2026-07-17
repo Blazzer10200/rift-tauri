@@ -2,7 +2,7 @@
 // of `src/lib/state/assistant.svelte.ts`. Zero state, zero IPC; only
 // localStorage prefs + pure transforms. Safe to import anywhere.
 
-import type { ChatMessage, ModelFamily, ModelSel, PermissionMode, RiftPlan, ThinkingEffort } from "./types";
+import type { ModelFamily, ModelSel, PermissionMode, RiftPlan, ThinkingEffort } from "./types";
 
 const MODEL_SELS: readonly ModelSel[] = [
   "sonnet", "opus", "claude-opus-4-7", "haiku", "claude-fable-5",
@@ -312,24 +312,6 @@ export function previewToolInput(_name: string, input: Record<string, unknown> |
   }
   return null;
 }
-
-/** Tool names whose presence in a tab's stream means the Session-panel right
- *  rail has content worth surfacing. */
-const CONTEXT_SIGNAL_TOOLS = new Set([
-  "Edit", "Write", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch",
-]);
-
-/** Early-exit scan: does this message list contain ANY Edit/Write/WebFetch/etc
- *  tool call? Cheap — bails on first match. */
-export function messagesHaveContextSignals(messages: ChatMessage[]): boolean {
-  for (const m of messages) {
-    for (const b of m.blocks) {
-      if (b.type === "tool" && CONTEXT_SIGNAL_TOOLS.has(b.name)) return true;
-    }
-  }
-  return false;
-}
-
 
 /** Compact token count for the live turn readout (Claude-Code style: "1.2k").
  *  Guard against the 999_500–999_999 band rounding to "1000k": Math.round(n/1000)

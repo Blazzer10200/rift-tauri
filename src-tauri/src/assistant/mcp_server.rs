@@ -116,11 +116,13 @@ fn compile_globs(raw: &str) -> Vec<(regex::Regex, bool)> {
 }
 
 impl PathFilter {
-    fn from_env() -> Self {
-        PathFilter {
+    // Env is fixed at MCP-server spawn — compile the globs once, not per tool call.
+    fn from_env() -> &'static Self {
+        static CACHE: std::sync::OnceLock<PathFilter> = std::sync::OnceLock::new();
+        CACHE.get_or_init(|| PathFilter {
             include: compile_globs(&std::env::var("RIFT_MCP_INCLUDE").unwrap_or_default()),
             exclude: compile_globs(&std::env::var("RIFT_MCP_EXCLUDE").unwrap_or_default()),
-        }
+        })
     }
 
     /// Build from explicit glob lists (newline-joined). Used by the `@`-mention

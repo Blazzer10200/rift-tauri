@@ -103,6 +103,7 @@
   ];
   let searchQ = $state("");
   let searchIdx = $state(0);
+  let searchFocused = $state(false);
   let searchEl = $state<HTMLInputElement>();
   // "/" or Ctrl+F anywhere on the page focuses the settings search.
   function onGlobalKey(ev: KeyboardEvent) {
@@ -502,7 +503,7 @@
             </button>
           {/each}
         </div>
-        <div class="sset-search" class:open={searchResults.length > 0}>
+        <div class="sset-search" class:open={searchFocused && searchResults.length > 0}>
           <Search size={13} class="sset-search-ic" />
           <input
             class="sset-search-in"
@@ -511,11 +512,13 @@
             bind:value={searchQ}
             bind:this={searchEl}
             onkeydown={onSearchKey}
+            onfocus={() => (searchFocused = true)}
+            onblur={() => (searchFocused = false)}
             aria-label="Search settings"
             spellcheck="false"
           />
           <span class="sset-search-kbd mono" aria-hidden="true">/</span>
-          {#if searchResults.length > 0}
+          {#if searchFocused && searchResults.length > 0}
             <div class="sset-results" role="listbox" aria-label="Matching settings">
               {#each searchResults as r, i (r.tab + r.anchor + r.title)}
                 <button type="button" class="sset-result" role="option" aria-selected={i === searchIdx} data-active={i === searchIdx} onmousedown={(ev) => { ev.preventDefault(); jumpTo(r); }} onpointerenter={() => (searchIdx = i)}>
@@ -1049,7 +1052,7 @@
                     {:else}
                       <span class="st-pill ok"><span class="dot"></span>Active</span>
                     {/if}
-                    <button type="button" class="st-btn danger-btn" onclick={() => void stt.deleteModel(m.id)} use:tooltip={"Delete model"} aria-label="Delete"><Trash2 size={14} /></button>
+                    <button type="button" class="st-btn danger-btn" onclick={() => void stt.deleteModel(m.id)} use:tooltip={"Delete model"} aria-label={`Delete ${m.display_name} model`}><Trash2 size={14} /></button>
                   {:else}
                     <button type="button" class="st-btn primary" disabled={!stt.config.enabled} onclick={() => void stt.downloadModel(m.id)}>Download</button>
                   {/if}

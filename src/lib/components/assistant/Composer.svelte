@@ -875,6 +875,8 @@
         await stt.start(tabId);
         void tick().then(() => ta?.focus());
       }
+    } catch (e) {
+      notify.warn("Dictation couldn't start", { detail: String(e) });
     } finally {
       micBusy = false;
     }
@@ -908,8 +910,12 @@
     // `tabId` is reactive — a tab switch mid-encode would land the attachment
     // on the NEW tab. Same pattern as AppShell's window-drop capture.
     const targetTabId = tabId;
-    const res = await attachImageFiles(imageFiles, (a) => assistant.addAttachment(a, targetTabId));
-    if (tabId === targetTabId) attachError = summarizeAttach(res);
+    try {
+      const res = await attachImageFiles(imageFiles, (a) => assistant.addAttachment(a, targetTabId));
+      if (tabId === targetTabId) attachError = summarizeAttach(res);
+    } catch (e) {
+      if (tabId === targetTabId) attachError = `Couldn't attach image: ${e}`;
+    }
   }
 
   // Up-arrow recall offset (0 = newest). Reset whenever the user types or
@@ -1155,10 +1161,14 @@
   async function stageFiles(files: Iterable<File>) {
     // Same snapshot as onPaste — the encode awaits below outlive a tab switch.
     const targetTabId = tabId;
-    const imgRes = await attachImageFiles(files, (a) => assistant.addAttachment(a, targetTabId));
-    const txtRes = await attachTextFiles(files, (a) => assistant.addTextAttachment(a, targetTabId));
-    if (tabId === targetTabId) {
-      attachError = [summarizeAttach(imgRes), summarizeTextAttach(txtRes)].filter(Boolean).join(" · ") || null;
+    try {
+      const imgRes = await attachImageFiles(files, (a) => assistant.addAttachment(a, targetTabId));
+      const txtRes = await attachTextFiles(files, (a) => assistant.addTextAttachment(a, targetTabId));
+      if (tabId === targetTabId) {
+        attachError = [summarizeAttach(imgRes), summarizeTextAttach(txtRes)].filter(Boolean).join(" · ") || null;
+      }
+    } catch (e) {
+      if (tabId === targetTabId) attachError = `Couldn't attach: ${e}`;
     }
   }
   async function onDrop(e: DragEvent) {

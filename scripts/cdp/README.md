@@ -64,7 +64,7 @@ bash scripts/cdp/c.sh find "Send"                              # locate elements
 bash scripts/cdp/c.sh text ".chat"                             # exact rendered text (transcript/errors) — no shot, no ax caps
 bash scripts/cdp/c.sh errors                                   # console errors, CURRENT page-gen only (--all incl. stale)
 bash scripts/cdp/c.sh doctor                                   # WHY is CDP down? layered diagnosis (wrapper/port/ELEVATION) + fix
-bash scripts/cdp/c.sh nav settings                             # jump to a workspace (home/chat/settings/ai-health/local-llm) + look
+bash scripts/cdp/c.sh nav settings                             # jump to a workspace (home/chat/settings/ai-health/models) + look
 bash scripts/cdp/c.sh tour chat home ai-health settings        # visit N surfaces + screenshot EACH in ONE round-trip
 bash scripts/cdp/c.sh ready                                    # block until app mounted + idle (kills settle-time guessing)
 bash scripts/cdp/c.sh health                                   # smoke + real eval ping (pingMs, page gen, viewport-suspect)

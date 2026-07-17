@@ -459,7 +459,33 @@ fn evict_idle_once() -> usize {
                     // reachable. Its reader loop holds a self-referential turn_tx,
                     // so an orphaned entry would never be reaped (~450MB leak).
                     // Never kill a child mid-turn.
-                    insert(&sid, arc);
+                    if !insert_if_absent(&sid, arc.clone()) {
+                        // Double race: a NEW child claimed the slot while the
+                        // entry was out. A bare insert here would displace that
+                        // live child with no kill (the leak this module guards
+                        // against) — instead leave it, and reap the old child
+                        // once its in-flight turn ends.
+                        log::error!(
+                            "warm_pool: evict re-insert lost the {sid} slot to a new child — old pid={:?} reaped after its turn",
+                            c.pid
+                        );
+                        if let Some(pid) = c.pid {
+                            std::thread::spawn(move || {
+                                let deadline = Instant::now() + Duration::from_secs(960);
+                                loop {
+                                    std::thread::sleep(Duration::from_secs(5));
+                                    let done = {
+                                        let g = arc.lock().unwrap_or_else(|p| p.into_inner());
+                                        !g.turn_in_progress.load(Ordering::Acquire)
+                                    };
+                                    if done || Instant::now() >= deadline {
+                                        kill_child_tree(pid);
+                                        break;
+                                    }
+                                }
+                            });
+                        }
+                    }
                 }
             }
         }

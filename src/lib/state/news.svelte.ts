@@ -10,7 +10,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 // One Claude Code release, as the backend returns it.
-export type NewsItem = {
+type NewsItem = {
   source: string;
   version: string;
   published_at: string | null; // ISO-8601 or null

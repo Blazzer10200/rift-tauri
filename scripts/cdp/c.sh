@@ -27,7 +27,7 @@
 #   bash scripts/cdp/c.sh shot-sel ".tabs-rail"          # clip to a selector
 #   bash scripts/cdp/c.sh shot-sel ".chat" jpeg 65
 #   bash scripts/cdp/c.sh batch '<json>'                 # raw batch body
-#   bash scripts/cdp/c.sh nav settings                   # jump to a workspace (chat/home/settings/ai-health/local-llm) + look
+#   bash scripts/cdp/c.sh nav settings                   # jump to a workspace (chat/home/settings/ai-health/models) + look
 #   bash scripts/cdp/c.sh tour chat home ai-health settings   # visit N surfaces + shot EACH in ONE round-trip (no nav→shot→nav)
 #   bash scripts/cdp/c.sh ready                          # block until app mounted + idle (no settle guessing)
 #   bash scripts/cdp/c.sh doctor                         # diagnose WHY CDP is down (wrapper/port/ELEVATION) + print the fix
@@ -432,13 +432,13 @@ case "$cmd" in
     # already lands correctly; 250 is a safe margin). For capturing SEVERAL
     # surfaces, use `tour` instead — one round-trip for all of them.
     dest="${1:-}"; lookSel="${2:-}"; settle="${3:-250}"
-    if [ -z "$dest" ]; then echo "usage: $0 nav <home|chat|settings|ai-health|local-llm> [lookSel] [settleMs]" >&2; exit 2; fi
+    if [ -z "$dest" ]; then echo "usage: $0 nav <home|chat|settings|ai-health|models> [lookSel] [settleMs]" >&2; exit 2; fi
     case "$dest" in
       home|workspace|projects) label="Workspace" ;;
       chat)                    label="Chat" ;;
       settings)                label="Settings" ;;
       ai-health|health|aihealth) label="AI Health" ;;
-      local-llm|local|llm)     label="Local LLM" ;;
+      models|local-llm|local|llm) label="Models" ;;
       *) label="$dest" ;;  # pass a literal aria-label through
     esac
     sel="[aria-label=\"$label\"]"
@@ -462,7 +462,7 @@ case "$cmd" in
     while [ $# -gt 0 ]; do
       case "$1" in --settle) settle="${2:-250}"; shift 2 ;; *) args+=("$1"); shift ;; esac
     done
-    [ ${#args[@]} -eq 0 ] && { echo "usage: $0 tour <ws1> <ws2> ... [--settle N]   (ws: home|chat|settings|ai-health|local-llm)" >&2; exit 2; }
+    [ ${#args[@]} -eq 0 ] && { echo "usage: $0 tour <ws1> <ws2> ... [--settle N]   (ws: home|chat|settings|ai-health|models)" >&2; exit 2; }
     # Build one batch: per surface -> click nav button, sleep settle, screenshot.
     labels=""
     ops="$(jq -nc '[]')"
@@ -472,7 +472,7 @@ case "$cmd" in
         chat) label="Chat" ;;
         settings) label="Settings" ;;
         ai-health|health|aihealth) label="AI Health" ;;
-        local-llm|local|llm) label="Local LLM" ;;
+        models|local-llm|local|llm) label="Models" ;;
         *) label="$ws" ;;
       esac
       labels="$labels $ws"

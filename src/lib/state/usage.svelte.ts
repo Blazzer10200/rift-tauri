@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 // Live plan limits (same data as Claude Code's /usage) — utilization is 0–100.
 export type LimitWindow = { utilization: number; resetsAt: string | null };
-export type ExtraUsage = {
+type ExtraUsage = {
   isEnabled: boolean; monthlyLimit: number | null; usedCredits: number | null;
   utilization: number | null; currency: string | null;
   // Minor-unit exponent: monthlyLimit/usedCredits are scaled integers (8000 @ dp=2 = $80).
@@ -33,12 +33,12 @@ export type AdviceImpact = "high" | "medium" | "low";
 // A concrete one-tap action a card can carry. The model emits a machine value;
 // the frontend re-validates it (see normalizeApply) before ever applying — the
 // model's value is a suggestion, not a trusted command.
-export type AdviceApplyKind = "effort" | "model" | "budget";
+type AdviceApplyKind = "effort" | "model" | "budget";
 export type AdviceApply = { kind: AdviceApplyKind; value: string | number; label: string };
-export type AdviceCard = {
+type AdviceCard = {
   title: string; detail: string; impact: AdviceImpact; apply: AdviceApply | null;
 };
-export type UsageAdvice = { summary: string; cards: AdviceCard[] };
+type UsageAdvice = { summary: string; cards: AdviceCard[] };
 
 /** Shared warn/hot zoning for limit bars (status bar + usage panel). Percent
  *  thresholds, overridden by the endpoint's own `severity` when it says things

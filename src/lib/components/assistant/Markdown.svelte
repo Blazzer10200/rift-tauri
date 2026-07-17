@@ -325,6 +325,10 @@
   }
   // Per-button copy-reset timers, so a re-click clears the in-flight one.
   const copyTimers = new Map<HTMLElement, number>();
+  $effect(() => () => {
+    for (const t of copyTimers.values()) clearTimeout(t);
+    copyTimers.clear();
+  });
   // Indices of collapsible code blocks the user expanded — survives innerHTML
   // re-injection so a re-render doesn't snap them back to collapsed (plain Set,
   // non-reactive: re-applying must not re-trigger the render effect).

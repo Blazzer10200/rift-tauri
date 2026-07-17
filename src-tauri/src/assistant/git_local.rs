@@ -321,7 +321,10 @@ pub(crate) fn drain_child_capped(mut child: std::process::Child) -> std::io::Res
     let stderr_handle =
         std::thread::spawn(move || drain(stderr_pipe.map(|p| Box::new(p) as Box<dyn Read + Send>)));
     let stdout = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
-    let stderr = stderr_handle.join().unwrap_or_default();
+    let stderr = stderr_handle.join().unwrap_or_else(|_| {
+        log::warn!("git_local: stderr drain thread panicked — stderr lost for this call");
+        Vec::new()
+    });
     let status = child.wait()?;
     Ok(CappedOut { stdout, stderr, code: status.code() })
 }

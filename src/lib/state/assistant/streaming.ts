@@ -123,7 +123,9 @@ function maybeBeginContinuation(tab: TabState, env: StreamEnvelope): boolean {
   const lastIdx = tab.messages.length - 1;
   const last = lastIdx >= 0 ? tab.messages[lastIdx] : null;
   const doneAgoMs = tab.lastTurnDoneAt !== null ? Date.now() - tab.lastTurnDoneAt : Infinity;
-  console.debug(`[assistant] continuation turn: ${Math.round(doneAgoMs / 100) / 10}s after done, last=${last?.role ?? "none"} → ${last?.role === "assistant" && doneAgoMs < CONTINUATION_MERGE_MS ? "merge" : "new bubble"}`);
+  if (import.meta.env.DEV) {
+    console.debug(`[assistant] continuation turn: ${Math.round(doneAgoMs / 100) / 10}s after done, last=${last?.role ?? "none"} → ${last?.role === "assistant" && doneAgoMs < CONTINUATION_MERGE_MS ? "merge" : "new bubble"}`);
+  }
   if (last && last.role === "assistant" && doneAgoMs < CONTINUATION_MERGE_MS) {
     tab.streamingMsgId = last.id;
     tab.streamingMsgIdx = lastIdx;
@@ -625,6 +627,9 @@ function appendToolInputDelta(tab: TabState, index: number, partialJson: string)
   // big Write instead of freezing until the envelope lands.
   tab.liveOutputChars += partialJson.length;
   refreshLiveTokens(tab);
+  // Past the scan cap the extraction window is frozen — fields can't change,
+  // so skip the per-delta rescan (big Write inputs stream thousands of deltas).
+  if (entry.json.length - partialJson.length >= FORM_SCAN_CAP) return;
   const fields = extractFormingFields(entry.json);
   const snap = JSON.stringify(fields);
   if (snap === entry.extracted) return;

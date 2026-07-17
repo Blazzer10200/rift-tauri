@@ -1131,7 +1131,10 @@ async fn resolve_spawn(
     // off the async hot path via spawn_blocking (the probe may shell out).
     let caps = tokio::task::spawn_blocking(super::cli_caps::CliCaps::active)
         .await
-        .unwrap_or_else(|_| super::cli_caps::CliCaps::from_version(None));
+        .unwrap_or_else(|e| {
+            log::warn!("cli_caps probe task failed ({e}) — falling back to conservative-old caps");
+            super::cli_caps::CliCaps::from_version(None)
+        });
     // Hard floor: below it the stream-json control handshake Rift relies on
     // doesn't exist, so a turn can't run. Surface an actionable update prompt
     // instead of a silent dead turn. A None version is "unsupported" too, but we
@@ -3076,12 +3079,14 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                     // RETURN (the loop parks for the next turn; stdin stays open).
                     if ty == Some("result") {
                         // Invariant probe: tool_result always precedes result in a
-                        // well-formed stream. If a CLI quirk ever violates it, the
-                        // stuck-open tool would vanish with no #88 stash — log loud.
+                        // well-formed stream. If a CLI quirk ever violates it, stash
+                        // the open tools so the next send carries the #88
+                        // reconciliation note (matches every other interrupted exit).
                         if tools_in_flight > 0 {
                             log::warn!(
                                 "warm_pool: result frame landed with {tools_in_flight} tool(s) still counted in flight, session={stream_sid}"
                             );
+                            stash_interrupted_tools(stream_sid, &inflight_tools);
                         }
                         let res_is_err = v.get("is_error").and_then(|b| b.as_bool()).unwrap_or(false)
                             || v.get("subtype").and_then(|s| s.as_str()).map(|s| s != "success").unwrap_or(false);

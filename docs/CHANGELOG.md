@@ -2,14 +2,12 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.118.0 — Models: bring other frontier models into Rift
+## v0.119.0 — Tabs you can see + a full-app tune-up
 
-- **New Models workspace** (the chip icon, ⌨5). Add Kimi, DeepSeek, GLM, OpenRouter, a local Ollama/LiteLLM endpoint, or any custom Anthropic-compatible URL as a chat brain. Claude stays the default; switch back any time.
-- **One-click presets.** Each preset chip prefills the endpoint and starting models — you just paste your API key. A **Detect** button lists what an endpoint serves (where supported), a **Test** button round-trips a one-line prompt before you switch your chats over, and free-text model names always work — no built-in catalog to go stale.
-- **Keys stay in your OS keychain**, never in a config file, and never reach the page — the UI only ever sees "a key is set."
-- **Switching brains starts a fresh chat** (the old one is saved in History) and shows a provider pill in the composer so you always know who's answering.
-- **Your existing local-LLM setup migrates automatically** — it appears as a "Local (Ollama/LiteLLM)" card with its endpoint, model, and key intact. The Ollama context-window check and one-click "Optimize for Rift" moved into that card.
-- Heads up: Rift still runs everything through the Claude CLI — a provider only swaps which model answers. How well a model handles edits and tool calls varies by model.
+- **Chat tabs are finally visible.** A quiet "N tabs" pill now sits in the titlebar whenever you have more than one chat tab open. Click it to see every tab — switch, close, or open a new one by mouse. (Before this, Ctrl+T made an invisible tab and Ctrl+Tab was the only way back.)
+- **GitHub chip sees release runs.** Tag-triggered CI runs (your releases) now show up in the branch popover instead of silently missing, and a failed run tells you exactly which job and step broke — the "ask Rift to fix it" prompt carries that detail too.
+- **Failures speak up.** Attaching an image that can't be read, or a dictation engine that fails to start, now shows a clear message instead of doing nothing.
+- **Under-the-hood hardening** from a full-app review: fixed a rare leak that could strand a ~450MB background helper after a mid-turn eviction, smoother streaming on very large tool calls, and a batch of internal dead code removed.
 
 ## Known issues
 - **While elevated, dragging files from Explorer into the window doesn't work** (Windows blocks lower→higher integrity drag-drop); the attach button / file picker still works fine.
