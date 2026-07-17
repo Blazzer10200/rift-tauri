@@ -1310,7 +1310,41 @@ export function onStreamDone(tab: TabState) {
   flushPendingText(tab);
   let envelopeFallback = false;
   let blankTurn = false;
-  if (tab.deltaCount === 0 && tab.envelopeTextBuffer.length > 0) {
+  // CLI no-op turn: resuming a session that was interrupted mid-turn (user
+  // Stop, killed child), the CLI injects its own "Continue from where you left
+  // off." user turn and — with nothing to add — answers a canned "No response
+  // requested.", usually stop-sequence-suppressed into a near-silent stream.
+  // That's a deliberate no-op, not a malformed stream: drop the dead bubble
+  // instead of surfacing the "Blank response" error (the "good response just
+  // blank" turn, Discord-Bot session 2026-07-17).
+  const NOOP_TEXT = "No response requested.";
+  const CLI_CONTINUE = "Continue from where you left off.";
+  const streamMsg = tab.streamingMsgId
+    ? tab.messages.find((m) => m.id === tab.streamingMsgId)
+    : null;
+  const cliNoop =
+    tab.deltaCount === 0 &&
+    !!streamMsg &&
+    streamMsg.blocks.length === 0 &&
+    (tab.envelopeTextBuffer.trim() === NOOP_TEXT ||
+      tab.rawLineLog.some((ln) => {
+        try {
+          const p = JSON.parse(ln) as {
+            type?: string;
+            message?: { content?: string | Array<{ type?: string; text?: string }> };
+          };
+          const c = p.message?.content;
+          const texts = typeof c === "string" ? [c] : (c ?? []).map((b) => (b.type === "text" ? (b.text ?? "") : ""));
+          if (p.type === "assistant") return texts.some((t) => t.trim() === NOOP_TEXT);
+          if (p.type === "user") return texts.some((t) => t.trim() === CLI_CONTINUE);
+          return false;
+        } catch {
+          return false;
+        }
+      }));
+  if (cliNoop) {
+    tab.messages = tab.messages.filter((m) => m.id !== tab.streamingMsgId);
+  } else if (tab.deltaCount === 0 && tab.envelopeTextBuffer.length > 0) {
     appendText(tab, tab.envelopeTextBuffer);
     envelopeFallback = true;
   } else if (tab.deltaCount === 0 && tab.envelopeTextBuffer.length === 0) {

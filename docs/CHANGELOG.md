@@ -2,10 +2,9 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.122.0 — Compacting says so
+## v0.123.0 — No more ghost turns
 
-- **/compact no longer hides behind "Working…".** While the CLI condenses your conversation, the turn now says what's actually happening: the header reads "Compacting conversation…", the footer shows "Summarizing older messages" with the live timer, and a short note explains that nothing is deleted — the full transcript stays put and the chat picks up right where it left off. The before → after context pill still lands when it finishes.
-- **No false alarms mid-compact.** Compaction is legitimately silent until the summary lands; the stall watchdog ("Waiting on the model…") no longer fires during that quiet stretch.
+- **Blank ghost turns are gone.** When you stop a turn and keep chatting, the Claude CLI quietly injects its own "Continue from where you left off." resume turn behind the scenes; with nothing to add, it answers itself with a suppressed "No response requested." — which Rift used to render as a dead blank bubble with a scary "Blank response" error. Rift now recognizes these no-op resume turns and drops them silently — you'll never see them.
 
 ## Known issues
 - **While elevated, dragging files from Explorer into the window doesn't work** (Windows blocks lower→higher integrity drag-drop); the attach button / file picker still works fine.

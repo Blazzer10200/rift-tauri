@@ -705,6 +705,37 @@ describe("playback — onDone finalization", () => {
     expect(tab.lastError).toMatch(/Blank response/);
   });
 
+  it("drops the CLI's no-op resume turn (No response requested.) without erroring", () => {
+    const tab = freshTab();
+    const rec = beginTurn(tab);
+    const id = tab.streamingMsgId!;
+    feed(tab, [
+      { type: "assistant", message: { content: [{ type: "text", text: "No response requested." }] } },
+      resultEnv(),
+    ]);
+    tab.onDone();
+    expect(tab.messages.find((m) => m.id === id)).toBeUndefined();
+    expect(tab.lastError).toBeNull();
+    expect(rec.blankTurn).toBe(false);
+    expect(rec.endKind).toBe("success");
+  });
+
+  it("drops a fully-suppressed no-op turn via the replayed CLI continue marker", () => {
+    const tab = freshTab();
+    const rec = beginTurn(tab);
+    const id = tab.streamingMsgId!;
+    // The canned reply was stop-sequence-suppressed — the stream only carries
+    // the CLI's own injected user turn plus the result frame.
+    feed(tab, [
+      { type: "user", message: { content: "Continue from where you left off." } },
+      resultEnv(),
+    ]);
+    tab.onDone();
+    expect(tab.messages.find((m) => m.id === id)).toBeUndefined();
+    expect(tab.lastError).toBeNull();
+    expect(rec.blankTurn).toBe(false);
+  });
+
   it("falls back to the assistant envelope text when no stream deltas arrived", () => {
     const tab = freshTab();
     const rec = beginTurn(tab);
