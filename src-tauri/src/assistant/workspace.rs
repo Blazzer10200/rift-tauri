@@ -46,8 +46,11 @@ pub fn assistant_set_root(path: String) -> Result<WorkspaceState, String> {
     }
     // canonicalize can fail on a junction-to-nowhere even when is_dir() passed;
     // only fall back to raw if raw itself still resolves, else fail loud.
+    // strip_unc drops the `\\?\` verbatim prefix std::fs::canonicalize emits on
+    // Windows — persisting it poisons recent_roots/current_root and the tab's
+    // workspaceRoot, breaking every lexical path compare downstream.
     let canonical = match std::fs::canonicalize(&raw) {
-        Ok(c) => c,
+        Ok(c) => super::strip_unc(&c),
         Err(_) if raw.is_dir() => raw,
         Err(e) => return Err(format!("could not resolve {path}: {e}")),
     };
@@ -76,8 +79,12 @@ pub fn assistant_set_tab_root(path: String) -> Result<String, String> {
     if !raw.is_dir() {
         return Err(format!("not a directory: {path}"));
     }
+    // strip_unc: same verbatim-prefix fix as assistant_set_root — the returned
+    // string is stored as the tab's workspaceRoot, so a `\\?\` prefix here is
+    // exactly what poisoned the persisted convos (breaks folder reconcile on
+    // tab switch, wedging the chat switcher).
     let canonical = match std::fs::canonicalize(&raw) {
-        Ok(c) => c,
+        Ok(c) => super::strip_unc(&c),
         Err(_) if raw.is_dir() => raw,
         Err(e) => return Err(format!("could not resolve {path}: {e}")),
     };
@@ -360,5 +367,21 @@ mod tests {
         let b = local_scratch_dir().expect("second resolve self-heals / no-ops");
         assert_eq!(a, b, "repeated resolution yields the same path");
         assert!(b.is_dir());
+    }
+
+    /// Regression: `assistant_set_tab_root` must NOT return the Windows verbatim
+    /// `\\?\` prefix. It did (raw `std::fs::canonicalize`), and the prefixed
+    /// string was persisted as the tab's workspaceRoot — poisoning ~300 saved
+    /// convos and wedging the chat switcher when the prefixed path failed to
+    /// reconcile against the plain active root. strip_unc now normalizes it.
+    #[test]
+    fn set_tab_root_strips_verbatim_prefix() {
+        let td = std::env::temp_dir();
+        let returned = assistant_set_tab_root(td.to_string_lossy().into_owned())
+            .expect("temp dir is a valid directory");
+        assert!(
+            !returned.starts_with(r"\\?\"),
+            "workspaceRoot must not carry the verbatim prefix, got {returned}"
+        );
     }
 }

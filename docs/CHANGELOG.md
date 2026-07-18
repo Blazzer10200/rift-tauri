@@ -2,6 +2,15 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.127.0 — Chat switcher unwedge (malformed folder-path fix)
+
+**Clicking certain chats did nothing, and every button after went dead until restart.** When you set a project folder, Rift stored its path in a low-level Windows form (with a `\\?\` prefix) that the rest of the app didn't recognize. Chats saved with that path couldn't be matched to their folder, so opening one stalled mid-switch and jammed the whole chat switcher — buttons stopped responding, and startup crawled while the app tripped over every affected chat.
+
+- **Root cause fixed** — folder paths are now normalized on the way in, so no new chat can pick up the bad prefix. Guarded by a regression test.
+- **Existing data healed** — all previously-affected chats and your recent-folders list were cleaned in place. No history was lost; transcripts are byte-for-byte intact.
+
+---
+
 ## v0.126.0 — Split-pane bulletproofing + composer menu overhaul
 
 Four owner-reported issues from real split-pane use, all fixed:
