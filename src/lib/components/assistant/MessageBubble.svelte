@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, AlertCircle, X, Ban } from "lucide-svelte";
+  import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, AlertCircle, X, Ban, CornerDownRight } from "lucide-svelte";
   import { onDestroy } from "svelte";
   import { fade, slide } from "svelte/transition";
   const reducedMotion =
@@ -414,6 +414,12 @@
         {:else if b.type === "tool"}
           <ToolChip tool={b} variant={isUser ? "card" : "timeline"} {caption} />
           <PermissionBar toolUseId={b.id} toolName={b.name} />
+        {:else if b.type === "steer"}
+          <div class="steer-note" title="Sent while Claude was working — read mid-turn">
+            <CornerDownRight size={11} />
+            <span class="steer-body">{b.text}</span>
+            <span class="steer-tag">mid-turn</span>
+          </div>
         {/if}
       {/snippet}
 
@@ -1057,6 +1063,42 @@
   }
   .tl-divider-label {
     padding-right: 2px;
+  }
+
+  /* Mid-turn steer marker — the user's interjection pinned at the point in the
+     timeline where Claude read it. Accent seam = user voice; otherwise quiet
+     island framing so it never competes with prose or a full user bubble. */
+  .steer-note {
+    display: flex; align-items: flex-start; gap: 7px;
+    margin: 6px 0;
+    padding: 6px 10px 7px;
+    border: 1px solid color-mix(in oklab, var(--accent) 20%, var(--border));
+    border-left: 2px solid color-mix(in oklab, var(--accent) 55%, var(--border));
+    border-radius: 8px;
+    background: color-mix(in oklab, var(--accent) 5%, transparent);
+  }
+  .steer-note :global(svg) {
+    flex: none;
+    margin-top: 3px;
+    color: color-mix(in oklab, var(--accent) 60%, var(--fg-muted));
+  }
+  .steer-body {
+    flex: 1;
+    min-width: 0;
+    color: var(--fg-2);
+    font-size: var(--fs-sm);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .steer-tag {
+    flex: none;
+    margin-top: 1px;
+    font-size: 9.5px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg-subtle);
   }
 
   @media (prefers-reduced-motion: reduce) {

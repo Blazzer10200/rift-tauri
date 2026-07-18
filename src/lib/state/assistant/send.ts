@@ -20,7 +20,7 @@ import type { AssistantStore, TabState } from "../assistant.svelte";
 import type { Block, ChatMessage, ModelSel, QueueItem, TurnRecord } from "./types";
 import { effortToFlag, fableAvailable, fastEligible, haikuAvailable, FABLE_SUNSET_MS } from "./helpers";
 import { mcpPanel } from "../mcp-panel.svelte";
-import { finalizeInflightBlocks } from "./streaming";
+import { appendSteerBlock, finalizeInflightBlocks, removeSteerBlock } from "./streaming";
 
 // One-shot per app session — the sunset warning shouldn't nag on every send.
 let fableSunsetNoticed = false;
@@ -70,10 +70,12 @@ export async function send(
     void store.refreshAuth();
     return;
   }
-  // Already streaming on this tab → queue instead of dropping. Snapshot the
-  // composer attachments NOW: send() clears them right after enqueue, so a
-  // queued message that didn't capture them would drain with its image/files
-  // silently dropped (the user's "I queued an image and it vanished" bug).
+  // Already streaming on this tab → STEER first (inject into the live turn so
+  // Claude reads it after the current tool call — same turn, same context),
+  // queue only as the fallback. Snapshot the composer attachments NOW: send()
+  // clears them right after, so a message that didn't capture them would
+  // deliver with its image/files silently dropped (the user's "I queued an
+  // image and it vanished" bug).
   if (liveTab?.streaming) {
     const images = payload ? payload.images : liveTab.attachments.map((a) => ({
       id: a.id, mime: a.mime, dataBase64: a.dataBase64, sizeBytes: a.sizeBytes,
@@ -87,15 +89,13 @@ export async function send(
       ...(images.length ? { images } : {}),
       ...(textFiles.length ? { textFiles } : {}),
     };
-    // A drained head that lost the post-stop gate race re-parks at the FRONT —
-    // it was next in line; appending would shuffle it behind newer messages.
-    liveTab.queue = opts?.requeueFront ? [item, ...liveTab.queue] : [...liveTab.queue, item];
     if (!payload) {
       // Clear the composer so the snapshotted attachments don't ALSO ride the
       // current turn / linger as a double-send. Mirrors send()'s own clear.
       liveTab.attachments = [];
       liveTab.textAttachments = [];
     }
+    await steerOrQueue(store, liveTab, item, opts?.requeueFront === true);
     return;
   }
   // Phase 2 (S72): the CLI owns conversation state now. First turn mints a
@@ -359,6 +359,73 @@ export async function send(
     });
   } catch (e) {
     tab.onError(String(e));
+  }
+}
+
+/** Steer-first delivery for a send that arrived while `tab` was streaming.
+ *  Renders the message as an inline steer marker in the live assistant bubble
+ *  (optimistic), then asks the backend to inject it into the in-flight turn's
+ *  stdin. Ok = Claude reads it after the current tool call (same turn). Any
+ *  failure — turn ended in the race window, dead child, idle session — removes
+ *  the marker and parks the message in the ordinary queue, so nothing is ever
+ *  silently lost. Wire prompt mirrors send(): fenced text-file blocks above
+ *  the typed text; images ride the attachments array. */
+async function steerOrQueue(
+  store: AssistantStore,
+  tab: TabState,
+  item: QueueItem,
+  requeueFront: boolean,
+) {
+  const enqueue = () => {
+    // A drained head that lost the post-stop gate race re-parks at the FRONT —
+    // it was next in line; appending would shuffle it behind newer messages.
+    tab.queue = requeueFront ? [item, ...tab.queue] : [...tab.queue, item];
+  };
+  const sid = tab.cliSessionId;
+  if (!sid) {
+    enqueue();
+    return;
+  }
+  const imgCount = item.images?.length ?? 0;
+  const fileCount = item.textFiles?.length ?? 0;
+  // Marker text mirrors the user-bubble fallback: attachment counts when the
+  // typed text is empty (paste-and-go steer).
+  const markerParts: string[] = [];
+  if (imgCount > 0) markerParts.push(`📎 ${imgCount} image${imgCount === 1 ? "" : "s"}`);
+  if (fileCount > 0) markerParts.push(`📄 ${fileCount} file${fileCount === 1 ? "" : "s"}`);
+  const markerText = item.text.length > 0 ? item.text : markerParts.join(" · ");
+  const blockId = appendSteerBlock(tab, markerText, imgCount, fileCount);
+  if (!blockId) {
+    // Nothing streaming to attach to (terminal raced us) — plain queue path.
+    enqueue();
+    return;
+  }
+  // Up-arrow recall should see steered prompts too — same dedupe as send().
+  if (item.text && tab.promptHistory[tab.promptHistory.length - 1] !== item.text) {
+    tab.promptHistory = [...tab.promptHistory, item.text].slice(-50);
+  }
+  const textBlocks = (item.textFiles ?? [])
+    .map((t) => `\`\`\`${t.name}\n${t.text}\n\`\`\``)
+    .join("\n\n");
+  const effectivePrompt = textBlocks
+    ? (item.text ? `${textBlocks}\n\n${item.text}` : textBlocks)
+    : item.text;
+  try {
+    await invoke("assistant_steer", {
+      sessionId: sid,
+      prompt: effectivePrompt,
+      attachments: imgCount > 0
+        ? item.images!.map((a) => ({ mime: a.mime, dataBase64: a.dataBase64 }))
+        : null,
+    });
+    store.telemetry.event("turn.steer", { convoId: sid, promptLen: item.text.length });
+  } catch {
+    // Not delivered — fall back to the queue as its own turn. If the turn
+    // ended while we waited, kick the drain so the message fires now instead
+    // of stranding until the next tab activation.
+    removeSteerBlock(tab, blockId);
+    enqueue();
+    if (!tab.streaming) drainQueue(store, tab);
   }
 }
 

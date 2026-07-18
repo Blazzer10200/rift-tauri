@@ -151,7 +151,8 @@ export function parseReadOutput(text: string): { start: number; code: string } |
 
 type StreamBlock =
   | { type: "say"; text: string }
-  | { type: "tool"; tool: StreamTool };
+  | { type: "tool"; tool: StreamTool }
+  | { type: "steer"; text: string; images: number; files: number };
 
 // What the turn actually did, so the footer can be honest:
 //  - "applied": at least one edit/create tool succeeded → green "Applied"
@@ -180,7 +181,8 @@ export type WorkSeg =
 
 export type Group =
   | { type: "work"; segs: WorkSeg[] }
-  | { type: "say"; text: string };
+  | { type: "say"; text: string }
+  | { type: "steer"; text: string; images: number; files: number };
 
 // ── helpers (mirror ToolChip.svelte) ────────────────────────────────────────
 // `basename` = canonical `leafName` (imported above) — was a local inline copy.
@@ -690,6 +692,10 @@ export function messageToTurn(m: ChatMessage): TurnModel {
       const tool = adaptTool(b);
       totalSecs += tool.durSecs;
       blocks.push({ type: "tool", tool });
+    } else if (b.type === "steer") {
+      // Mid-turn user injection — keep it at its timeline position so the
+      // transcript shows exactly where Claude read it.
+      blocks.push({ type: "steer", text: b.text, images: b.images ?? 0, files: b.files ?? 0 });
     }
     // boundary / image blocks are not part of a stream turn body
   }
@@ -795,6 +801,10 @@ export function groupBlocks(rawBlocks: StreamBlock[]): Group[] {
     if (b.type === "tool") {
       if (!work) work = [];
       work.push(b.tool);
+    } else if (b.type === "steer") {
+      // A steer splits the work run — it marks where the user's message landed.
+      if (work) { out.push({ type: "work", segs: segmentWork(work) }); work = null; }
+      out.push(b);
     } else {
       if (work) { out.push({ type: "work", segs: segmentWork(work) }); work = null; }
       out.push({ type: "say", text: b.text });

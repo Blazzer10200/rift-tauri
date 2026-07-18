@@ -115,6 +115,19 @@ pub(super) struct TurnCmd {
     pub turn_epoch: u64,
 }
 
+/// A mid-turn steering message: an extra `user` envelope injected into the
+/// LIVE turn's stdin (the CLI's agentic loop reads it after the current tool
+/// call resolves — same turn, same context; probe-verified on CLI 2.1.212).
+/// `done` acks exactly once: Ok(()) = written to the child's stdin; Err = the
+/// turn ended / child died first (the frontend re-queues the message as its
+/// own turn). A dropped-without-ack sender means the reader loop died — the
+/// awaiting command treats that as Err too.
+pub(super) struct SteerCmd {
+    /// Pre-built stream-json `user` envelope (text + optional images).
+    pub line: Vec<u8>,
+    pub done: oneshot::Sender<Result<(), String>>,
+}
+
 /// The spawn "signature": the set of per-turn inputs that, if changed, REQUIRE
 /// a fresh process because the warm child was started with the old value baked
 /// into its argv/env (can't change in-flight). A turn whose key differs from
@@ -193,6 +206,10 @@ pub(super) fn live_switchable(old: &SpawnKey, new: &SpawnKey) -> bool {
 pub(super) struct WarmChild {
     /// Send a turn into the reader loop. The loop owns the receiver + stdin.
     pub turn_tx: mpsc::UnboundedSender<TurnCmd>,
+    /// Inject a steering message into the LIVE turn (assistant_steer). The
+    /// reader loop drains this while streaming (writes to stdin) AND while
+    /// parked (acks Err — no turn to steer), so a cmd is never stranded.
+    pub steer_tx: mpsc::UnboundedSender<SteerCmd>,
     /// The spawn signature this child was started with. A turn whose key
     /// differs must drain + cold-respawn.
     pub key: SpawnKey,

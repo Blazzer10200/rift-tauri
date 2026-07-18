@@ -149,7 +149,22 @@ export type ModelSwitchBlock = {
   at: number;
 };
 
-export type Block = TextBlock | ToolBlock | ThinkingBlock | BoundaryBlock | ImageBlock | ModelSwitchBlock;
+/** Mid-turn steering message: sent while the tab was streaming and injected
+ *  into the LIVE turn's stdin (assistant_steer), so Claude reads it after the
+ *  current tool call — same turn, same context. Rendered inline inside the
+ *  assistant bubble at the exact point of delivery (chronological transcript).
+ *  Image/file attachments ride the wire envelope; the block keeps only count
+ *  markers so no base64 lands in the transcript twice. */
+export type SteerBlock = {
+  type: "steer";
+  id: string;
+  text: string;
+  at: number;
+  images?: number;
+  files?: number;
+};
+
+export type Block = TextBlock | ToolBlock | ThinkingBlock | BoundaryBlock | ImageBlock | ModelSwitchBlock | SteerBlock;
 
 /** A queued outbound message (sent while the tab was already streaming).
  *  `images`/`textFiles` snapshot the composer attachments at enqueue time so

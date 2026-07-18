@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // Mock Tauri IPC before importing the store. The playback harness never lets a
 // real turn reach the backend — it drives the stream accumulators directly — so
@@ -849,6 +849,15 @@ function readyStore(): { tab: Tab; convoId: string } {
 // where it flips streaming on (everything up to the awaited invoke is sync).
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
+// Mid-stream sends now steer-first (assistant_steer into the live turn) and only
+// queue when the backend refuses. The bare vi.fn() mock resolves everything, so
+// steering "succeeds" by default — queue-path tests must refuse it explicitly.
+const refuseSteer = () =>
+  mockInvoke.mockImplementation(((cmd: string) =>
+    cmd === "assistant_steer"
+      ? Promise.reject(new Error("no turn in progress"))
+      : Promise.resolve(undefined)) as never);
+
 describe("playback — send() turn initialization", () => {
   it("builds the user + assistant messages, the turn record, and invokes the backend", async () => {
     const { tab } = readyStore();
@@ -896,6 +905,9 @@ describe("playback — send() turn initialization", () => {
 });
 
 describe("playback — queue while streaming, drain on completion", () => {
+  beforeEach(refuseSteer);
+  afterEach(() => mockInvoke.mockReset());
+
   it("queues a second send mid-stream, then fires it when the first turn completes", async () => {
     const { tab } = readyStore();
     await assistant.send("first");
@@ -1000,7 +1012,58 @@ describe("playback — queue while streaming, drain on completion", () => {
   });
 });
 
+describe("playback — steer (mid-turn send injects into the live turn)", () => {
+  it("steers a mid-stream send: no queue, no new turn, marker in the streaming bubble", async () => {
+    const { tab } = readyStore();
+    await assistant.send("first");
+    expect(tab.streaming).toBe(true);
+    mockInvoke.mockClear();
+
+    await assistant.send("also include PINEAPPLE");
+
+    expect(mockInvoke).toHaveBeenCalledWith(
+      "assistant_steer",
+      expect.objectContaining({ sessionId: tab.cliSessionId, prompt: "also include PINEAPPLE" }),
+    );
+    expect(tab.queue).toHaveLength(0);
+    expect(assistant.telemetry.turns).toHaveLength(1); // absorbed into the live turn
+    const streamMsg = tab.messages[tab.messages.length - 1];
+    expect(streamMsg.role).toBe("assistant");
+    expect(streamMsg.blocks).toContainEqual(
+      expect.objectContaining({ type: "steer", text: "also include PINEAPPLE" }),
+    );
+  });
+
+  it("falls back to the queue when the backend refuses the steer, and removes the marker", async () => {
+    const { tab } = readyStore();
+    await assistant.send("first");
+    refuseSteer();
+
+    await assistant.send("too late");
+
+    expect(tab.queue.map((q) => q.text)).toEqual(["too late"]);
+    const streamMsg = tab.messages[tab.messages.length - 1];
+    expect(streamMsg.blocks.filter((b) => b.type === "steer")).toHaveLength(0);
+    mockInvoke.mockReset();
+  });
+
+  it("skips straight to the queue when the tab has no CLI session yet", async () => {
+    const { tab } = readyStore();
+    await assistant.send("first");
+    tab.cliSessionId = ""; // no session → nothing to steer into
+    mockInvoke.mockClear();
+
+    await assistant.send("second");
+
+    expect(tab.queue.map((q) => q.text)).toEqual(["second"]);
+    expect(mockInvoke).not.toHaveBeenCalledWith("assistant_steer", expect.anything());
+  });
+});
+
 describe("playback — queue (type while streaming → fires after the turn)", () => {
+  beforeEach(refuseSteer);
+  afterEach(() => mockInvoke.mockReset());
+
   it("drains the queue head as the next turn, in queue order", async () => {
     const { tab } = readyStore();
     await assistant.send("first");

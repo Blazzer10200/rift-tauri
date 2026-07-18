@@ -427,6 +427,50 @@ export function flushPendingText(tab: TabState) {
   }
 }
 
+/** Append a mid-turn steer marker inside the streaming assistant bubble at the
+ *  current stream position (send-while-streaming → assistant_steer). Flushes
+ *  the pacer first so the marker lands after everything already generated —
+ *  and appendText's tail-merge then starts a FRESH text block after it, so
+ *  post-steer prose never fuses into pre-steer prose. Returns the block id
+ *  (for removal if delivery fails) or null when nothing is streaming. */
+export function appendSteerBlock(tab: TabState, text: string, images: number, files: number): string | null {
+  if (!tab.streamingMsgId) return null;
+  flushPendingText(tab);
+  const id = crypto.randomUUID();
+  let applied = false;
+  mutateStreaming(tab, (m) => {
+    applied = true;
+    return {
+      ...m,
+      blocks: [
+        ...m.blocks,
+        {
+          type: "steer",
+          id,
+          text,
+          at: Date.now(),
+          ...(images > 0 ? { images } : {}),
+          ...(files > 0 ? { files } : {}),
+        },
+      ],
+    };
+  });
+  return applied ? id : null;
+}
+
+/** Remove a steer marker whose backend delivery failed (the message falls back
+ *  to the outbound queue). Scans all messages — the turn may have ended (and
+ *  streamingMsgId cleared) between optimistic render and the failure ack. */
+export function removeSteerBlock(tab: TabState, id: string) {
+  for (let i = 0; i < tab.messages.length; i++) {
+    const m = tab.messages[i];
+    if (m.blocks.some((b) => b.type === "steer" && b.id === id)) {
+      tab.messages[i] = { ...m, blocks: m.blocks.filter((b) => !(b.type === "steer" && b.id === id)) };
+      return;
+    }
+  }
+}
+
 function applyTodoWrite(tab: TabState, input: Record<string, unknown> | undefined): boolean {
   const raw = (input?.todos ?? []) as Array<{ content?: string; status?: string }>;
   // #178: content-keyed ids so a reorder/insert in the model's TodoWrite

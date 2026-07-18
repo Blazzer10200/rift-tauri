@@ -257,6 +257,7 @@ pub fn run() {
             commands::environment_check,
             commands::install_local_tool,
             commands::assistant_send,
+            commands::assistant_steer,
             commands::assistant_prewarm,
             commands::assistant_enhance_prompt,
             commands::assistant_enhance_cancel,

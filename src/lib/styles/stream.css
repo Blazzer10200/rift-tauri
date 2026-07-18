@@ -79,6 +79,43 @@
   line-height: 1.45;
   animation: blockIn var(--dur-base) var(--ease-page) both;
 }
+/* Mid-turn steer marker — the user's interjection pinned where Claude read it.
+   Accent seam = user voice; quiet island frame so it never competes with the
+   prose or reads as a second full user bubble. */
+.ssteer {
+  display: flex; align-items: flex-start; gap: 7px;
+  margin: var(--stream-gap) 0;
+  padding: 6px 10px 7px;
+  border: 1px solid color-mix(in oklch, var(--accent) 20%, var(--border));
+  border-left: 2px solid color-mix(in oklch, var(--accent) 55%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--accent) 5%, transparent);
+  animation: blockIn var(--dur-base) var(--ease-page) both;
+}
+.ssteer svg {
+  flex: none;
+  margin-top: 3px;
+  color: color-mix(in oklch, var(--accent) 60%, var(--fg-muted));
+}
+.ssteer-text {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-2);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ssteer-tag {
+  flex: none;
+  margin-top: 1px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+
 .snarr-beat::before {
   content: "";
   position: absolute; left: 2px; top: 0.62em;

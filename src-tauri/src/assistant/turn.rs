@@ -337,6 +337,54 @@ const SHELL_ROWS_EVENT: &str = "assistant://shell-rows";
 /// success (the command's return value is the authoritative final text).
 pub(super) const ENHANCE_STREAM_EVENT: &str = "assistant://enhance-stream";
 
+/// Steer a LIVE turn: inject an additional `user` envelope into the in-flight
+/// CLI turn over its open stdin. The CLI's agentic loop absorbs it into the
+/// SAME turn after the current tool call resolves (probe-verified, 2.1.212 —
+/// one `result`, steered instruction honored). Ok(()) = the reader loop wrote
+/// the envelope to the child; any Err (idle session, turn ended in the race
+/// window, dead child) means NOT delivered — the frontend falls back to
+/// queueing the message as its own turn, so a steer is never silently lost.
+#[tauri::command]
+pub async fn assistant_steer(
+    session_id: String,
+    prompt: String,
+    attachments: Option<Vec<AssistantAttachment>>,
+) -> Result<(), String> {
+    if !is_valid_session_id(&session_id) {
+        return Err(format!("invalid session_id: must be a UUID (got {} chars)", session_id.len()));
+    }
+    let attachments = attachments.unwrap_or_default();
+    validate_attachments(&attachments)?;
+    if prompt.trim().is_empty() && attachments.is_empty() {
+        return Err("empty steer message".into());
+    }
+    let line = build_user_envelope(&prompt, &attachments)?;
+    let Some(arc) = warm_pool::get(&session_id) else {
+        return Err("no live turn for this session".into());
+    };
+    // Clone what we need under the lock, then release before any await
+    // (std Mutex must not be held across awaits; mirrors dispatch_turn M5/M7).
+    let (steer_tx, in_progress) = {
+        let g = match arc.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+        (g.steer_tx.clone(), g.turn_in_progress.clone())
+    };
+    if !in_progress.load(std::sync::atomic::Ordering::Acquire) {
+        return Err("no turn in progress".into());
+    }
+    let (done_tx, done_rx) = oneshot::channel();
+    steer_tx
+        .send(warm_pool::SteerCmd { line, done: done_tx })
+        .map_err(|_| "reader loop gone — no live turn".to_string())?;
+    // No timeout here on purpose: the ack is a fast stdin write, but the reader
+    // can legitimately be parked on a can_use_tool round-trip (human time)
+    // first. Every exit path acks-or-drops the oneshot, so this can't hang
+    // past the child's life; a dropped sender (loop died) reads as Err.
+    match done_rx.await {
+        Ok(res) => res,
+        Err(_) => Err("the turn ended before the message was delivered".into()),
+    }
+}
+
 /// Resolve a pending `mcp__rift__ask_user` request. The frontend invokes this
 /// from `ToolChip.svelte` when the user picks an answer. The `answer` payload
 /// shape is decided by the chip — the bridge layer just passes it through to
@@ -2036,12 +2084,14 @@ async fn cold_spawn_and_run(
 
     // Per-child turn channel: dispatch_turn sends a TurnCmd; the loop runs it.
     let (turn_tx, turn_rx) = mpsc::unbounded_channel::<warm_pool::TurnCmd>();
+    let (steer_tx, steer_rx) = mpsc::unbounded_channel::<warm_pool::SteerCmd>();
     let turn_in_progress = Arc::new(std::sync::atomic::AtomicBool::new(true)); // first turn starts in-progress
 
     // Register the warm child BEFORE spawning the loop so a racing second send
     // (or the evictor) sees a coherent entry.
     let warm = Arc::new(std::sync::Mutex::new(warm_pool::WarmChild {
         turn_tx: turn_tx.clone(),
+        steer_tx,
         key,
         turn_in_progress: turn_in_progress.clone(),
         last_used: std::time::Instant::now(),
@@ -2098,6 +2148,7 @@ async fn cold_spawn_and_run(
         stdout,
         stderr,
         turn_rx,
+        steer_rx,
         first_turn: Some(first_turn),
         session_id: session_id.clone(),
         turn_pid,
@@ -2196,12 +2247,14 @@ fn prewarm_spawn(
     };
 
     let (turn_tx, turn_rx) = mpsc::unbounded_channel::<warm_pool::TurnCmd>();
+    let (steer_tx, steer_rx) = mpsc::unbounded_channel::<warm_pool::SteerCmd>();
     // A spare is IDLE from birth: no turn in progress. (A racing real send sees
     // turn_in_progress=false and reuses it via dispatch_turn's warm path.)
     let turn_in_progress = Arc::new(std::sync::atomic::AtomicBool::new(false));
 
     let warm = Arc::new(std::sync::Mutex::new(warm_pool::WarmChild {
         turn_tx: turn_tx.clone(),
+        steer_tx,
         key,
         turn_in_progress: turn_in_progress.clone(),
         last_used: std::time::Instant::now(),
@@ -2231,6 +2284,7 @@ fn prewarm_spawn(
         stdout,
         stderr,
         turn_rx,
+        steer_rx,
         first_turn: None,
         session_id: session_id.clone(),
         turn_pid,
@@ -2257,6 +2311,9 @@ struct RunCtx {
     stdout: tokio::process::ChildStdout,
     stderr: tokio::process::ChildStderr,
     turn_rx: mpsc::UnboundedReceiver<warm_pool::TurnCmd>,
+    /// Mid-turn steering messages (assistant_steer). Drained by the streaming
+    /// select (write to stdin) and the park select (ack Err — no live turn).
+    steer_rx: mpsc::UnboundedReceiver<warm_pool::SteerCmd>,
     /// The first turn to run, or `None` for a #67 pre-warm spare: the loop runs
     /// the init handshake then parks on `turn_rx` for the real first turn.
     first_turn: Option<warm_pool::TurnCmd>,
@@ -2300,6 +2357,7 @@ async fn run_turn_loop(mut ctx: RunCtx) {
     // is our own spawned `claude` CLI; its NDJSON lines are model-bounded.
     let mut lines = BufReader::new(ctx.stdout).lines();
     let mut turn_rx = ctx.turn_rx;
+    let mut steer_rx = ctx.steer_rx;
 
     // Persistent stderr reader (M2): on the warm path `child.wait()` never
     // returns non-zero mid-life, so stderr can't be drained at exit. Keep a
@@ -2437,6 +2495,17 @@ async fn run_turn_loop(mut ctx: RunCtx) {
                             // DeadOnReuse retry.
                             _ => break 'park None,
                         },
+                        // A steer raced the turn's end (assistant_steer read
+                        // turn_in_progress=true, the result landed before the
+                        // cmd reached us). Never deliver it into the NEXT
+                        // turn's stdin — ack Err so the frontend re-queues the
+                        // message as its own turn instead.
+                        steer = steer_rx.recv() => {
+                            if let Some(cmd) = steer {
+                                let _ = cmd.done.send(Err("the turn ended before the message was delivered".into()));
+                            }
+                            continue 'park;
+                        },
                         cmd = turn_rx.recv() => break 'park cmd,
                     }
                 };
@@ -2495,6 +2564,7 @@ async fn run_turn_loop(mut ctx: RunCtx) {
         let outcome = stream_one_turn(StreamCtx {
             stdin: &mut stdin,
             lines: &mut lines,
+            steer_rx: &mut steer_rx,
             app_out: &app_out,
             win_label: &win_label,
             stream_sid: &stream_sid,
@@ -2678,6 +2748,9 @@ enum TurnOutcome {
 struct StreamCtx<'a> {
     stdin: &'a mut tokio::process::ChildStdin,
     lines: &'a mut tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+    /// Mid-turn steering messages (assistant_steer) — served by a select arm in
+    /// the streaming loop: write the envelope to stdin, ack the oneshot.
+    steer_rx: &'a mut mpsc::UnboundedReceiver<warm_pool::SteerCmd>,
     app_out: &'a AppHandle,
     win_label: &'a str,
     stream_sid: &'a str,
@@ -2880,7 +2953,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
     use tokio::io::AsyncWriteExt;
 
     let StreamCtx {
-        stdin, lines, app_out, win_label, stream_sid, model, effort, thinking_on,
+        stdin, lines, steer_rx, app_out, win_label, stream_sid, model, effort, thinking_on,
         user_line, preread, handshake_done, bg_evict, turn_start, turn_epoch,
     } = ctx;
     let mut preread = preread;
@@ -3027,6 +3100,32 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
             );
             stash_interrupted_tools(stream_sid, &inflight_tools);
             return TurnOutcome::Stalled;
+        }
+        // Mid-turn steering (assistant_steer): write the extra user envelope
+        // onto the live turn's stdin — the CLI absorbs it into THIS turn after
+        // the current tool call resolves (probe-verified, CLI 2.1.212). Gated
+        // on user_sent so a first-turn steer can't jump ahead of the init
+        // handshake + this turn's own user envelope (stdin is ordered; the cmd
+        // just waits in the channel those few hundred ms). A write failure =
+        // dead child — ack Err (frontend re-queues) and let the read arm's EOF
+        // handling own the teardown path.
+        steer = steer_rx.recv(), if user_sent => {
+            if let Some(cmd) = steer {
+                let wrote = match stdin.write_all(&cmd.line).await {
+                    Ok(()) => stdin.flush().await.map_err(|e| format!("flush steer: {e}")),
+                    Err(e) => Err(format!("write steer: {e}")),
+                };
+                match wrote {
+                    Ok(()) => {
+                        log::info!("warm_pool: steer delivered mid-turn ({} bytes) session={stream_sid}", cmd.line.len());
+                        let _ = cmd.done.send(Ok(()));
+                    }
+                    Err(e) => {
+                        log::warn!("warm_pool: steer failed (session={stream_sid}): {e}");
+                        let _ = cmd.done.send(Err(e));
+                    }
+                }
+            }
         }
         read = next_line_or_preread(lines, &mut preread) => {
             // Any line (even an ignored control frame) = the child is alive and

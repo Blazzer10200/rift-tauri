@@ -1,6 +1,6 @@
 <script lang="ts">
   import "$lib/styles/stream.css";
-  import { Check, Copy, RotateCcw, AlertTriangle, Zap } from "lucide-svelte";
+  import { Check, Copy, RotateCcw, AlertTriangle, Zap, CornerDownRight } from "lucide-svelte";
   import Markdown from "../Markdown.svelte";
   import StreamThinking from "./StreamThinking.svelte";
   import WorkLine from "./WorkLine.svelte";
@@ -293,6 +293,12 @@
           <Markdown text={g.text} {streaming} />
         </div>
       {/if}
+    {:else if g.type === "steer"}
+      <div class="ssteer" use:tooltip={"Sent while Claude was working — read mid-turn"}>
+        <CornerDownRight size={11} />
+        <span class="ssteer-text">{g.text}</span>
+        <span class="ssteer-tag">mid-turn</span>
+      </div>
     {:else}
       {#each g.segs as seg, si (si)}
         {#if seg.seg === "rich"}
