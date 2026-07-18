@@ -44,6 +44,13 @@
   const blocks = $derived((spawn?.blocks ?? []) as Block[]);
   const toolSteps = $derived(blocks.filter((b) => b.type === "tool"));
 
+  // One-line preview for the agent's own prose/thinking in the expanded
+  // timeline — flattened + capped so a chatty agent stays a peek, not a wall.
+  function snip(s: string, n = 220): string {
+    const t = s.trim().replace(/\s+/g, " ");
+    return t.length > n ? t.slice(0, n) + "…" : t;
+  }
+
   // Live "now-doing" headline while running — shared with ActivityHud via
   // agentNowLine (toolCaption.ts) so the card and the pinned periscope can't
   // drift. This is what made the retired dock read as alive, not a spinner.
@@ -69,7 +76,7 @@
   });
 
   const result = $derived(tool.result);
-  const expandable = $derived(toolSteps.length > 0 || !!result);
+  const expandable = $derived(blocks.length > 0 || !!result);
   let open = $state(false);
 </script>
 
@@ -100,7 +107,7 @@
 
   {#if open && expandable}
     <div class="sa-body">
-      {#each toolSteps as b, i (i)}
+      {#each blocks as b, i (i)}
         {#if b.type === "tool"}
           {@const Ic = toolIcon(b.name)}
           <div class="sa-step" data-status={b.status}>
@@ -115,6 +122,16 @@
               <span class="sa-step-dur">{fmtDur(b.durationMs / 1000)}</span>
             {/if}
           </div>
+          {#if b.status === "error" && b.result}
+            <div class="sa-step-err">{snip(b.result, 160)}</div>
+          {/if}
+        {:else if b.type === "thinking" && b.text.trim()}
+          <div class="sa-think">
+            <span class="sa-step-ic" aria-hidden="true"><Brain size={12} /></span>
+            <span>{snip(b.text)}</span>
+          </div>
+        {:else if b.type === "text" && b.text.trim()}
+          <div class="sa-prose">{snip(b.text)}</div>
         {/if}
       {/each}
       {#if result}
@@ -200,12 +217,32 @@
   .sa-dots span:nth-child(3) { animation-delay: 0.3s; }
   @keyframes sa-dot { 0%, 60%, 100% { opacity: 0.3; } 30% { opacity: 1; } }
 
-  /* Expanded step trail — the sub-agent's own tool steps, captioned + iconed. */
+  /* Expanded timeline — the sub-agent's own thinking/prose/tool steps in
+     arrival order. Scroll-clamped so a chatty agent stays a card, not a wall
+     (bell-portal maxH precedent). */
   .sa-body {
     display: flex; flex-direction: column; gap: 5px;
     padding: 7px 12px 10px;
     border-top: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
     animation: workOpen 0.3s var(--ease-page) both;
+    max-height: 300px; overflow-y: auto;
+  }
+  /* Agent thinking — dim italic whisper; prose — quiet narration. Both stay
+     visually below the tool rows (fg-muted) so steps keep primacy. */
+  .sa-think {
+    display: flex; align-items: flex-start; gap: 8px;
+    font-size: 11px; color: var(--fg-faint); font-style: italic; line-height: 1.45;
+    padding-left: 19px; /* align under step labels (stat glyph width + gap) */
+  }
+  .sa-think > span:last-child { min-width: 0; }
+  .sa-prose {
+    font-size: 11.5px; color: var(--fg-muted); line-height: 1.45;
+    padding-left: 19px;
+  }
+  .sa-step-err {
+    font-size: 10.5px; color: var(--danger); font-family: var(--font-mono);
+    line-height: 1.4; padding-left: 39px; /* indent under the step label */
+    overflow-wrap: anywhere;
   }
   .sa-step { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--fg-muted); }
   .sa-step-stat { display: inline-flex; flex: none; color: var(--fg-faint); }

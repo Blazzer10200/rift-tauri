@@ -55,7 +55,8 @@
     const maxLeft = window.innerWidth - pw - 8;
     if (left > maxLeft) left = maxLeft;
     if (left < 8) left = 8;
-    pos = { top, left };
+    // Only touch state on real movement — this runs every frame (follow loop).
+    if (pos.top !== top || pos.left !== left) pos = { top, left };
   }
   function onDocMousedown(ev: MouseEvent) {
     if (anchor && ev.target instanceof Node && anchor.contains(ev.target)) return;
@@ -66,19 +67,19 @@
     window.addEventListener("mousedown", onDocMousedown);
     return () => window.removeEventListener("mousedown", onDocMousedown);
   });
+  // Anchor-follow loop: the composer FLIPs between hero-center and docked
+  // postures WHILE this panel is open (engage/disengage animation) — a
+  // position() computed once mid-flight strands the panel floating mid-screen.
+  // Following the live anchor rect every frame keeps it glued to the pill
+  // through any layout motion (FLIP, resize, panel height changes); position()
+  // no-ops state when nothing moved.
   $effect(() => {
-    // re-position when the panel's height changes (ladder show/hide on model
-    // swap, provider-mode row-count changes)
-    const _m = assistant.effectiveModel; void _m;
-    const _p = providers.selectedModel; void _p;
     void tick().then(position);
-  });
-  // Mount-once resize listener — kept separate so a reposition-dep change above
-  // doesn't tear down and re-register it every toggle.
-  $effect(() => {
-    const onResize = () => position();
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    let raf = requestAnimationFrame(function follow() {
+      position();
+      raf = requestAnimationFrame(follow);
+    });
+    return () => cancelAnimationFrame(raf);
   });
 
   const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === assistant.effectiveModel));
@@ -129,6 +130,29 @@
     if (s.effort === null) assistant.setThinkingDial(false);
     else assistant.setThinkingDial(true, s.effort);
   }
+  // ── Range-slider mechanics (owner call 2026-07-18) — a real fill+knob
+  // slider, draggable anywhere on the rail. Still snaps to the discrete
+  // DIAL_STOPS gears: the wire has no continuum, so pointer x maps to the
+  // NEAREST stop and the knob glides stop-to-stop, never between.
+  let trackEl = $state<HTMLDivElement | null>(null);
+  let sliderDragging = $state(false);
+  const effortPct = $derived(effortStops.length > 1 ? (effortIdx / (effortStops.length - 1)) * 100 : 0);
+  function idxFromPointer(ev: PointerEvent): number {
+    if (!trackEl) return effortIdx;
+    const r = trackEl.getBoundingClientRect();
+    const f = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width));
+    return Math.round(f * (effortStops.length - 1));
+  }
+  function onRailPointerDown(ev: PointerEvent) {
+    ev.preventDefault(); // keep composer focus — a blur here unmounts the menu
+    sliderDragging = true;
+    (ev.currentTarget as HTMLElement).setPointerCapture(ev.pointerId);
+    setEffortByIdx(idxFromPointer(ev));
+  }
+  function onRailPointerMove(ev: PointerEvent) {
+    if (sliderDragging) setEffortByIdx(idxFromPointer(ev));
+  }
+  function onRailPointerUp() { sliderDragging = false; }
   // Plain-language caption per rung — short, concrete, no marketing voice.
   // Fable is special-cased: its thinking is ALWAYS ON server-side (an explicit
   // disable 400s), so no rung "responds immediately" there.
@@ -180,12 +204,19 @@
   const legacyOpen = $derived(activeIsLegacy || cursorIsLegacy || legacyHover || legacyPinned);
 </script>
 
+<!-- Root-level mousedown preventDefault: a click on panel padding/dividers/
+     captions must NOT steal focus from the composer textarea — the blur would
+     disengage the hero posture (composer flies back up, this toolbar unmounts,
+     menu vanishes). Buttons inside already preventDefault; this catches the
+     misclick zones between them. -->
 <div
   class="rift-menu settings-menu"
   role="menu"
+  tabindex="-1"
   bind:this={menuEl}
   use:portal
   style="top: {pos.top}px; left: {pos.left}px;"
+  onmousedown={(e) => e.preventDefault()}
 >
   {#snippet modelRow(m: ModelOpt)}
     {@const sel = m.id === assistant.effectiveModel}
@@ -341,13 +372,10 @@
 
   {#if dialApplies}
     <div class="rift-menu-divider"></div>
-    <!-- Effort — segmented rung cards, one per CLI `--effort` flag. A slider
-         implied a continuum that doesn't exist; these are four discrete gears.
-         Rung 0 replies immediately (thinking off on the wire); higher rungs
-         reason before replying at their depth. Every rung is live. -->
-    <!-- Effort — Faster↔Smarter stop-rail (Claude-Desktop flow): N discrete
-         stops on a track, active = accent thumb, current label in the head.
-         Same DIAL_STOPS mechanics: click a stop / ←→ arrows; nothing continuous. -->
+    <!-- Effort — Faster↔Smarter RANGE SLIDER (owner call 2026-07-18): groove +
+         accent fill + draggable knob. Same DIAL_STOPS wire mechanics as ever:
+         N discrete gears, pointer x snaps to the nearest stop — rung 0 replies
+         immediately (thinking off on the wire); nothing continuous. -->
     <div class="effort-head">
       <span class="effort-head-k">Effort</span>
       <span class="effort-head-cur">{currentEffort.label}</span>
@@ -362,13 +390,20 @@
     <div
       class="effort-rail"
       class:active={activeKind === "effort"}
+      class:dragging={sliderDragging}
       role="radiogroup"
       tabindex="0"
       aria-label="Effort"
       onkeydown={(e) => { if (e.key === 'ArrowRight') { e.preventDefault(); setEffortByIdx(effortIdx + 1); } else if (e.key === 'ArrowLeft') { e.preventDefault(); setEffortByIdx(effortIdx - 1); } }}
+      onpointerdown={onRailPointerDown}
+      onpointermove={onRailPointerMove}
+      onpointerup={onRailPointerUp}
+      onpointercancel={onRailPointerUp}
     >
       <span class="er-end">Faster</span>
-      <div class="er-track">
+      <div class="er-track" bind:this={trackEl}>
+        <div class="er-groove" aria-hidden="true"></div>
+        <div class="er-fill" style="width: {effortPct}%" aria-hidden="true"></div>
         {#each effortStops as s, i (s.id)}
           <button
             type="button"
@@ -378,11 +413,12 @@
             class="er-stop"
             class:on={i === effortIdx}
             class:passed={i < effortIdx}
-            class:xhigh={s.id === "xhigh"}
+            style="left: {effortStops.length > 1 ? (i / (effortStops.length - 1)) * 100 : 0}%"
             use:tooltip={`${s.label} — ${s.hint.split(" — ")[1] ?? s.hint}`}
             onmousedown={(ev) => { ev.preventDefault(); setEffortByIdx(i); }}
           ><i></i></button>
         {/each}
+        <div class="er-knob" class:xhigh={currentEffort.id === "xhigh"} style="left: {effortPct}%" aria-hidden="true"></div>
       </div>
       <span class="er-end">Smarter</span>
     </div>
@@ -735,40 +771,67 @@
   :global(.settings-menu .er-end) {
     flex: none; font-size: 10px; color: var(--fg-faint); line-height: 1; user-select: none;
   }
-  /* Claude-Desktop slider anatomy: a recessed 6px groove, faint dots inside,
-     and a light round knob on the active stop. Still N discrete stops. */
+  /* Range-slider anatomy (owner call 2026-07-18): recessed groove, accent
+     fill gliding to the active stop, light round knob riding the fill edge.
+     Still N discrete gears — drag / tick clicks / ←→ all snap to DIAL_STOPS. */
   :global(.settings-menu .er-track) {
     position: relative; flex: 1;
-    display: flex; align-items: center; justify-content: space-between;
-    height: 20px; padding: 0 2px;
+    height: 22px; margin: 0 7px; /* half-knob breathing room at 0% / 100% */
+    cursor: pointer; touch-action: none;
   }
-  :global(.settings-menu .er-track)::before {
-    content: ""; position: absolute; left: 0; right: 0; top: 50%;
+  :global(.settings-menu .er-groove) {
+    position: absolute; left: 0; right: 0; top: 50%;
     height: 6px; transform: translateY(-50%);
     background: color-mix(in oklab, var(--fg) 6%, transparent);
     border: 1px solid color-mix(in oklab, var(--fg) 7%, transparent);
     border-radius: 999px;
   }
+  :global(.settings-menu .er-fill) {
+    position: absolute; left: 0; top: 50%;
+    height: 6px; transform: translateY(-50%);
+    border-radius: 999px;
+    background: linear-gradient(90deg,
+      color-mix(in oklab, var(--accent) 55%, transparent),
+      var(--accent));
+    box-shadow: 0 0 8px color-mix(in oklab, var(--accent) 22%, transparent);
+    transition: width var(--dur-base) var(--ease-page);
+  }
   :global(.settings-menu .er-stop) {
-    position: relative; z-index: 1;
-    width: 16px; height: 20px; padding: 0;
+    position: absolute; top: 0; z-index: 1;
+    width: 16px; height: 22px; padding: 0; margin: 0;
+    transform: translateX(-50%);
     display: grid; place-items: center;
     background: transparent; border: 0; cursor: pointer;
   }
   :global(.settings-menu .er-stop i) {
     width: 3.5px; height: 3.5px; border-radius: 50%;
     background: color-mix(in oklab, var(--fg) 30%, transparent);
-    transition: background var(--dur-fast), width var(--dur-base) var(--ease-page),
-                height var(--dur-base) var(--ease-page), box-shadow var(--dur-fast);
+    transition: background var(--dur-fast), opacity var(--dur-fast);
   }
   :global(.settings-menu .er-stop:hover i) { background: color-mix(in oklab, var(--fg) 55%, transparent); }
-  :global(.settings-menu .er-stop.on i) {
-    width: 14px; height: 14px;
+  /* Ticks the fill has swallowed knock out dark against the accent bar. */
+  :global(.settings-menu .er-stop.passed i) { background: color-mix(in oklab, var(--bg) 55%, transparent); }
+  /* The active tick hides under the knob. */
+  :global(.settings-menu .er-stop.on i) { opacity: 0; }
+  :global(.settings-menu .er-knob) {
+    position: absolute; top: 50%; z-index: 2;
+    width: 14px; height: 14px; border-radius: 50%;
+    transform: translate(-50%, -50%);
     background: var(--fg);
+    border: 1px solid color-mix(in oklab, var(--bg) 30%, transparent);
     box-shadow: 0 1px 4px oklch(0 0 0 / 0.5), inset 0 -1px 0 oklch(0 0 0 / 0.14);
+    pointer-events: none;
+    transition: left var(--dur-base) var(--ease-page), transform var(--dur-fast) ease;
+  }
+  :global(.settings-menu .effort-rail:hover .er-knob) { transform: translate(-50%, -50%) scale(1.08); }
+  /* Dragging: fill + knob track the pointer raw (no easing lag), knob pops. */
+  :global(.settings-menu .effort-rail.dragging .er-fill) { transition: none; }
+  :global(.settings-menu .effort-rail.dragging .er-knob) {
+    transition: transform var(--dur-fast) ease;
+    transform: translate(-50%, -50%) scale(1.15);
   }
   /* X-High lit = the hot gear — a whisper of accent flags its cost/autonomy. */
-  :global(.settings-menu .er-stop.xhigh.on i) {
+  :global(.settings-menu .er-knob.xhigh) {
     box-shadow: 0 1px 4px oklch(0 0 0 / 0.5),
                 0 0 10px color-mix(in oklab, var(--accent) 45%, transparent);
   }
@@ -784,6 +847,8 @@
   @media (prefers-reduced-motion: reduce) {
     :global(.settings-menu),
     :global(.settings-menu .pop-ck),
+    :global(.settings-menu .er-fill),
+    :global(.settings-menu .er-knob),
     :global(.settings-menu .er-stop i) { animation: none; transition: none; }
   }
 </style>

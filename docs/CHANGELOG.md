@@ -2,14 +2,16 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.125.0 — Stuck-turn + post-crash recovery fixes
+## v0.126.0 — Split-pane bulletproofing + composer menu overhaul
 
-Field-reported on a second user's machine (2026-07-17): a turn wedged forever on "Calling 0 questions", Stop wouldn't kill it, and after force-closing the app their chat wouldn't reopen and sidebar clicks stopped registering. All four are fixed:
+Four owner-reported issues from real split-pane use, all fixed:
 
-- **Turns can no longer wedge on a hidden question.** In Bypass mode the model could invoke the CLI's built-in AskUserQuestion tool, which has no surface in Rift's headless CLI — the turn stalled forever waiting for an answer nobody could give. The tool is now stripped from the model's toolset in every permission mode (`--disallowed-tools`); Rift's own in-chat question card keeps working as before.
-- **Stop now reaches a wedged warm child.** If the per-turn PID entry was already cleared, Stop silently "succeeded" while the warm CLI child kept running. It now falls back to the warm pool's PID and kills the real process tree.
-- **A chat that fails to open says so — and can be retried.** A failed conversation load used to be swallowed (error routed to an invisible surface) and left the app pointing at a tab that no longer existed, which silently blocked every further click on that chat. Failures now show a toast with the real error, clear the stale pointer, and refresh the sidebar list; clicking again genuinely retries the load.
-- **Sidebar clicks can't dead-end anymore.** The "already open" fast path now verifies the tab actually exists before short-circuiting — the root cause of "switching chats does nothing" after a crash. This also fixes the workspace switcher showing a stale project while the pane ran elsewhere (both fell out of the same broken tab state).
+- **The mic only lights up in the pane that's actually dictating.** The speech-to-text engine is a single shared service, but every pane's mic button mirrored its state — both ends lit up no matter where you were talking. Buttons now check ownership: the dictating pane animates, the other pane's mic disables with a "Dictating in another pane" hint, and Ctrl+D / hold-Space can't hijack a recording that belongs to the other side.
+- **A pane's model can no longer leak in from the other pane.** With two panes on two projects, clearing a chat (or opening a new tab, or setting a pane's folder) could silently adopt the sibling pane's model. Panes with their own folder now pin their model explicitly — clear/new-tab preserve it, per-pane folder picks stop rewriting the shared defaults, and model/effort choices save against the pane's folder instead of the global one.
+- **The model menu stays glued to the composer.** The settings and permission menus positioned themselves once, so the composer's center↔docked flight animation could strand them floating mid-screen. They now follow their anchor every frame. Misclicking the menu's padding also no longer steals focus — which was what sent the composer flying back up and closed the menu mid-adjustment.
+- **New effort range slider.** The effort control is now a real range slider — recessed groove, accent fill, draggable knob — replacing the tick-only rail. Drag anywhere, click a tick, or use arrow keys; it still snaps to the same four discrete gears (leftmost = thinking off).
+
+Plus: expanding a running agent card now shows a live mini-transcript — the agent's own thinking, narration, and tool errors in arrival order, scroll-clamped so a chatty agent stays a card, not a wall.
 
 ## Known issues
 - **While elevated, dragging files from Explorer into the window doesn't work** (Windows blocks lower→higher integrity drag-drop); the attach button / file picker still works fine.

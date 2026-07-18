@@ -886,6 +886,9 @@
   const dictating = $derived(
     stt.targetTabId === tabId && (stt.recording || stt.transcribing),
   );
+  // Split-pane: the stt store is a global singleton — every mic-button visual
+  // must gate on ownership or ALL panes light up while one dictates.
+  const sttMine = $derived(stt.targetTabId === tabId);
   // Rotate the idle hint only while the idle ghost is actually showing.
   const idleGhost = $derived(!dictating && !hero && draft.length === 0 && !streaming && attachments.length === 0);
   $effect(() => {
@@ -910,6 +913,9 @@
   );
   async function toggleMic() {
     if (micBusy) return;
+    // Another pane owns the live dictation — don't hijack or stop it from here
+    // (covers Ctrl+D / hold-Space too; the button itself is also disabled).
+    if ((stt.recording || stt.transcribing) && !sttMine) return;
     micBusy = true;
     try {
       await stt.init();
@@ -1506,15 +1512,16 @@
           {#if micAvailable}
           <button
             class="cbtn ic micbtn"
-            class:recording={stt.recording}
-            class:transcribing={stt.transcribing}
+            class:recording={sttMine && stt.recording}
+            class:transcribing={sttMine && stt.transcribing}
             class:mic-error={!!stt.lastError && !stt.recording && !stt.transcribing}
             type="button"
             onclick={toggleMic}
-            disabled={micBusy || stt.transcribing}
+            disabled={micBusy || stt.transcribing || (stt.recording && !sttMine)}
             use:tooltip={
-              stt.recording ? "Stop recording" :
-              stt.transcribing ? "Transcribing…" :
+              sttMine && stt.recording ? "Stop recording" :
+              sttMine && stt.transcribing ? "Transcribing…" :
+              stt.recording || stt.transcribing ? "Dictating in another pane" :
               stt.currentState === "loading_model" ? "Loading model…" :
               stt.lastError ? stt.lastError :
               stt.config.engine === "parakeet"
@@ -1523,11 +1530,11 @@
                   ? "Dictate — Whisper (local) · Ctrl+D or hold Space"
                   : "Dictate — Web Speech · Ctrl+D or hold Space"
             }
-            aria-label={stt.recording ? "Stop recording" : stt.lastError ? `Start recording (last error: ${stt.lastError})` : "Start recording"}
+            aria-label={sttMine && stt.recording ? "Stop recording" : stt.lastError ? `Start recording (last error: ${stt.lastError})` : "Start recording"}
           >
-            {#if stt.transcribing || (micBusy && !stt.recording)}
+            {#if (sttMine && stt.transcribing) || (micBusy && !stt.recording)}
               <Loader2 size={15} class="mic-spin" />
-            {:else if stt.recording}
+            {:else if sttMine && stt.recording}
               <span
                 class="mic-wave"
                 class:silent={stt.level < 0.04}

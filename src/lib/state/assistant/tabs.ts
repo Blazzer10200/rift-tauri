@@ -12,8 +12,9 @@
 // state for removed tabs), #145 (debounced save snapshots the tab), #149
 // (racy openTab during delete), #181 (persistTabs in finally on restore).
 
-import { MAX_PANES, type PaneState } from "./types";
+import { MAX_PANES, type ModelSel, type PaneState } from "./types";
 import type { TextAttachment } from "./attachments";
+import { loadModel } from "./helpers";
 import { tabsStorageKey } from "./persistence";
 import { notify } from "../toast.svelte";
 import { shell } from "../shell.svelte";
@@ -529,7 +530,12 @@ export async function newTab(host: TabsHost) {
   // Fresh TabState — empty messages, no streaming. cliSessionId defaults
   // to the convoId; first send() finalizes if needed.
   host.ensureTab(id, id);
-  (host.tabs.get(id) as { workspaceRoot: string | null }).workspaceRoot = inheritRoot;
+  const minted = host.tabs.get(id) as { workspaceRoot: string | null; modelOverride: ModelSel | null };
+  minted.workspaceRoot = inheritRoot;
+  // A rooted tab pins its model to the FOLDER's choice — never the shared
+  // global default, which tracks whatever pane is globally focused and would
+  // leak a sibling pane's model into this one (split-pane fix, cont.339).
+  if (inheritRoot) minted.modelOverride = loadModel(inheritRoot);
   host.telemetry.event("tab.new", { convoId: id });
   host.currentConvoId = id;
   // #143: per-tab fields default to null/<id> on the freshly minted
@@ -560,10 +566,13 @@ export async function clearConversation(host: TabsHost) {
     await newTab(host);
     return;
   }
-  // Preserve THIS pane's folder across the clear — clearing a pane must keep
-  // its own project dir, never inherit another pane's switched folder.
-  const keepRoot =
-    (host.tabs.get(oldId) as { workspaceRoot?: string | null } | undefined)?.workspaceRoot ?? null;
+  // Preserve THIS pane's folder AND model across the clear — clearing a pane
+  // must keep its own project dir + model, never inherit another pane's.
+  const oldTab = host.tabs.get(oldId) as
+    | { workspaceRoot?: string | null; modelOverride?: ModelSel | null }
+    | undefined;
+  const keepRoot = oldTab?.workspaceRoot ?? null;
+  const keepModel = oldTab?.modelOverride ?? (keepRoot ? loadModel(keepRoot) : null);
   // Stop any in-flight stream on this tab before swapping it out.
   if (host.streaming) await host.stop();
   // Flush the outgoing convo so it persists to History (nondestructive).
@@ -582,7 +591,9 @@ export async function clearConversation(host: TabsHost) {
   // Fresh empty TabState; cliSessionId seeded to newId. #143: don't write the
   // per-tab fields via store setters afterwards or ensureTab's seed is lost.
   host.ensureTab(newId, newId);
-  (host.tabs.get(newId) as { workspaceRoot: string | null }).workspaceRoot = keepRoot;
+  const cleared = host.tabs.get(newId) as { workspaceRoot: string | null; modelOverride: ModelSel | null };
+  cleared.workspaceRoot = keepRoot;
+  cleared.modelOverride = keepModel;
   host.telemetry.event("tab.clear", { from: oldId, to: newId });
   host.currentConvoId = newId;
   host.queue = [];

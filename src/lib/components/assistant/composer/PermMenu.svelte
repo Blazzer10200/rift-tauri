@@ -39,7 +39,8 @@
     const maxLeft = window.innerWidth - pw - 8;
     if (left > maxLeft) left = maxLeft;
     if (left < 8) left = 8;
-    permPos = { top, left };
+    // Only touch state on real movement — this runs every frame (follow loop).
+    if (permPos.top !== top || permPos.left !== left) permPos = { top, left };
   }
   function onDocPermMousedown(ev: MouseEvent) {
     if (anchor && ev.target instanceof Node && anchor.contains(ev.target)) return;
@@ -50,21 +51,31 @@
     window.addEventListener("mousedown", onDocPermMousedown);
     return () => window.removeEventListener("mousedown", onDocPermMousedown);
   });
+  // Anchor-follow loop (LOCKSTEP w/ SettingsMenu): keeps the panel glued to
+  // the pill through the composer's hero↔docked FLIP instead of stranding it
+  // at a mid-animation position. positionPerm() no-ops state when still.
   $effect(() => {
     void tick().then(positionPerm);
-    const onResize = () => positionPerm();
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    let raf = requestAnimationFrame(function follow() {
+      positionPerm();
+      raf = requestAnimationFrame(follow);
+    });
+    return () => cancelAnimationFrame(raf);
   });
   const toneClass = (t: PermTone) => (t ? `tone-${t}` : "");
 </script>
 
+<!-- Root mousedown preventDefault (LOCKSTEP w/ SettingsMenu): padding
+     misclicks must not blur the composer — blur disengages the hero posture
+     and unmounts this menu mid-interaction. -->
 <div
   class="perm-menu pop"
   role="menu"
+  tabindex="-1"
   bind:this={permPop}
   use:portal
   style="top: {permPos.top}px; left: {permPos.left}px;"
+  onmousedown={(e) => e.preventDefault()}
 >
   <div class="pop-label">Permission mode</div>
   {#each MODE_OPTIONS as m, i (m.id)}

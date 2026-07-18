@@ -8,7 +8,8 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import type { WorkspaceState } from "./types";
+import type { ModelSel, WorkspaceState } from "./types";
+import { loadModel } from "./helpers";
 import { notify } from "../toast.svelte";
 import { prettyPath } from "../../components/shell/tabsbar/helpers";
 
@@ -39,14 +40,18 @@ type WorkspaceHost = {
   // to the focused tab's effective root, and the per-pane picker writes the
   // chosen folder onto the tab rather than the global default.
   activeRoot: string | null;
-  tabFor: (id: string | null) => { workspaceRoot: string | null } | null;
+  tabFor: (id: string | null) => { workspaceRoot: string | null; modelOverride: ModelSel | null } | null;
   activeTab: { workspaceRoot: string | null } | null;
 };
 
-export async function refreshWorkspace(host: WorkspaceHost): Promise<void> {
+/** `applyPrefs: false` refreshes the workspace snapshot (recents MRU etc.)
+ *  WITHOUT re-applying the global root's model/effort pins — per-tab ops use
+ *  it so touching one pane can never rewrite the shared defaults from the
+ *  globally-focused root (split-pane model-leak fix, cont.339). */
+export async function refreshWorkspace(host: WorkspaceHost, opts: { applyPrefs?: boolean } = {}): Promise<void> {
   try {
     host.workspace = await invoke<WorkspaceState>("assistant_get_workspace");
-    host.applyWorkspacePrefs();
+    if (opts.applyPrefs !== false) host.applyWorkspacePrefs();
   } catch (e) {
     console.warn("assistant_get_workspace failed", e);
   }
@@ -101,9 +106,14 @@ export async function setTabRoot(host: WorkspaceHost, tabId: string | null, path
   try {
     const canonical = await invoke<string>("assistant_set_tab_root", { path });
     tab.workspaceRoot = canonical;
+    // Pin this chat's model to the chosen folder's saved choice (unless the
+    // user already picked one for this chat) so the pane stops tracking the
+    // shared global default — that's how a sibling pane's model leaked in.
+    tab.modelOverride ??= loadModel(canonical);
     // Pull the updated recent-roots MRU into the global workspace state so the
-    // picker still offers it; current_root is intentionally left unchanged.
-    await refreshWorkspace(host);
+    // picker still offers it; current_root is intentionally left unchanged —
+    // and so are the global model/effort prefs (applyPrefs: false).
+    await refreshWorkspace(host, { applyPrefs: false });
     host.workspaceFiles = [];
     host.workspaceBranch = null;
     notify.info("Pane folder set", { detail: prettyPath(canonical), mono: true });

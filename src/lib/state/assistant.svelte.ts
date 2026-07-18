@@ -1000,9 +1000,12 @@ class AssistantStore {
     // when a tab override diverges from the global default would silently
     // rewrite the global default on a same-model reselect.
     if (prev === v) return;
-    this.model = v;
+    // Split-pane: a pick inside a pane with its OWN folder scopes to that chat
+    // + that folder's pin. Only a pick in a pane following the global root
+    // moves the shared new-chat default (cont.339 model-leak fix).
+    if (!this.activeTab?.workspaceRoot) this.model = v;
     if (this.activeTab) this.activeTab.modelOverride = v;
-    saveModel(v, this.workspace.current);
+    saveModel(v, this.activeRoot);
     // Coerce effort down to the new model's ceiling so the slider and the tier
     // we actually send can't exceed what the model honors (e.g. Opus@ultra →
     // Sonnet caps at smart). No-op when already in range. setThinkingEffort
@@ -1017,7 +1020,7 @@ class AssistantStore {
     if (this.thinkingEffort === v) return;
     const prev = this.thinkingEffort;
     this.thinkingEffort = v;
-    saveEffort(v, this.workspace.current);
+    saveEffort(v, this.activeRoot);
     const midConvo = (this.activeTab?.messages.length ?? 0) > 0;
     this.telemetry.event("effort.change", { from: prev, to: v, midConvo });
     if (midConvo) this.cacheBustHint("effort");
@@ -1036,10 +1039,10 @@ class AssistantStore {
     const prevEnabled = this.thinkingEnabled;
     const prevEffort = this.thinkingEffort;
     this.thinkingEnabled = enabled;
-    saveThinkingEnabled(enabled, this.workspace.current);
+    saveThinkingEnabled(enabled, this.activeRoot);
     if (nextEffort !== prevEffort) {
       this.thinkingEffort = nextEffort;
-      saveEffort(nextEffort, this.workspace.current);
+      saveEffort(nextEffort, this.activeRoot);
     }
     const midConvo = (this.activeTab?.messages.length ?? 0) > 0;
     this.telemetry.event("thinking.dial", {
