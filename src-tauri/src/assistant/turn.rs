@@ -1448,6 +1448,13 @@ async fn resolve_spawn(
         // Pure conversational mode.
         cmd.arg("--tools").arg("");
     }
+    // AskUserQuestion must be REMOVED from the model's toolset, not just left
+    // off the allowlist: bypassPermissions auto-approves unlisted tools, so in
+    // Bypass the model could still call it and wedge the headless child forever
+    // ("Calling 0 questions", reported live 2026-07-17). --disallowed-tools
+    // strips it in every permission mode; the model falls back to
+    // mcp__rift__ask_user / plain text as designed.
+    cmd.arg("--disallowed-tools").arg("AskUserQuestion");
 
     if use_api_key {
         // `--bare`: ignore OAuth/keychain, use ANTHROPIC_API_KEY strictly. The
@@ -3659,7 +3666,12 @@ pub async fn assistant_stop(
     if perms_cancelled > 0 {
         log::info!("assistant_stop: cancelled {perms_cancelled} pending permission ask(s) for {session_id}");
     }
-    let Some(pid) = get_session_pid(&session_id) else {
+    // Fallback: SESSION_PIDS is per-turn (cleared on reap/eviction), but a WARM
+    // child can outlive that entry and sit wedged (the documented "PID already
+    // cleared" hole above). Without this, Stop on a wedged warm child silently
+    // returned Ok having killed nothing — reported live 2026-07-17 ("stop
+    // button don't even work").
+    let Some(pid) = get_session_pid(&session_id).or_else(|| warm_pool::pid_of(&session_id)) else {
         return Ok(());
     };
     // RR9: compare-and-clear on the PID we observed (mirrors the turn loop at

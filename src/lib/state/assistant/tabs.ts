@@ -394,7 +394,11 @@ export async function openTab(host: TabsHost, id: string) {
   if (!host.openTabs.includes(id)) {
     host.openTabs = [...host.openTabs, id];
   }
-  if (host.currentConvoId === id) {
+  // Already-open fast path ONLY when the TabState actually exists: after a
+  // failed loadConversation drops the half-built tab, a restored/stale
+  // currentConvoId still pointing here would otherwise turn every retry click
+  // into a silent no-op (the post-force-close "can't reopen my chat" wedge).
+  if (host.currentConvoId === id && host.tabs.get(id)) {
     host.persistTabs();
     return;
   }

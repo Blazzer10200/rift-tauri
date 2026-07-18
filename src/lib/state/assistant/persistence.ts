@@ -13,6 +13,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { notify } from "../toast.svelte";
 import { asModelSel } from "./helpers";
 import type {
   ChatMessage,
@@ -436,11 +437,23 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     // marker work on reopened chats too.
     tab.pinnedModel = asModelSel(convo.model);
   } catch (e) {
+    // Toast, not just lastError: the ambient lastError setter routes to the
+    // PREVIOUS activeTab (or storeLastError, which only WorkspacePage reads),
+    // so a sidebar-click load failure was architecturally invisible — clicks
+    // read as "nothing happened" (post-force-close field report 2026-07-17).
+    notify.danger("Couldn't open this chat", { detail: String(e) });
     host.lastError = `Failed to load conversation: ${String(e)}`;
     // ensureTab already registered a half-built TabState under `id`; evict it so
     // the fast-path above doesn't surface the broken tab forever (a retry would
     // otherwise short-circuit before the disk load). Next open re-attempts.
     host.dropTab(id);
+    // If the failed convo is still the active pointer, clear it — otherwise
+    // openTab's already-open guard short-circuits every retry into a permanent
+    // silent no-op (and activeRoot falls back to the stale global workspace).
+    if (host.currentConvoId === id) host.currentConvoId = null;
+    // Re-list so a row whose file the backend list now drops (unreadable /
+    // corrupt) disappears instead of inviting more dead clicks.
+    void refreshConversations(host).catch(() => { /* list refresh is best-effort here */ });
   }
 }
 
