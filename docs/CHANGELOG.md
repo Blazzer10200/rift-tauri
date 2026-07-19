@@ -2,15 +2,12 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.128.0 — Claude-only: provider system removed + path-bug class fully swept
+## v0.129.0 — Verified close-out: no leftovers in Task Manager
 
-**Rift is now a pure Claude app.** The multi-provider system (local LLMs, Kimi, DeepSeek, custom endpoints) is gone — the Models page, provider picker, and all related plumbing were removed. Less surface, faster startup, one brain. Old chats and settings that referenced a provider open normally as Claude chats.
+**Closing Rift now proves it cleaned up after itself.** Hitting ✕ shows a quick confirm, then a live checklist: stop any running AI turns → shut down background helpers → **verify nothing is left running** — a real process-tree scan that only reports "all clear" at an actual count of zero. If something survives, it's force-closed and the count is shown honestly; if the scan is unavailable, it says so instead of faking a green. Kills are strictly scoped to processes Rift owns — your own terminal `claude` sessions and other apps are never touched. (Press ✕ twice if the confirm ever gets stuck — the second one always closes.)
 
-- **"No project" pill fixed** — chats could show "No project" even with a folder set. Same low-level `\\?\` path-prefix bug class as v0.127.0's switcher fix; this release sweeps it everywhere (saving, loading, matching, display). Existing data self-heals on launch. Regression-tested on both the app and engine sides.
-- **Startup cleanup** — a chat deleted or corrupted on disk no longer leaves a dead pane pointer behind; panes are scrubbed at boot.
-- **Smoother chat loading** — opening a conversation no longer blocks the app's async runtime while reading from disk.
-
-Note: if you previously added a provider API key, Windows may still hold it in Credential Manager — remove it there if you want it gone.
+- **CLI updates now finish the job** — after updating the Claude CLI in-app, the banner offers "Restart Rift to finish". Rift locks onto the CLI's location at startup, so the restart is what guarantees every conversation runs on the new version. The restart does the same verified cleanup first.
+- **Path-bug hardening** — the `\\?\` prefix fix class (v0.127–128) now runs through one shared chokepoint instead of per-site patches, so it can't silently regress in future code.
 
 ## Known issues
 - **While elevated, dragging files from Explorer into the window doesn't work** (Windows blocks lower→higher integrity drag-drop); the attach button / file picker still works fine.
