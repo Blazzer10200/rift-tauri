@@ -1226,7 +1226,7 @@ class AssistantStore {
       // for plain Claude/Anthropic turns. The CLI silently retries 429/5xx
       // for minutes, so without this a dead-air stall reads as "Rift hung".
       // Backend throttles re-emits (10s / status change).
-      await listen<{ status: number; provider: string | null }>(
+      await listen<{ status: number }>(
         "assistant://provider-upstream",
         (e) => {
           // Only meaningful while some tab is actually streaming.

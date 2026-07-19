@@ -131,8 +131,7 @@ pub(super) fn patterns_for_root(cfg: &AssistantConfig, root: &std::path::Path) -
     // Canonical-on-write means a plain equality check suffices, but a moved/
     // deleted root won't canonicalize at lookup time — compare the stored
     // (already-canonical) value directly against the resolved turn root.
-    let target = std::fs::canonicalize(root)
-        .map(|p| super::strip_unc(&p))
+    let target = super::canonicalize_clean(root)
         .unwrap_or_else(|_| root.to_path_buf());
     for p in &cfg.projects {
         if p.root == target {
@@ -174,15 +173,7 @@ pub fn assistant_save_project(
     if !raw.is_dir() {
         return Err(format!("not a directory: {}", raw.display()));
     }
-    // canonicalize can fail on a junction-to-nowhere even when is_dir() passed;
-    // only fall back to raw if raw itself still resolves, else fail loud.
-    let canonical = match std::fs::canonicalize(&raw) {
-        Ok(c) => c,
-        Err(_) if raw.is_dir() => raw,
-        Err(e) => return Err(format!("could not resolve {}: {e}", raw.display())),
-    };
-    // v0.127.0 bug class: the verbatim `\\?\` prefix must never be persisted.
-    let canonical = super::strip_unc(&canonical);
+    let canonical = super::canonicalize_root(raw)?;
     let include = sanitize_patterns(include)?;
     let exclude = sanitize_patterns(exclude)?;
 
@@ -315,7 +306,7 @@ mod tests {
             projects: vec![Project {
                 id: "p1".into(),
                 name: "here".into(),
-                root: crate::assistant::strip_unc(&std::fs::canonicalize(&here).unwrap()),
+                root: crate::assistant::canonicalize_clean(&here).unwrap(),
                 include: vec!["src/**".into()],
                 exclude: vec![],
                 created_at: 0,

@@ -146,6 +146,24 @@ pub(super) fn strip_unc(p: &std::path::Path) -> PathBuf {
     p.to_path_buf()
 }
 
+/// THE way to canonicalize a path that gets persisted, compared, or displayed:
+/// `std::fs::canonicalize` + `strip_unc` in one step. Call this instead of raw
+/// canonicalize or the `\\?\` bug class (v0.127.0/v0.128.0) creeps back in.
+pub(super) fn canonicalize_clean(p: &std::path::Path) -> std::io::Result<PathBuf> {
+    std::fs::canonicalize(p).map(|c| strip_unc(&c))
+}
+
+/// `canonicalize_clean` + the root-persisting fallback: canonicalize can fail on
+/// a junction-to-nowhere even when `is_dir()` passed — fall back to `raw` if it
+/// still resolves as a dir, else fail loud.
+pub(super) fn canonicalize_root(raw: PathBuf) -> Result<PathBuf, String> {
+    match std::fs::canonicalize(&raw) {
+        Ok(c) => Ok(strip_unc(&c)),
+        Err(_) if raw.is_dir() => Ok(raw),
+        Err(e) => Err(format!("could not resolve {}: {e}", raw.display())),
+    }
+}
+
 /// Read a reqwest response body with a hard byte `cap`. A hostile/misbehaving
 /// endpoint could stream an unbounded body into `.text()` and OOM us; this stops
 /// at `cap` bytes (the surplus is dropped at the chunk boundary). Decodes lossily

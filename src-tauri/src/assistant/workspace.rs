@@ -44,16 +44,7 @@ pub fn assistant_set_root(path: String) -> Result<WorkspaceState, String> {
     if !raw.is_dir() {
         return Err(format!("not a directory: {path}"));
     }
-    // canonicalize can fail on a junction-to-nowhere even when is_dir() passed;
-    // only fall back to raw if raw itself still resolves, else fail loud.
-    // strip_unc drops the `\\?\` verbatim prefix std::fs::canonicalize emits on
-    // Windows — persisting it poisons recent_roots/current_root and the tab's
-    // workspaceRoot, breaking every lexical path compare downstream.
-    let canonical = match std::fs::canonicalize(&raw) {
-        Ok(c) => super::strip_unc(&c),
-        Err(_) if raw.is_dir() => raw,
-        Err(e) => return Err(format!("could not resolve {path}: {e}")),
-    };
+    let canonical = super::canonicalize_root(raw)?;
     let mut cfg = load_config();
     // Dedup: pull existing entry then re-insert at the front.
     cfg.recent_roots.retain(|p| p != &canonical);
@@ -79,15 +70,7 @@ pub fn assistant_set_tab_root(path: String) -> Result<String, String> {
     if !raw.is_dir() {
         return Err(format!("not a directory: {path}"));
     }
-    // strip_unc: same verbatim-prefix fix as assistant_set_root — the returned
-    // string is stored as the tab's workspaceRoot, so a `\\?\` prefix here is
-    // exactly what poisoned the persisted convos (breaks folder reconcile on
-    // tab switch, wedging the chat switcher).
-    let canonical = match std::fs::canonicalize(&raw) {
-        Ok(c) => super::strip_unc(&c),
-        Err(_) if raw.is_dir() => raw,
-        Err(e) => return Err(format!("could not resolve {path}: {e}")),
-    };
+    let canonical = super::canonicalize_root(raw)?;
     let mut cfg = load_config();
     cfg.recent_roots.retain(|p| p != &canonical);
     cfg.recent_roots.insert(0, canonical.clone());
@@ -106,7 +89,7 @@ pub fn assistant_remove_recent_root(path: String) -> Result<WorkspaceState, Stri
     // the target the same way so removal matches regardless of case/trailing-slash/
     // `..` drift; keep the raw form too so a now-deleted dir (canonicalize fails)
     // is still removable.
-    let canonical = std::fs::canonicalize(&raw).ok().map(|p| super::strip_unc(&p));
+    let canonical = super::canonicalize_clean(&raw).ok();
     let mut cfg = load_config();
     cfg.recent_roots
         .retain(|p| p != &raw && Some(p) != canonical.as_ref());

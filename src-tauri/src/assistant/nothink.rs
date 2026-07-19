@@ -34,9 +34,9 @@ static SHIM: OnceLock<u16> = OnceLock::new();
 /// Rift actually sees the response status.
 static APP: OnceLock<tauri::AppHandle> = OnceLock::new();
 
-/// (status, provider-route, last-emit) — re-emit only on change or after 10s so
-/// a retry storm doesn't flood the frontend with toasts.
-static LAST_STATUS: Mutex<Option<(u16, String, Instant)>> = Mutex::new(None);
+/// (status, last-emit) — re-emit only on change or after 10s so a retry storm
+/// doesn't flood the frontend with toasts.
+static LAST_STATUS: Mutex<Option<(u16, Instant)>> = Mutex::new(None);
 
 /// Consecutive retryable failures (408/429/5xx) per upstream route. The CLI
 /// retries these SILENTLY up to ~10 times (minutes of dead air on a saturated
@@ -52,12 +52,12 @@ fn emit_upstream_status(status: u16, target: &str) {
     let Some(app) = APP.get() else { return };
     {
         let mut last = LAST_STATUS.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some((s, r, at)) = last.as_ref() {
-            if *s == status && r.is_empty() && at.elapsed() < Duration::from_secs(10) {
+        if let Some((s, at)) = last.as_ref() {
+            if *s == status && at.elapsed() < Duration::from_secs(10) {
                 return;
             }
         }
-        *last = Some((status, String::new(), Instant::now()));
+        *last = Some((status, Instant::now()));
     }
     log::warn!("nothink shim: upstream {status} on /v1/messages ({target})");
     let _ = app.emit(
