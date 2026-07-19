@@ -34,5 +34,7 @@ export function prettyPath(p: string): string {
  *  "is this the same folder?" key — was duplicated as
  *  `projects.svelte.ts::projectRootKey` and `ConversationList::rootKey`. */
 export function rootKey(r: string | null | undefined): string {
-  return (r ?? "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  // `//?/` = the Windows verbatim prefix (`\\?\` post-normalize) — records
+  // persisted by pre-v0.127.0 builds carry it; same folder, so strip it.
+  return (r ?? "").replace(/\\/g, "/").replace(/^\/\/\?\//, "").replace(/\/+$/, "").toLowerCase();
 }

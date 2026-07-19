@@ -5,7 +5,6 @@
 
 import { toast } from "../toast.svelte";
 import { workspace } from "../workspace.svelte";
-import { providers } from "../providers.svelte";
 import type { AssistantStore, TabState } from "../assistant.svelte";
 import type { TurnRecord } from "./types";
 
@@ -169,7 +168,7 @@ export function checkTurnHealth(store: AssistantStore, tab: TabState, convoId: s
         severity: "warn",
         title: "Slow turn start",
         detail: egregious
-          ? `${Math.round(deadWait / 1000)}s before first output — the ${rec.provider ? `${providers.byId(rec.provider)?.name ?? rec.provider} endpoint` : "Anthropic API"} was slow (or silently retrying), not Rift.`
+          ? `${Math.round(deadWait / 1000)}s before first output — the Anthropic API was slow (or silently retrying), not Rift.`
           : `${Math.round(deadWait / 1000)}s passed before first output (spawn/prefill/queue stall).`,
       });
     }

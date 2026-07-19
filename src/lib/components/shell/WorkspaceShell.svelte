@@ -74,7 +74,7 @@
     position: relative;
     overflow: hidden;
     /* transparent so the app dot-field shows through; per-workspace roots
-       (assistant transparent, settings/local-llm opaque) decide their own fill. */
+       (assistant transparent, settings opaque) decide their own fill. */
     background: transparent;
   }
   .ws-page {

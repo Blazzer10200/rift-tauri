@@ -1,10 +1,9 @@
 <script lang="ts">
   import { Send, Square, X, Mic, Loader2, Wand2, Paperclip,
-    Sparkles, Eye, ChevronUp, Undo2, Cpu, Folder, GitBranch } from "lucide-svelte";
+    Sparkles, Eye, ChevronUp, Undo2, Folder, GitBranch } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { github } from "../../state/github.svelte";
   import GhPopover from "./GhPopover.svelte";
-  import { providers, providerModelCtx, providerModelCtxKnown } from "../../state/providers.svelte";
   import { notify } from "../../state/toast.svelte";
   import { clampEffort, modelFamily } from "../../state/assistant/helpers";
   import { requestPrewarm, resetPrewarmDedup } from "../../state/assistant/prewarm";
@@ -23,7 +22,7 @@
   import {
     MODEL_OPTIONS, MODE_OPTIONS,
     dialStopsFor, dialIdxFor, clampEffortIdx, permToneFor,
-    providerEffortCaps, settingsRowsFor, type SettingsRow,
+    settingsRowsFor, type SettingsRow,
     type ModelOpt, type ModeOpt,
   } from "./composer/modelMatrix";
   import { stt } from "../../state/stt.svelte";
@@ -32,9 +31,8 @@
 
   // Mic-button visibility binds to stt.config.enabled, so load the backend
   // stt config eagerly — otherwise users with STT enabled wouldn't see the
-  // mic until they opened Settings → Speech once. providers.refresh() seeds
-  // the multi-model pill/placeholder state (re-enabled 2026-07-16).
-  onMount(() => { void stt.init(); void providers.refresh(); });
+  // mic until they opened Settings → Speech once.
+  onMount(() => { void stt.init(); });
 
   // RR2 unmount hygiene — the Composer is destroyed when its tab/split-pane
   // closes (parent gates rendering on tab presence). Without this, pending
@@ -102,25 +100,8 @@
   // focused activeTab, so in split-pane both composers showed the focused
   // pane's ctx%. Read this pane's own tab instead.
   const paneCtxTokens = $derived(assistant.ctxTokensFor(tab));
-  // Provider mode swaps the window source: the verified known-model table
-  // first (the CLI reports a generic 200K for models it doesn't know, so a
-  // table hit beats the report — kimi-k3 is 1M, not 200K), then the
-  // CLI-reported window, then the conservative 200K default. The Claude
-  // path's plan-cap clamp doesn't apply to third-party endpoints.
-  const paneCtxWindow = $derived.by(() => {
-    if (!providers.enabled) return assistant.ctxWindowFor(tab);
-    const model = tab?.lastModelId ?? providers.selectedModel;
-    const known = providerModelCtxKnown(model);
-    if (known != null) return known;
-    const rep = tab?.reportedCtxWindow;
-    if (rep && model && rep.model === model) return rep.window;
-    return providerModelCtx(model);
-  });
-  const paneCtxPct = $derived(
-    providers.enabled
-      ? (paneCtxWindow > 0 ? Math.min(100, (paneCtxTokens / paneCtxWindow) * 100) : 0)
-      : assistant.ctxPctFor(tab),
-  );
+  const paneCtxWindow = $derived(assistant.ctxWindowFor(tab));
+  const paneCtxPct = $derived(assistant.ctxPctFor(tab));
   // Per-pane model — `assistant.effectiveModel` delegates to the focused
   // activeTab (modelOverride ?? store.model), so in split-pane the background
   // pane's pill / settings highlight / data-model showed the FOCUSED pane's
@@ -186,7 +167,7 @@
   // reduced-motion.
   const IDLE_HINTS = $derived.by(() => {
     const hints = [
-      `Ask ${providers.askLabel} anything`,
+      "Ask Claude anything",
       "Type / for a command",
       "Mention a file with @",
     ];
@@ -373,7 +354,6 @@
   // `user` setting source, so personal entries can't run — hide accordingly.
   // Builtins always win a name collision.
   const customSlash = $derived.by<SlashCmd[]>(() => {
-    if (providers.enabled) return [];
     const seen = new Set(SLASH_COMMANDS.map((c) => c.name));
     const out: SlashCmd[] = [];
     for (const c of assistant.customCommands) {
@@ -420,14 +400,7 @@
   // ONE ladder over the store pair (thinkingEnabled, thinkingEffort): rung 0 =
   // fastest (thinking off → wire `--effort low`), higher rungs reason at their
   // tier. See modelMatrix DIAL_STOPS for the wire-truth rationale.
-  // Provider mode: the ladder derives from the ACTIVE PROFILE's capability
-  // (effort-capable clouds get the full ladder; Ollama/unknown hide it), same
-  // store pair on the wire — turn.rs sends `--effort` for capable providers.
-  const effortStops = $derived(
-    providers.enabled
-      ? dialStopsFor(providerEffortCaps(providers.effortCapable))
-      : dialStopsFor(currentModel),
-  );
+  const effortStops = $derived(dialStopsFor(currentModel));
   const dialApplies = $derived(effortStops.length > 0);
   const effortIdx = $derived(dialIdxFor(effortStops, assistant.thinkingEnabled, assistant.thinkingEffort));
   const currentEffort = $derived(effortStops[effortIdx] ?? effortStops[0]);
@@ -444,9 +417,7 @@
   // Clamps the tier directly — the ladder's rung 0 (effort:null) is not a tier,
   // so a stops-membership check would false-positive on `none`.
   $effect(() => {
-    // Claude-only: the clamp keys off Claude model ceilings; provider ladders
-    // have no per-tier rejection matrix (providerEffortCaps → full ladder).
-    if (!dialApplies || providers.enabled) return;
+    if (!dialApplies) return;
     const clamped = clampEffort(assistant.thinkingEffort, paneEffectiveModel);
     if (clamped !== assistant.thinkingEffort) assistant.setThinkingEffort(clamped);
   });
@@ -471,21 +442,13 @@
 
   // Flat, navigable row list spanning the unified settings panel — built by
   // the SAME settingsRowsFor helper SettingsMenu renders from, so keyboard
-  // cursor and rendered order can never disagree. Effort is dropped on Haiku
-  // (ignored server-side) and on effort-incapable providers. Drives
-  // ArrowUp/Down + the active highlight; mouse clicks call the pick fns.
-  const settingsRows = $derived(settingsRowsFor({
-    providerMode: providers.enabled,
-    providerModels: providers.activeModels,
-    providerIds: providers.list.map((p) => p.id),
-    dialApplies,
-  }));
+  // cursor and rendered order can never disagree. Effort is dropped on Haiku.
+  // Drives ArrowUp/Down + the active highlight; mouse clicks call the pick fns.
+  const settingsRows = $derived(settingsRowsFor({ dialApplies }));
   // Re-seed the cursor to the current model row whenever the panel opens.
   $effect(() => {
     if (settingsOpen) {
-      const i = settingsRows.findIndex((r) =>
-        (r.kind === "model" && r.model.id === paneEffectiveModel)
-        || (r.kind === "pmodel" && r.id === providers.selectedModel));
+      const i = settingsRows.findIndex((r) => r.kind === "model" && r.model.id === paneEffectiveModel);
       settingsIdx = i >= 0 ? i : 0;
     }
   });
@@ -498,25 +461,7 @@
   });
   function pickRow(row: SettingsRow) {
     if (row.kind === "model") pickModel(row.model);
-    else if (row.kind === "pmodel") pickProviderModel(row.id);
-    else if (row.kind === "provider") pickProvider(row.id);
     else { settingsOpen = false; void tick().then(() => ta?.focus()); }
-  }
-  /** Same-provider model switch from the picker — THIS tab only, keeps the
-   *  session (no profile-pin rewrite, so sibling panes are untouched). */
-  function pickProviderModel(id: string) {
-    assistant.setTabProviderModel(id);
-    settingsOpen = false;
-    void tick().then(() => ta?.focus());
-  }
-  /** Activate a provider (or null = back to Claude) for THIS tab (+ the
-   *  global default). Mid-chat switches reset to a fresh session inside the
-   *  store (different auth can't share a CLI session) — it toasts the
-   *  flush-to-History itself. */
-  function pickProvider(id: string | null) {
-    void providers.activate(id).catch((e) => notify.danger("Provider switch failed", { detail: String(e) }));
-    settingsOpen = false;
-    void tick().then(() => ta?.focus());
   }
 
   // Tab (or picking a command that wants arguments): insert `/name ` into the
@@ -540,15 +485,6 @@
       stt.consume();
       settingsOpen = true;
       void tick().then(() => ta?.focus());
-      return;
-    }
-    // Claude Design rides the user's claude.ai login — it can't authenticate
-    // under local-LLM mode (--bare strips the cloud session). Warn instead of
-    // firing a turn that's doomed to fail at the design OAuth step.
-    if (c.name.startsWith("design-") && providers.enabled) {
-      notify.warn("Claude Design needs cloud Claude", {
-        detail: "Switch the chat brain back to Claude (Models page) to sync with claude.ai/design.",
-      });
       return;
     }
     // A custom command with an argument hint expects args — fill, don't fire.
@@ -1093,16 +1029,11 @@
         setEffortByIdx(effortIdx + (e.key === "ArrowRight" ? 1 : -1));
         return;
       }
-      // Digit 1–N jumps straight to that model row (provider models in
-      // provider mode — same positional mapping the menu's kbd hints show).
+      // Digit 1–N jumps straight to that model row — same positional
+      // mapping the menu's kbd hints show.
       if (/^[1-9]$/.test(e.key)) {
-        if (providers.enabled) {
-          const id = providers.activeModels[Number(e.key) - 1];
-          if (id) { e.preventDefault(); pickProviderModel(id); return; }
-        } else {
-          const m = MODEL_OPTIONS[Number(e.key) - 1];
-          if (m) { e.preventDefault(); pickModel(m); return; }
-        }
+        const m = MODEL_OPTIONS[Number(e.key) - 1];
+        if (m) { e.preventDefault(); pickModel(m); return; }
       }
       if (e.key === "Enter" || e.key === "Tab") {
         e.preventDefault();
@@ -1607,35 +1538,25 @@
         <LivePills {queue} />
 
         <div class="cbar-r">
-          <!-- Model + effort picker — ONE pill across brains (cont.127 →
-               unified 2026-07-17). Claude mode shows the family dot; provider
-               mode swaps in the Cpu glyph + the active provider's model so the
-               pill always names what the turn actually runs against. Both open
-               the same unified SettingsMenu (models · effort · brain switch). -->
+          <!-- Model + effort picker — ONE pill (cont.127 → unified
+               2026-07-17). Opens the unified SettingsMenu (models · effort). -->
           <button
             type="button"
             class="model-pill"
             class:open={settingsOpen}
-            class:provider={providers.enabled}
             class:ultra={dialApplies && currentEffort?.id === "xhigh"}
-            data-model={!providers.enabled && currentModel ? modelFamily(currentModel.id) : ""}
+            data-model={currentModel ? modelFamily(currentModel.id) : ""}
             bind:this={modelWrap}
             onclick={() => { settingsOpen = !settingsOpen; permOpen = false; void tick().then(() => ta?.focus()); }}
             aria-haspopup="listbox"
             aria-expanded={settingsOpen}
             aria-label="Model & effort"
-            use:tooltip={providers.enabled
-              ? `${providers.active?.name ?? "Provider"} — turns run against ${providers.baseUrl || "your endpoint"}${dialApplies ? `\n${currentEffort?.label} effort — ${effortIdx === 0 ? "replies immediately" : "reasons before replying"}` : ""}`
-              : dialApplies
+            use:tooltip={dialApplies
               ? `Model · effort\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel} · ${currentEffort?.label} effort — ${effortIdx === 0 ? "replies immediately" : "reasons before replying"}`
               : `Model\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel} · no extended thinking`}
           >
-            {#if providers.enabled}
-              <Cpu size={12} class="pill-cpu" aria-hidden="true" />
-            {:else}
-              <span class="model-dot" aria-hidden="true"></span>
-            {/if}
-            <span class="pill-label">{providers.enabled ? providers.pillLabel : currentModel ? `${currentModel.label} ${currentModel.version}` : paneEffectiveModel}</span>
+            <span class="model-dot" aria-hidden="true"></span>
+            <span class="pill-label">{currentModel ? `${currentModel.label} ${currentModel.version}` : paneEffectiveModel}</span>
             {#if dialApplies}
               <span class="pill-effort" class:dim={effortIdx === 0}>{currentEffort?.label}</span>
             {/if}
@@ -1651,8 +1572,6 @@
               activeKind={settingsRows[settingsIdx]?.kind ?? null}
               anchor={modelWrap}
               onPickModel={pickModel}
-              onPickProviderModel={pickProviderModel}
-              onPickProvider={pickProvider}
               onRequestClose={() => (settingsOpen = false)}
             />
           {/if}
@@ -2469,13 +2388,6 @@
   }
   .model-pill:hover :global(.pill-chev), .model-pill.open :global(.pill-chev) { opacity: 1; }
   .model-pill.open :global(.pill-chev) { transform: rotate(180deg); color: var(--fg-muted); }
-
-  /* Provider mode — the unified pill keeps the model-pill anatomy but tints
-     accent + swaps the family dot for the Cpu glyph, so "talking to a
-     third-party brain" still reads at a glance (was .local-pill, cont.127). */
-  .model-pill.provider { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 38%, transparent); background: var(--accent-soft); }
-  .model-pill.provider:hover { background: color-mix(in oklab, var(--accent) 22%, transparent); border-color: color-mix(in oklab, var(--accent) 55%, transparent); }
-  .model-pill.provider :global(.pill-cpu) { color: var(--accent); flex-shrink: 0; }
 
   /* Context chips row — layout only; the chip itself (.ctx-chip/.cc-label)
      lives in app.css, shared w/ the Welcome launchpad (one chip dialect). */

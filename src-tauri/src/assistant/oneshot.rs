@@ -786,16 +786,15 @@ pub async fn assistant_analyze_usage(app: AppHandle, snapshot_json: String) -> R
         return Err("usage snapshot too large to analyze".into());
     }
     // Enrich with server-only setup facts the frontend can't see (trust level,
-    // local-LLM mode, OS). The tunable knobs — effort/model/budget — come from
-    // the frontend's `currentSetup` block instead: post-F48 effort + model live
-    // in localStorage, not config.json, so the frontend value is authoritative
+    // OS). The tunable knobs — effort/model/budget — come from the frontend's
+    // `currentSetup` block instead: post-F48 effort + model live in
+    // localStorage, not config.json, so the frontend value is authoritative
     // and config.json's may be stale.
     let cfg = load_config();
     let os = std::env::consts::OS;
     let setup = serde_json::json!({
         "permissionMode": cfg.permission_mode.as_deref().unwrap_or("bypassPermissions"),
         "trustLevel": cfg.trust_level.as_deref().unwrap_or("readonly"),
-        "localLlmMode": cfg.local_llm_enabled,
         "os": os,
     });
 

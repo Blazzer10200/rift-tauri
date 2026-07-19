@@ -376,6 +376,14 @@ export async function restoreTabs(host: TabsHost) {
         // a valid tab list. The parsed tabs are already restored; keep them.
         console.warn("restoreTabs: loadConversation failed", e);
       }
+      // loadConversation swallows its own failures (toast + dropTab) — the
+      // catch above never sees them. If the TabState didn't materialize, scrub
+      // the pane pointer + openTabs entry too, else the pane renders dead
+      // chrome (tabId set, no tab) that only a restart clears.
+      if (!host.tabs.get(winner)) {
+        for (const p of host.panes) if (p.tabId === winner) p.tabId = null;
+        host.openTabs = host.openTabs.filter((t) => t !== winner);
+      }
     }
   } catch (e) {
     console.warn("restoreTabs failed", e);

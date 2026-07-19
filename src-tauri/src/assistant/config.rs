@@ -36,8 +36,7 @@ pub(super) struct AssistantConfig {
     /// allowlist so `/handoff`, `/check`, `/plan`, etc. invoke. When false,
     /// Rift is a clean sandbox: the `user` setting source is dropped (no global
     /// CLAUDE.md/hooks) and only Rift's own MCP tools are exposed. Forced off
-    /// in API-key + local-LLM modes (both fire `--bare`, which suppresses user
-    /// config wholesale).
+    /// in API-key mode (fires `--bare`, which suppresses user config wholesale).
     /// `None` = default (true). Switch off for a sandboxed Assistant.
     #[serde(default)]
     pub(super) use_full_config: Option<bool>,
@@ -64,42 +63,6 @@ pub(super) struct AssistantConfig {
     /// `standard` / `full`. `None` = `readonly`.
     #[serde(default)]
     pub(super) trust_level: Option<String>,
-    /// Experimental local-LLM mode. When true, `turn.rs` points the spawned CLI
-    /// at a local Anthropic-Messages-compatible endpoint (LiteLLM/Ollama) via
-    /// `ANTHROPIC_BASE_URL` + the keychain `LOCAL_LLM_API_KEY`, forces `--bare`,
-    /// overrides `--model` with `local_llm_model`, and skips the cloud
-    /// model-pin and `--effort`. Purely additive + flag-gated — off =
-    /// byte-identical to the cloud path. Testing/experiment only for now.
-    #[serde(default)]
-    pub(super) local_llm_enabled: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) local_llm_base_url: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) local_llm_model: Option<String>,
-    /// `CLAUDE_CODE_MAX_OUTPUT_TOKENS` for provider/local turns. `None` = the
-    /// Ollama-sized 8192 default; cloud providers (Kimi/DeepSeek) set more via
-    /// their profile. Wire field — synced from the active provider on activate.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) local_llm_max_output: Option<u32>,
-    /// Provider honors Anthropic extended-thinking (`--effort` + a native
-    /// `thinking` block). Wire field — synced from the active provider. When
-    /// true + thinking on, turn.rs routes DIRECT to the base URL (skipping the
-    /// no-think shim) and sends `--effort`; false = legacy always-shimmed path.
-    #[serde(default)]
-    pub(super) local_llm_effort: bool,
-    /// One-shot guard for the load-time effort back-fill (reasoning-cloud
-    /// presets saved before the `effort` field existed get it flipped on once).
-    #[serde(default)]
-    pub(super) effort_backfilled: bool,
-    /// Multi-model provider registry (docs/design/multi-model-providers.md).
-    /// Named endpoint profiles over the SAME wire mechanism as local-LLM mode:
-    /// activating one copies its base_url/model/key into the local_llm_* fields
-    /// above + LOCAL_LLM_API_KEY, so turn.rs needs zero provider awareness.
-    #[serde(default)]
-    pub(super) providers: Vec<super::providers::ProviderProfile>,
-    /// Id of the active provider (mirrors local_llm_enabled). None = Claude.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) active_provider: Option<String>,
     /// When true, Rift launches itself with administrator privileges (Windows).
     /// Backed by a per-user Scheduled Task so no UAC prompt fires on launch — see
     /// `crate::elevation`. `None`/false = normal (standard-user) launch. The task
@@ -259,16 +222,6 @@ pub(super) fn send_effort_flag(thinking_on: bool, effort_flag: &'static str) -> 
     } else {
         "low"
     }
-}
-
-/// Local-LLM model names carry provider prefixes + tags the cloud allowlist
-/// rejects (`ollama/llama3`, `ollama_chat/qwen2.5:7b`). Same anti-flag-injection
-/// guard (no leading dash, no empty) but also allows `/` and `:`.
-pub(super) fn is_valid_local_model_name(s: &str) -> bool {
-    if s.is_empty() || s.starts_with('-') {
-        return false;
-    }
-    s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-' | b'/' | b':'))
 }
 
 /// The base URL is injected verbatim as `ANTHROPIC_BASE_URL`, so only allow
@@ -448,34 +401,11 @@ pub(super) fn load_config() -> AssistantConfig {
             }
         }
     }
-    // Provider-registry migration: a pre-registry local-LLM config becomes the
-    // "local" provider entry. In-memory + idempotent (persisted by whichever
-    // setter saves next); delete_provider clears the wire fields so a deleted
-    // entry can't resurrect here.
-    if cfg.providers.is_empty() {
-        if let Some(base) = cfg.local_llm_base_url.clone() {
-            cfg.providers
-                .push(super::providers::ProviderProfile::migrated_local(base, cfg.local_llm_model.clone()));
-            if cfg.local_llm_enabled && cfg.active_provider.is_none() {
-                cfg.active_provider = Some("local".to_string());
-            }
-        }
-    }
-    // Effort back-fill: profiles saved before the `effort` field existed
-    // deserialize false, but for the reasoning-cloud presets the capability is
-    // an endpoint fact, not a user choice — flip them on ONCE. In-memory +
-    // idempotent like the migration above; any later save persists the flag,
-    // after which a deliberate per-profile off sticks.
-    if !cfg.effort_backfilled {
-        cfg.effort_backfilled = true;
-        for p in cfg.providers.iter_mut() {
-            if matches!(p.preset.as_deref(), Some("kimi" | "deepseek" | "glm")) && !p.effort {
-                p.effort = true;
-                if cfg.active_provider.as_deref() == Some(p.id.as_str()) {
-                    cfg.local_llm_effort = true;
-                }
-            }
-        }
+    // v0.127.0 bug class: project roots saved pre-fix carry the Windows
+    // verbatim `\\?\` prefix and fail the FE registry match ("No project"
+    // pill). In-memory + idempotent like the migrations above.
+    for p in cfg.projects.iter_mut() {
+        p.root = super::strip_unc(&p.root);
     }
     cfg
 }
@@ -612,27 +542,6 @@ pub fn assistant_set_trust_level(value: String) -> Result<(), String> {
     let mut cfg = load_config();
     cfg.trust_level = Some(value);
     save_config(&cfg)
-}
-
-/// Renderer-facing view of local-LLM config. Never includes the key value —
-/// only whether one is set (mirrors `assistant_get_api_key_present`).
-#[derive(Serialize)]
-pub struct LocalLlmDto {
-    enabled: bool,
-    base_url: Option<String>,
-    model: Option<String>,
-    has_key: bool,
-}
-
-#[tauri::command]
-pub fn assistant_get_local_llm_config() -> Result<LocalLlmDto, String> {
-    let cfg = load_config();
-    Ok(LocalLlmDto {
-        enabled: cfg.local_llm_enabled,
-        base_url: cfg.local_llm_base_url,
-        model: cfg.local_llm_model,
-        has_key: crate::secrets::get(crate::secrets::LOCAL_LLM_API_KEY).is_some(),
-    })
 }
 
 #[tauri::command]

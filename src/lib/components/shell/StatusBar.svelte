@@ -2,7 +2,6 @@
   import { GitBranch, ShieldCheck } from "lucide-svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { github } from "$lib/state/github.svelte";
-  import { providers } from "$lib/state/providers.svelte";
   import GhPopover from "../assistant/GhPopover.svelte";
   import { usage, limitZone } from "$lib/state/usage.svelte";
   import { workspace } from "$lib/state/workspace.svelte";
@@ -81,29 +80,15 @@
 </script>
 
 <footer class="statusbar" data-tauri-drag-region>
-  {#if providers.enabled}
-    <!-- Provider mode: the brain chip names the endpoint, not Claude, and
-         jumps to the Models page (where that provider is managed). -->
-    <button
-      class="sb-item sb-btn sb-conn"
-      type="button"
-      onclick={() => workspace.setActive("local-llm")}
-      use:tooltip={`Turns run via ${providers.active?.name ?? "provider"} — open Models`}
-    >
-      <span class="sb-dot"></span>
-      {providers.pillLabel}
-    </button>
-  {:else}
-    <button
-      class="sb-item sb-btn sb-conn"
-      type="button"
-      onclick={openClaudeSettings}
-      use:tooltip={connected ? "Claude session — open settings" : "Not connected — open Claude settings"}
-    >
-      <span class="sb-dot" class:off={!connected}></span>
-      {connected ? "Claude" : "Not connected"}
-    </button>
-  {/if}
+  <button
+    class="sb-item sb-btn sb-conn"
+    type="button"
+    onclick={openClaudeSettings}
+    use:tooltip={connected ? "Claude session — open settings" : "Not connected — open Claude settings"}
+  >
+    <span class="sb-dot" class:off={!connected}></span>
+    {connected ? "Claude" : "Not connected"}
+  </button>
   <span class="sb-sep"></span>
   <button class="sb-item sb-btn" type="button" onclick={() => workspace.setActive("home")} use:tooltip={"Open Workspace"}>
     {repoName}
@@ -133,7 +118,7 @@
     </button>
   {/if}
 
-  <span class="sb-note">{providers.enabled ? providers.askLabel : "Claude"} can make mistakes — double-check important work.</span>
+  <span class="sb-note">Claude can make mistakes — double-check important work.</span>
 
   {#if limits.length}
     <span class="sb-usage">

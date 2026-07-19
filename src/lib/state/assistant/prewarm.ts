@@ -52,16 +52,8 @@ function signatureOf(
   root: string,
   isFirstTurn: boolean,
 ): string {
-  // Per-tab brain (split-pane): the spare must spawn against the TAB's
-  // provider/model, mirroring send.ts's resolution, or the real send mismatches
-  // the SpawnKey and eats a cold start anyway.
-  const tab = store.activeTab;
-  const provider = store.providerIdFor(tab);
-  const pModel = provider ? (tab?.providerModel ?? null) : null;
   return [
     sessionId,
-    provider ?? "claude",
-    pModel ?? "",
     store.effectiveModel,
     // Mirror the backend key: thinking-off wires `--effort low` whatever tier
     // is parked, so fold it here too — a parked-tier change while thinking is
@@ -72,7 +64,7 @@ function signatureOf(
     // Mirror the send-path gating (fastEligible) so the spare's SpawnKey
     // matches the real send — an ineligible model folds to "false" both here
     // and there, and a fast toggle mid-typing re-arms the trigger.
-    String(!provider && store.fastMode && fastEligible(store.effectiveModel)),
+    String(store.fastMode && fastEligible(store.effectiveModel)),
     root,
     // A fresh-tab spare (`--session-id`) and a restart-history spare (`--resume`)
     // are different children; keep them distinct in the dedup key so opening a
@@ -135,17 +127,13 @@ export function requestPrewarm(store: AssistantStore): void {
     if ((store.effectiveRoot(t) ?? store.localScratchPath) !== root) return;
     if (signatureOf(store, sessionId, root, isFirstTurn) !== sig) return;
     lastFiredKey = sig;
-    const provider = store.providerIdFor(t);
     void invoke("assistant_prewarm", {
       sessionId,
-      // Mirror send.ts: provider turns warm on the tab's provider model
-      // (undefined → the profile pin wins backend-side).
-      model: provider ? (t.providerModel ?? undefined) : store.effectiveModel,
-      provider: provider ?? "claude",
+      model: store.effectiveModel,
       thinkingEffort: store.thinkingEffort,
       thinkingEnabled: store.thinkingEnabled,
       permissionMode: store.permissionMode,
-      fastMode: !provider && store.fastMode && fastEligible(store.effectiveModel),
+      fastMode: store.fastMode && fastEligible(store.effectiveModel),
       root,
       isFirstTurn,
     }).catch((e) => {

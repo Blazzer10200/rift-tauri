@@ -35,7 +35,7 @@
 
   // Per-icon hover micro-motion hook (CSS targets .snav-ic-<key>).
   const ICON_KEY: Record<WorkspaceId, string> = {
-    home: "home", chat: "chat", projects: "projects", "local-llm": "local", settings: "settings", "ai-health": "health",
+    home: "home", chat: "chat", projects: "projects", settings: "settings", "ai-health": "health",
   };
 
   function goto(id: WorkspaceId) {

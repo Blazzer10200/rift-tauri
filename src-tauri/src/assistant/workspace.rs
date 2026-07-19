@@ -106,7 +106,7 @@ pub fn assistant_remove_recent_root(path: String) -> Result<WorkspaceState, Stri
     // the target the same way so removal matches regardless of case/trailing-slash/
     // `..` drift; keep the raw form too so a now-deleted dir (canonicalize fails)
     // is still removable.
-    let canonical = std::fs::canonicalize(&raw).ok();
+    let canonical = std::fs::canonicalize(&raw).ok().map(|p| super::strip_unc(&p));
     let mut cfg = load_config();
     cfg.recent_roots
         .retain(|p| p != &raw && Some(p) != canonical.as_ref());

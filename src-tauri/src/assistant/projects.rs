@@ -131,7 +131,9 @@ pub(super) fn patterns_for_root(cfg: &AssistantConfig, root: &std::path::Path) -
     // Canonical-on-write means a plain equality check suffices, but a moved/
     // deleted root won't canonicalize at lookup time — compare the stored
     // (already-canonical) value directly against the resolved turn root.
-    let target = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let target = std::fs::canonicalize(root)
+        .map(|p| super::strip_unc(&p))
+        .unwrap_or_else(|_| root.to_path_buf());
     for p in &cfg.projects {
         if p.root == target {
             return (p.include.clone(), p.exclude.clone());
@@ -179,6 +181,8 @@ pub fn assistant_save_project(
         Err(_) if raw.is_dir() => raw,
         Err(e) => return Err(format!("could not resolve {}: {e}", raw.display())),
     };
+    // v0.127.0 bug class: the verbatim `\\?\` prefix must never be persisted.
+    let canonical = super::strip_unc(&canonical);
     let include = sanitize_patterns(include)?;
     let exclude = sanitize_patterns(exclude)?;
 
@@ -299,6 +303,27 @@ mod tests {
         assert!(cfg.projects.is_empty());
         // The ghost is gone, but unrelated recents are untouched.
         assert_eq!(cfg.recent_roots, vec![PathBuf::from("/ws/other")]);
+    }
+
+    #[test]
+    fn patterns_for_root_matches_a_plain_stored_root_against_a_verbatim_lookup() {
+        // v0.127.0 bug class: stored roots are plain (strip_unc on write + heal
+        // on load), but canonicalize() at lookup time re-adds `\\?\` on Windows.
+        // The compare side must strip too or per-project patterns silently die.
+        let here = std::env::current_dir().unwrap();
+        let cfg = AssistantConfig {
+            projects: vec![Project {
+                id: "p1".into(),
+                name: "here".into(),
+                root: crate::assistant::strip_unc(&std::fs::canonicalize(&here).unwrap()),
+                include: vec!["src/**".into()],
+                exclude: vec![],
+                created_at: 0,
+            }],
+            ..Default::default()
+        };
+        let (inc, _exc) = patterns_for_root(&cfg, &here);
+        assert_eq!(inc, vec!["src/**".to_string()]);
     }
 
     #[test]

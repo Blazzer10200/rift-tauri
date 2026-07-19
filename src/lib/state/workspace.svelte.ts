@@ -3,10 +3,10 @@
 // Chat is the default workspace.
 
 export type WorkspaceId =
-  | "home" | "chat" | "projects" | "settings" | "local-llm" | "ai-health";
+  | "home" | "chat" | "projects" | "settings" | "ai-health";
 
 export const WORKSPACE_IDS: readonly WorkspaceId[] = [
-  "home", "chat", "projects", "settings", "local-llm", "ai-health",
+  "home", "chat", "projects", "settings", "ai-health",
 ] as const;
 
 const ACTIVE_KEY = "rift.ui.workspace.v1";
@@ -47,7 +47,6 @@ const LEGACY_KEYS_TO_SWEEP = [
   "rift.terminal.activeTabIdx",
 ] as const;
 
-// "local-llm" re-enabled 2026-07-16 as the Models workspace (provider registry).
 const DISABLED: ReadonlySet<WorkspaceId> = new Set([]);
 const DEFAULT_ORDER: readonly WorkspaceId[] = WORKSPACE_IDS;
 
@@ -70,10 +69,15 @@ class WorkspaceState {
     const stored = localStorage.getItem(ACTIVE_KEY);
     // "home" now maps to WorkspacePage (real mounted destination).
     // Fold stored "projects" → "home" (migration for users who had Projects as active workspace).
+    // "local-llm" (provider rip-out — the Models workspace is retired) folds
+    // to "chat" so a persisted pick from an old build never dead-ends.
     // Fresh installs (stored=null) default to "chat".
     if (stored === "projects") {
       this.activeId = "home";
       localStorage.setItem(ACTIVE_KEY, "home");
+    } else if (stored === "local-llm") {
+      this.activeId = "chat";
+      localStorage.setItem(ACTIVE_KEY, "chat");
     } else if (stored && isWorkspaceId(stored) && !DISABLED.has(stored)) {
       this.activeId = stored;
     } else {

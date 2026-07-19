@@ -455,10 +455,16 @@ fn assistant_stats_sync() -> Result<Vec<ConvoStat>, String> {
 }
 
 #[tauri::command]
-pub fn assistant_load_conversation(id: String) -> Result<Conversation, String> {
-    let p = convo_path(&id)?;
-    let bytes = std::fs::read(&p).map_err(|e| format!("read {}: {e}", p.display()))?;
-    serde_json::from_slice(&bytes).map_err(|e| format!("parse conversation: {e}"))
+pub async fn assistant_load_conversation(id: String) -> Result<Conversation, String> {
+    // RR10: large-transcript read + parse is blocking I/O — off the Tokio worker,
+    // same as list/stats/save.
+    tokio::task::spawn_blocking(move || {
+        let p = convo_path(&id)?;
+        let bytes = std::fs::read(&p).map_err(|e| format!("read {}: {e}", p.display()))?;
+        serde_json::from_slice(&bytes).map_err(|e| format!("parse conversation: {e}"))
+    })
+    .await
+    .map_err(|e| format!("load_conversation join error: {e}"))?
 }
 
 /// #30: expose a session's pinned cwd so the UI can flag a resumed tab that

@@ -97,7 +97,9 @@ async fn resolve_in_workspace(
 #[tauri::command]
 pub async fn resolve_workspace_path(root: Option<String>, path: String) -> Result<String, String> {
     let resolved = resolve_in_workspace(root, path).await?;
-    Ok(resolved.display().to_string())
+    // Strip the `\\?\` verbatim prefix at the display boundary — openers and
+    // "copy path" choke on it (v0.127.0 bug class).
+    Ok(crate::assistant::strip_unc(&resolved).display().to_string())
 }
 
 /// Bounded workspace search for a bare filename — first match wins, heavy

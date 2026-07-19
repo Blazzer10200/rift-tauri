@@ -116,15 +116,8 @@ export const DIAL_STOPS: DialStop[] = [
   { id: "xhigh",  label: "X-High", effort: "ultra", hint: "X-High — deepest reasoning + autonomous multi-agent workflows. Claude orchestrates fleets of subagents for the most exhaustive answer." },
 ];
 
-/** Minimal capability shape the ladder derives from — a full ModelOpt (Claude)
- *  or a synthesized `{effort, maxEffort}` pair (effort-capable provider). */
+/** Minimal capability shape the ladder derives from — a full ModelOpt. */
 export type EffortCaps = Pick<ModelOpt, "effort" | "maxEffort">;
-/** The ladder capability of an active provider: effort-capable profiles get
- *  the full ladder (their endpoints take every CLI `--effort` flag; there is
- *  no per-tier rejection matrix like Claude's), others hide it entirely. */
-export function providerEffortCaps(effortCapable: boolean): EffortCaps | undefined {
-  return effortCapable ? { effort: true, maxEffort: "ultra" } : undefined;
-}
 
 /** The ladder rungs a model supports. Haiku (no effort capability) gets an
  *  empty list — the panel hides the ladder entirely. Otherwise rungs truncate
@@ -158,30 +151,16 @@ export function clampEffortIdx(stops: readonly unknown[], i: number): number {
 }
 
 // ── Unified settings-panel rows ──────────────────────────────────────────────
-// ONE row list spanning both panel modes, built identically by Composer (which
-// owns keyboard nav over it) and SettingsMenu (which renders it) so cursor
-// index and rendered order can never disagree:
-//   Claude mode   → Claude model rows · effort · one row per saved provider
-//   provider mode → the active provider's model rows · effort (if capable)
+// ONE row list built identically by Composer (which owns keyboard nav over it)
+// and SettingsMenu (which renders it) so cursor index and rendered order can
+// never disagree: Claude model rows · effort.
 export type SettingsRow =
   | { kind: "model"; model: ModelOpt }
-  | { kind: "pmodel"; id: string }     // a model of the ACTIVE provider
-  | { kind: "provider"; id: string }   // switch-to-provider row (Claude mode)
   | { kind: "effort" };
 
-export function settingsRowsFor(opts: {
-  providerMode: boolean;
-  /** Active provider's picker models (providers.activeModels). */
-  providerModels: string[];
-  /** All saved provider ids — the Claude-mode switcher section. */
-  providerIds: string[];
-  dialApplies: boolean;
-}): SettingsRow[] {
-  const rows: SettingsRow[] = opts.providerMode
-    ? opts.providerModels.map((id) => ({ kind: "pmodel" as const, id }))
-    : MODEL_OPTIONS.map((m) => ({ kind: "model" as const, model: m }));
+export function settingsRowsFor(opts: { dialApplies: boolean }): SettingsRow[] {
+  const rows: SettingsRow[] = MODEL_OPTIONS.map((m) => ({ kind: "model" as const, model: m }));
   if (opts.dialApplies) rows.push({ kind: "effort" });
-  if (!opts.providerMode) rows.push(...opts.providerIds.map((id) => ({ kind: "provider" as const, id })));
   return rows;
 }
 

@@ -20,7 +20,7 @@ function makeFakeStorage() {
 
 let fakeLS: ReturnType<typeof makeFakeStorage>;
 
-const DEFAULT_ORDER = ["home", "chat", "projects", "settings", "local-llm", "ai-health"] as const;
+const DEFAULT_ORDER = ["home", "chat", "projects", "settings", "ai-health"] as const;
 
 beforeEach(() => {
   fakeLS = makeFakeStorage();
@@ -121,21 +121,14 @@ describe("setActive()", () => {
   });
 });
 
-// local-llm re-enabled 2026-07-16 as the Models workspace (provider registry).
-// These guard that it stays navigable + a persisted activeId survives restarts.
-describe("local-llm enabled (Models workspace)", () => {
-  it("setActive('local-llm') navigates and latches everOpened", () => {
-    fakeLS.setItem(ACTIVE_KEY, "chat");
-    workspace.init();
-    workspace.setActive("local-llm");
-    expect(workspace.activeId).toBe("local-llm");
-    expect(workspace.everOpened.has("local-llm")).toBe(true);
-  });
-
-  it("stored activeId 'local-llm' is restored on init", () => {
+// Provider rip-out (2026-07-18): the "local-llm" Models workspace is retired.
+// A persisted "local-llm" activeId must fold to "chat", not crash/dead-end.
+describe("local-llm retired (provider rip-out)", () => {
+  it("stored activeId 'local-llm' folds to 'chat' on init", () => {
     fakeLS.setItem(ACTIVE_KEY, "local-llm");
     workspace.init();
-    expect(workspace.activeId).toBe("local-llm");
+    expect(workspace.activeId).toBe("chat");
+    expect(fakeLS.getItem(ACTIVE_KEY)).toBe("chat");
   });
 });
 
@@ -143,7 +136,7 @@ const ORDER_KEY = "rift.ui.workspace-order.v1";
 
 describe("init() — order restore + backfill", () => {
   it("restores a full stored order verbatim", () => {
-    const stored = ["settings", "chat", "home", "ai-health", "projects", "local-llm"];
+    const stored = ["settings", "chat", "home", "ai-health", "projects"];
     fakeLS.setItem(ORDER_KEY, JSON.stringify(stored));
     workspace.init();
     expect(workspace.order).toEqual(stored);
@@ -155,7 +148,7 @@ describe("init() — order restore + backfill", () => {
     // positional Ctrl+N switching matches the kbd hints.
     fakeLS.setItem(ORDER_KEY, JSON.stringify(["settings", "chat"]));
     workspace.init();
-    expect(workspace.order).toEqual(["home", "projects", "settings", "chat", "local-llm", "ai-health"]);
+    expect(workspace.order).toEqual(["home", "projects", "settings", "chat", "ai-health"]);
   });
 
   it("filters unknown ids out of a stored order (and backfills the rest)", () => {
@@ -187,7 +180,7 @@ describe("init() — order restore + backfill", () => {
 describe("reorder() / resetOrder()", () => {
   it("moves an id and persists the new order", () => {
     workspace.reorder(1, 3); // chat → after settings
-    expect(workspace.order).toEqual(["home", "projects", "settings", "chat", "local-llm", "ai-health"]);
+    expect(workspace.order).toEqual(["home", "projects", "settings", "chat", "ai-health"]);
     expect(JSON.parse(fakeLS.getItem(ORDER_KEY)!)).toEqual(workspace.order);
   });
 
@@ -218,12 +211,6 @@ describe("migrateLegacy() — legacy shell keys (runs inside init)", () => {
     fakeLS.setItem("rift.ui.right-pane.v1", "settings");
     workspace.init();
     expect(workspace.activeId).toBe("settings");
-  });
-
-  it("seeds from a legacy local-llm panel id now that the workspace is enabled", () => {
-    fakeLS.setItem("rift.ui.right-pane.v1", "local-llm");
-    workspace.init();
-    expect(workspace.activeId).toBe("local-llm");
   });
 
   it("does NOT override an already-set new-shell activeId", () => {

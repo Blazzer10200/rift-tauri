@@ -49,4 +49,8 @@ describe("rootKey", () => {
   it("matches the same folder across mixed separators", () => {
     expect(rootKey("C:\\Proj\\Rift")).toBe(rootKey("C:/Proj/Rift"));
   });
+  it("matches a verbatim-prefixed record against the plain root (No-project pill bug)", () => {
+    expect(rootKey("\\\\?\\C:\\Proj\\Rift")).toBe(rootKey("C:/Proj/Rift"));
+    expect(rootKey("//?/C:/Proj/Rift")).toBe("c:/proj/rift");
+  });
 });

@@ -149,10 +149,6 @@ pub(super) struct SpawnKey {
     /// warm child kept running with the OLD credential until some other field
     /// forced a respawn.
     pub cred_fp: u64,
-    pub local_llm_enabled: bool,
-    /// Fingerprint of the local-LLM base URL + key baked into env at spawn. 0
-    /// when `local_llm_enabled` is false. Same rotation hazard as `cred_fp`.
-    pub local_llm_fp: u64,
     pub thinking_on: bool,
     /// `--effort` is baked at spawn (NOT re-readable per-turn over stream-json,
     /// red-team M4) → effort change MUST respawn. Silent wrong-effort is worse
@@ -178,8 +174,8 @@ pub(super) struct SpawnKey {
     pub fast_mode: bool,
 }
 
-/// Cheap stable fingerprint for a secret/URL string, for `SpawnKey.cred_fp` /
-/// `local_llm_fp` — never store the raw value in the key struct.
+/// Cheap stable fingerprint for a secret/URL string, for `SpawnKey.cred_fp` —
+/// never store the raw value in the key struct.
 pub(super) fn fingerprint(s: &str) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -641,8 +637,6 @@ mod tests {
             use_full_config: true,
             use_api_key: false,
             cred_fp: 0,
-            local_llm_enabled: false,
-            local_llm_fp: 0,
             thinking_on: false,
             effort_level: effort.into(),
             trust_level: "readonly".into(),

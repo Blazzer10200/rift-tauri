@@ -81,19 +81,10 @@ fn extract_corporate_roots() -> Option<PathBuf> {
 
 static USAGE_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static DOWNLOAD_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-static LOCAL_LLM_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
 /// Shared client for usage/limits.rs (15 s timeout).
 pub fn usage_client() -> &'static reqwest::Client {
     USAGE_CLIENT.get_or_init(|| build_client(Duration::from_secs(15), None))
-}
-
-/// Shared client for local_llm.rs probes. No restrictive base timeout — each
-/// command sets its own per-request `.timeout()`; this exists so local-LLM
-/// HTTPS endpoints behind a corporate TLS-inspecting proxy get the same
-/// native-root injection every other outbound client gets.
-pub fn local_llm_client() -> &'static reqwest::Client {
-    LOCAL_LLM_CLIENT.get_or_init(|| build_client(Duration::from_secs(600), None))
 }
 
 /// Shared client for stt/model_manager.rs (30 s connect, 600 s body).

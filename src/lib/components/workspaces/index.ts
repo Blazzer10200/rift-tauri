@@ -2,12 +2,11 @@ import type { Component } from "svelte";
 import type { WorkspaceId } from "$lib/state/workspace.svelte";
 import {
   MessageSquare, FolderTree,
-  Activity, Settings as SettingsIcon, Cpu, HeartPulse,
+  Activity, Settings as SettingsIcon, HeartPulse,
 } from "lucide-svelte";
 import AssistantPage from "../assistant/AssistantPage.svelte";
 import WorkspacePage from "../workspace/WorkspacePage.svelte";
 import SettingsPage from "../settings/SettingsPage.svelte";
-import LocalLlmPage from "../local-llm/LocalLlmPage.svelte";
 import AiHealthPage from "../ai-health/AiHealthPage.svelte";
 
 // lucide-svelte 1.x ships icons typed as legacy components; `typeof Activity`
@@ -36,9 +35,5 @@ export const WORKSPACES: Record<WorkspaceId, WorkspaceDef> = {
   // Legacy "projects" id: aliases WorkspacePage to keep the Record exhaustive + handle persisted activeId (init() folds it → "home").
   projects:    { component: WorkspacePage,     title: "Workspace",   icon: FolderTree,    kbd: "3" },
   settings:    { component: SettingsPage,      title: "Settings",    icon: SettingsIcon,  kbd: "4" },
-  // Re-enabled 2026-07-16 as the multi-model "Models" workspace (provider
-  // registry — docs/design/multi-model-providers.md). Id stays "local-llm"
-  // (persisted activeIds in the wild).
-  "local-llm": { component: LocalLlmPage,       title: "Models",      icon: Cpu,           kbd: "5" },
   "ai-health": { component: AiHealthPage,       title: "AI Health",   icon: HeartPulse,    kbd: "6" },
 };

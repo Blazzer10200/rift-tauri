@@ -57,11 +57,6 @@ pub fn delete(key: &str) -> Result<(), String> {
 /// Single-tenant key for the Anthropic API key.
 pub const ASSISTANT_API_KEY: &str = "assistant.api_key";
 
-/// Key for the experimental local-LLM endpoint (LiteLLM/Ollama). Most local
-/// proxies accept any non-empty value; stored separately so it never shadows
-/// the cloud `ASSISTANT_API_KEY`.
-pub const LOCAL_LLM_API_KEY: &str = "local_llm.api_key";
-
 #[cfg(test)]
 mod tests {
     use super::*;

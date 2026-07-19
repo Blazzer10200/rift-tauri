@@ -247,11 +247,6 @@ export type ConversationRecord = {
   /** Per-project scope: workspace folder active when this convo's turns run.
    *  Stamped on save so the sidebar can filter to the open project. */
   workspaceRoot?: string | null;
-  /** Provider profile id this chat's turns ran on (null = Claude). Absent on
-   *  legacy records → the tab follows the global default on load. */
-  provider?: string | null;
-  /** Model within that provider (null = the profile's pinned model). */
-  providerModel?: string | null;
 };
 
 // Minimal stream-json envelope shape we care about.
@@ -364,11 +359,6 @@ export type TurnRecord = {
   cliSessionId: string;
   isFirstTurn: boolean;
   model: ModelSel;
-  /** Provider profile id the turn ran against (null = Claude/Anthropic) —
-   *  drives honest attribution in health alerts ("kimi endpoint was slow",
-   *  not "the Anthropic API"). */
-  provider?: string | null;
-  providerModel?: string | null;
   effort: ThinkingEffort;
   /** Actual `--effort` flag the CLI is invoked with (mirrors mod.rs mapping). */
   effortFlag: "low" | "medium" | "high" | "xhigh" | null;

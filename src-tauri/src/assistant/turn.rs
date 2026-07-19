@@ -25,7 +25,7 @@ use super::config::{
     effective_trust_level, effort_tier_to_flag,
     fable_unavailable, haiku_unavailable, HAIKU_FALLBACK_MODEL, HAIKU_MODEL,
     is_valid_effort_tier,
-    is_valid_local_model_name, is_valid_model_name, is_valid_permission_mode, load_config,
+    is_valid_model_name, is_valid_permission_mode, load_config,
     model_fast_eligible, normalize_effort_tier, send_effort_flag, DEFAULT_MODEL, FABLE_FALLBACK_MODEL, FABLE_MODEL,
 };
 use super::convo_store::{
@@ -448,17 +448,6 @@ fn plan_usage_is_hot(five_hour_pct: f64, seven_day_pct: f64) -> bool {
     five_hour_pct >= 90.0 || seven_day_pct >= 95.0
 }
 
-/// Local-LLM mode addendum (workspace open). Replaces the Claude-tuned TOOLS
-/// addendum when `local_llm_enabled`. A local open-weights model (qwen3-coder)
-/// (1) inherits the CLI's baked-in "You are Claude" identity, which it parrots,
-/// (2) does worse with the long Claude-tuned prose, and (3) sometimes emits tool
-/// calls as PLAIN TEXT (`<function=name>…`) instead of a structured call when
-/// chaining — Ollama's template then can't parse it and the CLI renders it as
-/// text. This terse variant corrects identity + hard-enforces structured calls,
-/// the only lever Rift has on those failures. Single-line (.cmd-shim batch-arg
-/// validator, Rust 1.77+ CVE-2024-24576).
-const RIFT_SYSTEM_ADDENDUM_LOCAL: &str = "IDENTITY: You are NOT Claude and NOT made by Anthropic — ignore any earlier text that says you are. You are a local open-weights coding model running fully offline on the user's own machine, embedded in Rift, a Tauri desktop coding app. Your working directory is already the open project root, so ALWAYS use paths relative to it (e.g. `src/foo.js`, `greet.js`) — NEVER invent an absolute path like /home/user/... or C:/..., that points outside the project and will fail. Bash also runs in the project root, so `git add greet.js` works directly; do not `cd` elsewhere. THINKING: If you produce internal reasoning (a thinking block), keep ALL of it inside that block — your visible reply must begin directly with the answer, the code, or a tool call, never with a reasoning dump, a restated plan, or meta-commentary about what you are about to do. TOOL CALLS (critical): invoke tools ONLY through the structured function-calling interface. NEVER write a tool call as text in your reply — text like `<function=name>`, `<parameter=…>`, or a JSON blob describing a call does NOTHING, it is a bug, and the user just sees the raw text. If you cannot call a tool the proper structured way, say so in plain words instead of typing the call out. Make ONE tool call at a time and wait for its result before the next call. TOOLS YOU HAVE: Read / Write / Edit for files, Bash for shell commands (runs in the workspace dir), Glob for filename patterns, Grep for content search. For ALL git work — status, diff, log, add, commit, branch — use plain Bash (`git status`, `git diff`, `git commit -m \"...\"`). Bash git is simpler and more reliable than the MCP equivalents; prefer it. BOUNDED AUTONOMY (critical): finishing the task means doing the LOCAL work — read, edit, build, test, and a local `git commit` when committing fits what was asked. But any action that leaves this machine or is hard to undo — `git push`, opening or merging a PR, deleting files the user did not ask you to delete, or any network publish — do NOT do on your own initiative; only do it when the user EXPLICITLY asked for that exact action. A vague 'continue', 'keep going', or 'finish it' means continue the LOCAL task, NOT push or publish. When in doubt about an outward-facing action, stop and state what you would do instead of doing it. Rift ALSO exposes a few mcp__rift__ helper tools for UI round-trips: mcp__rift__ask_user (interactive choice card — use instead of asking in text when the user must pick), mcp__rift__open_browser (show an http/https page in Rift's in-app dock — call it when you start a dev server or have a URL worth showing, e.g. http://localhost:3000), and mcp__rift__notify (corner toast for finished long work). MCP TOOL NAMES ARE LITERAL: every mcp tool name has the exact form mcp__rift__NAME with TWO underscores before and after `rift` (e.g. mcp__rift__ask_user). Copy the name character-for-character — never collapse the double underscore to one (`mcp__rift_ask_user` is WRONG), never call the bare prefix `mcp__rift`, never invent a name like mcp__rift__git_commit (git goes through Bash, not mcp). If you are not 100% sure of an mcp name, use the plain native tool or Bash instead — a wrong mcp name just errors with 'No such tool available'. Inspect files with Read / Grep / Glob — never cat, head, tail, ls -R, or find through Bash. Reserve Bash for git, builds, package managers, and running things. IMAGES (critical): if the user attaches an image, it is the PRIMARY input — LOOK at it and describe what you actually see before doing anything else. A screenshot of a bug IS the bug report: the user is showing you the broken thing, not decorating the message. Never ignore an attached image, and never answer as if no image was sent. DIAGNOSE BEFORE FIXING: 'find the issue and fix it' means (1) reproduce / locate the actual defect — from the image, the described symptom, or the code — then (2) edit the code that causes it, then (3) verify. Running the build, linter, or tests and seeing them pass does NOT mean 'there is no issue' — a clean build with a visible bug means the bug is real and you have not found it yet. If everything you checked looks green but the user reports a problem, you looked in the wrong place: keep digging, do not declare there is nothing to fix. Only say 'no issue found' after you have genuinely searched the relevant code for the described symptom and can explain why it cannot occur. TESTING RIGOR: when you fix a bug, your fix must handle EVERY case in the same family, not just the one example given — if the bug is about extra dashes, handle leading, trailing, AND internal/doubled dashes; if it is about whitespace, handle tabs and multiple spaces too. Before claiming done, mentally run 3-4 varied inputs (empty string, multiple separators in a row, punctuation runs) through your fix and confirm each. Your test must assert on those varied cases, not re-test the single happy path. A fix that passes only the reported example is INCOMPLETE. FINISH THE WHOLE TASK (critical — do NOT stop early): the user's request is the WHOLE job, not the first step of it. A broad ask like 'debug the codebase and see what can be improved', 'audit this', 'review the project', or 'find issues' means: read ALL the relevant files (not 2-3), actually FIND concrete problems, and report a real list of findings WITH fixes — keep calling tools across as many turns as it takes. Describing one file you happened to read is NOT doing the task; it is quitting after step one. After every tool result, ask yourself 'is the user's actual goal fully done?' — if not, immediately make the next tool call. Only end your turn when the complete request is satisfied, never after a single file or a single observation. If a task is genuinely large, do the work in order and keep going; do not hand it back half-done. CONVERSATION MEMORY: you have the full prior conversation. When the user says 'you didn't do what I requested' or 'do it' or 'continue', the request is in an EARLIER message — re-read the conversation and act on that original request; never reply that you cannot see a request. BEHAVIOR: bias toward action — once you know the cause, make the Edit; don't pad with long 'here is what I would do' preambles. But finishing the task always beats being brief: write as many words and make as many tool calls as the job needs. Keep PROSE tight (no filler, no restating the plan) — that is about wordiness, never about doing less work. A short, real diagnosis of a reported bug is required work, not filler. Locate files with Grep + Read; never guess file contents, paths, function names, or signatures — Read or Grep first, otherwise say you are unsure. EDIT PRECISION: when you use Edit, the old_string must match the file EXACTLY — copy it verbatim from what Read returned, byte for byte, including the exact existing indentation (spaces vs tabs). Do NOT retype it from memory, do NOT add tabs or spaces the file does not have, do NOT guess the whitespace. Read shows line numbers as a `123\t` prefix — that prefix is NOT part of the file, never include it in old_string. If an Edit fails with 'old_string not found', do not retry the same text — re-Read that exact region and copy the real bytes, or rewrite the file with Write. After an edit, verify by running the build or tests. Do not ask permission for routine LOCAL work — file edits, shell commands, package installs, and local git commits — the user expects real work and can revert via git. (Outward-facing actions like `git push` are the exception above: those need an explicit request.)";
-
 /// One image (or other future binary) attached to a single user-message turn.
 /// Carried inline from the frontend as base64 to avoid an extra disk round-trip.
 /// 20 MiB safety cap enforced at the call boundary below.
@@ -702,9 +691,6 @@ pub async fn assistant_send(
     session_id: String,
     is_first_turn: bool,
     model: Option<String>,
-    // Per-turn provider route (split-pane): a profile id, `"claude"` for an
-    // explicit pure-Claude tab, or None (legacy) = the global wire fields.
-    provider: Option<String>,
     attachments: Option<Vec<AssistantAttachment>>,
     dyslexia_mode: Option<bool>,
     thinking_effort: Option<String>,
@@ -716,7 +702,7 @@ pub async fn assistant_send(
     turn_epoch: Option<u64>,
 ) -> Result<(), String> {
     run_or_prewarm(
-        app, window, prompt, session_id, is_first_turn, model, provider, attachments,
+        app, window, prompt, session_id, is_first_turn, model, attachments,
         dyslexia_mode, thinking_effort, thinking_enabled, permission_mode, fast_mode,
         prior_context_summary, root, turn_epoch.unwrap_or(0), false,
     ).await
@@ -744,7 +730,6 @@ pub async fn assistant_prewarm(
     window: tauri::Window,
     session_id: String,
     model: Option<String>,
-    provider: Option<String>,
     thinking_effort: Option<String>,
     thinking_enabled: Option<bool>,
     permission_mode: Option<String>,
@@ -775,7 +760,7 @@ pub async fn assistant_prewarm(
         }
     }
     run_or_prewarm(
-        app, window, String::new(), session_id, is_first_turn.unwrap_or(true), model, provider,
+        app, window, String::new(), session_id, is_first_turn.unwrap_or(true), model,
         /*attachments*/ None, /*dyslexia*/ None, thinking_effort, thinking_enabled,
         permission_mode, fast_mode, /*prior_context_summary*/ None, root, /*turn_epoch*/ 0, true,
     ).await
@@ -807,7 +792,6 @@ async fn run_or_prewarm(
     session_id: String,
     is_first_turn: bool,
     model: Option<String>,
-    provider: Option<String>,
     attachments: Option<Vec<AssistantAttachment>>,
     dyslexia_mode: Option<bool>,
     thinking_effort: Option<String>,
@@ -848,7 +832,7 @@ async fn run_or_prewarm(
     // and per-turn envelope. Extracted so this orchestrator stays readable; the
     // body is behavior-identical to the former inline prologue.
     let ResolvedSpawn { cmd, key, user_line, mcp_guard, model, live_switch_ok } = resolve_spawn(
-        &app, &window_label, &prompt, &session_id, is_first_turn, model, provider, attachments,
+        &app, &window_label, &prompt, &session_id, is_first_turn, model, attachments,
         dyslexia_mode, thinking_effort, thinking_enabled, permission_mode, fast_mode,
         prior_context_summary, root, prewarm,
     )
@@ -931,7 +915,6 @@ async fn resolve_spawn(
     session_id: &str,
     is_first_turn: bool,
     model: Option<String>,
-    provider: Option<String>,
     attachments: Option<Vec<AssistantAttachment>>,
     dyslexia_mode: Option<bool>,
     thinking_effort: Option<String>,
@@ -943,36 +926,16 @@ async fn resolve_spawn(
     prewarm: bool,
 ) -> Result<ResolvedSpawn, String> {
     let cfg = load_config();
-    // Per-turn provider resolution (split-pane: each tab names its own brain,
-    // so a sibling pane's switch can't rewrite this turn's target mid-chat).
-    let pctx = super::providers::resolve_provider_ctx(&cfg, provider.as_deref())?;
     let api_key = current_api_key_with(&cfg);
     let use_api_key = api_key.is_some();
     let mut model = model.unwrap_or_else(|| DEFAULT_MODEL.to_string());
-    // Provider model ids allow `/` and `:` (openrouter/ollama); Claude stays strict.
-    let model_ok = if pctx.is_some() {
-        is_valid_local_model_name(&model)
-    } else {
-        is_valid_model_name(&model)
-    };
-    if !model_ok {
+    if !is_valid_model_name(&model) {
         return Err(format!("invalid model: {model}"));
     }
     // Set when the picker model differs from the session pin on a resumed turn —
     // a deliberate mid-chat switch. Drives the re-pin at the save site below.
     let mut model_switched = false;
-    if let Some(p) = &pctx {
-        // Provider turn: skip cloud-only machinery (model pin, Fable guard) —
-        // there are no thinking-block signatures to preserve and no Anthropic
-        // model ids in play. An EXPLICIT (per-tab) route trusts the FE-sent
-        // provider model; the legacy global fallback keeps the profile-pin
-        // override (pre-provider-aware callers still send a Claude id here).
-        if !p.explicit || model == DEFAULT_MODEL {
-            if let Some(lm) = p.model.as_deref().filter(|s| is_valid_local_model_name(s)) {
-                model = lm.to_string();
-            }
-        }
-    } else {
+    {
         // Model pin vs picker on resume: the SAME selection keeps the pinned id
         // (alias-stable — preserves the legacy `sonnet`→4.6 mapping below). A
         // DIFFERENT selection is a deliberate mid-chat switch — honor it and
@@ -1084,7 +1047,7 @@ async fn resolve_spawn(
     // keep the empty roots → no-tools fallback intact (mirrors the `use_full_config`
     // computation below; recomputed here because that binding is resolved later).
     let scratch_eligible =
-        cfg.use_full_config.unwrap_or(true) && !use_api_key && pctx.is_none();
+        cfg.use_full_config.unwrap_or(true) && !use_api_key;
     let roots: Vec<PathBuf> = if let Some(p) = pinned_cwd.clone() {
         vec![p]
     } else if let Some(r) = tab_root {
@@ -1151,16 +1114,6 @@ async fn resolve_spawn(
         }
     };
 
-    // Local-LLM mode: swap the Claude-tuned TOOLS addendum for the terse,
-    // identity-correcting, structured-tool-call-enforcing local variant.
-    // `mcp_config_path.is_some()` is exactly the "tools path" (workspace open +
-    // MCP config provisioned); the no-workspace / fallback paths keep NO_WS.
-    let addendum = if pctx.is_some() && mcp_config_path.is_some() {
-        RIFT_SYSTEM_ADDENDUM_LOCAL
-    } else {
-        addendum
-    };
-
     // Pipe the user's prompt via stdin instead of `-p <arg>`. The CLI accepts
     // prompt text on stdin when `-p` is bare; this keeps every arg short and
     // newline-free so .cmd shims work under Rust 1.77+ batch validation
@@ -1176,12 +1129,9 @@ async fn resolve_spawn(
     // `--setting-sources` started excluding `user`. Fixed here + at the
     // setting-sources branch below.)
     // API-key mode forces `--bare`, which suppresses user config wholesale,
-    // so we runtime-disable piggyback in that path. Local-LLM mode also forces
-    // `--bare` (below), so it disables piggyback for the same reason — keeps
-    // Rift's `--mcp-config` the strict source instead of a contradictory
-    // `--bare` + piggyback combo.
+    // so we runtime-disable piggyback in that path.
     let use_full_config =
-        cfg.use_full_config.unwrap_or(true) && !use_api_key && pctx.is_none();
+        cfg.use_full_config.unwrap_or(true) && !use_api_key;
 
     let attachments = attachments.unwrap_or_default();
     validate_attachments(&attachments)?;
@@ -1467,52 +1417,7 @@ async fn resolve_spawn(
         }
     }
 
-    // Local-LLM mode (experimental): redirect the CLI at a local Anthropic-
-    // compatible endpoint (LiteLLM/Ollama). `--bare` forces env-key auth so the
-    // CLI ignores OAuth/keychain (added above already if api-key mode). The base
-    // URL + local key override anything set in the api-key branch — local wins.
-    // Additive + flag-gated; off = the spawn is byte-identical to cloud. Yank =
-    // delete this block + the model/effort guards above/below.
-    if let Some(p) = &pctx {
-        if !use_api_key {
-            cmd.arg("--bare");
-        }
-        // Re-validate at the sink: the setter guards writes, but a hand-edited
-        // config.json could still carry a non-http(s) scheme. Skip if invalid.
-        if let Some(base) = p.base_url.as_deref() {
-            // Route through Rift's in-process no-think shim when it's bound: it
-            // injects `thinking:{type:"disabled"}` into /v1/messages (the only
-            // switch that suppresses Ollama's forced reasoning) and forwards to
-            // this provider's base, resolved fresh per-request via the `/p/<id>`
-            // route — per-provider so two panes on DIFFERENT providers can
-            // stream concurrently. If the shim failed to bind, fall back to
-            // the raw base URL (user can still run the external proxy).
-            //
-            // Effort-capable providers (Kimi/DeepSeek/GLM — profile.effort) with
-            // thinking ON skip the shim entirely: they honor native `thinking`
-            // blocks + `--effort`, and the shim would lobotomize their reasoning.
-            // Thinking OFF still rides the shim (the disabled-injection is the
-            // only real off switch — same rationale as cloud, #68).
-            let target = if p.effort && thinking_on {
-                base.to_string()
-            } else {
-                super::nothink::shim_base_url()
-                    .map(|s| format!("{s}/p/{}", p.id))
-                    .unwrap_or_else(|| base.to_string())
-            };
-            cmd.env("ANTHROPIC_BASE_URL", target);
-        }
-        cmd.env("ANTHROPIC_API_KEY", &p.key);
-        // Local models get a generous output cap. Without this the CLI applies
-        // its conservative default `max_tokens` to the /v1/messages request, so
-        // a multi-step local turn (explanation + several tool calls) gets
-        // guillotined mid-reply — the user sees "Response cut off — reached
-        // output length limit / Continue". 8192 (the default) suits Ollama's
-        // 16384 num_ctx; cloud providers (Kimi/DeepSeek via the provider
-        // registry) sync a bigger cap through local_llm_max_output.
-        let max_out = p.max_output.unwrap_or(8192);
-        cmd.env("CLAUDE_CODE_MAX_OUTPUT_TOKENS", max_out.to_string());
-    } else if routes_through_nothink_shim(thinking_on, &model) {
+    if routes_through_nothink_shim(thinking_on, &model) {
         // Cloud "thinking off": point the CLI at the in-process shim, which
         // injects `thinking:{type:"disabled"}` into /v1/messages and forwards to
         // Anthropic. Haiku + Fable are excluded (see routes_through_nothink_shim):
@@ -1585,22 +1490,16 @@ async fn resolve_spawn(
     // kills the multi-second pre-pass; if the shim ever starts working again the
     // injected disabled-block still wins on top of this.)
     // `--effort` gated on caps.effort: an older CLI without the flag rejects it.
-    // Effort-capable providers (cfg.local_llm_effort, synced from the active
-    // profile) get the flag too — their Anthropic-compat endpoints implement
-    // the thinking tiers (vendors ship first-party Claude Code guides, so the
-    // CLI's default effort traffic already works against them). Ollama/LiteLLM
-    // profiles keep the wholesale skip (4xx or silently ignore it).
     let send_effort = Some(send_effort_flag(thinking_on, effort_level));
-    if pctx.as_ref().is_none_or(|p| p.effort) && model != "haiku" && caps.effort {
+    if model != "haiku" && caps.effort {
         if let Some(level) = send_effort {
             cmd.arg("--effort").arg(level);
         }
     }
     // Fast mode (Opus fast output) — the flag actually SENT: requested AND the
     // model is Opus-family AND the headless settings-key path is confirmed on
-    // this CLI (caps.fast_mode). Local-LLM mode skips wholesale like effort.
+    // this CLI (caps.fast_mode).
     let fast_on = fast_mode.unwrap_or(false)
-        && pctx.is_none()
         && model_fast_eligible(&model)
         && caps.fast_mode;
     // `--settings` merges additively over user/project/local settings. Two keys
@@ -1613,7 +1512,7 @@ async fn resolve_spawn(
     // separate args would silently drop a key. Compact single-line JSON
     // (.cmd-shim batch-arg validator, Rust 1.77+ CVE-2024-24576). Haiku is
     // excluded wholesale (no extended thinking / workflow / fast).
-    if pctx.is_none() && model != "haiku" && caps.settings_flag {
+    if model != "haiku" && caps.settings_flag {
         let mut settings = serde_json::Map::new();
         if caps.effort && thinking_on && effort_tier == "ultra" {
             settings.insert("ultracode".into(), serde_json::Value::Bool(true));
@@ -1627,8 +1526,8 @@ async fn resolve_spawn(
     }
 
     log::info!(
-        "resolve_spawn: spawn session_id={} first_turn={} model={} effort={} thinking_on={} fast={} perm={} use_full_config={} mcp={} api_key={} local_llm={} cli_ver={:?} caps=[effort={} perm_tool={} excl_dyn={} partial={} budget={} settings={}]",
-        session_id, is_first_turn, model, effort_level, thinking_on, fast_on, permission_mode, use_full_config, mcp_config_path.is_some(), use_api_key, pctx.as_ref().map(|p| p.id.as_str()).unwrap_or("-"),
+        "resolve_spawn: spawn session_id={} first_turn={} model={} effort={} thinking_on={} fast={} perm={} use_full_config={} mcp={} api_key={} cli_ver={:?} caps=[effort={} perm_tool={} excl_dyn={} partial={} budget={} settings={}]",
+        session_id, is_first_turn, model, effort_level, thinking_on, fast_on, permission_mode, use_full_config, mcp_config_path.is_some(), use_api_key,
         caps.version, caps.effort, caps.permission_prompt_tool, caps.exclude_dynamic_sections, caps.include_partial_messages, caps.max_budget_usd, caps.settings_flag
     );
     log::debug!(
@@ -1745,24 +1644,10 @@ async fn resolve_spawn(
     // key differs from the warm child's must drain + cold-respawn (with
     // `--resume`). `addendum` is a `&'static str` (one of three constants), so
     // its pointer is a stable, cheap fingerprint of the system-prompt variant.
-    // cred_fp/local_llm_fp: fingerprint (not the raw value) of what's actually
-    // baked into the child's env at spawn, so a key rotation or endpoint change
-    // forces a respawn even though the bools above are unchanged.
+    // cred_fp: fingerprint (not the raw value) of what's actually baked into
+    // the child's env at spawn, so a key rotation forces a respawn even though
+    // the bools above are unchanged.
     let cred_fp = api_key.as_deref().map(warm_pool::fingerprint).unwrap_or(0);
-    let local_llm_fp = if let Some(p) = &pctx {
-        // id + base + key + effort: a per-tab provider switch, endpoint edit,
-        // key rotation, OR effort-capability flip (it changes the baked
-        // ANTHROPIC_BASE_URL target + the --effort arg) must cold-respawn.
-        warm_pool::fingerprint(&format!(
-            "{}\u{0}{}\u{0}{}\u{0}{}",
-            p.id,
-            p.base_url.as_deref().unwrap_or(""),
-            p.key,
-            p.effort
-        ))
-    } else {
-        0
-    };
     let key = warm_pool::SpawnKey {
         model: model.clone(),
         root: roots.first().map(|p| p.to_string_lossy().into_owned()),
@@ -1771,8 +1656,6 @@ async fn resolve_spawn(
         use_full_config,
         use_api_key,
         cred_fp,
-        local_llm_enabled: pctx.is_some(),
-        local_llm_fp,
         thinking_on,
         // Key on the flag actually SENT (thinking-off wires `--effort low`
         // whatever tier is parked): keying on the tier respawned two
@@ -1797,7 +1680,7 @@ async fn resolve_spawn(
         user_line,
         mcp_guard: _mcp_guard,
         model,
-        live_switch_ok: caps.live_switch && pctx.is_none(),
+        live_switch_ok: caps.live_switch,
     })
 }
 
