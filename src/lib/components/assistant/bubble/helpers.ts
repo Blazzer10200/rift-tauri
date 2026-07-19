@@ -128,7 +128,10 @@ export function reconcileSplitHeaders(blocks: Block[]): Block[] {
 // left untouched: the head must look truncated and the tail must look like a
 // continuation, not a new sentence.
 const SENTENCE_END = /[.!?:)\]}"'`\n]\s*$/;
-const TAIL_CONTINUES = /^\s*(?:[a-z]|['’](?:s|t|re|ve|ll|d|m)\b|[,.;:!?)\]}])/;
+// Continuation punctuation only — NOT sentence terminators. A tail that opens
+// with `.`/`!`/`?` is a new sentence, not a mid-construct split, so it must not
+// trigger the stitch (else "real logic" + ".Done." fuse + reorder past the tool).
+const TAIL_CONTINUES = /^\s*(?:[a-z]|['’](?:s|t|re|ve|ll|d|m)\b|[,;:)\]}])/;
 export function mergeSplitProse(blocks: Block[]): Block[] {
   const out: Block[] = [];
   let i = 0;

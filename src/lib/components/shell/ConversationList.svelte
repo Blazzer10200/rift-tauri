@@ -9,12 +9,25 @@
   import { tooltip } from "$lib/actions/tooltip";
   import { leafName, rootKey } from "$lib/utils/path";
   import { projectHue } from "$lib/utils/projectHue";
+  import Skeleton from "./Skeleton.svelte";
+  import { bootLoad } from "$lib/state/bootLoad.svelte";
 
   // mini = the sidebar's hover-peek flyout: flat list capped to the most
   // recent chats, no bucket headers, no "Show earlier" — the full history
   // lives in the pinned sidebar.
   let { mini = false }: { mini?: boolean } = $props();
   const MINI_CAP = 8;
+
+  // Boot skeleton rows — varied widths so the placeholder reads like real chat
+  // titles, not a barcode; the first row carries a group label.
+  const SKEL_ROWS = [
+    { label: true,  w: "68%" },
+    { label: false, w: "82%" },
+    { label: false, w: "59%" },
+    { label: false, w: "74%" },
+    { label: false, w: "48%" },
+    { label: false, w: "66%" },
+  ];
 
   // ── grouping ─────────────────────────────────────────────────────────
   type Group = { label: string; items: ConversationMeta[] };
@@ -285,6 +298,16 @@
 {/snippet}
 
 <div class="conv-list">
+  {#if bootLoad.showSkeleton}
+    <div class="cl-skel">
+      {#each (mini ? SKEL_ROWS.slice(0, 4) : SKEL_ROWS) as row, i (i)}
+        {#if row.label}
+          <div class="cl-skel-label"><Skeleton w="52px" h="9px" radius="4px" delay={i * 90} /></div>
+        {/if}
+        <div class="cl-skel-row"><Skeleton w={row.w} h="13px" radius="6px" delay={i * 90} /></div>
+      {/each}
+    </div>
+  {:else}
   {#if groups.length === 0}
     <div class="conv-empty">No conversations yet.{"\n"}Start one from Home or Chat.</div>
   {/if}
@@ -329,6 +352,7 @@
         {/each}
       {/if}
     {/if}
+  {/if}
   {/if}
 </div>
 
@@ -399,6 +423,15 @@
   .conv-group-label .cgl-txt { flex: 1; }
   .conv-group-label .cgl-ct { font-weight: 600; opacity: 0.55; font-variant-numeric: tabular-nums; }
   .conv-empty { padding: 22px 14px; text-align: center; font-size: 11.5px; line-height: 1.6; color: var(--fg-subtle); white-space: pre-line; }
+
+  /* Boot skeleton — placeholder rows shaped like the real list (34px rows, a
+     leading group label) while the first load is still in flight. */
+  .cl-skel { display: flex; flex-direction: column; gap: 1px; padding: 2px 0;
+    animation: cl-skel-in 240ms var(--ease-page) both; }
+  .cl-skel-label { display: flex; align-items: center; padding: 10px 11px 6px; }
+  .cl-skel-row { display: flex; align-items: center; height: 34px; padding: 0 11px; }
+  @keyframes cl-skel-in { from { opacity: 0; } to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .cl-skel { animation: none; } }
 
   .crow { position: relative; display: flex; align-items: center; gap: 9px; height: 34px; padding: 0 6px 0 11px; flex: none;
     border-radius: 8px; color: var(--fg-muted); cursor: pointer; transition: background var(--dur-fast), color var(--dur-fast);

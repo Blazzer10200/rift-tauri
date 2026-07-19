@@ -18,6 +18,8 @@
   import { tooltip } from "$lib/actions/tooltip";
 
   import { projectHue } from "$lib/utils/projectHue";
+  import Skeleton from "./Skeleton.svelte";
+  import { bootLoad } from "$lib/state/bootLoad.svelte";
 
   const list = $derived(projects.sorted);
   const activeKey = $derived(projectRootKey(assistant.activeRoot));
@@ -120,6 +122,15 @@
   }
 </script>
 
+{#if bootLoad.showSkeleton}
+  <div class="sw-skel">
+    <Skeleton w="28px" h="28px" radius="8px" />
+    <div class="sw-skel-meta">
+      <Skeleton w="62%" h="12px" radius="5px" />
+      <Skeleton w="40%" h="9px" radius="4px" delay={120} />
+    </div>
+  </div>
+{:else}
 <button
   bind:this={triggerEl}
   class="switcher"
@@ -147,6 +158,7 @@
   </span>
   <ChevronsUpDown size={15} class="sw-ch" />
 </button>
+{/if}
 
 {#if menuOpen}
   <div class="sw-menu" use:portal style="left:{menuPos.x}px; top:{menuPos.y}px; min-width:{menuPos.w}px" role="menu" tabindex="-1">
@@ -197,6 +209,13 @@
     border-radius: 11px; border: 1px solid var(--border); background: var(--bg-inset);
     transition: border-color var(--dur-fast), background var(--dur-fast); }
   .switcher:hover, .switcher.open { border-color: var(--border-strong); background: var(--surface); }
+  /* Boot skeleton — same footprint as the switcher trigger so nothing jumps. */
+  .sw-skel { display: flex; align-items: center; gap: 10px; height: 46px; margin: 2px 0; padding: 0 8px; flex: none;
+    border-radius: 11px; border: 1px solid var(--border); background: var(--bg-inset);
+    animation: sw-skel-in 240ms var(--ease-page) both; }
+  .sw-skel-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+  @keyframes sw-skel-in { from { opacity: 0; } to { opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .sw-skel { animation: none; } }
   /* Monogram tiles wear the project's identity hue (--ph), not the accent. */
   .sw-mono { width: 28px; height: 28px; flex: none; display: grid; place-items: center; border-radius: 8px;
     font-size: 12px; font-weight: 700; letter-spacing: -0.01em; color: oklch(0.78 0.14 var(--ph)); background: oklch(0.72 0.14 var(--ph) / 0.13);

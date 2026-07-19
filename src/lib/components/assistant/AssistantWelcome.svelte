@@ -13,6 +13,8 @@
   import ClaudeConnect from "$lib/components/onboarding/ClaudeConnect.svelte";
   import { leafName, shortPath } from "$lib/components/shell/tabsbar/helpers";
   import { greeting, fmtAgo } from "$lib/components/workspace/welcomeShared";
+  import Skeleton from "$lib/components/shell/Skeleton.svelte";
+  import { bootLoad } from "$lib/state/bootLoad.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
   // Optional tabId — when set (split-pane), suggestion clicks write into THIS
@@ -179,8 +181,23 @@
         <GhPopover anchor={ghAnchor} onClose={() => (ghOpen = false)} />
       {/if}
 
-      <!-- Jump back in — the project's freshest threads, one click to resume. -->
-      {#if resumables.length > 0}
+      <!-- Jump back in — the project's freshest threads, one click to resume.
+           During boot the conversation list is still loading, so show skeleton
+           rows in the strip's exact footprint instead of letting it pop in late. -->
+      {#if bootLoad.showSkeleton}
+        <div class="resume">
+          <div class="wo-label">Jump back in</div>
+          <div class="resume-list">
+            {#each [0, 1, 2] as i (i)}
+              <div class="resume-skel">
+                <Skeleton w="13px" h="13px" radius="4px" delay={i * 90} />
+                <Skeleton w="{58 - i * 9}%" h="12px" radius="5px" delay={i * 90 + 40} />
+                <Skeleton w="34px" h="10px" radius="5px" delay={i * 90 + 80} />
+              </div>
+            {/each}
+          </div>
+        </div>
+      {:else if resumables.length > 0}
         <div class="resume">
           <div class="wo-label">Jump back in</div>
           <div class="resume-list">
@@ -431,6 +448,10 @@
     cursor: pointer; min-width: 0; transition: background var(--dur-fast), color var(--dur-fast); }
   .resume-item:hover { background: var(--surface-hover); color: var(--fg); }
   .resume-item > :global(svg:first-child) { color: var(--fg-faint); flex: none; }
+  /* Boot skeleton row — matches .resume-item footprint (32px, same gap/pad) so
+     the swap to real rows doesn't shift the strip. */
+  .resume-skel { display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 9px; }
+  .resume-skel > :global(:nth-child(2)) { flex: 1; }
   .ri-t { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 500;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ri-m { flex: none; font-size: 10.5px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }

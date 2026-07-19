@@ -2,13 +2,11 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.130.0 — The slash menu keeps up with Claude Code
+## v0.131.0 — Boot that shows its work, and cleaner streaming
 
-**Rift now asks the CLI what it can do instead of assuming.** The `/` menu picks up every slash command your installed Claude Code actually supports — including ones that ship inside the CLI itself, like `/code-review` — and refreshes automatically as the CLI updates. They appear in a new "Claude Code" group, remembered between launches.
+**Rift no longer opens on a dead, empty shell while it loads.** The conversation list, project switcher, status bar, home welcome, and "Jump back in" strip now shimmer as skeleton placeholders during the first load, then swap in place for the real thing — so a slow cold start reads as "loading" instead of "broken." Warm boots stay instant: the skeletons only appear if the load actually takes a moment, so nothing flickers when it's fast.
 
-- **Plugin skills listed too** — skills from marketplace-installed Claude Code plugins now show in the menu alongside your own.
-- **Nothing silently dropped anymore** — if a newer CLI streams a content type this Rift build doesn't know yet, the transcript shows a small "unsupported content skipped" note instead of losing it invisibly.
-- **Early warning on CLI renames** — Rift logs a warning when a tool it enables no longer exists in the CLI, so upstream renames get caught before they turn into permission popups.
+- **Cleaner streaming in the transcript** — fixed a display bug where a reply that ran text → tool → text could fuse two separate sentences together (`…real logic.Done.`) and render the tool card out of order. Text before and after a tool now stays as separate, correctly ordered blocks.
 
 ## Known issues
 - **While elevated, dragging files from Explorer into the window doesn't work** (Windows blocks lower→higher integrity drag-drop); the attach button / file picker still works fine.

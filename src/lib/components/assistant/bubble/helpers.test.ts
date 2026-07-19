@@ -97,6 +97,12 @@ describe("mergeSplitProse", () => {
     const blocks: Block[] = [text("Checking now"), tool("Bash"), text("Done — all clean.")];
     expect(mergeSplitProse(blocks)).toEqual(blocks);
   });
+  it("does not stitch when the tail opens with terminal punctuation (new sentence)", () => {
+    // Regression: a tail beginning with a bare `.`/`!`/`?` is a new sentence, not
+    // a mid-construct split — must stay a separate block, not fuse+reorder past the tool.
+    const blocks: Block[] = [text("that's the real logic"), tool("Edit"), text(".Done.")];
+    expect(mergeSplitProse(blocks)).toEqual(blocks);
+  });
   it("leaves a head with no interim tool untouched", () => {
     const blocks: Block[] = [text("ends mid"), text("sentence")];
     expect(mergeSplitProse(blocks)).toEqual(blocks);

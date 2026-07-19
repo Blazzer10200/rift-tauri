@@ -243,6 +243,24 @@ describe("playback — tool_use → tool_result lifecycle", () => {
     expect(tools).toHaveLength(1);
     expect(rec.toolUses).toHaveLength(1);
   });
+
+  it("keeps text before and after a tool as separate, ordered blocks (no fusion / reorder)", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    const id = tab.streamingMsgId!;
+    feed(tab, [
+      textDelta("before the edit."),
+      toolUseEnv("tu-mid", "Edit", { file_path: "/a.ts" }),
+      toolResultEnv("tu-mid", "ok", false),
+      textDelta("after the edit."),
+    ]);
+    const kinds = textBlocks(tab, id).map((b) => b.type);
+    expect(kinds).toEqual(["text", "tool", "text"]);
+    const texts = textBlocks(tab, id)
+      .filter((b) => b.type === "text")
+      .map((b) => (b as { text: string }).text);
+    expect(texts).toEqual(["before the edit.", "after the edit."]);
+  });
 });
 
 // ── Sub-agent live routing ───────────────────────────────────────────────────

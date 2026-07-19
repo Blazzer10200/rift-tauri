@@ -10,6 +10,8 @@
   import UsagePanel from "../assistant/composer/UsagePanel.svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import { onMount } from "svelte";
+  import Skeleton from "./Skeleton.svelte";
+  import { bootLoad } from "$lib/state/bootLoad.svelte";
 
   const connected = $derived(!!(assistant.auth?.loggedIn || assistant.hasApiKey));
   const repoName = $derived.by(() => {
@@ -80,6 +82,11 @@
 </script>
 
 <footer class="statusbar" data-tauri-drag-region>
+  {#if bootLoad.showSkeleton}
+    <span class="sb-item"><Skeleton w="56px" h="11px" radius="5px" /></span>
+    <span class="sb-sep"></span>
+    <span class="sb-item"><Skeleton w="66px" h="11px" radius="5px" delay={110} /></span>
+  {:else}
   <button
     class="sb-item sb-btn sb-conn"
     type="button"
@@ -93,6 +100,7 @@
   <button class="sb-item sb-btn" type="button" onclick={() => workspace.setActive("home")} use:tooltip={"Open Workspace"}>
     {repoName}
   </button>
+  {/if}
   {#if assistant.workspaceBranch}
     {#if ghActive}
       <button class="sb-item sb-btn" type="button" bind:this={ghAnchor}
