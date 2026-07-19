@@ -82,7 +82,24 @@
         onDismiss: () => updates.snooze(),
       });
     }
-    if (cliAvailable) {
+    if (cliUpdate.restartReady) {
+      // Post-update follow-through: the CLI path is cached at startup, so a
+      // relaunch is what provably finishes the update. Outranks the update row
+      // (a stale auth probe can briefly still report the old version).
+      out.push({
+        key: "cli-restart",
+        kind: "cli",
+        icon: Terminal,
+        label: "Claude CLI updated",
+        note: "Restart Rift to finish switching to the new CLI.",
+        busy: cliUpdate.restarting,
+        busyLabel: "Restarting…",
+        progress: null,
+        cta: "Restart",
+        onAct: () => void cliUpdate.restartNow(),
+        onDismiss: () => (cliUpdate.restartReady = false),
+      });
+    } else if (cliAvailable) {
       out.push({
         key: "cli",
         kind: "cli",

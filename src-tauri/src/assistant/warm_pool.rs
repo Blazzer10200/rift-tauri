@@ -51,7 +51,7 @@ use tokio::sync::{mpsc, oneshot};
 /// the loop holds a `turn_tx` clone (via the `WarmChild` it owns through `ctx.warm`)
 /// so dropping the registry entry alone never makes the loop's `recv()` return None
 /// (self-referential sender). The child must be killed by PID.
-pub(super) fn kill_child_tree(pid: u32) {
+pub(crate) fn kill_child_tree(pid: u32) {
     if pid == 0 { return; } // never taskkill PID 0 (meaningless / unsafe target)
     #[cfg(windows)]
     {
@@ -254,7 +254,7 @@ pub(super) fn get(session_id: &str) -> Option<Arc<Mutex<WarmChild>>> {
 
 /// Current number of live warm children in the pool. Diagnostics-only (the pool
 /// has no standalone size counter — size is the registry map length).
-pub(super) fn pool_size() -> usize {
+pub(crate) fn pool_size() -> usize {
     with_warm(|m| m.len())
 }
 

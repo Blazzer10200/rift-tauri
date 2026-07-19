@@ -27,6 +27,13 @@
   import { onboarding } from "../state/onboarding.svelte";
   import { betaNotice } from "../state/betaNotice.svelte";
   import OnboardingFlow from "./onboarding/OnboardingFlow.svelte";
+  import CloseConfirm from "./shell/CloseConfirm.svelte";
+  import { listen } from "@tauri-apps/api/event";
+
+  // Verified close-out: the backend intercepts the main window's ✕
+  // (lib.rs on_window_event) and emits this; the modal confirms + runs the
+  // reap/verify checklist before exiting.
+  let closeConfirmOpen = $state(false);
 
   // First-run gate: show the onboarding flow until it's been completed/skipped
   // once. Triggers when the assistant has no usable auth (no API key AND the
@@ -59,6 +66,9 @@
   // the assistant store — init here, not just on Chat/Settings mount, or the
   // dashboard renders the empty-state lie until another workspace runs it.)
   onMount(() => {
+    const unlistenClose = listen("rift://close-requested", () => {
+      closeConfirmOpen = true;
+    });
     void assistant.init();
     shell.init();
     browserDock.init();
@@ -79,6 +89,9 @@
       (window as unknown as { __assistant?: typeof assistant }).__assistant = assistant;
       (window as unknown as { __toast?: typeof toast }).__toast = toast;
     }
+    return () => {
+      void unlistenClose.then((u) => u());
+    };
   });
 
   // Keep the CLI-update store's install method in sync with the auth probe so
@@ -275,6 +288,7 @@
   {/if}
 
   <UpdateDialog />
+  <CloseConfirm bind:open={closeConfirmOpen} />
 
   <ToastHost />
 

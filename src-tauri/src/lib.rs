@@ -21,6 +21,7 @@ pub mod diagnostics;
 pub mod elevation;
 pub mod job_object;
 pub mod secrets;
+pub mod shutdown;
 pub mod state;
 pub mod stt;
 pub mod update_service;
@@ -166,6 +167,21 @@ pub fn run() {
         .manage(stt::DownloadCancel(std::sync::Mutex::new(None)))
         .manage(stt::EngineCache(tokio::sync::Mutex::new(None)))
         .manage(stt::SttSession(tokio::sync::Mutex::new(None)))
+        // Verified close-out: intercept the MAIN window's ✕ and let the frontend
+        // confirm + run the reap/verify checklist (shutdown.rs). Secondary
+        // `window-*` panes close freely. A second ✕ while a confirm is pending
+        // passes through (dead-webview escape hatch, shutdown::should_intercept_close).
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" && shutdown::should_intercept_close() {
+                    api.prevent_close();
+                    use tauri::Emitter;
+                    let _ = window
+                        .app_handle()
+                        .emit_to(window.label(), "rift://close-requested", ());
+                }
+            }
+        })
         .setup(|app| {
             // Window starts hidden (`visible: false` in tauri.conf.json) so we
             // can position it before the user sees it.
@@ -305,6 +321,11 @@ pub fn run() {
             stt::stt_cancel_download,
             stt::stt_delete_model,
             stt::stt_clean_transcript,
+            shutdown::app_close_dismissed,
+            shutdown::app_close_reap,
+            shutdown::app_close_verify,
+            shutdown::app_exit_now,
+            shutdown::app_restart_now,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

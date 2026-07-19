@@ -117,6 +117,12 @@ export class CliUpdate {
    *  npm's latest — the signature of a native copy that reports success without
    *  actually bumping. Drives the "may need a manual reinstall" hint. */
   updateStuck = $state(false);
+  /** True after a successful in-app CLI update: the backend caches the resolved
+   *  CLI path at startup, so only a relaunch provably puts every turn on the
+   *  new binary. Drives the "Restart Rift to finish" banner row. */
+  restartReady = $state(false);
+  /** True while app_restart_now is reaping children + relaunching. */
+  restarting = $state(false);
   /** The command string most recently copied via copyValue() — lets a single
    *  per-row copy button flip to its "Copied!" state without affecting others. */
   copiedCmd = $state<string | null>(null);
@@ -439,12 +445,26 @@ export class CliUpdate {
       // so the UI can point the user at a manual reinstall instead of leaving a
       // banner stuck "out of date" with no explanation.
       this.updateStuck = this.isAnyStale(res.installs, null);
+      this.restartReady = true;
       return true;
     } catch (e) {
       this.updateError = e instanceof Error ? e.message : String(e);
       return false;
     } finally {
       this.updating = false;
+    }
+  }
+
+  /** Relaunch Rift to finish applying the CLI update (reaps children first —
+   *  shutdown.rs::app_restart_now). On failure, falls loud into updateError. */
+  async restartNow(): Promise<void> {
+    if (this.restarting) return;
+    this.restarting = true;
+    try {
+      await invoke("app_restart_now");
+    } catch (e) {
+      this.restarting = false;
+      this.updateError = e instanceof Error ? e.message : String(e);
     }
   }
 

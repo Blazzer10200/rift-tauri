@@ -84,6 +84,8 @@ pub use permission::PermissionRegistry;
 // items + `crate::assistant::kill_all_session_children` path stability.
 pub use turn::*;
 pub(crate) use turn::kill_all_session_children;
+// shutdown.rs (verified close-out): per-PID tree-kill + pool gauge.
+pub(crate) use warm_pool::{kill_child_tree, pool_size};
 
 use std::path::PathBuf;
 
