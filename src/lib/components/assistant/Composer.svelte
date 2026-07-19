@@ -6,6 +6,7 @@
   import GhPopover from "./GhPopover.svelte";
   import { notify } from "../../state/toast.svelte";
   import { clampEffort, modelFamily } from "../../state/assistant/helpers";
+  import { cliCommands } from "../../state/assistant/cliCommands.svelte";
   import { requestPrewarm, resetPrewarmDedup } from "../../state/assistant/prewarm";
   import { fuzzyScore, slashScore, isFileDrag, attachImageFiles, summarizeAttach, attachTextFiles, summarizeTextAttach } from "./composer/helpers";
   import AttachmentsRow from "./composer/AttachmentsRow.svelte";
@@ -125,10 +126,11 @@
     name: string;
     desc: string;
     // Present on entries discovered from the user's Claude Code setup
-    // (`~/.claude` + `<root>/.claude` skills/commands). These aren't run by
-    // runSlash — they ride to the CLI as `/name`, where its own skill
-    // resolution takes over.
-    custom?: { source: "user" | "project"; kind: "skill" | "command"; hint?: string };
+    // (`~/.claude` + `<root>/.claude` skills/commands, installed plugins) or
+    // reported by the CLI itself (source "cli" — the init frame's
+    // slash_commands[]). These aren't run by runSlash — they ride to the CLI
+    // as `/name`, where its own skill resolution takes over.
+    custom?: { source: "user" | "project" | "plugin" | "cli"; kind: "skill" | "command"; hint?: string };
   };
   // Grouped: conversation lifecycle → model + composition → flow control → info.
   const SLASH_COMMANDS: SlashCmd[] = [
@@ -357,7 +359,8 @@
     const seen = new Set(SLASH_COMMANDS.map((c) => c.name));
     const out: SlashCmd[] = [];
     for (const c of assistant.customCommands) {
-      if (c.source === "user" && !assistant.useFullConfig) continue;
+      // Plugin skills resolve through the user config layer too — same gate.
+      if ((c.source === "user" || c.source === "plugin") && !assistant.useFullConfig) continue;
       if (seen.has(c.name)) continue;
       seen.add(c.name);
       out.push({
@@ -368,9 +371,24 @@
     }
     return out;
   });
+  // #98.1: commands the CLI itself reported in the last `system/init` frame —
+  // builtins + CLI-bundled plugin skills (`/code-review`) the disk scan can't
+  // see. Names only (the CLI sends no descriptions); disk-scanned entries with
+  // the same name win above, so this section is purely the not-otherwise-known
+  // tail. Sandbox mode spawns with `--disable-slash-commands` → hide there.
+  const cliSlash = $derived.by<SlashCmd[]>(() => {
+    if (!assistant.useFullConfig) return [];
+    const seen = new Set([...SLASH_COMMANDS.map((c) => c.name), ...customSlash.map((c) => c.name)]);
+    const out: SlashCmd[] = [];
+    for (const name of cliCommands.names) {
+      if (seen.has(name)) continue;
+      out.push({ name, desc: "Claude Code command", custom: { source: "cli", kind: "command" } });
+    }
+    return out;
+  });
   const slashFiltered = $derived.by(() => {
     const q = draft.slice(1).toLowerCase();
-    const all = [...SLASH_COMMANDS, ...customSlash];
+    const all = [...SLASH_COMMANDS, ...customSlash, ...cliSlash];
     if (!q) return all;
     return all
       .map((c) => ({ c, s: slashScore(c.name, q) }))

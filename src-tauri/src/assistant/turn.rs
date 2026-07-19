@@ -81,6 +81,49 @@ fn with_session_stopped<R>(f: impl FnOnce(&mut HashSet<String>) -> R) -> R {
     f(set)
 }
 
+/// #98.2 allowlist-drift tripwire: the exact `--allowed-tools` value each
+/// session was spawned with, stashed at resolve time and TAKEN by the stream
+/// reader on the turn-opening `system/init` frame — whose `tools[]` is the
+/// CLI's own report of what it actually enabled. An allowlisted builtin
+/// missing there means the installed CLI no longer knows that name
+/// (renamed/removed upstream) — the drift class that historically surfaced
+/// as silent tool-denial popups until a Rift catch-up release.
+static SESSION_ALLOWED_TOOLS: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+
+fn with_session_allowed<R>(f: impl FnOnce(&mut HashMap<String, String>) -> R) -> R {
+    let mut g = match SESSION_ALLOWED_TOOLS.lock() {
+        Ok(g) => g,
+        Err(p) => {
+            log::error!("SESSION_ALLOWED_TOOLS mutex poisoned — recovering inner state");
+            p.into_inner()
+        }
+    };
+    let map = g.get_or_insert_with(HashMap::new);
+    f(map)
+}
+
+fn stash_session_allowlist(session_id: &str, allowed: &str) {
+    with_session_allowed(|m| { m.insert(session_id.to_string(), allowed.to_string()); });
+}
+
+fn take_session_allowlist(session_id: &str) -> Option<String> {
+    with_session_allowed(|m| m.remove(session_id))
+}
+
+/// Allowlisted names ABSENT from the init frame's `tools[]`. `mcp__` entries
+/// are skipped (server health owns those — FE checkMcpInitHealth), as are
+/// wildcards (`mcp__*` matches nothing literal). Pure for the unit test.
+fn allowlist_missing_from_init(allowed: &str, init_tools: &[&str]) -> Vec<String> {
+    let have: HashSet<&str> = init_tools.iter().copied().collect();
+    allowed
+        .split(',')
+        .map(str::trim)
+        .filter(|t| !t.is_empty() && !t.contains('*') && !t.starts_with("mcp__"))
+        .filter(|t| !have.contains(t))
+        .map(String::from)
+        .collect()
+}
+
 fn set_session_pid(session_id: &str, pid: u32) {
     with_session_pids(|m| { m.insert(session_id.to_string(), pid); });
 }
@@ -1371,6 +1414,7 @@ async fn resolve_spawn(
         } else {
             format!("{BUILTINS},{SAFE_MCP},{GIT_READ_MCP}{git_write}")
         };
+        stash_session_allowlist(session_id, &allowed);
         cmd.arg("--mcp-config").arg(p)
             .arg("--allowed-tools").arg(allowed);
         // Spawn cwd = workspace root so Bash + relative paths resolve correctly.
@@ -1391,6 +1435,7 @@ async fn resolve_spawn(
         // a no-folder chat behave like `claude` in an empty dir rather than a
         // tools-disabled sandbox.
         const NO_WS_TOOLS: &str = "Agent,EnterPlanMode,ExitPlanMode,PushNotification,ScheduleWakeup,SendMessage,Skill,SlashCommand,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,TodoWrite,ToolSearch,WebFetch,WebSearch,Workflow";
+        stash_session_allowlist(session_id, NO_WS_TOOLS);
         cmd.arg("--allowed-tools").arg(NO_WS_TOOLS);
     } else {
         // No MCP config + sandboxed/prompting (or api-key/local-LLM, which force
@@ -3101,6 +3146,28 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                         }
                         continue;
                     }
+                    // #98.2 drift tripwire: the turn-opening init frame carries
+                    // the CLI's own `tools[]` — any allowlisted name it did NOT
+                    // enable no longer exists on this CLI (renamed/removed
+                    // upstream). Once per send (the stash is taken); healthy
+                    // turns log nothing. Falls through — init still forwards.
+                    if ty == Some("system")
+                        && v.get("subtype").and_then(|s| s.as_str()) == Some("init")
+                    {
+                        if let Some(allowed) = take_session_allowlist(stream_sid) {
+                            if let Some(tools) = v.get("tools").and_then(|t| t.as_array()) {
+                                let names: Vec<&str> = tools.iter().filter_map(|t| t.as_str()).collect();
+                                let missing = allowlist_missing_from_init(&allowed, &names);
+                                if !missing.is_empty() {
+                                    log::warn!(
+                                        "allowlist drift: {} --allowed-tools name(s) the CLI did not enable (renamed/removed upstream, or mode-gated): {} (session={stream_sid})",
+                                        missing.len(),
+                                        missing.join(",")
+                                    );
+                                }
+                            }
+                        }
+                    }
                     // `result` is the last frame — forward it, emit DONE, and
                     // RETURN (the loop parks for the next turn; stdin stays open).
                     if ty == Some("result") {
@@ -3640,12 +3707,23 @@ pub async fn assistant_kill_shell(session_id: String, pid: u32) -> Result<(), St
 #[cfg(test)]
 mod tests {
     use super::{
-        drain_stale_buffered_lines, interrupted_note_for_send, plan_usage_is_hot,
-        routes_through_nothink_shim, stash_interrupted_tools, take_interrupted_tools,
-        tool_use_desc, watchdog_should_stall, FABLE_MODEL, HAIKU_MODEL,
+        allowlist_missing_from_init, drain_stale_buffered_lines, interrupted_note_for_send,
+        plan_usage_is_hot, routes_through_nothink_shim, stash_interrupted_tools,
+        take_interrupted_tools, tool_use_desc, watchdog_should_stall, FABLE_MODEL, HAIKU_MODEL,
         STREAM_TOOL_CEILING_SECS,
     };
     use tokio::io::{AsyncBufReadExt, BufReader};
+
+    #[test]
+    fn allowlist_drift_flags_only_real_builtin_gaps() {
+        let allowed = "Bash,Read,mcp__*,mcp__rift__grep, ,Edit";
+        // Bash + Read enabled; Edit missing → flagged. mcp entries + wildcard
+        // + empty segments never flag.
+        let missing = allowlist_missing_from_init(allowed, &["Bash", "Read", "Write"]);
+        assert_eq!(missing, vec!["Edit".to_string()]);
+        // Fully-enabled allowlist → silent.
+        assert!(allowlist_missing_from_init("Bash,Read", &["Bash", "Read"]).is_empty());
+    }
 
     #[test]
     fn control_push_line_carries_subtype_fields_and_newline() {

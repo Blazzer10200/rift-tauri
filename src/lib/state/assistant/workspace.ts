@@ -21,7 +21,7 @@ import { prettyPath } from "../../components/shell/tabsbar/helpers";
 export type CustomCommand = {
   name: string;
   description: string;
-  source: "user" | "project";
+  source: "user" | "project" | "plugin";
   kind: "skill" | "command";
   argumentHint?: string;
 };

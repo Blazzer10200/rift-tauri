@@ -420,6 +420,13 @@
             <span class="steer-body">{b.text}</span>
             <span class="steer-tag">mid-turn</span>
           </div>
+        {:else if b.type === "unknown"}
+          <!-- #98.3: newer-CLI content this build can't render — honest marker
+               instead of a silent gap. Update Rift to see it. -->
+          <div class="unknown-note" title="This Claude Code version sent a content type Rift doesn't support yet — update Rift to render it.">
+            <span class="unknown-tag mono">{b.blockType}</span>
+            <span>unsupported content skipped</span>
+          </div>
         {/if}
       {/snippet}
 
@@ -1068,6 +1075,21 @@
   /* Mid-turn steer marker — the user's interjection pinned at the point in the
      timeline where Claude read it. Accent seam = user voice; otherwise quiet
      island framing so it never competes with prose or a full user bubble. */
+  /* #98.3 — deliberately quiet: an info marker, not an error. */
+  .unknown-note {
+    display: flex; align-items: center; gap: 7px;
+    margin: 6px 0;
+    padding: 4px 10px;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    color: var(--fg-faint); font-size: var(--fs-xs);
+  }
+  .unknown-tag {
+    padding: 0 5px;
+    border-radius: 4px;
+    background: var(--bg-elev-3);
+    color: var(--fg-subtle);
+  }
   .steer-note {
     display: flex; align-items: flex-start; gap: 7px;
     margin: 6px 0;

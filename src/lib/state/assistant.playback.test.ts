@@ -629,6 +629,51 @@ describe("playback — usage, cost, model attribution", () => {
   });
 });
 
+// ── #98 backward-compat: init slash_commands + unknown content blocks ────────
+describe("playback — CLI backward-compat surfaces", () => {
+  it("captures the init frame's slash_commands into the cliCommands store", async () => {
+    const { cliCommands } = await import("./assistant/cliCommands.svelte.js");
+    const tab = freshTab();
+    beginTurn(tab);
+    feed(tab, [{
+      type: "system",
+      subtype: "init",
+      slash_commands: ["/compact", "code-review", "/compact", 42, "bad name"],
+    }]);
+    expect(cliCommands.names).toEqual(["code-review", "compact"]);
+    // Older CLI omitting the field leaves the last-known set standing.
+    feed(tab, [{ type: "system", subtype: "init" }]);
+    expect(cliCommands.names).toEqual(["code-review", "compact"]);
+  });
+
+  it("renders one dedup'd marker for unknown assistant content block types", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const tab = freshTab();
+      beginTurn(tab);
+      feed(tab, [{
+        type: "assistant",
+        message: {
+          content: [
+            { type: "citation", cited_text: "a" },
+            { type: "tool_use", id: "tu-98", name: "Read", input: {} },
+            { type: "citation", cited_text: "b" },
+          ],
+        },
+      }]);
+      const last = tab.messages[tab.messages.length - 1];
+      const unknowns = last.blocks.filter((b) => b.type === "unknown");
+      expect(unknowns).toHaveLength(1);
+      expect(unknowns[0]).toMatchObject({ type: "unknown", blockType: "citation" });
+      // Known blocks still land untouched alongside the marker.
+      expect(last.blocks.some((b) => b.type === "tool" && b.name === "Read")).toBe(true);
+      expect(warn).toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+});
+
 // ── Live output-token counter ────────────────────────────────────────────────
 describe("playback — live output-token counter", () => {
   it("resets at turn start, climbs from streamed chars, snaps exact per message", () => {

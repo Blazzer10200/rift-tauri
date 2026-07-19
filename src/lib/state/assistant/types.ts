@@ -164,7 +164,18 @@ export type SteerBlock = {
   files?: number;
 };
 
-export type Block = TextBlock | ToolBlock | ThinkingBlock | BoundaryBlock | ImageBlock | ModelSwitchBlock | SteerBlock;
+/** #98.3: a content-block type this build doesn't recognize (a newer CLI
+ *  streaming something Rift predates). Rendered as a muted marker so the
+ *  transcript is honest about skipped content instead of silently dropping it.
+ *  One per (message, blockType) — repeats of the same type don't stack. */
+export type UnknownBlock = {
+  type: "unknown";
+  /** The wire `type` string we couldn't handle (e.g. a future "citation"). */
+  blockType: string;
+  at: number;
+};
+
+export type Block = TextBlock | ToolBlock | ThinkingBlock | BoundaryBlock | ImageBlock | ModelSwitchBlock | SteerBlock | UnknownBlock;
 
 /** A queued outbound message (sent while the tab was already streaming).
  *  `images`/`textFiles` snapshot the composer attachments at enqueue time so

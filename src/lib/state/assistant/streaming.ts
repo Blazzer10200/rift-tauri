@@ -19,6 +19,7 @@ import type { TabState } from "../assistant.svelte";
 import type { Block, ChatMessage, StreamEnvelope, ThinkingBlock, ToolBlock } from "./types";
 import { ctxWindowForModelId, flattenToolResult, previewToolInput } from "./helpers";
 import { checkMcpInitHealth } from "./healthAlerts";
+import { cliCommands } from "./cliCommands.svelte";
 import { browserDock } from "../browserDock.svelte";
 import { github } from "../github.svelte";
 
@@ -851,6 +852,20 @@ function appendToolUse(tab: TabState, block: { id: string; name: string; input?:
 
 const ASK_USER_NUDGE_MS = 60_000;
 
+/** #98.3: append a visible marker for a content-block type this build doesn't
+ *  know. Once per (message, type) — repeats of the same unknown type in one
+ *  bubble don't stack. Always leaves a console breadcrumb (matches the
+ *  unrecognized-stream_event policy above). */
+function appendUnknownBlock(tab: TabState, block: unknown) {
+  const blockType = String((block as { type?: unknown })?.type ?? "?");
+  console.warn("[assistant] unknown content block type from CLI — rendering a marker", blockType, block);
+  mutateStreaming(tab, (m) =>
+    m.blocks.some((b) => b.type === "unknown" && b.blockType === blockType)
+      ? m
+      : { ...m, blocks: [...m.blocks, { type: "unknown", blockType, at: Date.now() }] },
+  );
+}
+
 /** Drain the two ask_user FIFOs as long as both have entries. Each pair
  *  binds a toolUseId to a requestId in `askUserBindings`, making the chip
  *  in MessageBubble able to invoke the answer-submit command. */
@@ -997,6 +1012,10 @@ function applySubAgentFrame(tab: TabState, agentId: string, env: StreamEnvelope)
         const { id, name } = block;
         const input = block.input ?? {};
         newBlocks.push({ type: "tool", id, name, input, result: null, isError: false, status: "pending", startedAt: now });
+      } else if (block.type !== "text") {
+        // #98.3 (agent mini-transcript): breadcrumb only — the dock is
+        // ephemeral, the main-bubble path renders the visible marker.
+        console.warn("[assistant] unknown sub-agent content block type", (block as { type?: unknown })?.type);
       }
     }
     if (newBlocks.length > 0) {
@@ -1204,6 +1223,10 @@ export function onStreamLine(tab: TabState, raw: string) {
           tab.envelopeTextBuffer += block.text;
         } else if (block.type === "thinking") {
           ensureThinkingFromEnvelope(tab, block);
+        } else {
+          // #98.3: a block type this build predates (newer CLI) — surface a
+          // muted marker instead of silently dropping the content.
+          appendUnknownBlock(tab, block);
         }
       }
       break;
@@ -1319,6 +1342,10 @@ export function onStreamLine(tab: TabState, raw: string) {
             }));
         }
         checkMcpInitHealth(env as { mcp_servers?: unknown });
+        // #98.1: the CLI announcing its own slash-command set (builtins +
+        // bundled plugin skills the disk scan can't see) — feeds the
+        // composer menu's CLI section, persisted across restarts.
+        cliCommands.setFromInit((env as { slash_commands?: unknown }).slash_commands);
       }
       break;
     }

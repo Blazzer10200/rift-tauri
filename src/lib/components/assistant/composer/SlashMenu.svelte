@@ -15,7 +15,7 @@
   type SlashCmd = {
     name: string;
     desc: string;
-    custom?: { source: "user" | "project"; kind: "skill" | "command"; hint?: string };
+    custom?: { source: "user" | "project" | "plugin" | "cli"; kind: "skill" | "command"; hint?: string };
   };
 
   let {
@@ -52,11 +52,15 @@
   };
   const groupOf = (c: SlashCmd) =>
     c.custom
-      ? c.custom.source === "project" ? "Project skills" : "Your skills"
+      ? c.custom.source === "project" ? "Project skills"
+      : c.custom.source === "plugin" ? "Plugin skills"
+      : c.custom.source === "cli" ? "Claude Code"
+      : "Your skills"
       : META[c.name]?.group ?? "Commands";
   const iconOf = (c: SlashCmd): Icon =>
     c.custom
-      ? c.custom.kind === "skill" ? Sparkles : FileCode2
+      ? c.custom.source === "cli" ? SquareSlash
+      : c.custom.kind === "skill" ? Sparkles : FileCode2
       : META[c.name]?.icon ?? Terminal;
   // Filtering re-ranks across groups, so headers would interleave — flat list
   // with per-row source badges instead (standard palette behavior).
@@ -98,7 +102,7 @@
             <span class="sm-line">
               <span class="sm-cmd mono">/{#each slashMatchSegments(c.name, query) as seg, si (si)}{#if seg.hit}<b>{seg.text}</b>{:else}{seg.text}{/if}{/each}</span>
               {#if c.custom?.hint}<span class="sm-hint mono">{c.custom.hint}</span>{/if}
-              {#if !grouped && c.custom}<span class="sm-badge" data-src={c.custom.source}>{c.custom.source === "project" ? "project" : "yours"}</span>{/if}
+              {#if !grouped && c.custom}<span class="sm-badge" data-src={c.custom.source}>{c.custom.source === "project" ? "project" : c.custom.source === "plugin" ? "plugin" : c.custom.source === "cli" ? "cli" : "yours"}</span>{/if}
             </span>
             <span class="sm-desc">{c.desc}</span>
           </span>

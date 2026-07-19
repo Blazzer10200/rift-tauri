@@ -2,10 +2,14 @@
 //! places the Claude CLI resolves skills + commands from:
 //!   project — `<root>/.claude/skills/*/SKILL.md` + `<root>/.claude/commands/**/*.md`
 //!   user    — `~/.claude/skills/*/SKILL.md`     + `~/.claude/commands/**/*.md`
+//!   plugin  — each install dir in `~/.claude/plugins/installed_plugins.json`
+//!             (`<install>/skills/*/SKILL.md` + `<install>/commands/**/*.md`;
+//!             the registry, NOT `plugins/marketplaces/` — that catalog mirrors
+//!             every AVAILABLE plugin, installed or not)
 //! Metadata only (name / frontmatter description / argument-hint): Rift never
 //! executes these — an unmatched `/name` rides to the CLI as the prompt, where
-//! the CLI's own skill resolution runs it. Collisions dedup project-over-user
-//! (CLI precedence), skills-over-commands within a source.
+//! the CLI's own skill resolution runs it. Collisions dedup project-over-user-
+//! over-plugin (CLI precedence), skills-over-commands within a source.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -47,6 +51,15 @@ pub async fn assistant_list_custom_commands(
         }
         if let Ok(home) = crate::state::paths::dirs_home() {
             scan_source(&home.join(".claude"), "user", &mut seen, &mut out);
+            // Installed plugins last so a same-name user/project entry wins.
+            // A plugin install dir lays out skills/ + commands/ directly under
+            // itself — the same shape scan_source expects under a `.claude`.
+            let registry = home.join(".claude").join("plugins").join("installed_plugins.json");
+            if let Ok(txt) = std::fs::read_to_string(&registry) {
+                for dir in plugin_install_paths(&txt) {
+                    scan_source(&dir, "plugin", &mut seen, &mut out);
+                }
+            }
         }
         Ok(out)
     })
@@ -150,6 +163,26 @@ fn scan_commands(dir: &Path, source: &str, out: &mut Vec<CustomCommand>) {
             argument_hint: fm.argument_hint,
         });
     }
+}
+
+/// Install dirs out of `installed_plugins.json` (version-2 shape:
+/// `{"plugins": {"name@marketplace": [{"installPath": …}, …]}}`). Forgiving —
+/// any parse miss yields an empty list, never an error (no registry file =
+/// no plugins installed, the common case).
+fn plugin_install_paths(json: &str) -> Vec<std::path::PathBuf> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else { return Vec::new() };
+    let Some(map) = v.get("plugins").and_then(|p| p.as_object()) else { return Vec::new() };
+    let mut out: Vec<std::path::PathBuf> = map
+        .values()
+        .filter_map(|entries| entries.as_array())
+        .flatten()
+        .filter_map(|e| e.get("installPath").and_then(|s| s.as_str()))
+        .filter(|p| !p.trim().is_empty())
+        .map(std::path::PathBuf::from)
+        .collect();
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// Slash-safe name: alnum head, then word chars / `:` / `-` / `.`. Anything
@@ -357,6 +390,32 @@ mod tests {
         assert!(valid_name("-bad").is_none());
         assert!(valid_name("has space").is_none());
         assert!(valid_name("").is_none());
+    }
+
+    #[test]
+    fn plugin_install_paths_parses_v2_registry() {
+        let json = r#"{
+          "version": 2,
+          "plugins": {
+            "rust-analyzer-lsp@official": [
+              {"scope": "user", "installPath": "C:\\u\\.claude\\plugins\\cache\\official\\rust-analyzer-lsp\\1.0.0"}
+            ],
+            "dupe@official": [
+              {"installPath": "C:\\u\\.claude\\plugins\\cache\\official\\rust-analyzer-lsp\\1.0.0"},
+              {"installPath": ""}
+            ]
+          }
+        }"#;
+        let paths = plugin_install_paths(json);
+        assert_eq!(paths.len(), 1); // deduped; empty path dropped
+        assert!(paths[0].to_string_lossy().ends_with("1.0.0"));
+    }
+
+    #[test]
+    fn plugin_install_paths_tolerates_garbage() {
+        assert!(plugin_install_paths("not json").is_empty());
+        assert!(plugin_install_paths("{}").is_empty());
+        assert!(plugin_install_paths(r#"{"plugins": 3}"#).is_empty());
     }
 
     #[test]
