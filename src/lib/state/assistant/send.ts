@@ -293,6 +293,11 @@ export async function send(
     ...tab.messages,
     { id: crypto.randomUUID(), role: "user", blocks: userBlocks, ts: Date.now() },
   ];
+  // Persist the user message NOW — saves otherwise only happen at turn-complete,
+  // so anything that kills the app mid-turn (update apply, crash) lost the
+  // just-typed prompt (v0.131.0 incident). Fired before the assistant
+  // placeholder joins so the record never ends on an empty bubble.
+  store.scheduleSave(true, convoId);
   // Snapshot the permission mode this turn runs with — TurnSummary's badge
   // reads the message copy so a later mode switch can't relabel history.
   const asst: ChatMessage = {

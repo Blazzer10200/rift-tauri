@@ -303,6 +303,10 @@ class UpdateStore {
       // never resolves on success; Velopack relaunches the new version.
       this.state = "installing";
       this.progress = 100;
+      // apply exits via app.exit(0), which SKIPS beforeunload → flushNow never
+      // runs — a live turn's messages were lost in the v0.131.0 incident.
+      // Persist every tab and wait for the writes before the swap kills us.
+      await assistant.flushAllNow().catch((e) => console.warn("pre-apply flush failed", e));
       await invoke("apply_pending_update");
     } catch (e) {
       this.state = "available";

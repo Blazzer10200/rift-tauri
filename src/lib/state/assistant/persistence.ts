@@ -29,6 +29,7 @@ import type {
 type SaveableTab = {
   messages: ChatMessage[];
   saveTimer: ReturnType<typeof setTimeout> | null;
+  saveFirstQueuedAt: number | null;
   convoTitle: string | null;
   convoCreatedAt: number | null;
   lastActivityAt: number | null;
@@ -222,6 +223,7 @@ export function flushNow(host: PersistenceHost): void {
       clearTimeout(tab.saveTimer);
       tab.saveTimer = null;
     }
+    tab.saveFirstQueuedAt = null;
     const record = buildSaveRecord(host, convoId, tab);
     tab.convoTitle = record.title;
     tab.convoCreatedAt = record.createdAt;
@@ -229,6 +231,32 @@ export function flushNow(host: PersistenceHost): void {
       console.warn("flushNow save failed", e);
     });
   }
+}
+
+/** Awaited flush of every open tab — the pre-exit variant of flushNow. Used
+ *  before update-apply / restart, which exit via `app.exit(0)` and so skip
+ *  `beforeunload` entirely (v0.131.0 incident: a live turn's user message was
+ *  lost because the debounced save never ran and the swap killed the process
+ *  before flushNow could). Awaits every write so the swap can't outrun disk. */
+export async function flushAllAwait(host: PersistenceHost): Promise<void> {
+  const writes: Promise<unknown>[] = [];
+  for (const [convoId, tab] of host.tabs) {
+    if (tab.messages.length === 0 || deletedIds.has(convoId)) continue;
+    if (tab.saveTimer) {
+      clearTimeout(tab.saveTimer);
+      tab.saveTimer = null;
+    }
+    tab.saveFirstQueuedAt = null;
+    const record = buildSaveRecord(host, convoId, tab);
+    tab.convoTitle = record.title;
+    tab.convoCreatedAt = record.createdAt;
+    writes.push(
+      trackSave(convoId, invoke("assistant_save_conversation", { convo: record })).catch((e) => {
+        console.warn("flushAllAwait save failed", e);
+      }),
+    );
+  }
+  await Promise.allSettled(writes);
 }
 
 /** Persist the active tab's conversation. Debounced — callers fire freely;
@@ -248,6 +276,7 @@ export function scheduleSave(host: PersistenceHost, flush = false, forConvoId?: 
   }
   const doSave = async () => {
     tab.saveTimer = null;
+    tab.saveFirstQueuedAt = null;
     if (deletedIds.has(convoId)) return;
     const record = buildSaveRecord(host, convoId, tab);
     tab.convoTitle = record.title;
@@ -263,7 +292,17 @@ export function scheduleSave(host: PersistenceHost, flush = false, forConvoId?: 
       console.warn("assistant_save_conversation failed", e);
     }
   };
-  if (flush) void doSave();
+  if (flush) {
+    void doSave();
+    return;
+  }
+  // Starvation guard (v0.131.0 incident): this is a trailing debounce, so a
+  // streaming turn calling in every delta resets the timer forever — a 20-min
+  // turn persisted NOTHING until it ended. Cap the total deferral: once a save
+  // has been pending 5s, write now instead of re-arming.
+  const now = Date.now();
+  tab.saveFirstQueuedAt ??= now;
+  if (now - tab.saveFirstQueuedAt >= 5000) void doSave();
   else tab.saveTimer = setTimeout(doSave, 700);
 }
 

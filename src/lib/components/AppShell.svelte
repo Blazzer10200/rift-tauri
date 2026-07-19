@@ -29,6 +29,7 @@
   import OnboardingFlow from "./onboarding/OnboardingFlow.svelte";
   import CloseConfirm from "./shell/CloseConfirm.svelte";
   import { listen } from "@tauri-apps/api/event";
+  import { invoke } from "@tauri-apps/api/core";
   import Skeleton from "./shell/Skeleton.svelte";
   import { bootLoad } from "../state/bootLoad.svelte";
 
@@ -91,7 +92,14 @@
       (window as unknown as { __assistant?: typeof assistant }).__assistant = assistant;
       (window as unknown as { __toast?: typeof toast }).__toast = toast;
     }
+    // Freeze watchdog heartbeat: proves this renderer's main thread is alive.
+    // 3s cadence is lockstep with watchdog.rs::BEAT_EVERY_MS — the backend
+    // reloads the webview if a FOCUSED window goes silent (v0.131.0 incident).
+    const heartbeat = setInterval(() => {
+      void invoke("ui_heartbeat").catch(() => {});
+    }, 3_000);
     return () => {
+      clearInterval(heartbeat);
       void unlistenClose.then((u) => u());
     };
   });

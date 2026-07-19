@@ -31,6 +31,7 @@
 // user is never told to run npm (which would create a conflicting install).
 
 import { invoke } from "@tauri-apps/api/core";
+import { confirm } from "@tauri-apps/plugin-dialog";
 import { assistant } from "./assistant.svelte";
 
 const PKG = "@anthropic-ai/claude-code";
@@ -424,8 +425,13 @@ export class CliUpdate {
     const live = assistant.liveTabs.length;
     if (live > 0) {
       const what = live === 1 ? "1 conversation is" : `${live} conversations are`;
-      const ok = window.confirm(
+      // Async native confirm — window.confirm is a SYNCHRONOUS script dialog
+      // that blocks the renderer main thread; if the host ever fails to show
+      // or answer it, the whole UI freezes permanently (frozen frame, dead
+      // input). Never use window.confirm/alert/prompt in Rift.
+      const ok = await confirm(
         `${what} still running and will be interrupted by the CLI update.\n\nUpdate anyway?`,
+        { title: "Update Claude CLI", kind: "warning", okLabel: "Update anyway", cancelLabel: "Not now" },
       );
       if (!ok) return false;
     }
@@ -461,6 +467,9 @@ export class CliUpdate {
     if (this.restarting) return;
     this.restarting = true;
     try {
+      // Same exit class as update-apply: app_restart_now exits without
+      // beforeunload, so persist every tab first (v0.131.0 data-loss class).
+      await assistant.flushAllNow().catch((e) => console.warn("pre-restart flush failed", e));
       await invoke("app_restart_now");
     } catch (e) {
       this.restarting = false;

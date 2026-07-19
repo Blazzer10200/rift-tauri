@@ -1,5 +1,12 @@
-import { describe, it, expect } from "vitest";
-import { buildSaveRecord } from "./persistence";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+
+// Inert IPC — scheduleSave/flushAllAwait tests exercise scheduling logic only.
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+
+import { buildSaveRecord, scheduleSave, flushAllAwait } from "./persistence";
+import { invoke } from "@tauri-apps/api/core";
+
+const mockInvoke = vi.mocked(invoke);
 
 // buildSaveRecord's workspaceRoot resolution is the regression surface: a tab's
 // saved folder must come from the tab's OWN root, else the GLOBAL workspace
@@ -48,5 +55,112 @@ describe("buildSaveRecord — workspaceRoot resolution", () => {
   it("stays unfiled (null) when the tab has no root and no global default", () => {
     const rec = buildSaveRecord(host({ workspaceCurrent: null }), "c1", tab({ workspaceRoot: null }));
     expect(rec.workspaceRoot).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v0.131.0 incident regressions: debounce starvation + pre-exit awaited flush.
+
+/** Live tab shape — the SaveableTab subset scheduleSave/flushAllAwait touch. */
+function liveTab(messages = 1) {
+  return {
+    messages: Array.from({ length: messages }, (_, i) => ({
+      id: `m${i}`,
+      role: "user",
+      blocks: [{ type: "text", text: `msg ${i}` }],
+    })),
+    saveTimer: null as ReturnType<typeof setTimeout> | null,
+    saveFirstQueuedAt: null as number | null,
+    convoTitle: "t",
+    convoCreatedAt: 1000,
+    lastActivityAt: 2000,
+    cliSessionId: "sess",
+    titleGenerated: true, // pre-claimed → maybeGenerateTitle no-ops
+    modelOverride: null,
+    lastTurnUsage: null,
+    workspaceRoot: null,
+  };
+}
+
+function liveHost(tabs: Record<string, ReturnType<typeof liveTab>>) {
+  return {
+    model: "sonnet",
+    workspaceCurrent: null,
+    activeRoot: null,
+    conversations: [],
+    lastError: null,
+    tabs: new Map(Object.entries(tabs)),
+    currentConvoId: Object.keys(tabs)[0] ?? null,
+  } as unknown as Parameters<typeof scheduleSave>[0];
+}
+
+const saveCalls = () =>
+  mockInvoke.mock.calls.filter(([cmd]) => cmd === "assistant_save_conversation");
+
+describe("scheduleSave starvation guard", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue([]);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("fires after the quiet 700ms debounce (baseline)", async () => {
+    const h = liveHost({ a: liveTab() });
+    scheduleSave(h, false, "a");
+    expect(saveCalls().length).toBe(0);
+    await vi.advanceTimersByTimeAsync(750);
+    expect(saveCalls().length).toBe(1);
+  });
+
+  it("cannot be starved by continuous re-scheduling", async () => {
+    const h = liveHost({ a: liveTab() });
+    // Re-schedule every 300ms, streaming-delta style — a pure trailing
+    // debounce would defer forever (the v0.131.0 data-loss shape).
+    for (let i = 0; i < 30; i++) {
+      scheduleSave(h, false, "a");
+      await vi.advanceTimersByTimeAsync(300);
+    }
+    expect(saveCalls().length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("clears the max-wait clock once a save dispatches", async () => {
+    const h = liveHost({ a: liveTab() });
+    scheduleSave(h, false, "a");
+    await vi.advanceTimersByTimeAsync(750);
+    expect(saveCalls().length).toBe(1);
+    const t = (h as unknown as { tabs: Map<string, { saveFirstQueuedAt: number | null }> }).tabs.get("a")!;
+    expect(t.saveFirstQueuedAt).toBeNull();
+  });
+});
+
+describe("flushAllAwait (pre-exit awaited flush)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue([]);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("writes every tab with content and skips empty tabs", async () => {
+    const h = liveHost({ a: liveTab(2), b: liveTab(1), empty: liveTab(0) });
+    await flushAllAwait(h);
+    const saved = saveCalls()
+      .map(([, args]) => (args as { convo: { id: string } }).convo.id)
+      .sort();
+    expect(saved).toEqual(["a", "b"]);
+  });
+
+  it("cancels a pending debounce so nothing double-writes after exit", async () => {
+    const h = liveHost({ a: liveTab() });
+    scheduleSave(h, false, "a");
+    await flushAllAwait(h);
+    expect(saveCalls().length).toBe(1);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(saveCalls().length).toBe(1);
   });
 });

@@ -115,6 +115,7 @@ import {
 import {
   refreshConversations as persistRefresh,
   flushNow as persistFlushNow,
+  flushAllAwait as persistFlushAllAwait,
   scheduleSave as persistSchedule,
   renameConversation as persistRename,
   persistTabs as persistTabsImpl,
@@ -206,6 +207,9 @@ export class TabState {
    *  Each tab tracking its own timer means flushNow() on beforeunload can
    *  iterate every unsaved tab instead of dropping background-tab edits. */
   saveTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When the oldest still-unsaved scheduleSave was queued — caps how long the
+   *  trailing debounce can starve a write (persistence.ts). In-memory only. */
+  saveFirstQueuedAt: number | null = null;
 
   messages = $state<ChatMessage[]>([]);
   streaming = $state(false);
@@ -1525,6 +1529,10 @@ class AssistantStore {
   refreshConversations() { return persistRefresh(this); }
 
   flushNow() { persistFlushNow(this); }
+
+  /** Awaited flush of every open tab — call before any exit path that skips
+   *  `beforeunload` (update apply, programmatic restart). See persistence.ts. */
+  flushAllNow() { return persistFlushAllAwait(this); }
 
   // M6: relaxed from `private` so the tabs module calls it through the host ref.
   scheduleSave(flush = false, convoId?: string) { persistSchedule(this, flush, convoId); }

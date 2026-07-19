@@ -36,6 +36,13 @@ pub struct ConversationMeta {
     pub message_count: u32,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Real content activity (send / turn result). Every tab-switch save bumps
+    /// `updated_at`, so relative-time labels must read THIS — omitting it from
+    /// the list DTO is why every "Jump back in" row said "just now" (v0.131.0).
+    /// Rides the record's serde-flatten catch-all on save; None for legacy
+    /// records (frontend falls back to `updated_at`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_activity_at: Option<i64>,
     /// Σ of per-turn costs across the transcript (sum of messages[].costUsd).
     /// Matches the live session counter; 0.0 for convos predating cost capture.
     pub cost_usd: f64,
@@ -268,8 +275,9 @@ fn list_conversations_sync() -> Result<Vec<ConversationMeta>, String> {
                 continue;
             }
         };
-        // Extract the Value-only field BEFORE the typed parse consumes `raw`,
+        // Extract the Value-only fields BEFORE the typed parse consumes `raw`,
         // so we deserialize once without cloning the whole Value per convo.
+        let last_activity_at = raw.get("lastActivityAt").and_then(|v| v.as_i64());
         let compaction_summaries = raw
             .get("compactionHistory")
             .and_then(|v| v.as_array())
@@ -347,6 +355,7 @@ fn list_conversations_sync() -> Result<Vec<ConversationMeta>, String> {
             message_count,
             created_at: convo.created_at,
             updated_at: convo.updated_at,
+            last_activity_at,
             cost_usd,
             compaction_summaries,
             last_snippet,

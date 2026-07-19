@@ -26,6 +26,7 @@ pub mod state;
 pub mod stt;
 pub mod update_service;
 pub mod usage;
+pub mod watchdog;
 
 use tauri::Manager;
 
@@ -164,6 +165,7 @@ pub fn run() {
         .manage(std::sync::Arc::new(assistant::AskUserRegistry::new()))
         .manage(std::sync::Arc::new(assistant::PermissionRegistry::new()))
         .manage(std::sync::Arc::new(update_service::UpdateService::new()))
+        .manage(watchdog::WatchdogState::default())
         .manage(stt::DownloadCancel(std::sync::Mutex::new(None)))
         .manage(stt::EngineCache(tokio::sync::Mutex::new(None)))
         .manage(stt::SttSession(tokio::sync::Mutex::new(None)))
@@ -227,6 +229,9 @@ pub fn run() {
                     log::info!("assistant: startup sweep deleted {} retired JSONL(s)", deleted);
                 }
             });
+            // Webview-freeze watchdog: reloads a hung renderer (focused window
+            // whose FE heartbeat has gone silent). v0.131.0 field incident.
+            watchdog::spawn(app_handle.clone());
             // Warm the CLI-capabilities cache at boot. The first turn calls
             // CliCaps::active(), which on a cold cache shells out to probe
             // `claude --version` (up to a 5s block) — that cost landed on the
@@ -326,6 +331,7 @@ pub fn run() {
             shutdown::app_close_verify,
             shutdown::app_exit_now,
             shutdown::app_restart_now,
+            watchdog::ui_heartbeat,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
