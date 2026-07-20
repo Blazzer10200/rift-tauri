@@ -237,6 +237,16 @@
             ? "Waiting on the model"
             : `${idleVerb}…`,
   );
+  // The head already owns the turn-level state word ("Working…"/"Thinking…"), so
+  // repeating idleVerb in the footer just stacked the SAME word top-and-bottom
+  // (owner: "it feels duplicated"). The footer earns its row only when it can say
+  // something the head can't: a real tool action, a compaction, a stall warning,
+  // or an awaiting-input prompt. In the plain idle/reasoning gap the verb is
+  // suppressed and the footer becomes a clean detail line — last-action trail +
+  // the elapsed·tokens meter — with no echoed word.
+  const footerVerbShown = $derived(
+    liveTool || compacting || stallLevel > 0 || awaitingInput ? footerVerb : null,
+  );
   // The caption of the live tool ("composer.svelte", "git status …") rides next
   // to the verb so the footer reads as one honest phrase — "Reading composer.svelte"
   // — instead of a bare verb with the target stranded in a work row above. Dir
@@ -343,7 +353,7 @@
          — the footer would just duplicate it (and there's no action/tokens to
          report yet), so it's suppressed until a tool or token lands. -->
     <div class="sfooter" class:stalled={stallLevel > 0} class:awaiting={awaitingInput}>
-      {#key footerVerb}<span class="sf-verb-wrap"><span class="sf-verb">{footerVerb}</span>{#if footerCap}<span class="sf-cap">{footerCap}</span>{:else if idleTrail}<span class="sf-cap sf-last">· {idleTrail}</span>{/if}</span>{/key}
+      {#key footerVerbShown ?? idleTrail}<span class="sf-verb-wrap">{#if footerVerbShown}<span class="sf-verb">{footerVerbShown}</span>{/if}{#if footerCap}<span class="sf-cap" class:sf-lead={!footerVerbShown}>{footerCap}</span>{:else if idleTrail}<span class="sf-cap sf-last" class:sf-lead={!footerVerbShown}>{footerVerbShown ? "· " : ""}{idleTrail}</span>{/if}</span>{/key}
       {#if awaitingInput}
         <!-- Parked on the user: no climbing clock (it's human time, not the
              model's), no token meter. Just the calm verb + a nudge. -->

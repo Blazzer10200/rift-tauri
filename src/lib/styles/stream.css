@@ -31,8 +31,9 @@
 @keyframes acRoll { from { transform: translateY(0.62em); opacity: 0.6; } to { transform: none; opacity: 1; } }
 @keyframes acRollDown { from { transform: translateY(-0.62em); opacity: 0.6; } to { transform: none; opacity: 1; } }
 @keyframes streamLivePulse {
-  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 42%, transparent); }
-  70% { box-shadow: 0 0 0 5px transparent; }
+  0%   { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 70%, transparent); }
+  70%  { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
 }
 
 .sturn { margin: var(--stream-gap-between-turns) 0 calc(var(--stream-gap-between-turns) + 2px); }
@@ -53,9 +54,21 @@
 .sturn-head { display: flex; align-items: center; gap: 9px; padding-bottom: 11px; margin-bottom: 2px;
   border-bottom: 1px solid var(--border); font-size: var(--fs-sm); color: var(--fg-subtle); letter-spacing: 0.003em;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
-.sturn-head .sh-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex: none; }
-.sturn-head.live .sh-dot { background: var(--accent); animation: streamLivePulse var(--pulse-live) ease-out infinite; }
-.sturn-head .sh-label { font-variant-numeric: tabular-nums; }
+/* Cascade: the dot springs in first, the label rises a beat behind it. Plays
+   ONCE on mount (both), then the live dot settles into its calm breathing pulse.
+   Gif-borrowed: soft overshoot (gif 1) + staggered arrival (gif 2). */
+.sturn-head .sh-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); flex: none;
+  animation: dotPop 420ms var(--ease-spring) both; }
+.sturn-head.live .sh-dot { background: var(--accent);
+  animation: dotPop 420ms var(--ease-spring) both, streamLivePulse var(--pulse-live) ease-out 420ms infinite; }
+.sturn-head .sh-label { font-variant-numeric: tabular-nums;
+  animation: headRise 380ms var(--ease-spring) 80ms both; }
+@keyframes dotPop {
+  0%   { opacity: 0; transform: scale(0); }
+  60%  { opacity: 1; transform: scale(1.55); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes headRise { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
 /* Hover timestamp — quiet mono at the head's right edge; invisible until the
    pointer asks "when?". */
 .sturn-head .sh-time { margin-left: auto; font-family: var(--font-mono, monospace); font-size: 9.5px;
@@ -153,13 +166,21 @@
   text-overflow: ellipsis; }
 /* dead-air trail — the last FINISHED action, quieter than a live cap */
 .sfooter .sf-last { opacity: 0.72; }
+/* leading detail — the footer has no verb this beat (head owns the state word),
+   so the caption/trail IS the left anchor: no left margin, lifted a touch so it
+   doesn't read as an orphaned fragment. */
+.sfooter .sf-cap.sf-lead { margin-left: 0; opacity: 0.9; }
 .sfooter .sf-verb-wrap { display: inline-flex; align-items: baseline; min-width: 0; max-width: 60%;
-  animation: verbIn 320ms var(--ease-page) both; }
+  animation: verbIn 320ms var(--ease-spring) both; }
 @keyframes verbIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .sfooter .sf-fill { flex: 1; min-width: 16px; }
+/* the meta cluster trails the verb by a beat — the footer assembles as a small
+   wave (verb+caption ride the wrap's spring, the cluster follows on a delay) */
 .sfooter .sf-cluster { display: inline-flex; align-items: baseline; gap: 7px; flex: none;
   font-family: var(--font-mono, monospace); font-size: var(--fs-xs); letter-spacing: 0.02em;
-  color: var(--fg-faint); opacity: 0.85; }
+  color: var(--fg-faint); opacity: 0.85;
+  animation: clusterIn 380ms var(--ease-spring) 150ms both; }
+@keyframes clusterIn { from { opacity: 0; transform: translateX(6px); } to { opacity: 0.85; transform: none; } }
 .sfooter .sf-meta { color: var(--fg-subtle); }
 .sfooter .sf-pip { opacity: 0.5; }
 @media (prefers-reduced-motion: reduce) { .sfooter .sf-verb-wrap { animation: none; } }
@@ -268,14 +289,16 @@
 .sfooter .sf-verb,
 .wbrow.active .wb-label,
 .splan-item.is-active .splan-text {
-  --sh-b: var(--fg-muted); --sh-h: var(--fg);
-  background-image: linear-gradient(100deg, var(--sh-b) 0%, var(--sh-b) 42%, var(--sh-h) 50%, var(--sh-b) 58%, var(--sh-b) 100%);
-  background-size: 200% 100%;
+  /* highlight is a lifted foreground with a whisper of accent — the sweep reads
+     as "alive" without flashing full green across text that sits for minutes. */
+  --sh-b: var(--fg-subtle); --sh-h: color-mix(in oklab, var(--accent) 55%, var(--fg));
+  background-image: linear-gradient(100deg, var(--sh-b) 0%, var(--sh-b) 38%, var(--sh-h) 50%, var(--sh-b) 62%, var(--sh-b) 100%);
+  background-size: 220% 100%;
   -webkit-background-clip: text; background-clip: text;
   -webkit-text-fill-color: transparent; color: transparent;
-  animation: shim 1.9s linear infinite;
+  animation: shim 1.5s linear infinite;
 }
-.sfooter .sf-verb { --sh-b: var(--fg-faint); --sh-h: var(--fg-muted); }
+.sfooter .sf-verb { --sh-b: var(--fg-faint); --sh-h: var(--fg-2); }
 
 /* ── file-write batch — island shell like .wline/.sshell; rows + their inline
    diff cards live inside one framed card so an edit burst reads as one unit ── */

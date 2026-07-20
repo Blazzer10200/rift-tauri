@@ -145,7 +145,7 @@
     {#if shell.allProjects}<Layers size={14} />{:else}{monogram(activeProject?.name ?? "·")}{/if}
   </span>
   <span class="sw-meta">
-    <span class="sw-name">{shell.allProjects ? "All projects" : (activeProject?.name ?? "No project")}</span>
+    <span class="sw-name">{shell.allProjects ? "All chats" : (activeProject?.name ?? "No project")}</span>
     <span class="sw-sub">
       {#if !shell.allProjects && branch}
         <span class="branch"><GitBranch size={9} />{branch}</span>
@@ -169,7 +169,7 @@
       onclick={(e) => { e.stopPropagation(); chooseAll(); }}
     >
       <span class="sw-item-mk mk-all"><Layers size={13} /></span>
-      <span class="sw-item-nm">All projects</span>
+      <span class="sw-item-nm">All chats</span>
       {#if shell.allProjects}<Check size={14} class="sw-item-ck" />{/if}
     </button>
 

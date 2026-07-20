@@ -99,6 +99,7 @@
   /* motion — one shared vocabulary (reuse, don't hand-roll curves) */
   --ease-page:    cubic-bezier(0.22, 1, 0.36, 1);   /* decelerate — entrances */
   --ease-soft:    cubic-bezier(0.4, 0, 0.2, 1);      /* standard — layout shifts */
+  --ease-spring:  cubic-bezier(0.34, 1.56, 0.64, 1); /* soft overshoot — status beats spring in (once) */
   --dur-page:     400ms;   /* a screen enters */
   --dur-page-out: 140ms;   /* a screen leaves — fast, so the old page never ghosts under the new one */
   --dur-rise:     460ms;   /* a content block rises */
