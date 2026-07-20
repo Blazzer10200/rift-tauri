@@ -122,6 +122,9 @@ pub fn relaunch_as_admin() -> Result<(), String> {
 
 /// XML-escape the five predefined entities so an exe path with `&`/`<`/`"` (rare
 /// but possible in a username) can't break the task definition.
+// Called only from the #[cfg(windows)] `task_xml`; the non-test build on other
+// targets never reaches it (tests exercise it on all platforms).
+#[cfg_attr(not(windows), allow(dead_code))]
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")

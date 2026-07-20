@@ -53,6 +53,9 @@ pub(super) fn norm_path(s: &str) -> String {
 
 /// Expand `%VAR%` tokens via `lookup`; unknown vars and unclosed `%` stay
 /// verbatim. Pure so it's unit-testable without touching the real environment.
+// Only reached through the #[cfg(windows)] `expand_env_refs` wrapper; on other
+// targets it's referenced solely by tests, so the non-test build sees it unused.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn expand_env_refs_with(s: &str, lookup: impl Fn(&str) -> Option<String>) -> String {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
@@ -205,6 +208,11 @@ fn npm_global_prefix() -> Option<PathBuf> {
         return None;
     }
     Some(PathBuf::from(s))
+}
+
+#[cfg(not(windows))]
+fn npm_global_prefix() -> Option<PathBuf> {
+    None
 }
 
 /// Classify how a `claude` binary at `p` was installed, from its path.

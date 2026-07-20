@@ -10,6 +10,9 @@ use serde::Serialize;
 /// Append `extra` dirs missing from the `;`-separated `current` PATH value
 /// (case/trailing-slash-insensitive). Returns the merged value, or None when
 /// nothing was missing. Pure so it's unit-testable.
+// Called only from the #[cfg(windows)] `refresh_process_path`; the non-test
+// build on other targets never reaches it (tests exercise it on all platforms).
+#[cfg_attr(not(windows), allow(dead_code))]
 fn merged_path(current: &str, extra: &[PathBuf]) -> Option<String> {
     use super::cli_install::norm_path;
     let have: Vec<String> = current
