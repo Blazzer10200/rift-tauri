@@ -11,6 +11,18 @@
   import SplashOverlay from "$lib/components/SplashOverlay.svelte";
   import ContextMenuHost from "$lib/components/shell/ContextMenuHost.svelte";
   import { handleGlobalContextMenu } from "$lib/state/contextMenu.svelte";
+  import { goto } from "$app/navigation";
+  import { page } from "$app/state";
+
+  // Dev-only: Ctrl+Alt+G toggles the stream gallery (/dev/gallery) — a
+  // showroom of every renderable block for design work. No-op in prod builds.
+  function onDevKey(e: KeyboardEvent) {
+    if (!import.meta.env.DEV) return;
+    if (e.ctrlKey && e.altKey && (e.key === "g" || e.key === "G")) {
+      e.preventDefault();
+      void goto(page.url.pathname.startsWith("/dev/gallery") ? "/" : "/dev/gallery");
+    }
+  }
 
   let { children } = $props();
   // sessionStorage is per-window-instance (cleared on close), so prod cold-
@@ -31,6 +43,7 @@
 </script>
 
 <svelte:document oncontextmenu={handleGlobalContextMenu} />
+<svelte:window onkeydown={onDevKey} />
 
 {@render children()}
 
