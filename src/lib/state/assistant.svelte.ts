@@ -53,7 +53,9 @@ import {
   saveThinkingEnabled,
   loadPermissionMode,
   savePermissionMode,
+  loadAutocorrect,
   loadFastMode,
+  saveAutocorrect,
   saveFastMode,
   loadPlan,
   savePlan,
@@ -833,6 +835,9 @@ class AssistantStore {
   // fast-eligible models. Global, persisted, default off. The backend re-gates
   // by model family + CLI version, so this can be sent unconditionally.
   fastMode = $state<boolean>(loadFastMode());
+  // Composer typing-time autocorrect (word-finish boundary). Opt-in, global,
+  // persisted. Pure-FE — never touches the spawn key.
+  autocorrect = $state<boolean>(loadAutocorrect());
   // Subscription plan (USER-SET — no programmatic plan signal exists for OAuth
   // users). Drives the context-window cap applied to every model's native window
   // (see ctxWindowFor). Global, persisted; default `max` (1M). Free/uncredited-Pro
@@ -1031,6 +1036,13 @@ class AssistantStore {
     // --settings at spawn) → same cache-bust hint as effort so the prewarm
     // can hide the respawn behind typing time.
     if ((this.activeTab?.messages.length ?? 0) > 0) this.cacheBustHint("fast");
+  }
+
+  setAutocorrect(v: boolean) {
+    if (this.autocorrect === v) return;
+    this.autocorrect = v;
+    saveAutocorrect(v);
+    this.telemetry.event("autocorrect.change", { to: v });
   }
 
   setPlan(v: RiftPlan) {

@@ -12,6 +12,7 @@ import {
   SquareCode,
   TextSelect,
 } from "lucide-svelte";
+import { correctWord } from "$lib/utils/autocorrect";
 
 export type CtxIcon = typeof Copy;
 
@@ -81,29 +82,12 @@ async function cutField(el: EditField) {
   replaceFieldSelection(el, "");
 }
 
-// Common misspellings → fix. Lowercase keys; capitalization of the match is
-// preserved when applied. Deliberately small + high-confidence — this is a
-// deterministic local pass, not a spellchecker.
-const TYPO_MAP: Record<string, string> = {
-  teh: "the", thier: "their", recieve: "receive", recieved: "received",
-  seperate: "separate", definately: "definitely", occured: "occurred",
-  untill: "until", wich: "which", becuase: "because", alot: "a lot",
-  cant: "can't", dont: "don't", doesnt: "doesn't", wont: "won't",
-  isnt: "isn't", wasnt: "wasn't", didnt: "didn't", couldnt: "couldn't",
-  wouldnt: "wouldn't", shouldnt: "shouldn't", im: "I'm", ive: "I've",
-  youre: "you're", theyre: "they're", freind: "friend", wierd: "weird",
-};
-
-/** Deterministic auto-correction: common typos, sentence-start + standalone
- *  "i" capitalization, collapse runs of spaces. Pure — returns corrected text. */
+/** Deterministic auto-correction: common typos (shared dictionary with the
+ *  typing-time composer autocorrect), sentence-start capitalization, collapse
+ *  runs of spaces. Pure — returns corrected text. */
 function autoCorrect(text: string): string {
   if (!text) return text;
-  let out = text.replace(/\b([A-Za-z][A-Za-z']*)\b/g, (m) => {
-    const rep = TYPO_MAP[m.toLowerCase()];
-    if (!rep) return m;
-    return m[0] === m[0].toUpperCase() ? rep[0].toUpperCase() + rep.slice(1) : rep;
-  });
-  out = out.replace(/\bi\b/g, "I");
+  let out = text.replace(/\b([A-Za-z][A-Za-z']*)\b/g, (m) => correctWord(m) ?? m);
   out = out.replace(/(^\s*|[.!?]\s+)([a-z])/g, (_, lead, c) => lead + c.toUpperCase());
   out = out.replace(/ {2,}/g, " ");
   return out;

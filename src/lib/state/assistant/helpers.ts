@@ -44,6 +44,7 @@ const THINKING_KEY = "rift.assistant.thinkingEnabled";
 const PERMISSION_KEY = "rift.assistant.permissionMode";
 const PLAN_KEY = "rift.assistant.plan";
 const FAST_MODE_KEY = "rift.assistant.fastMode";
+const AUTOCORRECT_KEY = "rift.assistant.autocorrect";
 
 // Per-workspace override keys for model + effort. A `base::<root>` key holds a
 // workspace's pinned choice; the bare global key is the baseline default for
@@ -239,6 +240,23 @@ export function loadFastMode(): boolean {
     /* SSR or storage disabled */
   }
   return false;
+}
+
+export function loadAutocorrect(): boolean {
+  try {
+    if (typeof localStorage !== "undefined") return localStorage.getItem(AUTOCORRECT_KEY) === "on";
+  } catch {
+    /* SSR or storage disabled */
+  }
+  return false; // opt-in — owner call (composer autocorrect arc)
+}
+
+export function saveAutocorrect(v: boolean) {
+  try {
+    if (typeof localStorage !== "undefined") localStorage.setItem(AUTOCORRECT_KEY, v ? "on" : "off");
+  } catch {
+    /* storage disabled */
+  }
 }
 
 export function saveFastMode(v: boolean) {

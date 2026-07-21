@@ -9,6 +9,7 @@
   import { cliCommands } from "../../state/assistant/cliCommands.svelte";
   import { requestPrewarm, resetPrewarmDedup } from "../../state/assistant/prewarm";
   import { fuzzyScore, slashScore, isFileDrag, attachImageFiles, summarizeAttach, attachTextFiles, summarizeTextAttach } from "./composer/helpers";
+  import { boundaryAutocorrect, isBoundaryChar } from "$lib/utils/autocorrect";
   import AttachmentsRow from "./composer/AttachmentsRow.svelte";
   import QueueRail from "./composer/QueueRail.svelte";
   import LivePills from "./composer/LivePills.svelte";
@@ -1353,7 +1354,16 @@
           bind:this={ta}
           value={draft}
           oninput={(e) => {
-            setDraft((e.currentTarget as HTMLTextAreaElement).value);
+            const el = e.currentTarget as HTMLTextAreaElement;
+            // Opt-in autocorrect: fires only on the boundary char that finishes
+            // a word. setRangeText keeps the change undoable (Ctrl+Z restores
+            // the typo) and "preserve" keeps the caret past the boundary.
+            const typed = (e as unknown as InputEvent).data;
+            if (assistant.autocorrect && typeof typed === "string" && isBoundaryChar(typed)) {
+              const fix = boundaryAutocorrect(el.value, el.selectionStart ?? el.value.length);
+              if (fix) el.setRangeText(fix.replacement, fix.start, fix.end, "preserve");
+            }
+            setDraft(el.value);
             undoDraft = null;
             stt.dismissPolishUndo();
             stt.cancelPolish();

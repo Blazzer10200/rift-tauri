@@ -5,7 +5,7 @@
   // ←/→ effort nudges); this child renders, handles clicks, and owns the
   // pointer-drag slider. Derives re-compute here from the shared modelMatrix
   // + assistant store — same pure helpers the parent uses, so they can't drift.
-  import { Check, ChevronRight, HelpCircle, Plus, Zap } from "lucide-svelte";
+  import { Check, ChevronRight, HelpCircle, Plus, SpellCheck, Zap } from "lucide-svelte";
   import { tick } from "svelte";
   import { assistant } from "../../../state/assistant.svelte";
   import { fastEligible } from "../../../state/assistant/helpers";
@@ -293,6 +293,25 @@
       <span class="fast-switch" class:on={assistant.fastMode} aria-hidden="true"><i></i></span>
     </button>
   {/if}
+
+  <div class="rift-menu-divider"></div>
+  <!-- Autocorrect — opt-in typing-time typo fix (word-finish boundary). Pure
+       FE, free, so the ON tint is accent, not the pay-per-use amber. -->
+  <button
+    type="button"
+    role="menuitemcheckbox"
+    aria-checked={assistant.autocorrect}
+    class="pop-item rich ac-row"
+    use:tooltip={"Autocorrect — fixes common typos as you finish each word. Skips slash commands, paths, and code-like text."}
+    onmousedown={(e) => { e.preventDefault(); assistant.setAutocorrect(!assistant.autocorrect); }}
+  >
+    <span class="ac-glyph" class:on={assistant.autocorrect} aria-hidden="true"><SpellCheck size={13} /></span>
+    <span class="pi-text">
+      <span class="pi-name"><span class="model-name">Autocorrect</span></span>
+      <span class="pi-sub">Fix typos as you type — applied when a word is finished</span>
+    </span>
+    <span class="fast-switch ac-switch" class:on={assistant.autocorrect} aria-hidden="true"><i></i></span>
+  </button>
 
   {#if dialApplies}
     <div class="rift-menu-divider"></div>
@@ -586,6 +605,16 @@
     border-color: color-mix(in oklab, var(--warn) 45%, transparent);
   }
   :global(.settings-menu .fast-switch.on i) { transform: translateX(13px); background: var(--warn); }
+
+  /* Autocorrect row — free feature, so ON tint is accent (fast-switch anatomy,
+     re-tinted; the amber is reserved for costs-money states). */
+  :global(.settings-menu .ac-glyph) { flex: none; display: inline-flex; align-self: flex-start; margin-top: 3px; color: var(--fg-faint); }
+  :global(.settings-menu .ac-glyph.on) { color: var(--accent); }
+  :global(.settings-menu .ac-switch.on) {
+    background: color-mix(in oklab, var(--accent) 26%, transparent);
+    border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+  }
+  :global(.settings-menu .ac-switch.on i) { background: var(--accent); }
 
   /* Effort — Faster↔Smarter stop-rail (Claude-Desktop flow). One tick per
      dialStopsFor rung; the active stop is the accent thumb; the current label
