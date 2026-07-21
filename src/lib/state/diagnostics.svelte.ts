@@ -52,6 +52,11 @@ class DiagnosticsStore {
   dropped = $state(0);
 
   #unlisten: UnlistenFn | null = null;
+  /** In-flight init(), so concurrent callers (AppShell boot + DiagnosticsPage
+   *  mount land in the same tick when the app opens ON the diagnostics page)
+   *  can't both pass the #unlisten guard and attach TWO bus listeners — double
+   *  delivery duplicated every seq and blew up the keyed each (each_key_duplicate). */
+  #initing: Promise<void> | null = null;
   /** Events received while paused, flushed into the ring on resume. */
   #pausedBuf: DiagEvent[] = [];
   /** Synthetic seq for frontend-originated events (negative to avoid clashes). */
@@ -88,24 +93,28 @@ class DiagnosticsStore {
     });
   });
 
-  /** Idempotent: attach the bus listener + frontend error hooks. */
+  /** Idempotent + single-flight: attach the bus listener + frontend error hooks. */
   async init() {
     if (this.#unlisten) return;
-    this.#unlisten = await listen<DiagEvent>("diag://event", (e) => this.#push(e.payload));
-    this.live = true;
-    this.#hookErrors();
-    this.#exposeDevHook();
-    // Backfill: the pump only forwards LIVE events, so attaching mid-session
-    // used to start blank. The bus keeps a bounded backlog — merge it in front
-    // of anything already received (dedupe by seq).
-    try {
-      const backlog = await invoke<DiagEvent[]>("diag_backlog");
-      const have = new Set(this.events.map((ev) => ev.seq));
-      const fresh = backlog.filter((ev) => !have.has(ev.seq));
-      if (fresh.length) this.events = [...fresh, ...this.events].slice(-RING_CAP);
-    } catch (e) {
-      console.warn("diag_backlog failed", e);
-    }
+    if (this.#initing) return this.#initing;
+    this.#initing = (async () => {
+      this.#unlisten = await listen<DiagEvent>("diag://event", (e) => this.#push(e.payload));
+      this.live = true;
+      this.#hookErrors();
+      this.#exposeDevHook();
+      // Backfill: the pump only forwards LIVE events, so attaching mid-session
+      // used to start blank. The bus keeps a bounded backlog — merge it in front
+      // of anything already received (dedupe by seq).
+      try {
+        const backlog = await invoke<DiagEvent[]>("diag_backlog");
+        const have = new Set(this.events.map((ev) => ev.seq));
+        const fresh = backlog.filter((ev) => !have.has(ev.seq));
+        if (fresh.length) this.events = [...fresh, ...this.events].slice(-RING_CAP);
+      } catch (e) {
+        console.warn("diag_backlog failed", e);
+      }
+    })().finally(() => { this.#initing = null; });
+    return this.#initing;
   }
 
   /**
