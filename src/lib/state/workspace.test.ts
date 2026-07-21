@@ -20,7 +20,7 @@ function makeFakeStorage() {
 
 let fakeLS: ReturnType<typeof makeFakeStorage>;
 
-const DEFAULT_ORDER = ["home", "chat", "projects", "settings", "ai-health"] as const;
+const DEFAULT_ORDER = ["home", "chat", "projects", "settings", "ai-health", "diagnostics"] as const;
 
 beforeEach(() => {
   fakeLS = makeFakeStorage();
@@ -136,7 +136,7 @@ const ORDER_KEY = "rift.ui.workspace-order.v1";
 
 describe("init() — order restore + backfill", () => {
   it("restores a full stored order verbatim", () => {
-    const stored = ["settings", "chat", "home", "ai-health", "projects"];
+    const stored = ["settings", "chat", "home", "ai-health", "diagnostics", "projects"];
     fakeLS.setItem(ORDER_KEY, JSON.stringify(stored));
     workspace.init();
     expect(workspace.order).toEqual(stored);
@@ -148,7 +148,7 @@ describe("init() — order restore + backfill", () => {
     // positional Ctrl+N switching matches the kbd hints.
     fakeLS.setItem(ORDER_KEY, JSON.stringify(["settings", "chat"]));
     workspace.init();
-    expect(workspace.order).toEqual(["home", "projects", "settings", "chat", "ai-health"]);
+    expect(workspace.order).toEqual(["home", "projects", "settings", "chat", "ai-health", "diagnostics"]);
   });
 
   it("filters unknown ids out of a stored order (and backfills the rest)", () => {
@@ -180,7 +180,7 @@ describe("init() — order restore + backfill", () => {
 describe("reorder() / resetOrder()", () => {
   it("moves an id and persists the new order", () => {
     workspace.reorder(1, 3); // chat → after settings
-    expect(workspace.order).toEqual(["home", "projects", "settings", "chat", "ai-health"]);
+    expect(workspace.order).toEqual(["home", "projects", "settings", "chat", "ai-health", "diagnostics"]);
     expect(JSON.parse(fakeLS.getItem(ORDER_KEY)!)).toEqual(workspace.order);
   });
 

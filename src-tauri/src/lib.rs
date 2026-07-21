@@ -244,6 +244,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
+            commands::diag_backlog,
+            commands::diag_export_bundle,
             commands::open_in_vscode,
             commands::open_new_window,
             commands::broadcast_convos_changed,

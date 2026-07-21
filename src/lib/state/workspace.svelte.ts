@@ -3,10 +3,10 @@
 // Chat is the default workspace.
 
 export type WorkspaceId =
-  | "home" | "chat" | "projects" | "settings" | "ai-health";
+  | "home" | "chat" | "projects" | "settings" | "ai-health" | "diagnostics";
 
 export const WORKSPACE_IDS: readonly WorkspaceId[] = [
-  "home", "chat", "projects", "settings", "ai-health",
+  "home", "chat", "projects", "settings", "ai-health", "diagnostics",
 ] as const;
 
 const ACTIVE_KEY = "rift.ui.workspace.v1";

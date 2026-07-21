@@ -2999,6 +2999,11 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
     // in-flight slot, re-arming the no-progress stall under a live slow tool.
     // The desc feeds the #88 reconciliation note when the turn dies mid-tool.
     let mut inflight_tools: HashMap<String, String> = HashMap::new();
+    // Turn inspector: per-tool open time (id → name + at_ms) and the completed
+    // spans (name + timing only — no args, zero redaction surface), folded into
+    // the TurnPerf record at the result frame.
+    let mut tool_open_times: HashMap<String, (String, u64)> = HashMap::new();
+    let mut perf_tool_spans: Vec<crate::diagnostics::perf::ToolSpan> = Vec::new();
     // When `tools_in_flight` first went positive (the start of a continuous
     // in-flight stretch). Set on the 0→positive edge, cleared on the →0 edge.
     // Deliberately NOT reset by received lines: a wedged-but-chatty tool keeps
@@ -3032,6 +3037,23 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
             }
             log::warn!(
                 "warm_pool: stall (user_sent={user_sent}, tools_in_flight={tools_in_flight}, inflight={inflight_secs}s) — child wedged, session={stream_sid}"
+            );
+            // Structured stall event — System stage (critical bypass) so the
+            // diagnostics console + backlog always capture the wedge with its
+            // open tools, even under a Log-event burst. Descs pass the bus
+            // scrubber (string leaves) like every published field.
+            crate::diagnostics::emit_with_fields(
+                crate::diagnostics::DiagStage::System,
+                crate::diagnostics::DiagLevel::Error,
+                Some("assistant"),
+                Some("turn.rs"),
+                "turn stalled — child wedged, tree-killing",
+                serde_json::json!({
+                    "session": stream_sid,
+                    "tools_in_flight": tools_in_flight,
+                    "inflight_secs": inflight_secs,
+                    "open_tools": inflight_tools.values().cloned().collect::<Vec<String>>(),
+                }),
             );
             stash_interrupted_tools(stream_sid, &inflight_tools);
             return TurnOutcome::Stalled;
@@ -3197,6 +3219,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                             &v, ts_start_ms, turn_start, perf_ttft_thinking_ms,
                             perf_ttft_text_ms, stream_sid, model, effort, thinking_on,
                             perf_first_line_ms, perf_pre_text_tool_ms, !was_reused,
+                            std::mem::take(&mut perf_tool_spans),
                         );
                         let _ = app_out.emit_to(win_label, STREAM_EVENT, serde_json::json!({
                             "session_id": stream_sid, "line": trimmed, "turn_epoch": turn_epoch,
@@ -3245,6 +3268,12 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                                         tool_in_flight_since = Some(std::time::Instant::now());
                                     }
                                     tools_in_flight += 1;
+                                    if let Some(id) = block.get("id").and_then(|i| i.as_str()) {
+                                        tool_open_times.insert(id.to_string(), (
+                                            block_name.unwrap_or("tool").to_string(),
+                                            turn_start.elapsed().as_millis() as u64,
+                                        ));
+                                    }
                                     // WS6: clock the tool open so its result adds the
                                     // gap to pre-text tool time (only matters pre-text).
                                     if !first_text_logged && tool_open_at.is_none() {
@@ -3280,6 +3309,19 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                                     };
                                     if !counted {
                                         continue;
+                                    }
+                                    if let Some((name, at_ms)) = block
+                                        .get("tool_use_id")
+                                        .and_then(|i| i.as_str())
+                                        .and_then(|id| tool_open_times.remove(id))
+                                    {
+                                        if perf_tool_spans.len() < 200 {
+                                            perf_tool_spans.push(crate::diagnostics::perf::ToolSpan {
+                                                name,
+                                                at_ms,
+                                                dur_ms: (turn_start.elapsed().as_millis() as u64).saturating_sub(at_ms),
+                                            });
+                                        }
                                     }
                                     tools_in_flight = (tools_in_flight - 1).max(0);
                                     // →0 edge: the in-flight stretch ended, so clear
@@ -3455,6 +3497,7 @@ fn record_turn_perf(
     first_line_ms: Option<u64>,
     pre_text_tool_ms: u64,
     was_cold: bool,
+    tool_spans: Vec<crate::diagnostics::perf::ToolSpan>,
 ) {
     use crate::diagnostics::{self, perf::TurnPerf, DiagLevel, DiagStage};
 
@@ -3523,6 +3566,7 @@ fn record_turn_perf(
         dominant_cause,
         cli_ttft_ms,
         cli_api_ms,
+        tool_spans,
     };
 
     // Structured bus event — DiagStage::Log so it rides the normal 200/s cap,

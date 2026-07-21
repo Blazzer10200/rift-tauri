@@ -13,6 +13,7 @@
  * `scrubUser` before entering the ring.
  */
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import { scrubUser } from "$lib/utils/redact";
 import { rollUpHealth, overallHealth } from "./diagnosticsHealth";
 
@@ -94,6 +95,17 @@ class DiagnosticsStore {
     this.live = true;
     this.#hookErrors();
     this.#exposeDevHook();
+    // Backfill: the pump only forwards LIVE events, so attaching mid-session
+    // used to start blank. The bus keeps a bounded backlog — merge it in front
+    // of anything already received (dedupe by seq).
+    try {
+      const backlog = await invoke<DiagEvent[]>("diag_backlog");
+      const have = new Set(this.events.map((ev) => ev.seq));
+      const fresh = backlog.filter((ev) => !have.has(ev.seq));
+      if (fresh.length) this.events = [...fresh, ...this.events].slice(-RING_CAP);
+    } catch (e) {
+      console.warn("diag_backlog failed", e);
+    }
   }
 
   /**

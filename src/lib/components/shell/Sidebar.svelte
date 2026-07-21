@@ -36,6 +36,7 @@
   // Per-icon hover micro-motion hook (CSS targets .snav-ic-<key>).
   const ICON_KEY: Record<WorkspaceId, string> = {
     home: "home", chat: "chat", projects: "projects", settings: "settings", "ai-health": "health",
+    diagnostics: "diag",
   };
 
   function goto(id: WorkspaceId) {
@@ -347,6 +348,7 @@
   .fnav-item:hover :global(.snav-ic-home)     { transform: translateY(-2.5px) scale(1.06); }
   .fnav-item:hover :global(.snav-ic-chat)     { transform: rotate(-10deg) scale(1.06); }
   .fnav-item:hover :global(.snav-ic-health)   { transform: scale(1.1); }
+  .fnav-item:hover :global(.snav-ic-diag)     { transform: scale(1.1); }
   .fnav-item:hover :global(.snav-ic-local)    { transform: rotate(90deg) scale(1.06); }
   .fnav-item:hover :global(.snav-ic-settings) { transform: rotate(140deg); }
   .fnav-spacer { flex: 1; }

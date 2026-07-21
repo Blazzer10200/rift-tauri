@@ -601,6 +601,81 @@ pub(super) fn glob_to_regex(glob: &str) -> Result<regex::Regex, String> {
     regex::Regex::new(&out).map_err(|e| format!("glob compile: {e}"))
 }
 
+// ─── Self-diagnostics tools ────────────────────────────────────────────────
+// Rift's own runtime telemetry, readable by the assistant so it can self-serve
+// "why is the app misbehaving" questions instead of blind-grepping. Both read
+// disk sinks the parent process writes (same binary, no bridge needed) and are
+// already scrubbed at the write boundary (`diagnostics::scrub_log_message`).
+
+fn tool_read_diagnostics(args: &Value) -> Result<String, String> {
+    let lines_n =
+        args.get("lines").and_then(|v| v.as_u64()).unwrap_or(100).clamp(1, 1000) as usize;
+    let min_level = args.get("level").and_then(|v| v.as_str()).map(|s| s.to_lowercase());
+    let filter = args.get("filter").and_then(|v| v.as_str()).map(|s| s.to_lowercase());
+    let rank = |l: &str| match l {
+        "trace" => 0u8,
+        "debug" => 1,
+        "info" => 2,
+        "warn" => 3,
+        "error" => 4,
+        _ => 2,
+    };
+    let path = crate::diagnostics::app_log_path().ok_or("app log path unavailable")?;
+    let content =
+        std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    // Line shape: `<ts> [LEVEL] <target> — <msg>` (file_log_write). Unparseable
+    // lines (wrapped payloads) pass the level gate rather than vanish.
+    let keep = |line: &str| {
+        let lvl_ok = match min_level.as_deref() {
+            None => true,
+            Some(min) => line
+                .split('[')
+                .nth(1)
+                .and_then(|s| s.split(']').next())
+                .map(|s| rank(&s.trim().to_lowercase()) >= rank(min))
+                .unwrap_or(true),
+        };
+        lvl_ok && filter.as_deref().map(|f| line.to_lowercase().contains(f)).unwrap_or(true)
+    };
+    let matched: Vec<&str> = content.lines().filter(|l| keep(l)).collect();
+    let total = matched.len();
+    let tail = &matched[total.saturating_sub(lines_n)..];
+    Ok(format!(
+        "rift.log — {} matching line(s), showing last {}:\n{}",
+        total,
+        tail.len(),
+        tail.join("\n")
+    ))
+}
+
+fn tool_turn_trace(args: &Value) -> Result<String, String> {
+    let n = args.get("turns").and_then(|v| v.as_u64()).unwrap_or(10).clamp(1, 50) as usize;
+    let session = args.get("session_id").and_then(|v| v.as_str());
+    let path =
+        crate::diagnostics::perf::turns_log_path().ok_or("turns.ndjson path unavailable")?;
+    let content =
+        std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let mut recs: Vec<Value> = content
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .filter(|r| {
+            session
+                .map(|s| r.get("session_id").and_then(|v| v.as_str()) == Some(s))
+                .unwrap_or(true)
+        })
+        .collect();
+    let total = recs.len();
+    if total > n {
+        recs = recs.split_off(total - n);
+    }
+    serde_json::to_string_pretty(&json!({
+        "total_recorded": total,
+        "returned": recs.len(),
+        "turns": recs
+    }))
+    .map_err(|e| format!("serialize: {e}"))
+}
+
 // ─── JSON-RPC dispatch ─────────────────────────────────────────────────────
 
 fn tools_list_payload() -> Value {
@@ -639,6 +714,31 @@ fn tools_list_payload() -> Value {
                     "case_insensitive": { "type": "boolean", "description": "Case-insensitive match. Defaults to false." }
                 },
                 "required": ["pattern"]
+            }
+        }),
+        json!({
+            "name": "read_diagnostics",
+            "description": "Read Rift's own application log (rift.log) — every backend subsystem's log lines: turn engine, warm pool, MCP server, updater, watchdog. THE first stop when diagnosing Rift itself misbehaving (a stuck turn, a failed update, a wedged spinner). Optional level/filter narrowing; returns the most recent matching lines. Paths and usernames are scrubbed at the source.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "lines": { "type": "integer", "description": "Max lines to return, from the tail (1-1000). Default 100.", "minimum": 1, "maximum": 1000 },
+                    "level": { "type": "string", "enum": ["trace", "debug", "info", "warn", "error"], "description": "Minimum log level to include." },
+                    "filter": { "type": "string", "description": "Case-insensitive substring filter (matches the whole line, e.g. a subsystem name or session id)." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "turn_trace",
+            "description": "Read Rift's per-turn performance records (turns.ndjson) — one JSON record per completed assistant turn: latency milestones (TTFT, duration), token/cache/cost usage, model + effort, cold-vs-warm spawn, and the dominant latency cause. Use to answer 'why was that turn slow', 'what did this session cost', or to correlate a wedge with a specific turn. Returns the most recent records, optionally scoped to one session_id.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "turns": { "type": "integer", "description": "Max records to return, newest last (1-50). Default 10.", "minimum": 1, "maximum": 50 },
+                    "session_id": { "type": "string", "description": "Only records for this CLI session id." }
+                },
+                "required": []
             }
         }),
     ];
@@ -893,6 +993,8 @@ fn handle_request(req: RpcRequest, roots: &[PathBuf]) -> Option<RpcResponse> {
                 "read_file" => tool_read_file(&args, roots),
                 "list_dir" => tool_list_dir(&args, roots),
                 "grep" => tool_grep(&args, roots),
+                "read_diagnostics" => tool_read_diagnostics(&args),
+                "turn_trace" => tool_turn_trace(&args),
                 "git_status" => git_local::tool_git_status(&args, roots),
                 "git_diff" => git_local::tool_git_diff(&args, roots),
                 "git_log" => git_local::tool_git_log(&args, roots),

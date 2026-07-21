@@ -14,6 +14,7 @@
 //! * Frontend rate-limits emits at 200/sec to avoid overwhelming Svelte
 //!   reactivity on a webpack-rebuild-style burst.
 
+use std::collections::VecDeque;
 use std::io::Write as _;
 use std::sync::{Mutex, OnceLock};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -26,6 +27,9 @@ pub mod metrics;
 pub mod perf;
 
 const BUS_CAPACITY: usize = 4096;
+/// Late-subscriber backlog — broadcast has no replay, so a console (or the
+/// `diag_backlog` command) attaching mid-session would otherwise start blank.
+const BACKLOG_CAP: usize = 500;
 const FRONTEND_RATE_PER_SEC: u32 = 200;
 /// #246: secondary ceiling on critical-bypass events. Pathological loops
 /// (e.g. a System/Error event emitted in a hot retry) could otherwise flood
@@ -78,6 +82,7 @@ pub struct DiagEvent {
 pub struct DiagBus {
     tx: broadcast::Sender<DiagEvent>,
     seq: AtomicU64,
+    backlog: Mutex<VecDeque<DiagEvent>>,
 }
 
 fn basename_only(path: &str) -> String {
@@ -91,6 +96,7 @@ impl DiagBus {
         Self {
             tx,
             seq: AtomicU64::new(0),
+            backlog: Mutex::new(VecDeque::with_capacity(BACKLOG_CAP)),
         }
     }
 
@@ -119,10 +125,30 @@ impl DiagBus {
             scrub_value(&mut event.fields);
         }
         event.seq = self.seq.fetch_add(1, Ordering::Relaxed);
+        {
+            // Poison-recover like the file sink — a panic mid-push must not
+            // blackout the backlog for the rest of the session.
+            let mut bl = match self.backlog.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
+            if bl.len() >= BACKLOG_CAP {
+                bl.pop_front();
+            }
+            bl.push_back(event.clone());
+        }
         // send() returns Err only when there are zero subscribers — that's
         // fine, we drop on the floor. Lag is reported through Receiver::recv
         // returning RecvError::Lagged on the consumer side.
         let _ = self.tx.send(event);
+    }
+
+    pub fn backlog_snapshot(&self) -> Vec<DiagEvent> {
+        let bl = match self.backlog.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
+        bl.iter().cloned().collect()
     }
 
 }

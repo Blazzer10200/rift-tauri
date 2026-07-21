@@ -23,6 +23,18 @@ type GroupAcc = std::collections::BTreeMap<
     (Vec<u64>, Vec<u64>, std::collections::BTreeMap<String, usize>),
 >;
 
+/// One completed tool call within a turn — name + timing only. Deliberately NO
+/// args/paths (zero redaction surface: nothing here can leak a home dir or key).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolSpan {
+    /// Tool name as the CLI emitted it (e.g. "Bash", "Read", "mcp__rift__grep").
+    pub name: String,
+    /// Ms after turn start the tool_use opened.
+    pub at_ms: u64,
+    /// Open → matching tool_result round-trip, ms.
+    pub dur_ms: u64,
+}
+
 /// One record per completed assistant turn — one NDJSON line in `turns.ndjson`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TurnPerf {
@@ -108,6 +120,13 @@ pub struct TurnPerf {
     pub cli_ttft_ms: Option<u64>,
     #[serde(default)]
     pub cli_api_ms: Option<u64>,
+
+    // ── Tool spans (turn inspector) ──────────────────────────────────────────
+    /// Completed tool calls within the turn, in completion order (capped at 200
+    /// by the collector). Empty for tool-less turns and pre-existing lines;
+    /// skipped on serialize when empty so tool-less NDJSON lines stay lean.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_spans: Vec<ToolSpan>,
 }
 
 /// Decompose a turn's first-reply wait into its largest contributor. Pure so it
@@ -180,7 +199,9 @@ static TURNS_LOG_BYTES: AtomicU64 = AtomicU64::new(0);
 const TURNS_LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
 
 /// `<appLogDir>/turns.ndjson` — beside `rift.log` (mirrors `write_crash_report`).
-fn turns_log_path() -> Option<std::path::PathBuf> {
+/// pub(crate): the MCP server's `turn_trace` tool reads the same sink directly
+/// (same binary re-exec'd — disk state needs no bridge).
+pub(crate) fn turns_log_path() -> Option<std::path::PathBuf> {
     let log = super::app_log_path()?;
     Some(log.parent()?.join("turns.ndjson"))
 }
@@ -630,6 +651,7 @@ mod tests {
             dominant_cause: None,
             cli_ttft_ms: None,
             cli_api_ms: None,
+            tool_spans: Vec::new(),
         };
         serde_json::to_string(&r).unwrap()
     }
@@ -663,6 +685,7 @@ mod tests {
             dominant_cause: cause.map(|c| c.to_string()),
             cli_ttft_ms: None,
             cli_api_ms: None,
+            tool_spans: Vec::new(),
         };
         serde_json::to_string(&r).unwrap()
     }
@@ -692,6 +715,7 @@ mod tests {
             dominant_cause: None,
             cli_ttft_ms: None,
             cli_api_ms: None,
+            tool_spans: Vec::new(),
         };
         serde_json::to_string(&r).unwrap()
     }
@@ -722,6 +746,7 @@ mod tests {
             dominant_cause: None,
             cli_ttft_ms: None,
             cli_api_ms: None,
+            tool_spans: Vec::new(),
         };
         serde_json::to_string(&r).unwrap()
     }
@@ -877,6 +902,7 @@ mod tests {
             dominant_cause: None,
             cli_ttft_ms: Some(2500),
             cli_api_ms: Some(cli_api_ms),
+            tool_spans: Vec::new(),
         };
         serde_json::to_string(&r).unwrap()
     }

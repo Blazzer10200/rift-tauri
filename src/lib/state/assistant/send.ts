@@ -488,7 +488,19 @@ export function drainQueue(store: AssistantStore, tab: TabState | null) {
  *  keep streaming. */
 export async function stop(store: AssistantStore, tabId?: string | null) {
   const tab = tabId ? store.tabFor(tabId) : store.activeTab;
-  if (!tab || !tab.streaming) return;
+  if (!tab) return;
+  // Normal case: a live turn. But a wedged turn can leave the tab NOT streaming
+  // while a tool block is still pending / the activity label still spins / the
+  // backend PID is still tracked — the "can't stop the fake Editing-file
+  // spinner" prod wedge. So don't inertly early-return on !streaming: only bail
+  // when the tab is genuinely idle AND clean. Otherwise fall through to a
+  // hard-clear (finalizeInflightBlocks below sweeps any pending block).
+  const hasLingeringWork =
+    tab.streamingMsgId != null ||
+    tab.activity.currentLabel != null ||
+    tab.agentSpawns.some((a) => a.completedAt == null) ||
+    tab.shellRows.length > 0;
+  if (!tab.streaming && !hasLingeringWork) return;
   const sid = tab.cliSessionId;
   // #179: flush pacer-buffered text into the message BEFORE clearing
   // streamingMsgId — otherwise mutateStreaming's early-return drops it.

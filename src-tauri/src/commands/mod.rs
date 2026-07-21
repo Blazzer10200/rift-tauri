@@ -147,6 +147,61 @@ pub async fn query_turn_perf(
     .map_err(|e| format!("query_turn_perf: {e}"))
 }
 
+/// Diagnostics-console backfill — the `diag://event` pump only forwards live
+/// events, so a late-attaching console starts blank. Returns the bus's bounded
+/// recent-event backlog (already scrubbed at publish).
+#[tauri::command]
+pub fn diag_backlog() -> Vec<crate::diagnostics::DiagEvent> {
+    crate::diagnostics::bus().backlog_snapshot()
+}
+
+/// One-click support bundle: copy the diagnostic sinks (rift.log + rotation,
+/// turns.ndjson + rotation, crash reports) into a timestamped folder under
+/// Downloads and return its path. Explicit file allowlist — never glob the
+/// whole log dir. Log contents are already scrubbed at the write boundary.
+#[tauri::command]
+pub async fn diag_export_bundle() -> Result<String, String> {
+    tokio::task::spawn_blocking(|| {
+        let log = crate::diagnostics::app_log_path().ok_or("log dir unavailable")?;
+        let log_dir = log.parent().ok_or("log dir unavailable")?.to_path_buf();
+        let home = std::env::var_os("USERPROFILE")
+            .map(std::path::PathBuf::from)
+            .ok_or("USERPROFILE unset")?;
+        let ts = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+        let out = home.join("Downloads").join(format!("rift-diagnostics-{ts}"));
+        std::fs::create_dir_all(&out).map_err(|e| format!("create {}: {e}", out.display()))?;
+        let mut copied = 0usize;
+        for name in ["rift.log", "rift.log.old", "turns.ndjson", "turns.ndjson.old"] {
+            let src = log_dir.join(name);
+            if src.is_file() && std::fs::copy(&src, out.join(name)).is_ok() {
+                copied += 1;
+            }
+        }
+        if let Ok(rd) = std::fs::read_dir(&log_dir) {
+            for e in rd.flatten() {
+                let n = e.file_name().to_string_lossy().to_string();
+                if n.starts_with("crash-")
+                    && n.ends_with(".txt")
+                    && std::fs::copy(e.path(), out.join(&n)).is_ok()
+                {
+                    copied += 1;
+                }
+            }
+        }
+        let info = format!(
+            "Rift diagnostic bundle\nversion: {}\nos: {}\ncreated: {}\nfiles copied: {}\n",
+            env!("CARGO_PKG_VERSION"),
+            std::env::consts::OS,
+            chrono::Utc::now().to_rfc3339(),
+            copied,
+        );
+        std::fs::write(out.join("bundle-info.txt"), info).map_err(|e| format!("write info: {e}"))?;
+        Ok(out.display().to_string())
+    })
+    .await
+    .map_err(|e| format!("diag_export_bundle: {e}"))?
+}
+
 /// #37 Route A — spawn a second native window so a session can live on a
 /// separate monitor. Same app URL, unique `window-<n>` label (matched by the
 /// `secondary-window` capability glob). Each window boots its own store and

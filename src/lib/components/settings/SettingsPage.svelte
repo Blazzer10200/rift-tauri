@@ -27,7 +27,7 @@
   import { tooltip } from "$lib/actions/tooltip";
   import { sliderBubble } from "$lib/actions/sliderBubble";
   import { diagnostics } from "../../state/diagnostics.svelte";
-  import DiagnosticsConsole from "../diagnostics/DiagnosticsConsole.svelte";
+  import { workspace } from "../../state/workspace.svelte";
   import Select from "../Select.svelte";
   import PageHero from "../shared/PageHero.svelte";
 
@@ -180,7 +180,6 @@
 
   let diagCopied = $state(false);
   let diagCopiedTimer: ReturnType<typeof setTimeout> | null = null;
-  let diagConsoleOpen = $state(false);
 
   async function loadAboutPaths() {
     try { configDir = await appConfigDir(); } catch (e) { console.warn("appConfigDir failed", e); }
@@ -1266,7 +1265,7 @@
           <div class="card" id="card-help">
             <div class="card-tt">Help &amp; diagnostics</div>
             <div class="card-sub">Fix a wonky install, replay the intro, or file a bug.</div>
-            <button class="st-about-row" type="button" onclick={() => (diagConsoleOpen = true)}>
+            <button class="st-about-row" type="button" onclick={() => workspace.setActive("diagnostics")}>
               <span class="st-about-ic"><Activity size={15} /></span>
               <span class="st-about-body"><span class="st-about-t">Open diagnostics console</span><span class="st-about-s">Live event stream — filter, search, and export. Username-scrubbed.</span></span>
             </button>
@@ -1292,10 +1291,6 @@
 
   </div>
 </div>
-
-{#if diagConsoleOpen}
-  <DiagnosticsConsole onclose={() => (diagConsoleOpen = false)} />
-{/if}
 
 <style>
   /* Transparent — keeps the app dot-field continuous across surfaces

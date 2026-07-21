@@ -8,6 +8,7 @@ import AssistantPage from "../assistant/AssistantPage.svelte";
 import WorkspacePage from "../workspace/WorkspacePage.svelte";
 import SettingsPage from "../settings/SettingsPage.svelte";
 import AiHealthPage from "../ai-health/AiHealthPage.svelte";
+import DiagnosticsPage from "../diagnostics/DiagnosticsPage.svelte";
 
 // lucide-svelte 1.x ships icons typed as legacy components; `typeof Activity`
 // matches what each icon export looks like and stays compatible w/ Svelte 5
@@ -36,4 +37,5 @@ export const WORKSPACES: Record<WorkspaceId, WorkspaceDef> = {
   projects:    { component: WorkspacePage,     title: "Workspace",   icon: FolderTree,    kbd: "3" },
   settings:    { component: SettingsPage,      title: "Settings",    icon: SettingsIcon,  kbd: "4" },
   "ai-health": { component: AiHealthPage,       title: "AI Health",   icon: HeartPulse,    kbd: "6" },
+  diagnostics: { component: DiagnosticsPage,    title: "Diagnostics", icon: Activity,      kbd: "5" },
 };

@@ -1,16 +1,33 @@
 <script lang="ts">
-  import { X, Pause, Play, Trash2, Copy, Check, Search, Radio } from "lucide-svelte";
+  import { X, Pause, Play, Trash2, Copy, Check, Search, Radio, Download } from "lucide-svelte";
+  import { invoke } from "@tauri-apps/api/core";
+  import { openPath } from "@tauri-apps/plugin-opener";
   import { fade, scale } from "svelte/transition";
   import { portal } from "$lib/actions/portal";
   import { tooltip } from "$lib/actions/tooltip";
   import { diagnostics, type DiagEvent, type DiagLevel } from "$lib/state/diagnostics.svelte";
 
-  let { onclose }: { onclose: () => void } = $props();
+  let { onclose = () => {}, page = false }: { onclose?: () => void; page?: boolean } = $props();
 
   const LEVELS: DiagLevel[] = ["trace", "debug", "info", "warn", "error"];
 
   let copied = $state(false);
   let copiedTimer: ReturnType<typeof setTimeout> | null = null;
+  let exporting = $state(false);
+
+  // Support bundle: logs + turn traces into a Downloads folder, then reveal it.
+  async function exportBundle() {
+    if (exporting) return;
+    exporting = true;
+    try {
+      const dir = await invoke<string>("diag_export_bundle");
+      await openPath(dir);
+    } catch (e) {
+      console.error("diag export failed", e);
+    } finally {
+      exporting = false;
+    }
+  }
 
   // ── Windowed virtualization ──────────────────────────────────────────────
   // 2000 rows × full render = jank. Render only the slice in view (+ overscan).
@@ -51,7 +68,7 @@
     if (scrollEl) viewH = scrollEl.clientHeight;
   });
 
-  function onKey(e: KeyboardEvent) { if (e.key === "Escape") onclose(); }
+  function onKey(e: KeyboardEvent) { if (!page && e.key === "Escape") onclose(); }
 
   async function copyAll() {
     try {
@@ -103,9 +120,8 @@
 
 <svelte:window onkeydown={onKey} />
 
-<div class="dc-backdrop" use:portal transition:fade={{ duration: 140 }}>
-  <button class="dc-dismiss" type="button" aria-label="Close diagnostics console" onclick={onclose}></button>
-  <div class="dc-panel" role="dialog" aria-label="Diagnostics console" transition:scale={{ duration: 180, start: 0.98 }}>
+{#snippet panel()}
+  <div class="dc-panel" class:page role={page ? "region" : "dialog"} aria-label="Diagnostics console" transition:scale={{ duration: 180, start: 0.98 }}>
     <header class="dc-head">
       <div class="dc-title">
         <span class="dc-mark" class:live={diagnostics.live}>
@@ -129,10 +145,16 @@
         <button type="button" class="dc-btn" onclick={copyAll} use:tooltip={"Copy filtered view"}>
           {#if copied}<Check size={14} class="dc-okicon" />{:else}<Copy size={14} />{/if}
         </button>
-        <span class="dc-sep"></span>
-        <button type="button" class="dc-btn dc-close" onclick={onclose} use:tooltip={"Close (Esc)"}>
-          <X size={15} />
+        <button type="button" class="dc-btn" class:on={exporting} disabled={exporting} onclick={exportBundle}
+          use:tooltip={"Export diagnostic bundle (logs + turn traces → Downloads)"}>
+          <Download size={14} />
         </button>
+        {#if !page}
+          <span class="dc-sep"></span>
+          <button type="button" class="dc-btn dc-close" onclick={onclose} use:tooltip={"Close (Esc)"}>
+            <X size={15} />
+          </button>
+        {/if}
       </div>
     </header>
 
@@ -221,7 +243,16 @@
       <span class="dc-stat dim">{liveSubsystems.length}/{diagnostics.health.length} active</span>
     </footer>
   </div>
-</div>
+{/snippet}
+
+{#if page}
+  {@render panel()}
+{:else}
+  <div class="dc-backdrop" use:portal transition:fade={{ duration: 140 }}>
+    <button class="dc-dismiss" type="button" aria-label="Close diagnostics console" onclick={onclose}></button>
+    {@render panel()}
+  </div>
+{/if}
 
 <style>
   /* status palette — pulled to local vars so every dot/badge/edge agrees and a
@@ -242,6 +273,8 @@
     border: 1px solid var(--border-strong, var(--border));
     border-radius: var(--radius-2xl, 16px); box-shadow: var(--shadow-lg, 0 24px 64px oklch(0 0 0 / 0.55));
     overflow: hidden; }
+  /* page flavor — fills the workspace body instead of floating as a modal */
+  .dc-panel.page { width: 100%; height: 100%; max-width: none; }
   /* faint accent top-edge — Rift's "this surface is alive" cue */
   .dc-panel::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 1px; pointer-events: none;
     background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--accent) 50%, transparent) 30% 70%, transparent); }
