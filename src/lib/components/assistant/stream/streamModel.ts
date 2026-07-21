@@ -349,7 +349,9 @@ function caption(tb: ToolBlock): string {
     return fp ? `${fp} · ${c} edits` : `${c} edits`;
   }
   if (n === "NotebookEdit") return fp ?? "notebook";
-  if (n === "Bash" || n === "remote_bash" || n === "PowerShell") return typeof inp.command === "string" ? trimCmd(inp.command, 70) : "shell";
+  // Forming fallback: never the literal "shell" — a still-streaming block
+  // rendering "PS> shell" reads as broken (#100).
+  if (n === "Bash" || n === "remote_bash" || n === "PowerShell") return typeof inp.command === "string" ? trimCmd(inp.command, 70) : "running…";
   if (n === "Glob") {
     // "searching…" not "?": the pattern field lands late in the streamed
     // input JSON, so the placeholder is what users see while it forms.

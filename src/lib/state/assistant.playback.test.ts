@@ -1466,6 +1466,33 @@ describe("playback — live tool-block forming (S127)", () => {
     expect(tool).toMatchObject({ status: "error" });
     expect((tool as { inputPartial?: boolean }).inputPartial).toBeUndefined();
   });
+
+  it("#100: the envelope heals a block whose forming deltas were lost (finalized empty)", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    const id = tab.streamingMsgId!;
+    // Deltas never arrive → content_block_stop finalizes with EMPTY input and
+    // clears inputPartial. The envelope must still land the real command.
+    feed(tab, [toolStart(0, "tf-5", "Bash"), blockStop(0)]);
+    let tool = textBlocks(tab, id).find((b) => b.type === "tool");
+    expect(tool).toMatchObject({ input: {} });
+    expect((tool as { inputPartial?: boolean }).inputPartial).toBeUndefined();
+
+    feed(tab, [toolUseEnv("tf-5", "Bash", { command: "cargo build" })]);
+    tool = textBlocks(tab, id).find((b) => b.type === "tool");
+    expect(tool).toMatchObject({ input: { command: "cargo build" }, status: "pending" });
+  });
+
+  it("#100: a tool result clears a stuck forming flag", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    const id = tab.streamingMsgId!;
+    // No stop, no envelope — the result alone must end the forming state.
+    feed(tab, [toolStart(0, "tf-6", "Bash"), inputDelta(0, '{"command":"npm run ch'), toolResultEnv("tf-6", "ok", false)]);
+    const tool = textBlocks(tab, id).find((b) => b.type === "tool");
+    expect(tool).toMatchObject({ status: "done", result: "ok" });
+    expect((tool as { inputPartial?: boolean }).inputPartial).toBeUndefined();
+  });
 });
 
 // ── CLI-initiated continuation turns ─────────────────────────────────────────

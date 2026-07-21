@@ -725,14 +725,16 @@ function endToolForming(tab: TabState, index: number) {
 }
 
 /** The assistant envelope re-delivers a tool_use we already live-formed —
- *  upsert its authoritative complete input onto the existing block. No-op for
- *  blocks already finalized by endToolForming (inputPartial cleared). */
+ *  upsert its authoritative complete input onto the existing block. Applied
+ *  UNCONDITIONALLY (#100 self-heal): a block whose forming deltas were lost
+ *  can finalize empty via endToolForming, and the envelope is the only frame
+ *  that can still supply the real input. */
 function finalizeFormedTool(tab: TabState, block: { id: string; name: string; input?: Record<string, unknown> }) {
   const input = block.input ?? {};
   mutateStreaming(tab, (m) => ({
     ...m,
     blocks: m.blocks.map((b) =>
-      b.type === "tool" && b.id === block.id && b.inputPartial
+      b.type === "tool" && b.id === block.id && b.status === "pending"
         ? { ...b, name: block.name, input, inputPartial: undefined }
         : b,
     ),
@@ -960,7 +962,8 @@ function fillToolResult(tab: TabState, toolUseId: string, content: string, isErr
     blocks: m.blocks.map((b) => {
       if (b.type !== "tool" || b.id !== toolUseId) return b;
       const durationMs = typeof b.startedAt === "number" ? now - b.startedAt : undefined;
-      return { ...b, result: content, isError, status: isError ? "error" : "done", durationMs };
+      // A tool with a result is definitionally not forming anymore (#100).
+      return { ...b, result: content, isError, status: isError ? "error" : "done", durationMs, inputPartial: undefined };
     }),
   }));
 }
