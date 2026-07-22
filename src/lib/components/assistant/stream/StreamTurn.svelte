@@ -464,8 +464,13 @@
         <span class="bad"><AlertTriangle size={13} strokeWidth={2.5} /> Changes failed</span>
       {:else if turn.outcome === "planned"}
         <span class="ran"><Check size={13} strokeWidth={2.5} /> Plan proposed</span>
-      {:else}
+      {:else if turn.bgAgents === 0}
         <span class="ran"><Check size={13} strokeWidth={2.5} /> Done</span>
+      {/if}
+      {#if turn.bgAgents > 0}
+        <span class="bgagent" use:tooltip={"This turn sent work to a background agent. It reports back here automatically when it finishes — no need to wait."}>
+          <span class="bgagent-dot"></span>Agent working in background</span>
+        <span class="bgagent-note">you can keep chatting</span>
       {/if}
       {#if turn.meta}
         <span class="sapplied-meta">{turn.meta.time}</span>

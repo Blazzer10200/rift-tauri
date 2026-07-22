@@ -1545,6 +1545,39 @@ describe("playback — continuation merge", () => {
     expect(tab.streamingMsgId).not.toBe(firstId);
   });
 
+  it("a background Agent launch stamps the footer; the continuation retires it", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    const firstId = tab.streamingMsgId!;
+    feed(tab, [
+      toolUseEnv("t1", "Agent", { description: "bg research" }),
+      toolResultEnv("t1", "Async agent launched successfully. (internal metadata)\nagentId: abc123"),
+      resultEnv({ duration_ms: 1000 }),
+    ]);
+    tab.onDone();
+    let m = tab.messages.find((x) => x.id === firstId)!;
+    expect(m.bgAgentsPending).toBe(1);
+
+    // The agent reports back → continuation merges in and retires the stamp.
+    feed(tab, [contAssistant("Background agent finished")]);
+    m = tab.messages.find((x) => x.id === firstId)!;
+    expect(m.bgAgentsPending).toBe(0);
+    feed(tab, [resultEnv({ duration_ms: 500 })]);
+    tab.onDone();
+    m = tab.messages.find((x) => x.id === firstId)!;
+    // The merged result's re-stamp must respect the resolved count.
+    expect(m.bgAgentsPending).toBe(0);
+  });
+
+  it("a foreground Agent result never stamps the footer", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    const id = tab.streamingMsgId!;
+    feed(tab, [toolUseEnv("t1", "Agent", {}), toolResultEnv("t1", "recon findings: 3 files"), resultEnv({})]);
+    tab.onDone();
+    expect(tab.messages.find((x) => x.id === id)!.bgAgentsPending ?? 0).toBe(0);
+  });
+
   it("never merges into an errored turn (error terminal clears the stamp)", () => {
     const tab = freshTab();
     beginTurn(tab);

@@ -99,6 +99,17 @@ export function beginTurn(tab: TabState) {
   tab.streaming = true;
 }
 
+/** Count Agent tool launches that ran in the background — their tool_result
+ *  is the CLI's "Async agent launched successfully…" stub, and the real
+ *  report arrives later as a continuation turn. */
+function countBgAgentLaunches(m: ChatMessage): number {
+  let n = 0;
+  for (const b of m.blocks) {
+    if (b.type === "tool" && b.name === "Agent" && typeof b.result === "string" && b.result.startsWith("Async agent launched")) n++;
+  }
+  return n;
+}
+
 /** CLI-initiated continuation turn: a background agent/task finished after the
  *  previous turn's DONE and the CLI re-invoked the model on its own (turn.rs
  *  idle-drain forwards those frames). No send() scaffolded streaming state, so
@@ -123,7 +134,17 @@ function maybeBeginContinuation(tab: TabState, env: StreamEnvelope): boolean {
   // cost. A genuinely late follow-up (background agent minutes later) still
   // gets its own bubble.
   const lastIdx = tab.messages.length - 1;
-  const last = lastIdx >= 0 ? tab.messages[lastIdx] : null;
+  let last = lastIdx >= 0 ? tab.messages[lastIdx] : null;
+  // A continuation IS a background agent reporting back — retire one pending
+  // launch so the previous footer stops claiming "still working" for it.
+  if (last && last.role === "assistant" && (last.bgAgentsPending ?? 0) > 0) {
+    last = {
+      ...last,
+      bgAgentsPending: (last.bgAgentsPending ?? 0) - 1,
+      bgAgentsResolved: (last.bgAgentsResolved ?? 0) + 1,
+    };
+    tab.messages[lastIdx] = last;
+  }
   const doneAgoMs = tab.lastTurnDoneAt !== null ? Date.now() - tab.lastTurnDoneAt : Infinity;
   if (import.meta.env.DEV) {
     console.debug(`[assistant] continuation turn: ${Math.round(doneAgoMs / 100) / 10}s after done, last=${last?.role ?? "none"} → ${last?.role === "assistant" && doneAgoMs < CONTINUATION_MERGE_MS ? "merge" : "new bubble"}`);
@@ -1313,6 +1334,12 @@ export function onStreamLine(tab: TabState, raw: string) {
       if (fms === "on" || speed === "fast") {
         mutateStreaming(tab, (m) => ({ ...m, fast: true }));
       }
+      // Honest done receipt: background Agent launches that haven't reported
+      // back yet — the footer says "agent still working" instead of "Done".
+      mutateStreaming(tab, (m) => {
+        const pending = Math.max(0, countBgAgentLaunches(m) - (m.bgAgentsResolved ?? 0));
+        return (m.bgAgentsPending ?? 0) === pending ? m : { ...m, bgAgentsPending: pending };
+      });
       if (env.subtype && env.subtype !== "success") {
         const msg = RESULT_ERROR_MESSAGES[env.subtype];
         if (msg) {

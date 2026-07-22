@@ -213,6 +213,14 @@ export type ChatMessage = {
    *  fast_mode_state / usage.speed) — stamped at result, never at request, so
    *  the TurnSummary badge is honest. Absent on non-fast + pre-field convos. */
   fast?: boolean | null;
+  /** Background agents launched this turn (Agent tool result = "Async agent
+   *  launched…") that hadn't reported back when the turn ended. Drives the
+   *  footer's "agent still working" state; decremented as continuation turns
+   *  land, cleared on restore (the parked CLI that owned them is gone). */
+  bgAgentsPending?: number | null;
+  /** Continuation turns already counted against this message's launches —
+   *  internal bookkeeping so a re-stamp at a merged result stays honest. */
+  bgAgentsResolved?: number | null;
   // Terminal stop reason when noteworthy: "max_tokens" (response truncated at
   // the output cap) or "refusal" (model declined). Null/absent for normal
   // completions. Drives the truncation/refusal notice in MessageBubble.

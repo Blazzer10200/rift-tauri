@@ -405,7 +405,7 @@
   .sturn-head, .snarr, .snarr-beat, .sfooter, .sstall-note, .scompact-card,
   .wline, .wline-list, .wline-active, .wbrow, .splan, .sxplan, .sweb, .sresult { animation: none; }
   .scompact-fill { transition: none; }
-  .sturn-head.live .sh-dot, .wline-active .wa-dot, .wb-dot.live { animation: none; }
+  .sturn-head.live .sh-dot, .wline-active .wa-dot, .wb-dot.live, .sapplied .bgagent-dot { animation: none; }
   .wline-active::after { animation: none; background: none; }
   .sturn-body.railed.live::after { animation: none; background: none; }
 }
@@ -427,6 +427,12 @@
 .sapplied .ran { display: inline-flex; align-items: center; gap: 5px; color: var(--fg-muted); font-weight: 600; }
 /* "Changes failed" — edits attempted but all errored */
 .sapplied .bad { display: inline-flex; align-items: center; gap: 5px; color: var(--danger); font-weight: 600; }
+/* background agent still out when the turn ended — activity, not completion:
+   breathing live dot + status-busy ink instead of a checkmark claim */
+.sapplied .bgagent { display: inline-flex; align-items: center; gap: 6px; color: var(--status-busy); font-weight: 600; }
+.sapplied .bgagent-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--status-busy); flex: none;
+  animation: streamLivePulse var(--pulse-live) ease-out infinite; }
+.sapplied .bgagent-note { color: var(--fg-subtle); font-size: var(--fs-xs); }
 /* distinct-file count next to "Applied" */
 .sapplied .files { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ok); }
 .sapplied .sapplied-meta { color: var(--fg-faint); font-family: var(--font-mono); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }

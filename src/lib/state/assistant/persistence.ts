@@ -404,7 +404,12 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     // the original JSONL. New convos persist cliSessionId explicitly.
     const cliSid = convo.cliSessionId ?? convo.id;
     const tab = host.ensureTab(convo.id, cliSid);
-    tab.messages = convo.messages ?? [];
+    // A persisted "agent still working" stamp can never resolve — the parked
+    // CLI that owned those agents died with the previous app run. Clear it so
+    // a restored footer doesn't promise a report that will never come.
+    tab.messages = (convo.messages ?? []).map((m) =>
+      (m.bgAgentsPending ?? 0) > 0 ? { ...m, bgAgentsPending: 0 } : m,
+    );
     tab.cliSessionId = cliSid;
     // Hydrate last-activity from disk so reopening doesn't reset the order;
     // legacy records lacking it fall back to their createdAt.

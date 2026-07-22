@@ -172,6 +172,8 @@ export type TurnModel = {
   files: number; // distinct files edited/created (only meaningful for "applied")
   meta: { time: string; cost: string | null; tokens: number | null; fast: boolean } | null; // footer time·tokens·cost(·fast) line
   totalSecs: number;
+  /** Background agents launched this turn still out working (footer honesty). */
+  bgAgents: number;
 };
 
 export type WorkSeg =
@@ -765,7 +767,7 @@ export function messageToTurn(m: ChatMessage): TurnModel {
   const tokens = typeof m.outputTokens === "number" && m.outputTokens > 0 ? m.outputTokens : null;
   const meta = outcome === "text" ? null : { time: fmtDur(shownSecs), cost, tokens, fast: m.fast === true };
 
-  return { blocks, thinking, outcome, files: changedFiles.size, meta, totalSecs: shownSecs };
+  return { blocks, thinking, outcome, files: changedFiles.size, meta, totalSecs: shownSecs, bgAgents: Math.max(0, m.bgAgentsPending ?? 0) };
 }
 
 // The CLI can split one narration sentence across a tool_use — the model emits
