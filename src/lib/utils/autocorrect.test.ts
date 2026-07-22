@@ -22,6 +22,19 @@ describe("correctWord", () => {
     expect(correctWord("rust")).toBeNull();
     expect(correctWord("I")).toBeNull();
   });
+
+  it("fixes typos from the generated dictionary", () => {
+    expect(correctWord("becasue")).toBe("because");
+    expect(correctWord("abandonned")).toBe("abandoned");
+    expect(correctWord("amercia")).toBe("America");
+    expect(correctWord("Amercia")).toBe("America");
+  });
+
+  it("never fires on valid English words the source list marks as typos", () => {
+    // "posses"/"loosing" are real words — the generator filters them out.
+    expect(correctWord("posses")).toBeNull();
+    expect(correctWord("loosing")).toBeNull();
+  });
 });
 
 describe("boundaryAutocorrect", () => {
@@ -33,6 +46,11 @@ describe("boundaryAutocorrect", () => {
   it("fires on punctuation boundaries too", () => {
     const v = "is that wierd?";
     expect(apply(v, v.length)).toBe("is that weird?");
+  });
+
+  it("fixes generated-dictionary typos at a boundary", () => {
+    const v = "only becasue ";
+    expect(apply(v, v.length)).toBe("only because ");
   });
 
   it("capitalizes standalone i", () => {

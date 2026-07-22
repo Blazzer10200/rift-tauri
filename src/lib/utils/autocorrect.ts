@@ -1,6 +1,10 @@
 // Typing-time autocorrect (opt-in, composer) + the shared typo dictionary the
-// right-click "Auto-correct" menu item also draws from. Deliberately small +
-// high-confidence — a deterministic local pass, not a spellchecker.
+// right-click "Auto-correct" menu item also draws from. Deterministic local
+// pass: the generated Wikipedia misspellings list (typoData.ts, ~3.8k entries
+// whose misspelling is never a valid English word) merged under the
+// hand-curated overrides below.
+
+import { TYPO_DATA } from "./typoData";
 
 export const TYPO_MAP: Record<string, string> = {
   teh: "the", thier: "their", recieve: "receive", recieved: "received",
@@ -12,11 +16,18 @@ export const TYPO_MAP: Record<string, string> = {
   youre: "you're", theyre: "they're", freind: "friend", wierd: "weird",
 };
 
+const DICT = new Map<string, string>();
+for (const line of TYPO_DATA.split("\n")) {
+  const i = line.indexOf(":");
+  if (i > 0) DICT.set(line.slice(0, i), line.slice(i + 1));
+}
+for (const [k, v] of Object.entries(TYPO_MAP)) DICT.set(k, v);
+
 /** Correct a single word, preserving the typed capitalization shape.
  *  Returns null when the word needs no change. */
 export function correctWord(word: string): string | null {
   if (word === "i") return "I";
-  const rep = TYPO_MAP[word.toLowerCase()];
+  const rep = DICT.get(word.toLowerCase());
   if (!rep) return null;
   if (word.length > 1 && word === word.toUpperCase()) return rep.toUpperCase();
   const fixed = word[0] === word[0].toUpperCase() ? rep[0].toUpperCase() + rep.slice(1) : rep;
