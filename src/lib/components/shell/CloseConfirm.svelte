@@ -169,8 +169,8 @@
     z-index: 400;
     display: grid;
     place-items: center;
-    background: color-mix(in oklab, black 42%, transparent);
-    backdrop-filter: blur(3px);
+    /* Opaque dim, no backdrop-filter (WebView2 fixed-overlay ban, app.css). */
+    background: color-mix(in oklab, black 52%, transparent);
   }
   .cc-card {
     width: min(380px, calc(100vw - 48px));

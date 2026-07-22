@@ -648,6 +648,128 @@ fn tool_read_diagnostics(args: &Value) -> Result<String, String> {
     ))
 }
 
+/// Pure line filter for `read_events` — separate for unit tests. Returns
+/// (total matched, last `limit` lines). Non-JSON lines are dropped (the sink
+/// only ever writes JSON; a torn tail line must not pollute output).
+fn filter_event_lines<'a>(
+    content: &'a str,
+    min_level: Option<&str>,
+    resource: Option<&str>,
+    filter: Option<&str>,
+    limit: usize,
+) -> (usize, Vec<&'a str>) {
+    let rank = |l: &str| match l {
+        "trace" => 0u8,
+        "debug" => 1,
+        "info" => 2,
+        "warn" => 3,
+        "error" => 4,
+        _ => 2,
+    };
+    let matched: Vec<&str> = content
+        .lines()
+        .filter(|line| {
+            let Ok(v) = serde_json::from_str::<Value>(line) else { return false };
+            if let Some(min) = min_level {
+                let lvl = v.get("level").and_then(Value::as_str).unwrap_or("info");
+                if rank(lvl) < rank(min) {
+                    return false;
+                }
+            }
+            if let Some(res) = resource {
+                let r = v.get("resource").and_then(Value::as_str).unwrap_or("");
+                if !r.eq_ignore_ascii_case(res) {
+                    return false;
+                }
+            }
+            if let Some(f) = filter {
+                if !line.to_lowercase().contains(f) {
+                    return false;
+                }
+            }
+            true
+        })
+        .collect();
+    let total = matched.len();
+    let tail = matched[total.saturating_sub(limit)..].to_vec();
+    (total, tail)
+}
+
+fn tool_read_events(args: &Value) -> Result<String, String> {
+    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50).clamp(1, 500) as usize;
+    let min_level = args.get("level").and_then(|v| v.as_str()).map(|s| s.to_lowercase());
+    let resource = args.get("resource").and_then(|v| v.as_str()).map(|s| s.to_lowercase());
+    let filter = args.get("filter").and_then(|v| v.as_str()).map(|s| s.to_lowercase());
+    let path = crate::diagnostics::events_log_path().ok_or("events.ndjson path unavailable")?;
+    let content = std::fs::read_to_string(&path).map_err(|e| {
+        format!(
+            "read {}: {e} — the running app writes this sink; missing means no event has fired since this install started.",
+            path.display()
+        )
+    })?;
+    let (total, tail) = filter_event_lines(
+        &content,
+        min_level.as_deref(),
+        resource.as_deref(),
+        filter.as_deref(),
+        limit,
+    );
+    Ok(format!(
+        "events.ndjson — {} matching event(s), showing last {}:\n{}",
+        total,
+        tail.len(),
+        tail.join("\n")
+    ))
+}
+
+fn tool_crash_reports(args: &Value) -> Result<String, String> {
+    let name = args.get("name").and_then(|v| v.as_str()).map(|s| s.trim());
+    let log = crate::diagnostics::app_log_path().ok_or("app log path unavailable")?;
+    let dir = log.parent().ok_or("log dir unavailable")?.to_path_buf();
+    let mut reports: Vec<(String, u64, std::time::SystemTime)> = std::fs::read_dir(&dir)
+        .map_err(|e| format!("read {}: {e}", dir.display()))?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let fname = e.file_name().to_string_lossy().into_owned();
+            if !(fname.starts_with("crash-") && fname.ends_with(".txt")) {
+                return None;
+            }
+            let meta = e.metadata().ok()?;
+            Some((fname, meta.len(), meta.modified().ok()?))
+        })
+        .collect();
+    if reports.is_empty() {
+        return Ok("No crash reports — the app has not recorded any panics.".into());
+    }
+    reports.sort_by(|a, b| b.2.cmp(&a.2)); // newest first
+    let listing =
+        reports.iter().map(|(n, sz, _)| format!("{n} ({sz} B)")).collect::<Vec<_>>().join("\n");
+    // `name` must exactly match a listed report — names come from read_dir, so
+    // an arbitrary path can never be smuggled in.
+    let picked = match name {
+        Some(n) => {
+            if !reports.iter().any(|(f, ..)| f == n) {
+                return Err(format!("no crash report named `{n}` — available:\n{listing}"));
+            }
+            n.to_string()
+        }
+        None => reports[0].0.clone(),
+    };
+    let body =
+        std::fs::read_to_string(dir.join(&picked)).map_err(|e| format!("read {picked}: {e}"))?;
+    const CAP: usize = 16 * 1024;
+    let shown = if body.len() > CAP {
+        let mut start = body.len() - CAP;
+        while start < body.len() && !body.is_char_boundary(start) {
+            start += 1;
+        }
+        format!("…(truncated — showing the last {} KB)\n{}", CAP / 1024, &body[start..])
+    } else {
+        body
+    };
+    Ok(format!("{} crash report(s), newest first:\n{listing}\n\n--- {picked} ---\n{shown}", reports.len()))
+}
+
 fn tool_turn_trace(args: &Value) -> Result<String, String> {
     let n = args.get("turns").and_then(|v| v.as_u64()).unwrap_or(10).clamp(1, 50) as usize;
     let session = args.get("session_id").and_then(|v| v.as_str());
@@ -718,13 +840,38 @@ fn tools_list_payload() -> Value {
         }),
         json!({
             "name": "read_diagnostics",
-            "description": "Read Rift's own application log (rift.log) — every backend subsystem's log lines: turn engine, warm pool, MCP server, updater, watchdog. THE first stop when diagnosing Rift itself misbehaving (a stuck turn, a failed update, a wedged spinner). Optional level/filter narrowing; returns the most recent matching lines. Paths and usernames are scrubbed at the source.",
+            "description": "Read Rift's own application log (rift.log) — every backend subsystem's log lines: turn engine, warm pool, MCP server, updater, watchdog. THE first stop when diagnosing Rift itself misbehaving (a stuck turn, a failed update, a wedged spinner). Optional level/filter narrowing; returns the most recent matching lines. Paths and usernames are scrubbed at the source. Siblings: read_events (structured events + frontend/webview errors), crash_reports (panic reports), turn_trace (per-turn perf).",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "lines": { "type": "integer", "description": "Max lines to return, from the tail (1-1000). Default 100.", "minimum": 1, "maximum": 1000 },
                     "level": { "type": "string", "enum": ["trace", "debug", "info", "warn", "error"], "description": "Minimum log level to include." },
                     "filter": { "type": "string", "description": "Case-insensitive substring filter (matches the whole line, e.g. a subsystem name or session id)." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "read_events",
+            "description": "Read Rift's structured diagnostics event stream (events.ndjson) — the same live feed the in-app Diagnostics console shows: every subsystem's structured events WITH their JSON fields, plus frontend/webview errors (uncaught exceptions, unhandled promise rejections, console.error) forwarded from the UI. Richer than read_diagnostics (plain text log): use it to catch UI-side bugs, correlate structured fields, or narrow by subsystem. Each line is one JSON event: {at, seq, stage, level, resource, message, fields}.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "limit": { "type": "integer", "description": "Max events to return, from the tail (1-500). Default 50.", "minimum": 1, "maximum": 500 },
+                    "level": { "type": "string", "enum": ["trace", "debug", "info", "warn", "error"], "description": "Minimum level to include." },
+                    "resource": { "type": "string", "description": "Only events from this subsystem (e.g. `frontend`, `turn`, `warm_pool`)." },
+                    "filter": { "type": "string", "description": "Case-insensitive substring filter over the whole event line." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "crash_reports",
+            "description": "List Rift's crash reports (one crash-<timestamp>.txt per panic, scrubbed backtrace included) and read one — newest by default. THE tool when the app died, restarted unexpectedly, or a hard failure predates the current session's logs.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "Specific report filename from the listing. Defaults to the newest." }
                 },
                 "required": []
             }
@@ -994,6 +1141,8 @@ fn handle_request(req: RpcRequest, roots: &[PathBuf]) -> Option<RpcResponse> {
                 "list_dir" => tool_list_dir(&args, roots),
                 "grep" => tool_grep(&args, roots),
                 "read_diagnostics" => tool_read_diagnostics(&args),
+                "read_events" => tool_read_events(&args),
+                "crash_reports" => tool_crash_reports(&args),
                 "turn_trace" => tool_turn_trace(&args),
                 "git_status" => git_local::tool_git_status(&args, roots),
                 "git_diff" => git_local::tool_git_diff(&args, roots),
@@ -1320,6 +1469,35 @@ mod tests {
         let (_td, root) = workspace();
         let err = tool_grep(&json!({ "pattern": "hello", "path": "node_modules" }), &[root]).unwrap_err();
         assert!(err.contains("excluded directory"), "got: {err}");
+    }
+
+    // ─── read_events line filter ─────────────────────────────────────────────
+
+    #[test]
+    fn filter_event_lines_levels_resources_and_tail() {
+        let content = concat!(
+            r#"{"at":"t1","seq":1,"stage":"log","level":"info","resource":"turn","message":"ok","fields":null}"#, "\n",
+            r#"{"at":"t2","seq":2,"stage":"system","level":"error","resource":"frontend","message":"boom","fields":{"stack":"x"}}"#, "\n",
+            "not-json torn tail line\n",
+            r#"{"at":"t3","seq":3,"stage":"log","level":"warn","resource":"warm_pool","message":"lagged","fields":null}"#, "\n",
+        );
+        // No filters → every JSON line kept, the torn non-JSON line dropped.
+        let (total, tail) = filter_event_lines(content, None, None, None, 10);
+        assert_eq!((total, tail.len()), (3, 3));
+        // Minimum level `warn` → the error + warn events.
+        let (total, _) = filter_event_lines(content, Some("warn"), None, None, 10);
+        assert_eq!(total, 2);
+        // Resource narrowing.
+        let (total, tail) = filter_event_lines(content, None, Some("frontend"), None, 10);
+        assert_eq!(total, 1);
+        assert!(tail[0].contains("boom"));
+        // Substring filter.
+        let (total, _) = filter_event_lines(content, None, None, Some("lagged"), 10);
+        assert_eq!(total, 1);
+        // Tail limit keeps the LAST n of the matches.
+        let (total, tail) = filter_event_lines(content, None, None, None, 1);
+        assert_eq!(total, 3);
+        assert!(tail[0].contains("warm_pool"));
     }
 
     // ─── reject_skipped — the excluded-tree boundary (read/list, not just grep) ──

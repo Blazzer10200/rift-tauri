@@ -3,13 +3,13 @@
   // status bar). Floating tier (rift-menu shell + portal). Read-only surface:
   // the two "do something" actions inject a prompt into the composer so every
   // write flows through the assistant's normal permission system.
-  import { ExternalLink, GitBranch, GitPullRequest, RefreshCw, Sparkles } from "lucide-svelte";
+  import { ArrowDownToLine, ArrowUpFromLine, ExternalLink, GitBranch, GitPullRequest, RefreshCw, Sparkles } from "lucide-svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { portal } from "$lib/actions/portal";
   import { tooltip } from "$lib/actions/tooltip";
   import { assistant } from "$lib/state/assistant.svelte";
   import { github } from "$lib/state/github.svelte";
-  import { ghFixPrompt, ghPrPrompt, ghRelTime, ghSyncLabel } from "$lib/state/githubHelpers";
+  import { ghFixPrompt, ghPrPrompt, ghPullPrompt, ghPushPrompt, ghRelTime, ghSyncLabel } from "$lib/state/githubHelpers";
 
   let { anchor, onClose }: { anchor: HTMLElement; onClose: () => void } = $props();
 
@@ -26,6 +26,15 @@
   const canDraftPr = $derived(
     !pr && !!s?.branch && !["main", "master", "HEAD"].includes(s.branch),
   );
+  const aheadN = $derived(s?.state === "ok" && typeof s.ahead === "number" ? s.ahead : 0);
+  const behindN = $derived(s?.state === "ok" && typeof s.behind === "number" ? s.behind : 0);
+
+  // Ticking clock so "10m ago" stays honest while the popover sits open.
+  let now = $state(Date.now());
+  $effect(() => {
+    const t = setInterval(() => (now = Date.now()), 30_000);
+    return () => clearInterval(t);
+  });
 
   // Anchor-relative position; flips above when the chip sits low (status bar).
   // Re-measures when status content lands ($effect runs post-DOM-flush): the
@@ -142,7 +151,7 @@
           <span class="gp-muted">
             — {run.status === "completed" ? (run.conclusion ?? "done") : (run.status ?? "").replace("_", " ")}
             {#if run.headBranch && run.headBranch !== s.branch}&nbsp;· {run.headBranch}{/if}
-            {#if run.createdAt}&nbsp;· {ghRelTime(run.createdAt)}{/if}
+            {#if run.createdAt}&nbsp;· {ghRelTime(run.createdAt, now)}{/if}
           </span>
         </span>
         {#if run.url}
@@ -179,12 +188,24 @@
       {/if}
     </div>
 
-    {#if runFailed || canDraftPr}
+    {#if runFailed || canDraftPr || behindN > 0 || aheadN > 0}
       <div class="rift-menu-divider"></div>
       {#if runFailed && run}
         <button class="rift-menu-row" type="button" onclick={() => inject(ghFixPrompt(run))}>
           <span class="rift-menu-row-ic"><Sparkles size={13} /></span>
           <span class="rift-menu-row-t">Ask Claude to fix the failing run</span>
+        </button>
+      {/if}
+      {#if behindN > 0}
+        <button class="rift-menu-row" type="button" onclick={() => inject(ghPullPrompt(behindN))}>
+          <span class="rift-menu-row-ic"><ArrowDownToLine size={13} /></span>
+          <span class="rift-menu-row-t">Pull {behindN} {behindN === 1 ? "commit" : "commits"} with Claude</span>
+        </button>
+      {/if}
+      {#if aheadN > 0}
+        <button class="rift-menu-row" type="button" onclick={() => inject(ghPushPrompt(aheadN))}>
+          <span class="rift-menu-row-ic"><ArrowUpFromLine size={13} /></span>
+          <span class="rift-menu-row-t">Push {aheadN} {aheadN === 1 ? "commit" : "commits"} with Claude</span>
         </button>
       {/if}
       {#if canDraftPr}

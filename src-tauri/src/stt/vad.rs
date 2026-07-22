@@ -18,29 +18,41 @@ const FRAME_SAMPLES: usize = 480;
 /// to drop pure-silence windows.
 const SPEECH_RATIO_THRESHOLD: f32 = 0.10;
 
-/// Returns true if the window appears to contain speech.
-pub fn window_has_speech(samples_f32: &[f32]) -> bool {
-    if samples_f32.is_empty() {
-        return false;
-    }
+/// Minimum voiced frames (~150 ms) a span must carry before it's worth
+/// transcribing at all. Absolute, not a ratio — a long mostly-silent span
+/// (mic held while thinking) dilutes any ratio, and transcribing it is
+/// exactly where the engines hallucinate filler (".yeah") out of breath
+/// noise. Used by the segment-commit and stop-time-tail gates.
+pub const MIN_COMMIT_VOICED_FRAMES: usize = 5;
+
+/// Count of 30 ms frames webrtc-vad flags as voiced.
+pub fn voiced_frame_count(samples_f32: &[f32]) -> usize {
     let mut vad = Vad::new_with_rate_and_mode(SampleRate::Rate16kHz, VadMode::Aggressive);
-    let total_frames = samples_f32.len() / FRAME_SAMPLES;
-    if total_frames == 0 {
-        // Tiny window — fall back to RMS energy gate.
-        let rms = (samples_f32.iter().map(|s| s * s).sum::<f32>() / samples_f32.len() as f32).sqrt();
-        return rms > 0.005;
-    }
-    let mut speech_frames = 0usize;
+    let mut voiced = 0usize;
     for chunk in samples_f32.chunks_exact(FRAME_SAMPLES) {
         let frame_i16: Vec<i16> = chunk
             .iter()
             .map(|s| (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16)
             .collect();
         if vad.is_voice_segment(&frame_i16).unwrap_or(false) {
-            speech_frames += 1;
+            voiced += 1;
         }
     }
-    let ratio = speech_frames as f32 / total_frames as f32;
+    voiced
+}
+
+/// Returns true if the window appears to contain speech.
+pub fn window_has_speech(samples_f32: &[f32]) -> bool {
+    if samples_f32.is_empty() {
+        return false;
+    }
+    let total_frames = samples_f32.len() / FRAME_SAMPLES;
+    if total_frames == 0 {
+        // Tiny window — fall back to RMS energy gate.
+        let rms = (samples_f32.iter().map(|s| s * s).sum::<f32>() / samples_f32.len() as f32).sqrt();
+        return rms > 0.005;
+    }
+    let ratio = voiced_frame_count(samples_f32) as f32 / total_frames as f32;
     ratio >= SPEECH_RATIO_THRESHOLD
 }
 
@@ -86,9 +98,16 @@ fn hallucination_re() -> &'static regex::Regex {
 
 /// Strip known hallucination artifacts from a transcript. Case-insensitive,
 /// handles multiple occurrences per phrase. Idempotent. Collapses whitespace.
+/// Also drops a leading orphan-punctuation run (".yeah", "...so") — an engine
+/// artifact; no dictated sentence starts with a bare period.
 pub fn strip_hallucinations(text: &str) -> String {
     let out = hallucination_re().replace_all(text, "");
-    out.split_whitespace().collect::<Vec<_>>().join(" ")
+    out.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim_start_matches(['.', ',', '!', '?', ';', ':'])
+        .trim_start()
+        .to_string()
 }
 
 #[cfg(test)]
@@ -113,5 +132,18 @@ mod tests {
     #[test]
     fn empty_window_no_speech() {
         assert!(!window_has_speech(&[]));
+    }
+
+    #[test]
+    fn strips_leading_orphan_punctuation() {
+        assert_eq!(strip_hallucinations(".yeah"), "yeah");
+        assert_eq!(strip_hallucinations("...so anyway"), "so anyway");
+        assert_eq!(strip_hallucinations("fine. next line"), "fine. next line");
+    }
+
+    #[test]
+    fn silence_has_no_voiced_frames() {
+        let silence = vec![0.0f32; 16_000];
+        assert_eq!(voiced_frame_count(&silence), 0);
     }
 }

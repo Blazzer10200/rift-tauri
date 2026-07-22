@@ -8,9 +8,11 @@
  * and exposes derived filters for the live console (Phase 1).
  *
  * Scrubbing already happens at the bus boundary (`publish`), so events arriving
- * here are username/home/key-safe. The ONLY frontend-added paths are the
- * `window.onerror`/`unhandledrejection` captures below, which run through
- * `scrubUser` before entering the ring.
+ * here are username/home/key-safe. Frontend-originated captures
+ * (`window.onerror`/`unhandledrejection`/`console.error`) are scrubbed with
+ * `scrubUser` and FORWARDED to the backend bus (`diag_frontend_event`) so they
+ * reach the events.ndjson sink + the assistant's `read_events` tool; the echo
+ * lands back here over `diag://event`. Local ring push is the fallback only.
  */
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
@@ -64,6 +66,9 @@ class DiagnosticsStore {
   #errHooked = false;
   #onError: ((e: ErrorEvent) => void) | null = null;
   #onRejection: ((e: PromiseRejectionEvent) => void) | null = null;
+  #origConsoleError: typeof console.error | null = null;
+  /** True while the console.error mirror is forwarding (loop guard). */
+  #forwarding = false;
 
   /** Distinct resources seen, for the filter-chip list. */
   resources = $derived.by(() => {
@@ -195,32 +200,70 @@ class DiagnosticsStore {
     this.events = next;
   }
 
+  /** Send a frontend error to the backend bus — it echoes back over
+   *  `diag://event` (real seq), lands in the console backlog, the
+   *  events.ndjson sink, and the assistant's `read_events` tool. Local ring
+   *  push is the FALLBACK only (invoke unavailable / backend down), so the
+   *  event is never appended twice. */
+  #feForward(level: DiagLevel, message: string, fields: Record<string, unknown>) {
+    void invoke("diag_frontend_event", { level, message, fields }).catch(() => {
+      this.#push(this.#feEvent(level, message, fields));
+    });
+  }
+
   #hookErrors() {
     if (this.#errHooked) return;
     this.#errHooked = true;
     this.#onError = (e: ErrorEvent) => {
-      this.#push(this.#feEvent("error", e.message || "Uncaught error", {
+      this.#feForward("error", e.message || "Uncaught error", {
         source: scrubUser(e.filename),
         line: e.lineno,
         col: e.colno,
         stack: e.error?.stack ? scrubUser(String(e.error.stack)) : undefined,
-      }));
+      });
     };
     this.#onRejection = (e: PromiseRejectionEvent) => {
       const reason = e.reason;
       const msg = reason instanceof Error ? reason.message : String(reason);
-      this.#push(this.#feEvent("error", `Unhandled rejection: ${msg}`, {
+      this.#feForward("error", `Unhandled rejection: ${msg}`, {
         stack: reason instanceof Error && reason.stack ? scrubUser(reason.stack) : undefined,
-      }));
+      });
     };
     window.addEventListener("error", this.#onError);
     window.addEventListener("unhandledrejection", this.#onRejection);
+    // console.error carries most caught-but-real failures (openPath failed,
+    // shiki init failed, …) that never throw — mirror them onto the bus so
+    // they're visible outside a attached dev console. Reentrancy guard: the
+    // forward path must never loop back through console.error.
+    this.#origConsoleError = console.error;
+    console.error = (...args: unknown[]) => {
+      this.#origConsoleError?.apply(console, args);
+      if (this.#forwarding) return;
+      this.#forwarding = true;
+      try {
+        const msg = args
+          .map((a) => (a instanceof Error ? `${a.name}: ${a.message}` : typeof a === "string" ? a : safeString(a)))
+          .join(" ")
+          .slice(0, 2000);
+        const first = args.find((a): a is Error => a instanceof Error);
+        this.#feForward("error", scrubUser(msg), {
+          source: "console.error",
+          stack: first?.stack ? scrubUser(first.stack) : undefined,
+        });
+      } finally {
+        this.#forwarding = false;
+      }
+    };
   }
 
   #unhookErrors() {
     if (this.#onError) window.removeEventListener("error", this.#onError);
     if (this.#onRejection) window.removeEventListener("unhandledrejection", this.#onRejection);
     this.#onError = this.#onRejection = null;
+    if (this.#origConsoleError) {
+      console.error = this.#origConsoleError;
+      this.#origConsoleError = null;
+    }
     this.#errHooked = false;
   }
 
@@ -235,6 +278,14 @@ class DiagnosticsStore {
       message,
       fields,
     };
+  }
+}
+
+function safeString(v: unknown): string {
+  try {
+    return JSON.stringify(v) ?? String(v);
+  } catch {
+    return String(v);
   }
 }
 

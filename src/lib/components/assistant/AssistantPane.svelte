@@ -1023,6 +1023,9 @@
     pointer-events: none;
   }
   .hud-stack > :global(*) { pointer-events: auto; }
+  /* Stacked arrival — when both bars mount in the same flush, the second one
+     lands a beat later so the stack reads as dealing cards, not a clump. */
+  .hud-stack > :global(.phud + .ahud) { animation-delay: 90ms; }
 
   /* Conversation scroll region — replaces the old single `.scroll` wrapper for
      the message timeline. Keeps the hidden-scrollbar + flex-column behavior. */

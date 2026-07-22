@@ -239,8 +239,8 @@
      containing block (same reason ConversationList's menu portals). Rides the
      app's shared popover look. */
   :global(.sw-menu) { position: fixed; z-index: 52; max-width: 320px; max-height: 60vh; overflow-y: auto; padding: 5px;
-    border-radius: 12px; background: color-mix(in oklab, var(--bg-elev-2) 60%, transparent);
-    -webkit-backdrop-filter: blur(26px) saturate(1.6); backdrop-filter: blur(26px) saturate(1.6);
+    border-radius: 12px; background: color-mix(in oklab, var(--bg-elev-2) 90%, transparent);
+    -webkit-backdrop-filter: blur(12px) saturate(1.35); backdrop-filter: blur(12px) saturate(1.35);
     border: 1px solid color-mix(in oklab, var(--fg) 12%, transparent);
     box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.08), 0 24px 56px -26px oklch(0 0 0 / 0.7), var(--shadow-lg);
     animation: swPopIn var(--dur-fast) var(--ease-page) both; transform-origin: top left; }

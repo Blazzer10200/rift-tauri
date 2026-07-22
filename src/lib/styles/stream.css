@@ -47,15 +47,30 @@
    — stream stays boxless). Only when the turn actually did work; pure-text
    answers render unindented. Live turns tint the tail toward the accent. */
 .sturn-body.railed { position: relative; padding-left: 13px; }
-.sturn-body.railed::before { content: ""; position: absolute; left: 1px; top: 6px; bottom: 6px;
-  width: 2px; border-radius: 2px;
+.sturn-body.railed::before { content: ""; position: absolute; left: 1px; top: 2px; bottom: 2px;
+  width: 1.5px; border-radius: 999px;
   background: linear-gradient(to bottom,
-    color-mix(in oklch, var(--border) 95%, transparent),
-    color-mix(in oklch, var(--border) 35%, transparent)); }
+    transparent,
+    color-mix(in oklch, var(--border-strong) 85%, transparent) 12%,
+    color-mix(in oklch, var(--border) 60%, transparent) 88%,
+    transparent); }
 .sturn-body.railed.live::before {
   background: linear-gradient(to bottom,
-    color-mix(in oklch, var(--border) 95%, transparent) 55%,
-    color-mix(in oklab, var(--accent) 40%, transparent)); }
+    transparent,
+    color-mix(in oklch, var(--border-strong) 85%, transparent) 12%,
+    color-mix(in oklab, var(--accent) 35%, transparent) 92%,
+    transparent); }
+/* Live glint — one soft accent spark drifting down the spine while the turn
+   works. Quieter than pulsing any text; reads as "current position". */
+.sturn-body.railed.live::after { content: ""; position: absolute; left: 1px; top: 2px; bottom: 2px;
+  width: 1.5px; border-radius: 999px;
+  background: linear-gradient(to bottom, transparent, color-mix(in oklab, var(--accent) 55%, transparent) 50%, transparent);
+  background-size: 100% 90px; background-repeat: no-repeat;
+  animation: railGlint 3.2s ease-in-out infinite; }
+@keyframes railGlint {
+  from { background-position: 0 -90px; }
+  to { background-position: 0 calc(100% + 90px); }
+}
 /* Quiet state line, not a bar (comp: no top rule) — renders only for states the
    footer can't carry: thinking pause · awaiting input · compacting. */
 .sturn-head { display: flex; align-items: center; gap: 9px; padding-bottom: 6px; margin-bottom: 2px;
@@ -212,11 +227,23 @@
   color: var(--fg-faint); max-width: 52ch;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
 
-/* Compaction turn — a manual /compact is legitimately silent until the
-   boundary lands; same quiet-note voice as the stall note, calm not amber. */
-.scompact-note { margin: 4px 0 2px; font-size: var(--fs-sm); line-height: 1.45;
-  color: var(--fg-faint); max-width: 52ch;
-  animation: blockIn var(--dur-base) var(--ease-page) both; }
+/* Compaction progress card — a manual /compact (or the CLI's silent mid-turn
+   auto-compact) streams zero events, so this is the only honest signal: an
+   estimate-paced bar + what's being summarized + a plain-words note. Every
+   estimate is ~-labeled; the card leaves when the boundary lands. */
+.scompact-card { margin: 6px 0 2px; max-width: 52ch; display: flex; flex-direction: column;
+  gap: 7px; animation: blockIn var(--dur-base) var(--ease-page) both; }
+.scompact-track { height: 2px; border-radius: 2px; overflow: hidden;
+  background: color-mix(in oklab, var(--fg) 8%, transparent); }
+.scompact-fill { display: block; height: 100%; transform-origin: left; border-radius: 2px;
+  background: linear-gradient(90deg, color-mix(in oklab, var(--accent) 65%, transparent), var(--accent));
+  transition: transform 900ms var(--ease-soft); }
+.scompact-meta { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+  font-family: var(--font-mono, monospace); font-size: var(--fs-xs);
+  color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
+.scompact-meta .scompact-pip { opacity: 0.45; }
+.scompact-note { font-size: var(--fs-sm); line-height: 1.45;
+  color: var(--fg-faint); max-width: 52ch; }
 
 /* Awaiting human input — the turn is parked on YOU (a pending ask_user), not
    the model. Kill the shimmer + the racing clock illusion: a calm accent verb
@@ -375,10 +402,12 @@
   .splan-ring { animation: none; }
   /* Entrance slides + pulse dots — everything blockIn/workOpen/streamLivePulse
      drives. animation:none on a `both`-fill entrance lands at natural styles. */
-  .sturn-head, .snarr, .snarr-beat, .sfooter, .sstall-note,
+  .sturn-head, .snarr, .snarr-beat, .sfooter, .sstall-note, .scompact-card,
   .wline, .wline-list, .wline-active, .wbrow, .splan, .sxplan, .sweb, .sresult { animation: none; }
+  .scompact-fill { transition: none; }
   .sturn-head.live .sh-dot, .wline-active .wa-dot, .wb-dot.live { animation: none; }
   .wline-active::after { animation: none; background: none; }
+  .sturn-body.railed.live::after { animation: none; background: none; }
 }
 
 /* turn footer — a quiet receipt pill; tone varies by what the turn actually did */
@@ -466,6 +495,17 @@
 .splan-item.is-todo .splan-text { color: var(--fg-faint); }
 .splan-item.is-active .splan-text { color: var(--fg); font-weight: 550; }
 .splan-ring { width: 13px; height: 13px; border-radius: 50%; border: 2px solid color-mix(in oklab, var(--accent) 30%, transparent); border-top-color: var(--accent); animation: ringspin 0.9s linear infinite; }
+/* Completed-rows fold — one quiet summary line replacing the done backlog on
+   long plans. Same row rhythm as .splan-item, demoted a ladder step. */
+.splan-fold { display: flex; align-items: center; gap: 10px; width: 100%; padding: 4px 0;
+  border: none; background: none; cursor: pointer; text-align: left;
+  font: inherit; font-size: var(--fs-sm); color: var(--fg-subtle);
+  transition: color 160ms var(--ease-soft); }
+.splan-fold:hover { color: var(--fg-2); }
+.splan-fold .splan-mark { color: var(--ok); }
+.splan-fold-txt { flex: none; }
+.splan-fold .splan-fold-ch { color: var(--fg-faint); transition: transform 200ms var(--ease-soft); }
+.splan-fold.x .splan-fold-ch { transform: rotate(180deg); }
 
 /* ── ExitPlanMode proposal card (plan-mode deliverable, matches .splan chrome) ── */
 .sxplan { margin: var(--stream-gap) 0; border: 1px solid var(--border); border-radius: var(--radius-lg);

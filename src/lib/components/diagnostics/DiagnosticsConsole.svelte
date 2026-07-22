@@ -264,8 +264,9 @@
     --dc-info: oklch(0.72 0.10 235);
   }
 
+  /* Opaque dim, no backdrop-filter (WebView2 fixed-overlay ban, app.css). */
   :global(.dc-backdrop) { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center;
-    background: oklch(0 0 0 / 0.52); -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px); }
+    background: oklch(0 0 0 / 0.6); }
   .dc-dismiss { position: absolute; inset: 0; background: none; border: 0; cursor: default; }
 
   .dc-panel { position: relative; width: min(1080px, 93vw); height: min(740px, 88vh);

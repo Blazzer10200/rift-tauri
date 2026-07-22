@@ -822,7 +822,7 @@ function appendToolUse(tab: TabState, block: { id: string; name: string; input?:
   }
   // GitHub chip: a remote-mutating tool ran this turn — mark for a forced
   // status refresh at turn end (flushed in the `result` envelope).
-  if (/(?:^|_)(git_push|gh_pr_create)$/.test(block.name)) github.noteRemoteMutation();
+  if (/(?:^|_)(git_push|git_pull|git_commit|gh_pr_create)$/.test(block.name)) github.noteRemoteMutation();
   tab.activity = {
     ...tab.activity,
     currentLabel: tab.shortToolLabel ? tab.shortToolLabel(block.name, block.input) : block.name,

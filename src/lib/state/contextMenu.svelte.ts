@@ -12,7 +12,7 @@ import {
   SquareCode,
   TextSelect,
 } from "lucide-svelte";
-import { correctWord } from "$lib/utils/autocorrect";
+import { correctText } from "$lib/utils/autocorrect";
 
 export type CtxIcon = typeof Copy;
 
@@ -82,17 +82,6 @@ async function cutField(el: EditField) {
   replaceFieldSelection(el, "");
 }
 
-/** Deterministic auto-correction: common typos (shared dictionary with the
- *  typing-time composer autocorrect), sentence-start capitalization, collapse
- *  runs of spaces. Pure — returns corrected text. */
-function autoCorrect(text: string): string {
-  if (!text) return text;
-  let out = text.replace(/\b([A-Za-z][A-Za-z']*)\b/g, (m) => correctWord(m) ?? m);
-  out = out.replace(/(^\s*|[.!?]\s+)([a-z])/g, (_, lead, c) => lead + c.toUpperCase());
-  out = out.replace(/ {2,}/g, " ");
-  return out;
-}
-
 /** Correct the field's selection if one exists, else the whole value. Replaces
  *  via setRangeText so bind:value updates and the change stays undoable. */
 function autoCorrectField(el: EditField) {
@@ -102,7 +91,7 @@ function autoCorrectField(el: EditField) {
   const s = hasSel ? selStart : 0;
   const e = hasSel ? selEnd : el.value.length;
   const src = el.value.slice(s, e);
-  const fixed = autoCorrect(src);
+  const fixed = correctText(src);
   if (fixed === src) return;
   el.focus();
   el.setRangeText(fixed, s, e, "end");

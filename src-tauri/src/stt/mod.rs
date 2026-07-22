@@ -713,7 +713,12 @@ pub async fn stt_stop_recording(
     // model, and the committed segments all ran on this engine. Segments
     // already committed are text — no re-transcription of the whole ring.
     let samples = audio::take_from(&active.ring, upto);
-    let tail = if samples.is_empty() {
+    // Silence gate: a tail with no real voiced audio (mic held while thinking,
+    // then stop) is the classic hallucination input — skip the transcribe
+    // entirely instead of letting the engine invent a filler word.
+    let tail = if samples.is_empty()
+        || vad::voiced_frame_count(&samples) < vad::MIN_COMMIT_VOICED_FRAMES
+    {
         String::new()
     } else {
         let engine = active.engine.clone();
@@ -880,6 +885,13 @@ async fn dictation_loop(
                 speech_since_commit = false;
                 continue;
             }
+            // VAD blipped on a breath, not speech — don't hand near-silence to
+            // the engine (it hallucinates filler like ".yeah"). The audio stays
+            // unclaimed: real quiet speech still lands via the stop-time tail.
+            if vad::voiced_frame_count(&samples) < vad::MIN_COMMIT_VOICED_FRAMES {
+                speech_since_commit = false;
+                continue;
+            }
             let scrubbed = match transcribe_span(samples).await {
                 Err(()) => return,
                 Ok(None) => continue,
@@ -956,6 +968,57 @@ async fn level_loop(app: AppHandle, win: String, ring: audio::AudioRing, cancel:
         let rms = audio::peek_level(&ring, WINDOW_SECS);
         let _ = app.emit_to(&win, "stt://level", LevelPayload { rms });
     }
+}
+
+/// Pre-load the configured local engine into the cache so the first mic press
+/// skips the multi-second model load. Fired by the frontend at boot and after
+/// engine/model changes; no-op when the model is already cached, not
+/// downloaded, or the engine is web_speech. Never surfaces a toast — a failed
+/// warmup just means start_recording pays the load like before.
+#[tauri::command]
+pub async fn stt_warmup(cache: tauri::State<'_, EngineCache>) -> Result<bool, String> {
+    let cfg = load_config();
+    if !cfg.enabled {
+        return Ok(false);
+    }
+    let model_id = match cfg.engine.as_str() {
+        "parakeet" if parakeet::backend_available() => cfg.parakeet_model.clone(),
+        "whisper" if whisper::backend_available() => cfg.whisper_model.clone(),
+        _ => return Ok(false),
+    };
+    {
+        let slot = cache.0.lock().await;
+        if slot.as_ref().is_some_and(|e| e.model_id() == model_id) {
+            return Ok(true);
+        }
+    }
+    let models = model_manager::known_models();
+    let Some(info) = models.iter().find(|m| m.id == model_id) else {
+        return Ok(false);
+    };
+    if !info.downloaded {
+        return Ok(false);
+    }
+    let model_path = info.path.clone().ok_or_else(|| "model path missing".to_string())?;
+    let model_engine = info.engine;
+    let model_id_owned = model_id.clone();
+    let loaded = tokio::task::spawn_blocking(move || match model_engine {
+        model_manager::EngineKind::Whisper => {
+            whisper::WhisperEngine::load(&model_path, &model_id_owned).map(LoadedEngine::Whisper)
+        }
+        model_manager::EngineKind::Parakeet => {
+            parakeet::ParakeetEngine::load(&model_path, &model_id_owned).map(LoadedEngine::Parakeet)
+        }
+    })
+    .await
+    .map_err(|e| format!("warmup load join: {e}"))??;
+    // Don't clobber a session's freshly-loaded engine: only fill if still empty
+    // or holding a different model (same rule start_recording applies).
+    let mut slot = cache.0.lock().await;
+    if slot.as_ref().is_none_or(|e| e.model_id() != model_id) {
+        *slot = Some(loaded);
+    }
+    Ok(true)
 }
 
 #[tauri::command]

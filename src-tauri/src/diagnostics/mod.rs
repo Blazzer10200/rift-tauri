@@ -273,6 +273,92 @@ pub fn write_crash_report(location: &str, payload: &str) {
     let _ = std::fs::write(&path, body);
 }
 
+// ─── Structured event sink (events.ndjson) ──────────────────────────────────
+
+/// NDJSON mirror of every bus event — the structured counterpart of `rift.log`
+/// (which only receives `log::` macro text). The MCP server (separate process,
+/// same binary) tails it for `read_events`, giving the assistant the same view
+/// the Diagnostics console renders — structured fields intact, including
+/// webview errors forwarded through `diag_frontend_event`.
+static EVENTS_LOG: OnceLock<Option<Mutex<std::fs::File>>> = OnceLock::new();
+static EVENTS_LOG_BYTES: AtomicU64 = AtomicU64::new(0);
+const EVENTS_LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
+
+/// `<appLogDir>/events.ndjson` — beside `rift.log` (mirrors `turns_log_path`).
+pub fn events_log_path() -> Option<std::path::PathBuf> {
+    let log = app_log_path()?;
+    Some(log.parent()?.join("events.ndjson"))
+}
+
+fn init_events_log() -> Option<Mutex<std::fs::File>> {
+    let path = events_log_path()?;
+    let start_len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+    let oversized = start_len > EVENTS_LOG_MAX_BYTES;
+    let rotate_failed =
+        oversized && std::fs::rename(&path, path.with_extension("ndjson.old")).is_err();
+    let mut opts = std::fs::OpenOptions::new();
+    opts.create(true);
+    if rotate_failed {
+        opts.write(true).truncate(true);
+    } else {
+        opts.append(true);
+    }
+    let file = opts.open(&path).ok()?;
+    let seed = if rotate_failed || oversized { 0 } else { start_len };
+    EVENTS_LOG_BYTES.store(seed, Ordering::Relaxed);
+    Some(Mutex::new(file))
+}
+
+fn events_log_write(ev: &DiagEvent) {
+    let Some(cell) = EVENTS_LOG.get_or_init(init_events_log).as_ref() else { return };
+    let mut f = match cell.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    let Ok(mut line) = serde_json::to_string(ev) else { return };
+    line.push('\n');
+    use std::io::Seek as _;
+    // In-place periodic rotation — same counter trick as `append_turn_perf`:
+    // the OnceLock size check only ever runs once per process.
+    let written =
+        EVENTS_LOG_BYTES.fetch_add(line.len() as u64, Ordering::Relaxed) + line.len() as u64;
+    if written > EVENTS_LOG_MAX_BYTES
+        && f.set_len(0).is_ok()
+        && f.seek(std::io::SeekFrom::Start(0)).is_ok()
+    {
+        EVENTS_LOG_BYTES.store(0, Ordering::Relaxed);
+    }
+    let _ = f.write_all(line.as_bytes());
+    let _ = f.flush();
+}
+
+/// Drain bus events onto the NDJSON sink from one dedicated OS thread — the
+/// broadcast receiver never blocks on disk I/O (unbounded mpsc absorbs bursts;
+/// the bus's own 4096 cap bounds total memory).
+pub fn spawn_event_sink() {
+    use tokio::sync::broadcast::error::RecvError;
+    let mut rx = bus().subscribe();
+    let (tx, file_rx) = std::sync::mpsc::channel::<DiagEvent>();
+    std::thread::spawn(move || {
+        while let Ok(ev) = file_rx.recv() {
+            events_log_write(&ev);
+        }
+    });
+    tauri::async_runtime::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(ev) => {
+                    if tx.send(ev).is_err() {
+                        break;
+                    }
+                }
+                Err(RecvError::Lagged(_)) => continue,
+                Err(RecvError::Closed) => break,
+            }
+        }
+    });
+}
+
 // ─── Log forwarder ──────────────────────────────────────────────────────────
 
 /// `log::Log` impl that mirrors every log macro into the diagnostics bus AND

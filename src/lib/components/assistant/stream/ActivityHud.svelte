@@ -316,20 +316,35 @@
   /* Same glassy chrome family as .phud — this renders inside the shared
      .hud-stack (AssistantPane), which owns centering/width/stacking. */
   .ahud {
+    position: relative;
     width: 100%;
     border-radius: 12px;
-    background: color-mix(in oklch, var(--surface) 84%, transparent);
-    backdrop-filter: blur(16px) saturate(140%);
-    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    background: color-mix(in oklch, var(--surface) 94%, transparent);
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
     border: 1px solid var(--border-strong);
-    box-shadow: var(--shadow-float);
+    /* Layered depth + top catch-light — matches .phud (shared chrome family). */
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklab, var(--fg) 6%, transparent),
+      0 12px 32px -10px rgb(0 0 0 / 0.55),
+      var(--shadow-float);
     overflow: hidden;
     animation: ahud-in var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1) both;
     transition: border-color var(--dur-base) ease-out;
     pointer-events: auto;
   }
+  .ahud::before {
+    content: ""; position: absolute; top: 0; left: 14%; right: 14%; height: 1px;
+    background: linear-gradient(90deg, transparent,
+      color-mix(in oklab, var(--accent) 45%, transparent), transparent);
+    pointer-events: none;
+  }
+  .ahud.complete::before {
+    background: linear-gradient(90deg, transparent,
+      color-mix(in oklab, var(--ok) 50%, transparent), transparent);
+  }
   @keyframes ahud-in {
-    from { opacity: 0; transform: translateY(-8px); }
+    from { opacity: 0; transform: translateY(-10px) scale(0.96); }
     to { opacity: 1; transform: none; }
   }
   .ahud.complete { border-color: color-mix(in oklab, var(--ok) 45%, var(--border-strong)); }

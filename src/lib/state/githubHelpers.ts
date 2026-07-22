@@ -100,6 +100,24 @@ export function ghFixPrompt(run: GhRunInfo): string {
   );
 }
 
+/** Composer prompt for "Pull latest" when the branch is behind origin. */
+export function ghPullPrompt(behind: number): string {
+  const n = behind === 1 ? "1 commit" : `${behind} commits`;
+  return (
+    `This branch is ${n} behind origin. Pull the latest changes with git_pull, ` +
+    `then summarize what came in (git_log the new commits).`
+  );
+}
+
+/** Composer prompt for "Push commits" when the branch is ahead of origin. */
+export function ghPushPrompt(ahead: number): string {
+  const n = ahead === 1 ? "1 unpushed commit" : `${ahead} unpushed commits`;
+  return (
+    `This branch has ${n}. Review them briefly with git_log, then push to origin ` +
+    `with git_push and confirm the result.`
+  );
+}
+
 /** Composer prompt for "Draft a PR" — writes flow through the assistant. */
 export function ghPrPrompt(): string {
   return (

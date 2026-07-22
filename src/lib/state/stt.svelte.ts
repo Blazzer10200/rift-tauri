@@ -353,6 +353,15 @@ class SttStore {
     // Best-effort initial loads for the Settings panel — failures are non-fatal.
     void this.refreshModels();
     void this.refreshInputDevices();
+    this.warmup();
+  }
+
+  /** Pre-load the local model into the backend cache so the first mic press
+   *  skips the multi-second load stall. Silent best-effort — a failed warmup
+   *  just means start() pays the load like before. */
+  warmup() {
+    if (!this.config.enabled || !isLocalEngine(this.config.engine)) return;
+    void invoke("stt_warmup").catch(() => {});
   }
 
   async setConfig(patch: Partial<SttConfig>) {
@@ -373,6 +382,11 @@ class SttStore {
     // save rolls config back to prev (same engine) — cancelling the live
     // recording then would destroy the user's dictation for a failed settings save.
     if (!succeeded) return;
+
+    // Keep the engine cache hot across engine/model flips (and first enable).
+    if (patch.engine || patch.whisper_model || patch.parakeet_model || patch.enabled) {
+      this.warmup();
+    }
 
     // Engine switch mid-recording — hard-cancel the in-flight session under
     // the OLD engine before letting the new one take over.

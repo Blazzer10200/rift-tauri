@@ -1,5 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { ghDot, ghFixPrompt, ghRelTime, ghSyncLabel, type GhStatus } from "./githubHelpers";
+import { ghDot, ghFixPrompt, ghPullPrompt, ghPushPrompt, ghRelTime, ghSyncLabel, type GhStatus } from "./githubHelpers";
+
+describe("ghPullPrompt / ghPushPrompt", () => {
+  it("pluralizes and names the right tool", () => {
+    expect(ghPullPrompt(1)).toContain("1 commit behind");
+    expect(ghPullPrompt(3)).toContain("3 commits behind");
+    expect(ghPullPrompt(3)).toContain("git_pull");
+    expect(ghPushPrompt(1)).toContain("1 unpushed commit");
+    expect(ghPushPrompt(2)).toContain("2 unpushed commits");
+    expect(ghPushPrompt(2)).toContain("git_push");
+  });
+});
 
 const ok = (run: GhStatus["run"]): GhStatus => ({ state: "ok", branch: "main", repo: "o/r", run });
 

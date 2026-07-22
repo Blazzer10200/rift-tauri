@@ -130,8 +130,8 @@
   const awaitingInput = $derived(liveTool?.kind === "ask");
   // Manual /compact turn: the CLI compacts natively — no tools, no text, just
   // silence until the compact_boundary lands — so the generic "Working…" read
-  // as a hang. Dedicated status + reassurance note below keep it honest.
-  const compacting = $derived(streaming && !!liveTab?.compactingTurn);
+  // as a hang. Dedicated status + progress card below keep it honest.
+  const manualCompacting = $derived(streaming && !!liveTab?.compactingTurn);
 
   // Live footer meta — spec's `Unfurling… 5s · 312 tokens`. 1s ticker drives
   // elapsed + tokens; both pull from the assistant store (turnStartedAt +
@@ -150,6 +150,39 @@
   const liveTokens = $derived.by(() => {
     const lt = liveTab?.liveOutputTokens ?? 0;
     return streaming && lt > 0 ? lt : null;
+  });
+
+  // Auto-compaction detector. The CLI compacts in-process when the window fills
+  // — at turn start or mid-turn the stream just goes silent for minutes until
+  // the compact_boundary lands, which used to read as an unexplained hang (the
+  // stall copy even blamed the model). No early event exists, so infer it:
+  // context nearly full + a long stream silence + not thinking/parked. A wrong
+  // guess is cheap — the card hedges and the backend watchdog still auto-ends a
+  // truly dead turn. lastStreamEventAt is a plain field; the 1s `now` ticker is
+  // what re-evaluates this.
+  const sinceEventSecs = $derived.by(() => {
+    if (!streaming || now === 0) return 0;
+    const last = liveTab?.lastStreamEventAt ?? liveTab?.activity.turnStartedAt;
+    return last != null ? Math.max(0, (now - last) / 1000) : 0;
+  });
+  const ctxPctNow = $derived(liveTab ? assistant.ctxPctFor(liveTab) : 0);
+  const autoCompacting = $derived(
+    streaming && !manualCompacting && !awaitingInput && !turn.thinking?.active &&
+    ctxPctNow >= 80 && sinceEventSecs >= 12,
+  );
+  const compacting = $derived(manualCompacting || autoCompacting);
+  // Honest-estimate progress: the CLI emits no compaction progress events, so
+  // pace a bar off the history size and hold it short of done — the card leaves
+  // the moment the boundary lands. Elapsed anchors to the silence start for
+  // auto (compaction began when the stream went quiet), turn start for manual.
+  const compactElapsed = $derived(autoCompacting ? sinceEventSecs : (liveSecs ?? 0));
+  const compactEstSecs = $derived(
+    Math.min(210, Math.max(35, 20 + (assistant.ctxTokensFor(liveTab) / 1000) * 0.3)),
+  );
+  const compactProgress = $derived(compacting ? Math.min(0.97, compactElapsed / compactEstSecs) : 0);
+  const compactEtaLabel = $derived.by(() => {
+    const left = Math.round(compactEstSecs - compactElapsed);
+    return left > 8 ? `~${fmtDur(left)} left` : "wrapping up…";
   });
 
   // The head is the TURN-level status: "Working…" live, "Worked for Xs" done.
@@ -171,7 +204,7 @@
       : awaitingInput
         ? "Waiting for you"
         : compacting
-          ? "Compacting conversation…"
+          ? (autoCompacting ? "Auto-compacting conversation…" : "Compacting conversation…")
           : thinkingNow
             ? (liveSecs != null ? `Thinking… ${fmtDur(liveSecs)}` : "Thinking…")
             : "Working…"
@@ -389,10 +422,26 @@
       {/if}
     </div>
     {#if compacting}
-      <div class="scompact-note">
-        Older messages are being condensed into a short summary to free up
-        context. Nothing is deleted — the full transcript stays right here,
-        and the chat continues where it left off once the summary lands.
+      <div class="scompact-card">
+        <div class="scompact-track"><span class="scompact-fill" style="transform:scaleX({compactProgress})"></span></div>
+        <div class="scompact-meta">
+          <span>~{Math.round(compactProgress * 100)}%</span>
+          <span class="scompact-pip">·</span>
+          <span>{liveTab?.messages.length ?? 0} messages · {fmtTokens(assistant.ctxTokensFor(liveTab))} tokens of history</span>
+          <span class="scompact-pip">·</span>
+          <span>{compactEtaLabel}</span>
+        </div>
+        <div class="scompact-note">
+          {#if autoCompacting}
+            The context window filled up ({Math.round(ctxPctNow)}% used), so Claude paused to
+            summarize older messages before continuing. This runs automatically and usually
+            takes a minute or two — the turn resumes on its own. Nothing on screen is deleted.
+          {:else}
+            Older messages are being condensed into a short summary to free up context.
+            Nothing is deleted — the full transcript stays right here, and the chat continues
+            where it left off once the summary lands.
+          {/if}
+        </div>
       </div>
     {:else if stallLevel >= 3}
       <div class="sstall-note">

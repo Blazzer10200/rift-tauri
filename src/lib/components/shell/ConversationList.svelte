@@ -104,24 +104,13 @@
     return out;
   });
 
-  // Default view = enough recent history to FILL the rail — Pinned + whole
-  // day-buckets, newest first, until MIN_VISIBLE rows are showing (always at
-  // least the newest bucket). A single quiet day over a 100-chat archive left
-  // the rail mostly void; everything past the budget still tucks behind one
-  // "Show earlier" row. First included bucket renders flat (implied-recent),
-  // later ones keep their labels so the timeline stays legible.
-  const MIN_VISIBLE = 14;
+  // Default view = Pinned + the newest day-bucket only (Today when there is
+  // one); every older bucket tucks behind the "Show earlier" row. The visible
+  // bucket renders flat (implied-recent) via firstDayLabel.
   const recentGroups = $derived.by(() => {
     const pinned = groups.filter((g) => g.label === "Pinned");
-    const days = groups.filter((g) => g.label !== "Pinned");
-    const out = [...pinned];
-    let rows = pinned.reduce((n, g) => n + g.items.length, 0);
-    for (const g of days) {
-      if (out.length > pinned.length && rows >= MIN_VISIBLE) break;
-      out.push(g);
-      rows += g.items.length;
-    }
-    return out;
+    const first = groups.find((g) => g.label !== "Pinned");
+    return first ? [...pinned, first] : pinned;
   });
   const firstDayLabel = $derived(recentGroups.find((g) => g.label !== "Pinned")?.label);
   const recentLabels = $derived(new Set(recentGroups.map((g) => g.label)));
@@ -429,8 +418,9 @@
      list. Tinted+blurred backing so rows scrolling under them stay legible. */
   .conv-group-label { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 7px; width: 100%; padding: 10px 8px 4px 11px; flex: none;
     font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-faint); text-align: left;
-    background: linear-gradient(180deg, color-mix(in oklab, var(--fg) 3%, var(--bg)) 72%, transparent);
-    -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); }
+    /* Gradient backing only — the old blur(3px) re-rasterized the backdrop on
+       every scroll frame of a long list for barely-visible frost. */
+    background: linear-gradient(180deg, color-mix(in oklab, var(--fg) 3%, var(--bg)) 78%, transparent); }
   .conv-group-label .cgl-txt { flex: 1; }
   .conv-group-label .cgl-ct { font-weight: 600; opacity: 0.55; font-variant-numeric: tabular-nums; }
   .conv-empty { padding: 22px 14px; text-align: center; font-size: 11.5px; line-height: 1.6; color: var(--fg-subtle); white-space: pre-line; }
@@ -476,7 +466,9 @@
      filter/transform containing block that was clipping the fixed preview),
      so their rules ride :global. */
   :global(.conv-menu) { position: fixed; z-index: 51; min-width: 150px; padding: 5px; border-radius: 12px;
-    background: color-mix(in oklab, var(--bg-elev-2) 60%, transparent); -webkit-backdrop-filter: blur(26px) saturate(1.6); backdrop-filter: blur(26px) saturate(1.6);
+    /* 90%-opaque + light blur: the old 60% + blur(26) was expensive to
+       composite and read as mush over busy content. */
+    background: color-mix(in oklab, var(--bg-elev-2) 90%, transparent); -webkit-backdrop-filter: blur(12px) saturate(1.35); backdrop-filter: blur(12px) saturate(1.35);
     border: 1px solid color-mix(in oklab, var(--fg) 12%, transparent);
     box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.08), 0 24px 56px -26px oklch(0 0 0 / 0.7), var(--shadow-lg);
     animation: convPopIn var(--dur-fast) var(--ease-page) both; transform-origin: top left; }

@@ -201,6 +201,9 @@ pub fn run() {
             // of the process.
             let app_handle = app.handle().clone();
             diagnostics::spawn_frontend_pump(app_handle.clone());
+            // Structured NDJSON sink (events.ndjson) — what the assistant's
+            // `read_events` MCP tool tails from its separate process.
+            diagnostics::spawn_event_sink();
             // Assistant UI bridge (ask_user / open_browser / notify): bind the
             // loopback listener before the first turn can spawn an MCP child.
             // Failure is non-fatal — write_mcp_config skips the env injection
@@ -245,6 +248,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::app_version,
             commands::diag_backlog,
+            commands::diag_frontend_event,
             commands::diag_export_bundle,
             commands::open_in_vscode,
             commands::open_new_window,
@@ -328,6 +332,7 @@ pub fn run() {
             stt::stt_cancel_download,
             stt::stt_delete_model,
             stt::stt_clean_transcript,
+            stt::stt_warmup,
             shutdown::app_close_dismissed,
             shutdown::app_close_reap,
             shutdown::app_close_verify,

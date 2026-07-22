@@ -234,7 +234,9 @@
   /* Rail = layout spacer + positioning context. overflow stays visible so the
      absolutely-positioned island can float over the content while peeking. */
   .side-rail { position: relative; z-index: 30; flex: none; min-width: 0;
-    transition: width 0.36s var(--ease-page); }
+    /* Width is a layout prop — every frame reflows + rewraps the chat stream,
+       so keep the animation SHORT (0.36s of full-app reflow read as lag). */
+    transition: width var(--dur-base) var(--ease-soft); }
   .side-rail.resizing, .side-rail.resizing .sidebar { transition: none; }
   .side-rail.collapsed .sidebar { transform: translateX(-16px); opacity: 0; pointer-events: none; }
   /* Peek: same island, now a genuinely floating layer → it earns a shadow.
@@ -274,7 +276,7 @@
     overflow: hidden;
     box-sizing: border-box;
     isolation: isolate;
-    transition: transform 0.36s var(--ease-page), top 0.36s var(--ease-page), opacity var(--dur-base) var(--ease-page), box-shadow var(--dur-base) var(--ease-page); }
+    transition: transform var(--dur-base) var(--ease-soft), top var(--dur-base) var(--ease-soft), opacity var(--dur-base) var(--ease-page), box-shadow var(--dur-base) var(--ease-page); }
   .sidebar::after {
     content: "";
     position: absolute;

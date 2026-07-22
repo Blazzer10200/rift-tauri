@@ -129,9 +129,8 @@
   .mcp-scrim {
     position: fixed; inset: 0;
     z-index: 200;
-    background: color-mix(in oklch, var(--bg) 55%, transparent);
-    backdrop-filter: blur(8px) saturate(135%);
-    -webkit-backdrop-filter: blur(8px) saturate(135%);
+    /* Opaque dim, no backdrop-filter (WebView2 fixed-overlay ban, app.css). */
+    background: color-mix(in oklch, var(--bg) 40%, rgba(0, 0, 0, 0.6));
     display: flex; justify-content: center; align-items: center;
   }
   .mcp-panel {

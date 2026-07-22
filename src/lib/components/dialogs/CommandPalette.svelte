@@ -369,9 +369,10 @@
   .cp-scrim {
     position: fixed; inset: 0;
     z-index: 200;
-    background: color-mix(in oklch, var(--bg) 55%, transparent);
-    backdrop-filter: blur(8px) saturate(135%);
-    -webkit-backdrop-filter: blur(8px) saturate(135%);
+    /* Opaque dim, NO backdrop-filter — WebView2 mis-composites it on fixed
+       overlays (app.css dialog-stack ban) and a fullscreen blur repaints the
+       whole frame while open. */
+    background: color-mix(in oklch, var(--bg) 40%, rgba(0, 0, 0, 0.6));
     display: flex; justify-content: center; align-items: flex-start;
     padding-top: 13vh;
   }

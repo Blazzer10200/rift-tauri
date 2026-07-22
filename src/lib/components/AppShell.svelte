@@ -364,7 +364,9 @@
     overflow: hidden;
     position: relative;
     isolation: isolate;
-    transition: margin-left 0.36s var(--ease-page);
+    /* Kept in lockstep w/ Sidebar's rail width transition (same duration/ease)
+       — margin is a layout prop, so shorter = fewer full-reflow frames. */
+    transition: margin-left var(--dur-base) var(--ease-soft);
   }
   /* Film grain — static SVG noise at whisper opacity, scoped to the island
      like everything else. Kills banding on the island's light gradient.

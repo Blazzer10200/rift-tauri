@@ -155,6 +155,43 @@ pub fn diag_backlog() -> Vec<crate::diagnostics::DiagEvent> {
     crate::diagnostics::bus().backlog_snapshot()
 }
 
+/// Webview-originated diagnostics (uncaught errors, unhandled rejections,
+/// console.error) — published into the process-global bus so they reach the
+/// Diagnostics console, the events.ndjson sink, and the assistant's
+/// `read_events` tool. publish() scrubs; the caps here just bound a
+/// pathological caller.
+#[tauri::command]
+pub fn diag_frontend_event(level: String, message: String, fields: Option<serde_json::Value>) {
+    use crate::diagnostics::{DiagLevel, DiagStage};
+    let level = match level.as_str() {
+        "error" => DiagLevel::Error,
+        "warn" => DiagLevel::Warn,
+        _ => DiagLevel::Info,
+    };
+    let mut message = message;
+    if message.len() > 4096 {
+        let mut cut = 4096;
+        while cut > 0 && !message.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        message.truncate(cut);
+        message.push_str(" …[truncated]");
+    }
+    let fields = match fields {
+        Some(f) if serde_json::to_string(&f).map(|s| s.len() <= 16 * 1024).unwrap_or(false) => f,
+        Some(_) => serde_json::json!({ "note": "fields dropped (oversized)" }),
+        None => serde_json::Value::Null,
+    };
+    crate::diagnostics::emit_with_fields(
+        DiagStage::System,
+        level,
+        Some("frontend"),
+        None,
+        message,
+        fields,
+    );
+}
+
 /// One-click support bundle: copy the diagnostic sinks (rift.log + rotation,
 /// turns.ndjson + rotation, crash reports) into a timestamped folder under
 /// Downloads and return its path. Explicit file allowlist — never glob the

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Send, Square, X, Mic, Loader2, Wand2, Paperclip,
-    Sparkles, Eye, ChevronUp, Undo2, Folder, GitBranch } from "lucide-svelte";
+    Sparkles, ChevronUp, Undo2, Folder, GitBranch } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { github } from "../../state/github.svelte";
   import GhPopover from "./GhPopover.svelte";
@@ -9,7 +9,7 @@
   import { cliCommands } from "../../state/assistant/cliCommands.svelte";
   import { requestPrewarm, resetPrewarmDedup } from "../../state/assistant/prewarm";
   import { fuzzyScore, slashScore, isFileDrag, attachImageFiles, summarizeAttach, attachTextFiles, summarizeTextAttach } from "./composer/helpers";
-  import { boundaryAutocorrect, isBoundaryChar } from "$lib/utils/autocorrect";
+  import { boundaryAutocorrect, finalWordAutocorrect, isBoundaryChar } from "$lib/utils/autocorrect";
   import AttachmentsRow from "./composer/AttachmentsRow.svelte";
   import QueueRail from "./composer/QueueRail.svelte";
   import LivePills from "./composer/LivePills.svelte";
@@ -20,7 +20,6 @@
   import SettingsMenu from "./composer/SettingsMenu.svelte";
   import CtxRing from "./composer/CtxRing.svelte";
   import PermMenu from "./composer/PermMenu.svelte";
-  import PreviewPanel from "./composer/PreviewPanel.svelte";
   import {
     MODEL_OPTIONS, MODE_OPTIONS,
     dialStopsFor, dialIdxFor, clampEffortIdx, permToneFor,
@@ -186,12 +185,17 @@
     // keystroke (transcript bounce that grows with each extra draft line).
     const wrap = ta.parentElement as HTMLElement | null;
     if (wrap) wrap.style.height = `${wrap.offsetHeight}px`;
+    // Suspend flex-stretch for the measurement: with the wrap frozen, a
+    // stretched `height:auto` fills the OLD height, so scrollHeight could
+    // never report smaller and the composer only ever grew (ratchet).
+    ta.style.alignSelf = "flex-start";
     ta.style.height = "auto";
     // Dictation ghost renders outside the textarea value — take whichever
     // mirror is taller so in-flight speech reserves its own lines.
     const want = Math.max(ta.scrollHeight, ghostEl?.scrollHeight ?? 0);
     const h = Math.min(want, 340);
     ta.style.height = h + "px";
+    ta.style.alignSelf = "";
     if (wrap) wrap.style.height = "";
     multiline = h > 40;
     // Only allow the inner scrollbar once content actually hits the cap —
@@ -536,7 +540,19 @@
   let fireKey = $state(0);
 
   function fire() {
-    const text = draft.trim();
+    // Enter never reaches oninput (keydown preventDefault) — the trailing
+    // word gets its autocorrect pass here instead.
+    let out = draft;
+    // Dictation safety: spoken words still riding the gray ghost tail are
+    // uncommitted — consume() below would drop them (the backend final is
+    // ignored once consumed). Fold them into the outgoing text instead.
+    const ghost = dictating ? stt.ghostTail.trim() : "";
+    if (ghost) out = out ? (/\s$/.test(out) ? out + ghost : `${out} ${ghost}`) : ghost;
+    if (assistant.autocorrect) {
+      const fix = finalWordAutocorrect(out);
+      if (fix) out = out.slice(0, fix.start) + fix.replacement + out.slice(fix.end);
+    }
+    const text = out.trim();
     // Allow attachments-only sends (paste-and-go); only block if both empty.
     if (!text && attachments.length === 0) return;
     // Auth gate — the button's `disabled={!canFire}` covers clicks, but Enter
@@ -590,8 +606,6 @@
   }
   const CODE_ANCHOR_RE =
     /[\w-]+\.(rs|ts|tsx|js|jsx|svelte|py|css|html|json|toml|ya?ml|md)\b|src\/|src-tauri|\w+::\w+|\w+\(\)/;
-  // Draft preview (eye) — render the composer draft as Markdown before sending.
-  let previewing = $state(false);
   // Preview panel markup + word-stagger render live in composer/EnhanceBar.svelte
   // (C5); the state machine stays here (wand button + onKey Escape/Ctrl+E drive
   // it). `directive` steers a refine pass (chips or freeform); omitted for the
@@ -1262,10 +1276,6 @@
       </div>
     {/if}
 
-    {#if previewing && hasDraft}
-      <PreviewPanel {draft} />
-    {/if}
-
     {#if slashOpen}
       <SlashMenu commands={slashFiltered} activeIdx={slashIdx} query={draft.slice(1).toLowerCase()} onPick={pickSlash} />
     {/if}
@@ -1364,8 +1374,13 @@
             // Opt-in autocorrect: fires only on the boundary char that finishes
             // a word. setRangeText keeps the change undoable (Ctrl+Z restores
             // the typo) and "preserve" keeps the caret past the boundary.
-            const typed = (e as unknown as InputEvent).data;
-            if (assistant.autocorrect && typeof typed === "string" && isBoundaryChar(typed)) {
+            const ie = e as unknown as InputEvent;
+            const typed = ie.data;
+            // Shift+Enter arrives as insertLineBreak with data=null — the
+            // newline is a word boundary too.
+            const atBoundary =
+              (typeof typed === "string" && isBoundaryChar(typed)) || ie.inputType === "insertLineBreak";
+            if (assistant.autocorrect && atBoundary) {
               const fix = boundaryAutocorrect(el.value, el.selectionStart ?? el.value.length);
               if (fix) el.setRangeText(fix.replacement, fix.start, fix.end, "preserve");
             }
@@ -1536,26 +1551,6 @@
             aria-label="Improve prompt"
           >
             <Wand2 size={15} />
-          </button>
-          <button
-            class="cbtn ic previewbtn reveal"
-            class:active={previewing}
-            type="button"
-            onclick={() => (previewing = !previewing)}
-            aria-pressed={previewing}
-            use:tooltip={previewing ? "Hide preview" : "Preview as Markdown"}
-            aria-label="Preview message"
-          >
-            <Eye size={15} />
-          </button>
-          <button
-            class="cbtn ic clearbtn reveal"
-            type="button"
-            onclick={() => { setDraft(""); ta?.focus(); }}
-            use:tooltip={"Clear draft"}
-            aria-label="Clear draft"
-          >
-            <X size={15} />
           </button>
           {/if}
           {#if draft.length > 500}
@@ -2174,7 +2169,6 @@
 
   /* Slash + mention popover styles moved to composer/SlashMenu.svelte +
      composer/MentionPopover.svelte (C6). */
-  /* Draft preview panel styles moved to composer/PreviewPanel.svelte. */
 
   /* Prompt-enhancer panel styles moved to composer/EnhanceBar.svelte (C5). */
 
@@ -2295,8 +2289,29 @@
   }
   .composer.hero .dict-ghost { font-size: 14.5px; line-height: 1.55; padding: 11px 12px 11px 14px; }
   .dg-committed { visibility: hidden; }
-  .dg-tail { color: var(--fg-subtle); }
+  /* One ladder-step up from --fg-subtle: the tail is the text being READ back
+     while speaking, not decoration — it must be legible mid-dictation. */
+  .dg-tail { color: var(--fg-muted); }
   .dg-tail.pending { animation: dictate-polish 1.2s ease-in-out infinite; }
+  /* Live caret after the tail — signals "still listening" without pulsing the
+     words themselves. */
+  .dg-tail:not(:empty)::after {
+    content: "";
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    margin-left: 2px;
+    vertical-align: text-bottom;
+    background: currentColor;
+    animation: dict-caret 1s steps(2, jump-none) infinite;
+  }
+  @keyframes dict-caret {
+    from { opacity: 0.9; }
+    to { opacity: 0.1; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dg-tail:not(:empty)::after { animation: none; opacity: 0.6; }
+  }
 
   .textarea-wrap.polishing textarea {
     animation: dictate-polish 1.2s ease-in-out infinite;

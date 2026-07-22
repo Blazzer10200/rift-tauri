@@ -36,6 +36,27 @@
     : { label: "checking claude cli", p: 0.3 },
   );
 
+  // Smooth percentage: fast pull to each real stage mark, then a slow creep
+  // (≤ +8pts, never past 96) so a long stage never reads frozen; snaps to 100
+  // on ready. The stages are real — only the in-between pacing is estimated.
+  let shownP = $state(0);
+  $effect(() => {
+    const target = stage.p;
+    if (prefersReducedMotion) { shownP = target; return; }
+    let raf = 0;
+    let prev = performance.now();
+    const step = (t: number) => {
+      const dt = Math.min(64, t - prev);
+      prev = t;
+      const cap = target >= 1 ? 1 : Math.min(target + 0.08, 0.96);
+      const pull = shownP < target ? (target - shownP) * (dt / 240) : 0.00005 * dt;
+      shownP = Math.min(cap, shownP + pull);
+      if (shownP < cap - 0.0005 && !destroyed) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  });
+
   $effect(() => {
     if (ready && minHeld && !exiting) {
       exiting = true;
@@ -76,16 +97,20 @@
     </div>
   </div>
   <div class="boot" aria-hidden="true">
-    <div class="bootbar"><span class="bootfill" style="transform:scaleX({stage.p})"></span></div>
-    <div class="bootline">{stage.label}</div>
+    <div class="bootbar"><span class="bootfill" style="transform:scaleX({shownP})"></span></div>
+    <div class="bootrow">
+      {#key stage.label}<span class="bootline">{stage.label}</span>{/key}
+      <span class="bootpct">{Math.round(shownP * 100)}%</span>
+    </div>
   </div>
   {#if exiting}<span style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap">Ready</span>{/if}
 </div>
 
 <style>
-  /* Opaque slab — same material family as the app's islands (vertical tonal
-     crown over the base tone), no translucency: nothing behind it may read
-     until the reveal. */
+  /* Opaque slab — the SAME material language as the app's islands: a vertical
+     tonal crown over the base tone, a grounded foot, and whisper film grain
+     (banding-killer). No translucency: nothing behind it may read until the
+     reveal. Quality reads as finish, not illumination (DESIGN.md §5). */
   .splash {
     position: fixed;
     inset: 0;
@@ -96,16 +121,30 @@
     justify-content: center;
     gap: 38px;
     overflow: hidden;
-    background: linear-gradient(
-      180deg,
-      color-mix(in oklab, var(--fg) 3%, var(--bg)),
-      var(--bg) 42%
-    );
+    isolation: isolate;
+    background:
+      linear-gradient(
+        180deg,
+        color-mix(in oklab, var(--fg) 3.5%, var(--bg)),
+        var(--bg) 42%,
+        var(--bg) 82%,
+        color-mix(in oklab, black 22%, var(--bg))
+      );
     pointer-events: auto;
     opacity: 1;
     /* Exit: content settles out first, then the veil lifts and the UI lands. */
     transition: opacity 460ms cubic-bezier(0.4, 0, 0.2, 1) 180ms;
     will-change: opacity;
+  }
+  .splash::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 160px 160px;
+    opacity: 0.03;
   }
   .splash[data-exiting="true"] {
     opacity: 0;
@@ -113,7 +152,8 @@
   }
 
   /* The rift — a vertical shaft of accent light behind the lockup; draws in
-     first, flares briefly on exit. One light source, no stacked atmosphere. */
+     first, breathes softly while the app warms, flares briefly on exit. One
+     light source, no stacked atmosphere. */
   .shaft {
     position: absolute;
     left: 50%;
@@ -134,13 +174,22 @@
       0 0 18px color-mix(in oklab, var(--accent) 55%, transparent),
       0 0 90px 6px color-mix(in oklab, var(--accent) 16%, transparent);
     opacity: 0.5;
-    animation: shaft-draw 480ms cubic-bezier(0.22, 1, 0.36, 1) 80ms both;
+    animation:
+      shaft-draw 480ms cubic-bezier(0.22, 1, 0.36, 1) 80ms both,
+      shaft-breathe 3.8s ease-in-out 900ms infinite;
   }
   @keyframes shaft-draw {
     from { transform: translate(-50%, -62%) scaleY(0); opacity: 0; }
     to   { transform: translate(-50%, -62%) scaleY(1); opacity: 0.5; }
   }
+  /* Warmup pulse — opacity only (the draw owns transform); reads as the light
+     source idling, not a loading trick. */
+  @keyframes shaft-breathe {
+    0%, 100% { opacity: 0.5; }
+    50%      { opacity: 0.66; }
+  }
   .splash[data-exiting="true"] .shaft {
+    animation: shaft-draw 480ms cubic-bezier(0.22, 1, 0.36, 1) 80ms both;
     opacity: 0;
     transform: translate(-50%, -62%) scaleY(1.25);
     filter: brightness(1.5);
@@ -166,11 +215,18 @@
 
   .mark {
     filter: drop-shadow(0 10px 34px color-mix(in oklab, var(--accent) 30%, transparent));
-    animation: settle-mark 560ms cubic-bezier(0.22, 1, 0.36, 1) 140ms both;
+    animation:
+      settle-mark 560ms cubic-bezier(0.22, 1, 0.36, 1) 140ms both,
+      mark-breathe 3.8s ease-in-out 900ms infinite;
   }
   @keyframes settle-mark {
     from { opacity: 0; transform: translateY(8px) scale(0.94); filter: blur(8px); }
     to   { opacity: 1; transform: none; filter: blur(0); }
+  }
+  /* Same tempo as the shaft so the whole scene breathes as ONE light source. */
+  @keyframes mark-breathe {
+    0%, 100% { filter: drop-shadow(0 10px 34px color-mix(in oklab, var(--accent) 30%, transparent)); }
+    50%      { filter: drop-shadow(0 10px 38px color-mix(in oklab, var(--accent) 42%, transparent)); }
   }
 
   /* Wordmark — Lexend is sanctioned for brand/splash. Letters rise with a
@@ -200,13 +256,13 @@
   }
 
   /* Boot readout — the app's own terminal idiom: a hairline that fills on REAL
-     boot stages + a quiet mono status line with an idle caret. Honest signals,
-     no fake shimmer (DESIGN.md §8). */
+     boot stages + a quiet mono status line and a ticking percentage. Honest
+     signals, no fake shimmer (DESIGN.md §8). */
   .boot {
     display: flex;
     flex-direction: column;
-    align-items: center;
     gap: 12px;
+    width: 200px;
     animation: boot-in 400ms cubic-bezier(0.22, 1, 0.36, 1) 620ms both;
     transition: opacity 220ms cubic-bezier(0.4, 0, 0.2, 1);
   }
@@ -216,7 +272,7 @@
   }
   .splash[data-exiting="true"] .boot { opacity: 0; }
   .bootbar {
-    width: 148px;
+    width: 100%;
     height: 2px;
     border-radius: 2px;
     overflow: hidden;
@@ -229,14 +285,25 @@
     border-radius: 2px;
     background: linear-gradient(90deg, color-mix(in oklab, var(--accent) 70%, transparent), var(--accent));
     box-shadow: 0 0 10px color-mix(in oklab, var(--accent) 45%, transparent);
-    transition: transform 520ms var(--ease-soft);
   }
-  .bootline {
+  .bootrow {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
     font-family: var(--font-mono);
     font-size: 10.5px;
     letter-spacing: 0.06em;
     color: var(--fg-faint);
     user-select: none;
+    font-variant-numeric: tabular-nums;
+  }
+  .bootline {
+    animation: stage-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  @keyframes stage-in {
+    from { opacity: 0; transform: translateY(3px); }
+    to   { opacity: 1; transform: none; }
   }
   .bootline::after {
     content: "_";
@@ -244,6 +311,7 @@
     animation: caret-blink 1.1s steps(1) infinite;
   }
   @keyframes caret-blink { 50% { opacity: 0; } }
+  .bootpct { color: var(--fg-subtle); }
 
   @media (prefers-reduced-motion: reduce) {
     .splash { transition: opacity 100ms linear; }
@@ -251,8 +319,8 @@
     .shaft { animation: none; opacity: 0.35; transform: translate(-50%, -62%) scaleY(1); }
     .splash[data-exiting="true"] .shaft { transition: none; }
     .lockup { transition: none; }
-    .mark, .wl, .boot { animation: none; }
-    .bootfill { transition: none; }
+    .mark, .wl, .boot, .bootline { animation: none; }
+    .mark { filter: drop-shadow(0 10px 34px color-mix(in oklab, var(--accent) 30%, transparent)); }
     .bootline::after { animation: none; }
   }
 </style>
