@@ -28,7 +28,9 @@
   $effect(() => {
     const el = composerSlotEl;
     if (!el) return;
-    const ro = new ResizeObserver(() => { composerH = el.offsetHeight; });
+    // Composer growth also shifts the scroller's floor — keep a latched
+    // transcript pinned through it (instant: layout shift, not stream motion).
+    const ro = new ResizeObserver(() => { composerH = el.offsetHeight; if (stickToBottom) pinToBottom(true); });
     ro.observe(el);
     return () => ro.disconnect();
   });

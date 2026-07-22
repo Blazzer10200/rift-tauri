@@ -104,16 +104,26 @@
     return out;
   });
 
-  // Default view = the most recent day's chats, flat, no header — everything
-  // older tucks behind one "Show earlier" row. "Recent" = Pinned + the FIRST
-  // non-pinned bucket (Today if it has items, else Yesterday, else whatever the
-  // newest bucket is). This avoids the "list looks empty" trap when nothing was
-  // touched today. Pinned always shows on top.
+  // Default view = enough recent history to FILL the rail — Pinned + whole
+  // day-buckets, newest first, until MIN_VISIBLE rows are showing (always at
+  // least the newest bucket). A single quiet day over a 100-chat archive left
+  // the rail mostly void; everything past the budget still tucks behind one
+  // "Show earlier" row. First included bucket renders flat (implied-recent),
+  // later ones keep their labels so the timeline stays legible.
+  const MIN_VISIBLE = 14;
   const recentGroups = $derived.by(() => {
     const pinned = groups.filter((g) => g.label === "Pinned");
-    const firstDay = groups.find((g) => g.label !== "Pinned");
-    return firstDay ? [...pinned, firstDay] : pinned;
+    const days = groups.filter((g) => g.label !== "Pinned");
+    const out = [...pinned];
+    let rows = pinned.reduce((n, g) => n + g.items.length, 0);
+    for (const g of days) {
+      if (out.length > pinned.length && rows >= MIN_VISIBLE) break;
+      out.push(g);
+      rows += g.items.length;
+    }
+    return out;
   });
+  const firstDayLabel = $derived(recentGroups.find((g) => g.label !== "Pinned")?.label);
   const recentLabels = $derived(new Set(recentGroups.map((g) => g.label)));
   const olderGroups = $derived(groups.filter((g) => !recentLabels.has(g.label)));
   const olderCount = $derived(olderGroups.reduce((n, g) => n + g.items.length, 0));
@@ -329,7 +339,8 @@
          replays the stagger-in cascade. -->
     {#key shell.allProjects}
       {#each recentGroups as g (g.label)}
-        {#if g.label === "Pinned"}<div class="conv-group-label plain"><span class="cgl-txt">Pinned</span></div>{/if}
+        {#if g.label === "Pinned"}<div class="conv-group-label plain"><span class="cgl-txt">Pinned</span></div>
+        {:else if g.label !== firstDayLabel}<div class="conv-group-label plain"><span class="cgl-txt">{g.label}</span><span class="cgl-ct">{g.items.length}</span></div>{/if}
         {#each g.items as c, i (c.id)}{@render convRow(c, i)}{/each}
       {/each}
     {/key}

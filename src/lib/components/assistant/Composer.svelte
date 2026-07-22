@@ -181,12 +181,18 @@
 
   function autosize() {
     if (!ta) return;
+    // Freeze the wrap for the measurement collapse — the transient 1-line
+    // layout otherwise shrink-clamps the pane scroller's scrollTop on every
+    // keystroke (transcript bounce that grows with each extra draft line).
+    const wrap = ta.parentElement as HTMLElement | null;
+    if (wrap) wrap.style.height = `${wrap.offsetHeight}px`;
     ta.style.height = "auto";
     // Dictation ghost renders outside the textarea value — take whichever
     // mirror is taller so in-flight speech reserves its own lines.
     const want = Math.max(ta.scrollHeight, ghostEl?.scrollHeight ?? 0);
     const h = Math.min(want, 340);
     ta.style.height = h + "px";
+    if (wrap) wrap.style.height = "";
     multiline = h > 40;
     // Only allow the inner scrollbar once content actually hits the cap —
     // otherwise `overflow:auto` paints a phantom gutter in the idle composer.
