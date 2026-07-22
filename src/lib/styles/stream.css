@@ -417,8 +417,12 @@
 /* ── plan / todo checklist ── boxless, transparent (matches the inline diff):
    no card fill, a thin left rule instead of a full border so the page texture
    reads through it. ── */
-.splan { margin: var(--stream-gap) 0 var(--stream-gap) var(--stream-indent); border-left: 2px solid color-mix(in oklch, var(--border) 80%, transparent); padding-left: 11px; background: transparent;
+/* Island card like every other machinery block (DESIGN §8) — was a left rail. */
+.splan { margin: var(--stream-gap) 0; border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: color-mix(in oklab, var(--fg) 2.8%, transparent); padding: 9px 13px 10px;
+  transition: border-color 240ms var(--ease-soft);
   animation: blockIn var(--dur-base) var(--ease-page) both; }
+.splan:hover { border-color: var(--border-strong); }
 .splan-head { display: flex; align-items: center; gap: 9px; padding: 2px 0 8px; font-size: var(--fs-sm); color: var(--fg-2); }
 .splan-head > svg { color: var(--accent); flex: none; }
 .splan-title { font-weight: 650; letter-spacing: -0.006em; }
@@ -428,17 +432,21 @@
 .splan-list { display: flex; flex-direction: column; padding: 2px 0; margin: 0; list-style: none; }
 .splan-item { display: flex; align-items: center; gap: 10px; padding: 4px 0; font-size: var(--fs-sm); color: var(--fg-muted); }
 .splan-mark { width: 16px; height: 16px; display: grid; place-items: center; flex: none; }
-.splan-item.is-done .splan-mark { color: var(--ok); }
-.splan-item.is-done .splan-text { color: var(--fg-subtle); }
+.splan-item.is-done .splan-mark { color: var(--ok); animation: dotPop 420ms var(--ease-spring) both; }
+.splan-item.is-done .splan-text { color: var(--fg-subtle);
+  text-decoration: line-through; text-decoration-color: color-mix(in oklab, var(--fg-subtle) 55%, transparent); }
 .splan-item.is-todo .splan-mark { color: var(--fg-faint); }
 .splan-item.is-todo .splan-text { color: var(--fg-faint); }
 .splan-item.is-active .splan-text { color: var(--fg); font-weight: 550; }
 .splan-ring { width: 13px; height: 13px; border-radius: 50%; border: 2px solid color-mix(in oklab, var(--accent) 30%, transparent); border-top-color: var(--accent); animation: ringspin 0.9s linear infinite; }
 
 /* ── ExitPlanMode proposal card (plan-mode deliverable, matches .splan chrome) ── */
-.sxplan { margin: var(--stream-gap) 0 var(--stream-gap) var(--stream-indent); border-left: 2px solid color-mix(in oklch, var(--border) 80%, transparent); padding-left: 11px; background: transparent;
+.sxplan { margin: var(--stream-gap) 0; border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: color-mix(in oklab, var(--fg) 2.8%, transparent); padding: 8px 13px 9px;
+  transition: border-color 240ms var(--ease-soft);
   animation: blockIn var(--dur-base) var(--ease-page) both; }
-.sxplan.pending { border-left-color: color-mix(in oklab, var(--accent) 55%, transparent); }
+.sxplan:hover { border-color: var(--border-strong); }
+.sxplan.pending { border-color: color-mix(in oklab, var(--accent) 32%, var(--border)); }
 .sxplan-head { display: flex; align-items: center; gap: 9px; width: 100%; padding: 2px 0 4px; font-size: var(--fs-sm); color: var(--fg-2); background: none; border: none; cursor: pointer; text-align: left; }
 .sxplan-head > svg { color: var(--accent); flex: none; }
 .sxplan-title { font-weight: 650; letter-spacing: -0.006em; }

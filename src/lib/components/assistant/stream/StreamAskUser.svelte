@@ -157,7 +157,9 @@
 <div class="sask" class:answered={askAnswered} class:expired={askExpired} class:dismissed={askDismissed}>
   <div class="sask-head">
     <span class="sask-head-ic" aria-hidden="true">
-      {#if askAnswered && !askDismissed}<Check size={13} strokeWidth={2.5} />{:else}<MessageCircleQuestion size={13} />{/if}
+      {#if askAnswered && !askDismissed}<Check size={13} strokeWidth={2.5} />
+      {:else if !askAnswered && !askExpired}<span class="sask-dot"></span>
+      {:else}<MessageCircleQuestion size={13} />{/if}
     </span>
     <span class="sask-head-label">{askAnswered ? (askDismissed ? "Dismissed" : "Your answer") : askExpired ? "Question expired" : "Rift needs your input"}</span>
   </div>
@@ -302,19 +304,20 @@
 </div>
 
 <style>
+  /* The one card the turn is blocked on — same tile family as every block,
+     with the live-border accent tint (shell "running" language) instead of a
+     gradient panel. Liveness = breathing dot + warm hairline, not a glow. */
   .sask {
     display: flex;
     flex-direction: column;
     gap: 11px;
     margin: 10px 0;
-    padding: 13px 15px 14px;
-    border: 1px solid color-mix(in oklab, var(--accent) 38%, transparent);
-    border-radius: 12px;
-    background:
-      linear-gradient(180deg,
-        color-mix(in oklab, var(--accent) 7%, transparent),
-        color-mix(in oklab, var(--accent) 3%, transparent));
-    box-shadow: 0 1px 0 color-mix(in oklab, var(--accent) 10%, transparent) inset;
+    padding: 12px 14px 13px;
+    border: 1px solid color-mix(in oklab, var(--accent) 32%, var(--border));
+    border-radius: var(--radius-lg);
+    background: color-mix(in oklab, var(--fg) 2.8%, transparent);
+    transition: border-color 240ms var(--ease-soft, ease-out);
+    animation: blockIn var(--dur-base) var(--ease-page) both;
   }
   /* Answered: drop the call-to-action accent, settle into a quiet "done" card. */
   .sask.answered,
@@ -342,23 +345,24 @@
     background: color-mix(in oklab, var(--fg) 7%, transparent);
   }
 
-  /* card header — a small labelled rail so the card reads as a deliberate
-     surface, not a floating button group */
+  /* card header — quiet uppercase eyebrow + breathing dot, same status
+     vocabulary as the stream footer. */
   .sask-head {
-    display: flex; align-items: center; gap: 7px;
-    font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
+    display: flex; align-items: center; gap: 8px;
+    font-size: 10px; font-weight: 600;
+    letter-spacing: 0.08em; text-transform: uppercase;
     color: var(--accent);
   }
   .sask.answered .sask-head { color: var(--fg-2, color-mix(in oklab, var(--fg) 62%, transparent)); }
   .sask-head-ic {
-    display: grid; place-items: center; width: 19px; height: 19px;
-    border-radius: 6px; flex: none;
+    display: grid; place-items: center; flex: none;
     color: var(--accent);
-    background: color-mix(in oklab, var(--accent) 13%, transparent);
   }
-  .sask.answered .sask-head-ic {
-    color: var(--ok);
-    background: color-mix(in oklab, var(--ok) 14%, transparent);
+  .sask.answered .sask-head-ic { color: var(--ok); }
+  .sask-dot {
+    width: 6px; height: 6px; border-radius: 50%; display: block;
+    background: var(--accent);
+    animation: streamLivePulse var(--pulse-live) ease-out infinite;
   }
 
   /* answered summary — chips, not a monospace dump */
@@ -385,33 +389,37 @@
     padding: 2px 7px;
     border-radius: 5px;
     color: var(--accent);
-    background: color-mix(in oklab, var(--accent) 14%, transparent);
+    background: var(--accent-soft);
   }
-  .sask-q-text { font-size: 13px; font-weight: 500; color: var(--fg, inherit); }
-  .sask-options { display: flex; flex-direction: column; gap: 5px; }
+  .sask-q-text { font-size: 13.5px; font-weight: 500; color: var(--fg, inherit); }
+  .sask-options { display: flex; flex-direction: column; gap: 6px; }
+  /* Options are tint tiles inside the island (one level deep, per DESIGN §8) —
+     quiet at rest, accent only on the picked one. */
   .sask-option {
     display: flex;
     align-items: flex-start;
     gap: 8px;
     width: 100%;
     text-align: left;
-    padding: 8px 10px;
-    border: 1px solid var(--border, color-mix(in oklab, var(--fg) 12%, transparent));
+    padding: 8px 11px;
+    border: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
     border-radius: 8px;
-    background: transparent;
+    background: color-mix(in oklab, var(--fg) 2.5%, transparent);
     cursor: pointer;
     transition: border-color var(--dur-fast), background var(--dur-fast);
   }
   .sask-option:hover:not(:disabled) {
-    border-color: color-mix(in oklab, var(--accent) 45%, transparent);
-    background: color-mix(in oklab, var(--accent) 5%, transparent);
+    border-color: var(--border-strong);
+    background: color-mix(in oklab, var(--fg) 4.5%, transparent);
   }
   .sask-option.selected {
-    border-color: var(--accent);
-    background: color-mix(in oklab, var(--accent) 12%, transparent);
+    border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
+    background: color-mix(in oklab, var(--accent) 9%, transparent);
   }
   .sask-option:disabled { opacity: 0.55; cursor: default; }
-  .sask-marker { display: inline-flex; margin-top: 1px; color: var(--accent); }
+  .sask-marker { display: inline-flex; margin-top: 1px; color: var(--fg-faint); transition: color var(--dur-fast); }
+  .sask-option:hover:not(:disabled) .sask-marker { color: var(--fg-subtle); }
+  .sask-option.selected .sask-marker { color: var(--accent); animation: dotPop 420ms var(--ease-spring, var(--ease-page)) both; }
   .sask-opt-text { display: flex; flex-direction: column; gap: 2px; }
   .sask-opt-label { font-size: 12.5px; color: var(--fg, inherit); }
   .sask-opt-desc { font-size: 11px; color: var(--fg-2, color-mix(in oklab, var(--fg) 60%, transparent)); }

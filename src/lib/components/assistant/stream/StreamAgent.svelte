@@ -145,41 +145,37 @@
   /* Bordered card — first-class, distinct from the boxless tool rows around it
      (CC-UI ref §5). Translucent surface so it blends into the transcript rather
      than reading as a pasted panel; running state warms the hairline. */
+  /* Same tile family as every block; running warms the hairline with the
+     shell "running" accent tint. The pill + bot glyph carry delegation —
+     no wash, no seam (atmosphere doctrine). */
   .sacard {
     margin: var(--stream-gap, 13px) 0;
-    border: 1px solid color-mix(in oklch, var(--border) 88%, transparent);
+    border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    background: color-mix(in oklch, var(--bg-elev-1) 82%, transparent);
+    background: color-mix(in oklab, var(--fg) 2.8%, transparent);
     overflow: hidden;
+    transition: border-color 240ms var(--ease-soft);
     animation: blockIn var(--dur-base) var(--ease-page) both;
   }
+  .sacard:hover { border-color: var(--border-strong); }
   .sacard[data-status="running"] {
-    border-color: color-mix(in oklch, var(--status-busy) 28%, var(--border));
+    border-color: color-mix(in oklab, var(--accent) 28%, var(--border));
   }
 
-  /* The one first-class card in the transcript reads as the hero it is: the head
-     gets a whisper of accent wash fading to nothing (delegation = accent's job
-     here, established by the pill + bot) and a hairline accent seam at the left
-     edge. Body stays neutral so only the head carries the tint. */
   .sa-head {
     display: flex; align-items: center; gap: 9px; width: 100%;
     padding: 8px 11px; border: 0; text-align: left;
     color: var(--fg-2); font: inherit;
-    background: linear-gradient(90deg,
-      color-mix(in oklab, var(--accent) 7%, transparent),
-      transparent 60%);
-    box-shadow: inset 2px 0 0 color-mix(in oklab, var(--accent) 34%, transparent);
+    background: transparent;
+    transition: background var(--dur-fast);
   }
   .sa-clickable { cursor: pointer; }
-  .sa-clickable:hover { background:
-    linear-gradient(90deg, color-mix(in oklab, var(--accent) 10%, transparent), transparent 60%),
-    color-mix(in oklch, var(--fg) 3%, transparent); }
-  .sa-bot { display: inline-flex; color: var(--accent-hover); flex: none; }
+  .sa-clickable:hover { background: color-mix(in oklab, var(--fg) 4%, transparent); }
+  .sa-bot { display: inline-flex; color: var(--accent); flex: none; }
   .sa-pill {
     display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px;
-    background: color-mix(in oklab, var(--accent) 18%, transparent);
-    border: 1px solid color-mix(in oklab, var(--accent) 36%, var(--border));
-    color: var(--accent-hover); font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em;
+    background: var(--accent-soft);
+    color: var(--accent); font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em;
     font-family: var(--font-mono); flex: none;
   }
   .sa-desc {
@@ -224,6 +220,7 @@
     display: flex; flex-direction: column; gap: 5px;
     padding: 7px 12px 10px;
     border-top: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
+    background: var(--bg-inset);
     animation: workOpen 0.3s var(--ease-page) both;
     max-height: 300px; overflow-y: auto;
   }

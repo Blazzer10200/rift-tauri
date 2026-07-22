@@ -148,11 +148,37 @@
   let glideUntil = 0;
   let pinEcho = -1;
 
-  function pinToBottom() {
+  // Streaming follow glides instead of teleporting: a rAF lerp re-reads the
+  // target each frame, so bursty content growth reads as one continuous motion.
+  // pinEcho tracks every frame we write, so our own scroll echoes stay latched
+  // while a real user scroll (position ≠ pinEcho) still un-latches instantly.
+  // Big jumps snap — chasing three screens reads worse than a cut.
+  let smoothRaf = 0;
+  const paneReducedMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+
+  function pinToBottom(instant = false) {
     if (!scrollEl) return;
-    scrollEl.scrollTop = scrollEl.scrollHeight;
-    pinEcho = scrollEl.scrollTop; // post-clamp actual position
+    if (instant || paneReducedMotion) {
+      if (smoothRaf) { cancelAnimationFrame(smoothRaf); smoothRaf = 0; }
+      scrollEl.scrollTop = scrollEl.scrollHeight;
+      pinEcho = scrollEl.scrollTop; // post-clamp actual position
+      return;
+    }
+    if (smoothRaf) return; // glide already running — it re-reads the target
+    const step = () => {
+      smoothRaf = 0;
+      if (!scrollEl || !stickToBottom) return;
+      const delta = scrollEl.scrollHeight - scrollEl.clientHeight - scrollEl.scrollTop;
+      if (Math.abs(delta) < 0.5) { pinEcho = scrollEl.scrollTop; return; }
+      scrollEl.scrollTop = delta > 900 ? scrollEl.scrollHeight : scrollEl.scrollTop + delta * 0.2;
+      pinEcho = scrollEl.scrollTop;
+      smoothRaf = requestAnimationFrame(step);
+    };
+    smoothRaf = requestAnimationFrame(step);
   }
+  $effect(() => () => { if (smoothRaf) cancelAnimationFrame(smoothRaf); });
 
   function onScroll() {
     if (!scrollEl) return;
@@ -206,7 +232,8 @@
         const gap = scrollEl.scrollHeight - cached - scrollEl.clientHeight;
         stickToBottom = gap < 80;
       } else {
-        pinToBottom();
+        // Instant — gliding from the top of a freshly opened tab is noise.
+        pinToBottom(true);
         stickToBottom = true;
       }
     });
