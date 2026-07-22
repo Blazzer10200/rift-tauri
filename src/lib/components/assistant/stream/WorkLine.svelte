@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronDown, FileText, FolderSearch, FolderTree, Search, Terminal, Wrench } from "lucide-svelte";
+  import { ChevronDown, ChevronRight, FileText, FolderSearch, FolderTree, Search, Terminal, Wrench } from "lucide-svelte";
   import { fmtDur, groupNames, resultMeta, workLineMode, VERB_PAST, VERB_ING, type StreamTool, type TKind } from "./streamModel";
   import { uiPrefs } from "$lib/state/ui-prefs.svelte";
   import OutputBlock from "./OutputBlock.svelte";
@@ -12,6 +12,9 @@
   const mode = $derived(workLineMode(uiPrefs.toolDetail));
   let userOpen = $state(false);
   const open = $derived(mode === "expanded" || userOpen);
+  // Per-row disclosure: the open list is an INDEX (verb · path · → meta), each
+  // result body unfolds on its own row click. Detailed tier auto-opens all.
+  let bodyOpen = $state<Record<string, boolean>>({});
 
   const ICONS: Partial<Record<TKind, typeof FileText>> = {
     read: FileText, grep: Search, shell: Terminal, mcp: Wrench,
@@ -59,14 +62,28 @@
       <div class="wline-list">
         {#each tools as t (t.id)}
           {@const meta = resultMeta(t)}
-          <div class="wline-row" title={t.path ?? t.cap}>
+          {@const expandable = hasBody(t)}
+          {@const bopen = expandable && (bodyOpen[t.id] ?? mode === "expanded")}
+          {#snippet rowbits()}
             <span class="wr-verb">{t.status === "pending" ? VERB_ING[t.kind] : VERB_PAST[t.kind]}</span>
             {#if mode === "expanded" && t.path}<span class="wr-path">{t.path}</span>{:else}{#if t.dir}<span class="wr-dir">{t.dir}</span>{/if}<b>{t.cap}</b>{/if}
             {#if t.status === "error"}<span class="wr-meta bad">failed</span>
             {:else if meta}<span class="wr-meta">→ {meta}</span>{/if}
             {#if t.durSecs >= 1}<span class="wr-dur">{fmtDur(t.durSecs)}</span>{/if}
-          </div>
-          {#if hasBody(t)}
+          {/snippet}
+          {#if expandable}
+            <button class="wline-row wr-click" type="button" title={t.path ?? t.cap} aria-expanded={bopen}
+              onclick={() => (bodyOpen = { ...bodyOpen, [t.id]: !bopen })}>
+              <ChevronRight class="wr-chev {bopen ? 'open' : ''}" size={11} strokeWidth={2.2} />
+              {@render rowbits()}
+            </button>
+          {:else}
+            <div class="wline-row" title={t.path ?? t.cap}>
+              <span class="wr-chev-ghost" aria-hidden="true"></span>
+              {@render rowbits()}
+            </div>
+          {/if}
+          {#if bopen}
             <div class="wr-out">
               {#if t.kind === "read" && t.name !== "list_dir"}
                 <ReadResult text={t.result ?? ""} path={t.path ?? null} offset={numOf(t, "offset")} />

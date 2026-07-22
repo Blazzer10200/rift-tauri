@@ -111,8 +111,10 @@
     font: inherit; color: var(--fg-2); text-align: left;
     transition: background var(--dur-fast), color var(--dur-fast); }
   .gres-row:hover { background: var(--surface-hover); color: var(--fg); }
-  .gres-path { flex: none; color: var(--info); font-weight: 550; }
-  .gres-row:hover .gres-path { text-decoration: underline; text-underline-offset: 2px; }
+  /* Neutral at rest (one chromatic voice per view — DESIGN §2); the hover
+     underline + accent carry the link affordance. */
+  .gres-path { flex: none; color: var(--fg-2); font-weight: 550; }
+  .gres-row:hover .gres-path { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
   .gres-path.wide { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .gres-line { color: var(--fg-faint); font-weight: 400; }
   .gres-text { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; color: var(--fg-2); }
