@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ghDot, ghFixPrompt, ghPullPrompt, ghPushPrompt, ghRelTime, ghSyncLabel, type GhStatus } from "./githubHelpers";
+import { ghCheckedLabel, ghDot, ghElapsed, ghFixPrompt, ghPullPrompt, ghPushPrompt, ghRelTime, ghSyncLabel, type GhStatus } from "./githubHelpers";
 
 describe("ghPullPrompt / ghPushPrompt", () => {
   it("pluralizes and names the right tool", () => {
@@ -65,6 +65,31 @@ describe("ghRelTime", () => {
   it("is empty on bad input", () => {
     expect(ghRelTime(undefined, now)).toBe("");
     expect(ghRelTime("not-a-date", now)).toBe("");
+  });
+});
+
+describe("ghElapsed", () => {
+  const now = new Date("2026-07-16T12:00:00Z").getTime();
+  it("formats elapsed spans compactly", () => {
+    expect(ghElapsed("2026-07-16T11:59:40Z", now)).toBe("20s");
+    expect(ghElapsed("2026-07-16T11:49:00Z", now)).toBe("11m");
+    expect(ghElapsed("2026-07-16T10:55:00Z", now)).toBe("1h 5m");
+  });
+  it("is empty on bad input", () => {
+    expect(ghElapsed(undefined, now)).toBe("");
+    expect(ghElapsed("not-a-date", now)).toBe("");
+  });
+});
+
+describe("ghCheckedLabel", () => {
+  const now = new Date("2026-07-16T12:00:00Z").getTime();
+  it("phrases freshness", () => {
+    expect(ghCheckedLabel(now - 5_000, now)).toBe("checked just now");
+    expect(ghCheckedLabel(now - 3 * 60_000, now)).toBe("checked 3m ago");
+    expect(ghCheckedLabel(now - 2 * 3_600_000, now)).toBe("checked 2h ago");
+  });
+  it("is empty before the first fetch", () => {
+    expect(ghCheckedLabel(0, now)).toBe("");
   });
 });
 

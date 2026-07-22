@@ -87,6 +87,29 @@ export function ghRelTime(iso: string | undefined, now: number = Date.now()): st
   return `${Math.round(h / 24)}d ago`;
 }
 
+/** ISO start → compact elapsed span ("11m", "1h 5m") for live runs. */
+export function ghElapsed(iso: string | undefined, now: number = Date.now()): string {
+  if (!iso) return "";
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return "";
+  const s = Math.max(0, Math.round((now - t) / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}
+
+/** Last-fetch ms timestamp → "checked just now" / "checked 3m ago"; empty before first fetch. */
+export function ghCheckedLabel(fetchedAt: number, now: number = Date.now()): string {
+  if (!fetchedAt) return "";
+  const s = Math.max(0, Math.round((now - fetchedAt) / 1000));
+  if (s < 60) return "checked just now";
+  const m = Math.round(s / 60);
+  if (m < 60) return `checked ${m}m ago`;
+  return `checked ${Math.round(m / 60)}h ago`;
+}
+
 /** Composer prompt for "Ask Claude to fix" on a red run. */
 export function ghFixPrompt(run: GhRunInfo): string {
   const id = run.databaseId ? ` (run ${run.databaseId})` : "";

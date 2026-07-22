@@ -18,6 +18,8 @@ class GithubState {
   /** Root the current `status` belongs to (staleness + re-key guard). */
   loadedFor = $state<string | null>(null);
   loading = $state(false);
+  /** When the current snapshot landed (ms) — drives the popover freshness hint. */
+  fetchedAt = $state(0);
   dot = $derived(ghDot(this.status));
 
   #lastFetched = 0;
@@ -68,6 +70,7 @@ class GithubState {
       if (epoch === this.#epoch) {
         this.loadedFor = root;
         this.#lastFetched = Date.now();
+        this.fetchedAt = this.#lastFetched;
         this.loading = false;
         this.#schedulePoll();
       }

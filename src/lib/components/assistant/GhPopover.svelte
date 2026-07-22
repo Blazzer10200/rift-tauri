@@ -5,11 +5,12 @@
   // write flows through the assistant's normal permission system.
   import { ArrowDownToLine, ArrowUpFromLine, ExternalLink, GitBranch, GitPullRequest, RefreshCw, Sparkles } from "lucide-svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
+  import { untrack } from "svelte";
   import { portal } from "$lib/actions/portal";
   import { tooltip } from "$lib/actions/tooltip";
   import { assistant } from "$lib/state/assistant.svelte";
   import { github } from "$lib/state/github.svelte";
-  import { ghFixPrompt, ghPrPrompt, ghPullPrompt, ghPushPrompt, ghRelTime, ghSyncLabel } from "$lib/state/githubHelpers";
+  import { ghCheckedLabel, ghElapsed, ghFixPrompt, ghPrPrompt, ghPullPrompt, ghPushPrompt, ghRelTime, ghSyncLabel } from "$lib/state/githubHelpers";
 
   let { anchor, onClose }: { anchor: HTMLElement; onClose: () => void } = $props();
 
@@ -28,11 +29,13 @@
   );
   const aheadN = $derived(s?.state === "ok" && typeof s.ahead === "number" ? s.ahead : 0);
   const behindN = $derived(s?.state === "ok" && typeof s.behind === "number" ? s.behind : 0);
+  const runLive = $derived(!!run && run.status !== "completed");
+  const inSync = $derived(!!sync && aheadN === 0 && behindN === 0);
 
-  // Ticking clock so "10m ago" stays honest while the popover sits open.
+  // Ticking clock so "10m ago" / "checked Xm ago" stay honest while open.
   let now = $state(Date.now());
   $effect(() => {
-    const t = setInterval(() => (now = Date.now()), 30_000);
+    const t = setInterval(() => (now = Date.now()), 10_000);
     return () => clearInterval(t);
   });
 
@@ -70,8 +73,11 @@
   });
 
   // Opening the popover is an explicit "show me now" — bypass the min-gap.
+  // untrack: refresh() synchronously reads loading/status/loadedFor, which
+  // this effect would otherwise subscribe to → endless forced-refresh loop.
   $effect(() => {
-    void github.refresh(assistant.activeRoot, { force: true });
+    const root = assistant.activeRoot;
+    untrack(() => void github.refresh(root, { force: true }));
   });
 
   function inject(prompt: string) {
@@ -96,6 +102,9 @@
       {#if s?.repo}<span class="gp-sep">·</span><span class="gp-reponame">{s.repo}</span>{/if}
     </span>
     <span class="gp-actions">
+      {#if github.fetchedAt && !github.loading}
+        <span class="gp-fresh">{ghCheckedLabel(github.fetchedAt, now)}</span>
+      {/if}
       <button
         class="gp-icon"
         type="button"
@@ -135,7 +144,7 @@
     <div class="gp-note">GitHub check failed: {s.detail ?? "unknown error"}</div>
   {:else if s.state === "ok"}
     <div class="gp-row">
-      <span class="gp-dot idle"></span>
+      <span class="gp-dot {inSync ? 'ok' : 'idle'}"></span>
       {#if sync}
         <span class="gp-row-t">{sync}</span>
       {:else}
@@ -151,7 +160,7 @@
           <span class="gp-muted">
             — {run.status === "completed" ? (run.conclusion ?? "done") : (run.status ?? "").replace("_", " ")}
             {#if run.headBranch && run.headBranch !== s.branch}&nbsp;· {run.headBranch}{/if}
-            {#if run.createdAt}&nbsp;· {ghRelTime(run.createdAt, now)}{/if}
+            {#if run.createdAt}&nbsp;· {runLive ? `${ghElapsed(run.createdAt, now)} elapsed` : ghRelTime(run.createdAt, now)}{/if}
           </span>
         </span>
         {#if run.url}
@@ -238,6 +247,7 @@
   .gp-reponame { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-subtle);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .gp-actions { display: inline-flex; align-items: center; gap: 2px; flex: none; }
+  .gp-fresh { font-size: 10px; color: var(--fg-faint); white-space: nowrap; margin-right: 2px; }
   .gp-icon { display: inline-flex; align-items: center; justify-content: center;
     width: 22px; height: 22px; border: 0; border-radius: 5px; background: transparent;
     color: var(--fg-subtle); cursor: pointer; flex: none; }
