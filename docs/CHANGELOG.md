@@ -2,12 +2,17 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.134.1 — Startup crash fix
+## v0.135.0 — Stream redesign
 
-**Fixes a blank-screen crash on launch introduced in v0.134.0.**
+**The whole assistant transcript got a visual overhaul — every block now shares one quiet, cohesive look.**
 
-- **Fixed: app could tear down to a blank screen on launch** if it was closed while sitting on the new Diagnostics page. Two parts of the app raced to initialize diagnostics at the same moment, attaching duplicate event listeners — every log line arrived twice and the UI crashed. Initialization is now single-flight; the page boots cleanly.
-- Dev-only: new stream gallery (`Ctrl+Alt+G`) — a one-click replay that streams every transcript block kind through the real pipeline, for UI work on tool/command/code blocks.
+- **Terminal blocks**: live commands type themselves in, long-running ones show an honest wait state with a riding cursor, and every settled shell gets an ok/failed pill. Output sits in a proper inset well under a flat header.
+- **Diff cards** (Edited/Created): the loud green slabs are gone — quiet washes, monochrome-dimmed deleted lines, and creates no longer paint every row green.
+- **Ask / plan / agent cards**: "Rift needs your input" is now a proper island card with a breathing live dot and tinted option tiles; plan and agent boxes match the same family, with done plan items striking through.
+- **Tool drilldown**: the expanded work-line is a scannable index — each read/search row unfolds its result on demand into a clean inset panel, instead of dumping everything translucent at once.
+- **Mid-turn notes**: redesigned as a neutral dashed pill — no more stray blue.
+- **Smooth autoscroll**: the transcript glides to the bottom instead of teleporting (instant for reduced-motion and tab switches).
+- Turn receipts on every settled turn (time · tokens · cost), and code fences get quieter headers with hover-only copy.
 
 ## Known issues
 - **While elevated, dragging files from Explorer into the window doesn't work** (Windows blocks lower→higher integrity drag-drop); the attach button / file picker still works fine.
