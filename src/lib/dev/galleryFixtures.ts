@@ -190,7 +190,7 @@ export function buildReplaySteps(): ReplayStep[] {
 
   // ── 16 · closing prose + honest meta ─────────────────────────────────────
   say(1200, "That's every block kind the transcript renders — flip the density settings above and replay to compare.");
-  add(800, (m) => { m.turnDurationMs = 47000; m.costUsd = 0.42; });
+  add(800, (m) => { m.turnDurationMs = 47000; m.costUsd = 0.42; m.outputTokens = 12800; });
 
   return steps;
 }

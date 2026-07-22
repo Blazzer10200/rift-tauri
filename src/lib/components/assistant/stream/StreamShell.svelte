@@ -83,7 +83,8 @@
   // tty-wait: command entered, no output yet → an empty output well with an
   // idle cursor (a terminal waiting is a cursor on a blank line, not a blank
   // card). The header cursor hands off to the well cursor once typing ends.
-  const showWait = $derived(running && !typing && !hasOut && mode !== "minimal");
+  // A still-forming input isn't "entered" yet — keep the header cursor, not the well.
+  const showWait = $derived(running && !typing && !hasOut && !tool.forming && mode !== "minimal");
 
   // Output lands whole (the CLI can't stream stdout mid-run) — when it arrives
   // on a live block, the entrance cascade plays with the cursor parked on the
@@ -168,6 +169,7 @@
         <div class="ssh-peek">
           {#each peek.lines as ln (ln)}<div class="ssh-line">{ln}</div>{/each}
           {#if peek.more > 0}<div class="ssh-more">+{peek.more} more line{peek.more > 1 ? "s" : ""}</div>{/if}
+          {#if ride}<div class="ssh-line ssh-peek-cursorline"><span class="ssh-cursor" aria-hidden="true"></span></div>{/if}
         </div>
       </div>
     {:else if open}
@@ -269,5 +271,7 @@
   .ssh-peek { padding: 2px 11px 7px;
     font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.5; color: var(--fg-subtle); }
   .ssh-line { white-space: pre-wrap; word-break: break-word; }
+  /* Cursor parked after the last peeked line for a beat when output lands live. */
+  .ssh-peek-cursorline { display: flex; align-items: center; min-height: 15px; }
   .ssh-more { margin-top: 2px; font-size: 10.5px; color: var(--fg-faint); }
 </style>
