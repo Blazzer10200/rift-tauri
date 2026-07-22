@@ -1557,3 +1557,27 @@ describe("playback — continuation merge", () => {
     expect(tab.messages.length).toBe(countAfterError + 1); // new bubble, error bubble untouched
   });
 });
+
+// ── #100: hidden-page text drain ────────────────────────────────────────────
+// rAF never fires on a hidden page — the old pacer parked the whole text
+// backlog until refocus, then flooded it through the render path in one burst.
+// Hidden pages now flush synchronously: text lands, nothing parks on rAF.
+describe("playback — hidden-page text drain (#100)", () => {
+  it("text deltas land immediately under document.hidden with no rAF parked", () => {
+    (globalThis as { document?: { hidden: boolean } }).document = { hidden: true };
+    try {
+      const tab = freshTab();
+      beginTurn(tab);
+      const id = tab.streamingMsgId!;
+      // Deliberately NO pumpRaf between frames — a hidden page gets no frames.
+      tab.onStream(JSON.stringify(sysModel("claude-sonnet-4-6")));
+      tab.onStream(JSON.stringify(textDelta("Hello")));
+      tab.onStream(JSON.stringify(textDelta(" hidden")));
+      expect(textBlocks(tab, id)).toEqual([{ type: "text", text: "Hello hidden" }]);
+      expect(tab.pendingText).toBe("");
+      expect(rafCbs.size).toBe(0);
+    } finally {
+      delete (globalThis as { document?: unknown }).document;
+    }
+  });
+});

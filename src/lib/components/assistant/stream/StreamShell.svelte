@@ -66,14 +66,26 @@
   $effect(() => {
     if (!mountedLive) return;
     const cmd = tool.cap ?? "";
-    if (cmd.length === 0) { typedN = Number.MAX_SAFE_INTEGER; return; }
+    // #100: no animation owed when there's nothing to type, the run already
+    // settled (status is reactive — result landing snaps a half-typed head
+    // complete), or the page is hidden (throttled timers would starve the
+    // per-char chain and leave a blank head w/ a lone cursor).
+    if (
+      cmd.length === 0 ||
+      tool.status !== "pending" ||
+      (typeof document !== "undefined" && document.hidden)
+    ) { typedN = Number.MAX_SAFE_INTEGER; return; }
     const total = Math.min(Math.max(cmd.length * 14, 120), 320);
     const per = total / cmd.length;
     let stop = false;
     let h: ReturnType<typeof setTimeout>;
+    const t0type = performance.now();
     const tick = () => {
       if (stop) return;
-      typedN = Math.min(typedN + 1, cmd.length);
+      // Wall-clock catch-up (#100): a throttled/starved timer types the whole
+      // overdue remainder on its next fire instead of freezing at slice(0,0).
+      const frac = Math.min(1, (performance.now() - t0type) / total);
+      typedN = Math.max(typedN, Math.round(cmd.length * frac));
       if (typedN < cmd.length) h = setTimeout(tick, per * (0.6 + Math.random() * 0.9));
     };
     h = setTimeout(tick, per);

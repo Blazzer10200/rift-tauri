@@ -374,6 +374,13 @@ function enqueueText(tab: TabState, chunk: string) {
   tab.pendingText += chunk;
   tab.liveOutputChars += chunk.length;
   refreshLiveTokens(tab);
+  // #100: rAF never fires on a hidden page — the pacer would park the whole
+  // backlog until refocus, then flood it through the render path in one burst.
+  // Pacing exists for visible reading rhythm; invisible text just lands.
+  if (typeof document !== "undefined" && document.hidden) {
+    flushPendingText(tab);
+    return;
+  }
   if (tab.drainHandle === null) {
     tab.lastDrainAt = performance.now();
     tab.drainHandle = requestAnimationFrame(tab.drainTick);

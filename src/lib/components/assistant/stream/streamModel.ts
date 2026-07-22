@@ -511,6 +511,22 @@ function planItems(tb: ToolBlock): PlanItem[] {
     .filter((t) => t.text.length > 0);
 }
 
+// #100: messageToTurn re-runs on EVERY stream delta, and fresh StreamTool
+// objects per pass forced every child component to re-render (and re-derive
+// Shiki, captions, …) per token — the main-thread saturation behind the
+// blank-block/frozen-UI wedge on long turns. Store blocks are immutable
+// (every mutation replaces the changed block object), so same block identity
+// ⇒ same adaptation: memoize by block object. Unchanged children then keep
+// prop identity and skip re-render entirely. WeakMap — GC owns eviction.
+const adaptCache = new WeakMap<ToolBlock, StreamTool>();
+function adaptToolCached(tb: ToolBlock): StreamTool {
+  const hit = adaptCache.get(tb);
+  if (hit) return hit;
+  const t = adaptTool(tb);
+  adaptCache.set(tb, t);
+  return t;
+}
+
 function adaptTool(tb: ToolBlock): StreamTool {
   const durSecs = typeof tb.durationMs === "number" ? tb.durationMs / 1000 : 0;
   const inp = tb.input ?? {};
@@ -698,7 +714,7 @@ export function messageToTurn(m: ChatMessage): TurnModel {
       if (typeof b.durationMs === "number") { thinkSecs += b.durationMs / 1000; totalSecs += b.durationMs / 1000; }
       if (b.status === "active") thinkActive = true;
     } else if (b.type === "tool") {
-      const tool = adaptTool(b);
+      const tool = adaptToolCached(b);
       totalSecs += tool.durSecs;
       blocks.push({ type: "tool", tool });
     } else if (b.type === "steer") {

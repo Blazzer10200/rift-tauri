@@ -896,3 +896,34 @@ describe("coalescePolls — identical consecutive shell runs collapse to one car
     expect((segs[1] as { poll?: number }).poll).toBeUndefined();
   });
 });
+
+// ── #100: per-block adaptation memo ─────────────────────────────────────────
+// messageToTurn re-runs on every stream delta; the memo keeps StreamTool object
+// identity stable for unchanged blocks so child components skip re-render (the
+// main-thread-saturation fix). Store blocks are immutable — a changed block is
+// a NEW object — so identity is the correct cache key.
+describe("messageToTurn — per-block memoization (#100)", () => {
+  it("unchanged block objects yield identical StreamTool identity across re-runs", () => {
+    const shell = tool("Bash", "pending", { command: "echo hi" });
+    const read = tool("Read", "done", { file_path: "/a/b.ts" });
+    const pick = (m: ReturnType<typeof messageToTurn>) =>
+      m.blocks.filter((b): b is { type: "tool"; tool: StreamTool } => b.type === "tool").map((b) => b.tool);
+    const first = pick(messageToTurn(msg([shell, read])));
+    const second = pick(messageToTurn(msg([shell, read, text("done")])));
+    expect(second[0]).toBe(first[0]);
+    expect(second[1]).toBe(first[1]);
+  });
+
+  it("a replaced block object (immutable store update) re-adapts; siblings keep identity", () => {
+    const shell = tool("Bash", "pending", { command: "sleep 1" });
+    const read = tool("Read", "done", { file_path: "/a/c.ts" });
+    const pick = (m: ReturnType<typeof messageToTurn>) =>
+      m.blocks.filter((b): b is { type: "tool"; tool: StreamTool } => b.type === "tool").map((b) => b.tool);
+    const first = pick(messageToTurn(msg([shell, read])));
+    const settled = { ...shell, status: "done", result: "ok" };
+    const second = pick(messageToTurn(msg([settled, read])));
+    expect(second[0]).not.toBe(first[0]);
+    expect(second[0].status).toBe("done");
+    expect(second[1]).toBe(first[1]);
+  });
+});
