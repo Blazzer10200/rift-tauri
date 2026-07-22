@@ -46,6 +46,15 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
   }
+  // Every fenced block shares one chrome: [LANG · N lines · Copy] head bar
+  // over the body — shiki-highlighted, diff, unsupported-lang, and bare
+  // fences alike, so blocks read as one family regardless of grammar.
+  function codeHead(label: string, lineCount: number): string {
+    return `<div class="shiki-head"><span class="shiki-lang">${esc(label)}</span><span class="shiki-sep">·</span><span class="shiki-lines">${lineCount} line${lineCount === 1 ? "" : "s"}</span><span class="code-copy" role="button" tabindex="0" aria-label="Copy code">Copy</span></div>`;
+  }
+  function codeLines(text: string): number {
+    return text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+  }
   marked.use({
     renderer: {
       code({ text, lang }: { text: string; lang?: string }) {
@@ -92,18 +101,20 @@
             }
             return `<span class="${cls}"><span class="diff-gutter old">${oldCol}</span><span class="diff-gutter new">${newCol}</span><span class="diff-code">${code}</span></span>`;
           });
-          return `<pre class="diff-block"><code>${rows.join("")}</code></pre>`;
+          return `<div class="shiki-block" data-lang="diff">${codeHead("diff", codeLines(text))}<pre class="diff-block"><code>${rows.join("")}</code></pre></div>`;
         }
-        // Shiki path — supported language → render highlighted body wrapped
-        // in a header bar w/ [lang · N lines · Copy]. Unsupported language
-        // OR highlighter not ready yet → return false to fall through to
-        // marked's default (annotateCodeBlocks adds the copy button there).
+        // Supported language → shiki-highlighted body. Unsupported language
+        // or highlighter not warm yet → plain escaped body, but SAME wrapper
+        // + head bar (declared lang preserved as the label; bare fence →
+        // "text"). Warm-up upgrade happens via the shikiReady re-derive.
         const norm = normalizeLang(lang);
-        if (!norm) return false as unknown as string;
-        const html = highlightSync(text, lang);
-        if (!html) return false as unknown as string;
-        const lineCount = text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
-        return `<div class="shiki-block" data-lang="${esc(norm)}"><div class="shiki-head"><span class="shiki-lang">${esc(norm)}</span><span class="shiki-sep">·</span><span class="shiki-lines">${lineCount} line${lineCount === 1 ? "" : "s"}</span><span class="code-copy" role="button" tabindex="0" aria-label="Copy code">Copy</span></div>${html}</div>`;
+        const html = norm ? highlightSync(text, lang) : null;
+        const lineCount = codeLines(text);
+        if (html) {
+          return `<div class="shiki-block" data-lang="${esc(norm!)}">${codeHead(norm!, lineCount)}${html}</div>`;
+        }
+        const label = (norm ?? (lang ?? "").trim().split(/\s+/)[0].slice(0, 24)) || "text";
+        return `<div class="shiki-block" data-lang="${esc(label)}">${codeHead(label, lineCount)}<pre class="shiki"><code>${esc(text)}</code></pre></div>`;
       },
       codespan({ text }: { text: string }) {
         // Clickable file path — a code span that LOOKS like a workspace path
@@ -306,7 +317,15 @@
     const shikiBlock = copyBtn.closest(".shiki-block");
     const pre = shikiBlock?.querySelector("pre") ?? copyBtn.closest("pre");
     const code = pre?.querySelector("code");
-    const text = code?.textContent ?? "";
+    // Diff rows carry gutter line-number spans — rebuild the raw lines from
+    // the .diff-code column so Copy yields a clean patch, not "1 2 + code".
+    const text = pre?.classList.contains("diff-block")
+      ? Array.from(pre.querySelectorAll(".diff-line"), (row) => {
+          const t = (row.querySelector(".diff-code") ?? row.querySelector(".diff-gutter-span"))?.textContent ?? "";
+          // Empty source lines render as &nbsp; — map back to a blank line.
+          return t === "\u00a0" ? "" : t;
+        }).join("\n")
+      : (code?.textContent ?? "");
     if (!text) return;
     void navigator.clipboard.writeText(text).then(() => {
       // Clear any prior timer first — a rapid double-click would otherwise
@@ -468,8 +487,8 @@
   // onClick (delegated, like .code-copy).
   const CODE_CLAMP_LINES = 18;
   const CODE_CLAMP_HYST = 6;
-  function markCollapsible(host: HTMLElement, code: Element) {
-    const lineCount = (code.textContent ?? "").replace(/\n$/, "").split("\n").length;
+  function markCollapsible(host: HTMLElement, code: Element, lines?: number) {
+    const lineCount = lines ?? (code.textContent ?? "").replace(/\n$/, "").split("\n").length;
     if (lineCount <= CODE_CLAMP_LINES + CODE_CLAMP_HYST) return;
     const hidden = lineCount - CODE_CLAMP_LINES;
     host.setAttribute("data-collapsible", "true");
@@ -493,7 +512,9 @@
     // Collapse: shiki blocks clamp at the wrapper so the head bar stays visible.
     tpl.content.querySelectorAll(".shiki-block").forEach((block) => {
       const code = block.querySelector("code");
-      if (code) markCollapsible(block as HTMLElement, code);
+      // Diff rows are newline-free spans — count them instead of textContent lines.
+      const diffRows = block.querySelectorAll(".diff-line").length;
+      if (code) markCollapsible(block as HTMLElement, code, diffRows > 0 ? diffRows : undefined);
     });
     tpl.content.querySelectorAll("pre").forEach((pre) => {
       if (pre.classList.contains("diff-block")) return;
@@ -1148,7 +1169,8 @@
   .md :global([data-collapsible="true"]) { position: relative; }
   /* shiki: clamp the inner <pre> (keep the head bar visible); legacy: clamp the
      <pre> itself. The fade/pill button is the LAST child of the collapsible. */
-  .md :global(.shiki-block[data-collapsible="true"] pre.shiki) {
+  .md :global(.shiki-block[data-collapsible="true"] pre.shiki),
+  .md :global(.shiki-block[data-collapsible="true"] pre.diff-block) {
     max-height: 23rem;
     overflow: hidden;
   }
@@ -1157,6 +1179,7 @@
     overflow: hidden;
   }
   .md :global([data-collapsible="true"][data-expanded="true"] pre.shiki),
+  .md :global([data-collapsible="true"][data-expanded="true"] pre.diff-block),
   .md :global(pre.has-copy[data-collapsible="true"][data-expanded="true"]) {
     max-height: none;
     overflow-x: auto;
@@ -1224,6 +1247,16 @@
   }
 
   /* ── Diff code blocks (```diff fenced) ─────────────────────────────── */
+  /* Nested in the shared .shiki-block wrapper — strip the base .md pre
+     frame so the wrapper's chrome (border/radius/head bar) owns the look. */
+  .md :global(.shiki-block pre.diff-block) {
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    animation: none;
+  }
   .md :global(pre.diff-block) {
     padding: 0;
     overflow-x: auto;
@@ -1231,7 +1264,7 @@
   }
   .md :global(pre.diff-block code) {
     display: block;
-    padding: 4px 0;
+    padding: 6px 0 10px;
     white-space: pre;
     font-size: var(--fs-sm);
   }
