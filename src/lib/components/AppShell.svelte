@@ -31,8 +31,6 @@
   import CloseConfirm from "./shell/CloseConfirm.svelte";
   import { listen } from "@tauri-apps/api/event";
   import { invoke } from "@tauri-apps/api/core";
-  import Skeleton from "./shell/Skeleton.svelte";
-  import { bootLoad } from "../state/bootLoad.svelte";
 
   // Verified close-out: the backend intercepts the main window's ✕
   // (lib.rs on_window_event) and emits this; the modal confirms + runs the
@@ -291,12 +289,6 @@
         <Topbar />
         <main class="workspace">
           <WorkspaceShell />
-          {#if bootLoad.showSkeleton}
-            <div class="ws-skel" aria-hidden="true">
-              <Skeleton w="min(680px, 74%)" h="54px" radius="16px" />
-              <Skeleton w="150px" h="10px" radius="5px" delay={140} />
-            </div>
-          {/if}
         </main>
         <!-- Footer INSIDE the island — one surface, one level; the bar inherits
              the island's fill and rounded bottom corners. -->
@@ -401,14 +393,6 @@
   }
   @keyframes wsIn { from { transform: translateY(7px); } to { transform: none; } }
   @media (prefers-reduced-motion: reduce) { .workspace { animation: none; } }
-
-  /* Boot skeleton overlay — a subtle centered stand-in for the hero composer
-     while the first load runs; crossfades in, gone once the surface is ready. */
-  .ws-skel { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column;
-    align-items: center; justify-content: center; gap: 16px; pointer-events: none;
-    animation: ws-skel-in 300ms var(--ease-page) both; }
-  @keyframes ws-skel-in { from { opacity: 0; } to { opacity: 1; } }
-  @media (prefers-reduced-motion: reduce) { .ws-skel { animation: none; } }
 
   /* Onboarding takes the full surface below a minimal (brand + winctls) titlebar. */
   .ob-host {

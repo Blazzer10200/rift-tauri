@@ -231,32 +231,48 @@
 /* head dot: solid accent, no pulse — calm "parked" not "live grinding" */
 .sturn-head.live.awaiting-head .sh-dot { animation: none; background: var(--accent); }
 
-/* tool run — an ISLAND now (owner call 2026-07-15: bare rows read "too
-   transparent"). Same card language as .sshell/.sresult — hairline border +
-   faint fill + --radius-lg — so every tool block in the stream sits on one
-   family of framed shells. Detail unchanged; only the chrome got a frame.
-   Narration/prose stays boxless: content is still the protagonist. */
-.wline { margin: var(--stream-gap) 0; border: 1px solid var(--border); border-radius: var(--radius-lg);
+/* tool run — an ISLAND that hugs its content (2026-07-22 reshape: full-width
+   bars were 90% empty chrome — owner: "tacky"). Collapsed it's a compact
+   receipt chip sized to its summary; opening unfolds it into a full-width
+   ledger (interpolate-size animates the stretch where the engine supports it,
+   discrete jump elsewhere). Still the framed-island family per the 2026-07-15
+   owner call — never bare rows. */
+.wline { width: fit-content; max-width: 100%; margin: var(--stream-gap) 0;
+  border: 1px solid var(--border); border-radius: 11px;
   background: color-mix(in oklab, var(--fg) 2.5%, transparent); overflow: hidden;
-  animation: blockIn var(--dur-base) var(--ease-page) both; }
-.wline-head { display: flex; width: 100%; align-items: center; gap: 9px; font-size: var(--fs-sm); color: var(--fg-muted);
-  background: none; border: 0; cursor: pointer; padding: 7px 11px;
+  interpolate-size: allow-keywords;
+  animation: blockIn var(--dur-base) var(--ease-page) both;
+  transition: width var(--dur-base) var(--ease-page), border-color var(--dur-fast); }
+.wline:hover { border-color: var(--border-strong); }
+.wline.open { width: 100%; }
+.wline-head { display: flex; width: 100%; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--fg-muted);
+  background: none; border: 0; cursor: pointer; padding: 5.5px 9px 5.5px 10px;
   transition: color var(--dur-fast), background var(--dur-fast);
   max-width: 100%; min-width: 0; text-align: left; }
 .wline-head:hover { color: var(--fg); background: color-mix(in oklab, var(--fg) 3.5%, transparent); }
-.wline-head:hover .wline-ic { border-color: color-mix(in oklab, var(--accent) 45%, var(--border)); color: var(--accent); }
-.wline-ic { display: grid; place-items: center; width: 18px; height: 18px;
-  border: 1px solid color-mix(in oklab, var(--info) 16%, var(--border)); border-radius: 5px;
-  background: color-mix(in oklab, var(--info) 5%, transparent);
+.wline-head:hover .wline-ic { color: var(--accent); }
+/* Bare tinted glyph — the old bordered icon box stacked chip-in-chip chrome. */
+.wline-ic { display: grid; place-items: center;
   color: color-mix(in oklab, var(--info) 55%, var(--fg-muted)); flex: none;
-  transition: color var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast); }
+  transition: color var(--dur-fast); }
 /* Long summaries (regex patterns, absolute paths) truncate instead of running
    off the right edge of the message column — full text via the head's title. */
 .wline-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.wline-chev { color: var(--fg-faint); flex: none; margin-left: auto; transition: transform var(--dur-fast); }
+/* Trailing meta cluster — step count · total time · chevron. Sits flush after
+   the label while collapsed; rides the right edge once the card is open. */
+.wline-meta { display: inline-flex; align-items: center; gap: 7px; flex: none; margin-left: auto; padding-left: 4px; }
+.wline-count { min-width: 17px; height: 15px; padding: 0 4.5px; display: grid; place-items: center;
+  border-radius: 999px; font-size: 9.5px; font-weight: 650; font-variant-numeric: tabular-nums;
+  color: var(--fg-subtle); background: color-mix(in oklab, var(--fg) 6%, transparent); }
+.wline-dur { font-size: var(--fs-xs); color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+.wline-chev { color: var(--fg-faint); flex: none; transition: transform var(--dur-fast); }
 .wline-chev.open { transform: rotate(180deg); }
-.wline-list { margin: 0; padding: 2px 11px 9px 38px; display: flex; flex-direction: column; gap: 5px;
+.wline.open .wline-head { border-bottom: 1px solid color-mix(in oklab, var(--border) 55%, transparent); }
+/* Open ledger — rows hang off a hairline spine dropped from the lead glyph. */
+.wline-list { position: relative; margin: 0; padding: 6px 11px 9px 30px; display: flex; flex-direction: column; gap: 5px;
   animation: workOpen 0.3s var(--ease-page) both; }
+.wline-list::before { content: ""; position: absolute; left: 16px; top: 4px; bottom: 12px; width: 1px;
+  background: linear-gradient(to bottom, var(--border), color-mix(in oklch, var(--border) 25%, transparent)); }
 .wline-row { display: flex; align-items: baseline; gap: 6px;
   font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.55; color: var(--fg-muted);
   white-space: nowrap; overflow: hidden;

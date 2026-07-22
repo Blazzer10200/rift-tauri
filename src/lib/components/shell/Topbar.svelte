@@ -69,8 +69,9 @@
   .wc-x:hover { background: var(--danger); color: var(--danger-fg); }
   .wc-min { width: 10px; height: 1.5px; background: currentColor; }
   .wc-max { width: 9px; height: 9px; border: 1.5px solid currentColor; border-radius: 2px; }
-  /* Restore glyph: front square + a second square peeking out top-right. */
-  .wc-restore { position: relative; width: 9px; height: 9px; }
-  .wc-restore::before { content: ""; position: absolute; left: 0; bottom: 0; width: 7px; height: 7px; border: 1.5px solid currentColor; border-radius: 1.5px; background: var(--bg); }
-  .wc-restore::after { content: ""; position: absolute; right: 0; top: 0; width: 7px; height: 7px; border: 1.5px solid currentColor; border-radius: 1.5px; }
+  /* Restore glyph: front square + only the exposed CORNER of the back square
+     (two full squares side-by-side read as a doubled maximize icon). */
+  .wc-restore { position: relative; width: 10px; height: 10px; }
+  .wc-restore::before { content: ""; position: absolute; left: 0; bottom: 0; width: 7.5px; height: 7.5px; border: 1.5px solid currentColor; border-radius: 2px; }
+  .wc-restore::after { content: ""; position: absolute; right: 0; top: 0; width: 7px; height: 7px; border-top: 1.5px solid currentColor; border-right: 1.5px solid currentColor; border-top-right-radius: 2.5px; }
 </style>

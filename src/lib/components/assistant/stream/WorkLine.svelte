@@ -31,6 +31,7 @@
   const Icon = $derived(NAME_ICONS[leadTool?.name ?? ""] ?? ICONS[lead] ?? Wrench);
   const anyActive = $derived(tools.some((t) => t.status === "pending"));
   const summary = $derived(groupNames(tools));
+  const totalSecs = $derived(tools.reduce((a, t) => a + t.durSecs, 0));
 
   // Read/grep/MCP rows carry their real response (streamModel forwards it) —
   // the body renders under the row so "Read X" / "Searched Y" / "Called Z"
@@ -52,11 +53,15 @@
     <span class="wa-cap">{#if tools[0].dir}<span class="wa-dir">{tools[0].dir}</span>{/if}<b>{tools[0].cap}</b></span>
   </div>
 {:else}
-  <div class="wline">
+  <div class="wline" class:open>
     <button class="wline-head" onclick={() => (userOpen = !userOpen)} type="button" title={summary}>
       <span class="wline-ic"><Icon size={12} strokeWidth={2} /></span>
       <span class="wline-label">{summary}</span>
-      <ChevronDown class="wline-chev {open ? 'open' : ''}" size={13} strokeWidth={2} />
+      <span class="wline-meta">
+        {#if tools.length > 1}<span class="wline-count">{tools.length}</span>{/if}
+        {#if totalSecs >= 1}<span class="wline-dur">{fmtDur(totalSecs)}</span>{/if}
+        <ChevronDown class="wline-chev {open ? 'open' : ''}" size={12} strokeWidth={2} />
+      </span>
     </button>
     {#if open}
       <div class="wline-list">
