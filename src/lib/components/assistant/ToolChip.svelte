@@ -25,7 +25,7 @@
   import OutputBlock from "./stream/OutputBlock.svelte";
   import ReadResult from "./stream/ReadResult.svelte";
   import GrepResult from "./stream/GrepResult.svelte";
-  import { stripAnsi, shortScope, trimCmd } from "./stream/streamModel";
+  import { stripAnsi, shortScope, trimCmd, RESULT_TEXT_CAP } from "./stream/streamModel";
   import { isCardTool } from "./bubble/helpers";
 
   import { tooltip } from "$lib/actions/tooltip";
@@ -359,11 +359,10 @@
 
   // Error text — the one result shape still rendered by a local <pre> (the
   // shared OutputBlock/ReadResult/GrepResult bodies handle every success shape).
-  const ERROR_CHAR_CAP = 20000;
   const errorText = $derived.by(() => {
     if (!tool.result) return "";
     const s = stripAnsi(tool.result);
-    return s.length > ERROR_CHAR_CAP ? s.slice(0, ERROR_CHAR_CAP) + "\n… truncated" : s;
+    return s.length > RESULT_TEXT_CAP ? s.slice(0, RESULT_TEXT_CAP) + "\n… truncated" : s;
   });
 
   // Structured-body inputs (ReadResult gutter offset, GrepResult highlight).
@@ -415,12 +414,11 @@
   // tool.result for an Agent block is model-controlled subagent output with no
   // size bound — a runaway/hostile agent returning megabytes would freeze the UI
   // on the synchronous marked.parse + DOMPurify pass. Cap before render.
-  const AGENT_RESULT_CAP = 20000;
   const agentResult = $derived.by(() => {
     const r = tool.result;
     if (!r) return null;
-    return r.length > AGENT_RESULT_CAP
-      ? { text: r.slice(0, AGENT_RESULT_CAP), truncated: r.length - AGENT_RESULT_CAP }
+    return r.length > RESULT_TEXT_CAP
+      ? { text: r.slice(0, RESULT_TEXT_CAP), truncated: r.length - RESULT_TEXT_CAP }
       : { text: r, truncated: 0 };
   });
 

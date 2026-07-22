@@ -51,6 +51,56 @@
     return html.replace(/^<pre[^>]*><code[^>]*>/, "").replace(/<\/code><\/pre>\s*$/, "");
   });
 
+  // Typewriter command entry — ONLY when the block mounts live (pending): the
+  // command types in at terminal pace, cursor riding. A block mounted with its
+  // result already there (history load, replayed convo) renders instantly —
+  // replays never retype. Total type time scales with command length, clamped
+  // so long one-liners don't crawl. Reduced motion skips the whole act.
+  const reducedMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+  // svelte-ignore state_referenced_locally -- intentional mount-time snapshot: only a block born pending types
+  const mountedLive = tool.status === "pending" && !reducedMotion;
+  let typedN = $state(mountedLive ? 0 : Number.MAX_SAFE_INTEGER);
+  const typing = $derived(typedN < (tool.cap ?? "").length);
+  $effect(() => {
+    if (!mountedLive) return;
+    const cmd = tool.cap ?? "";
+    if (cmd.length === 0) { typedN = Number.MAX_SAFE_INTEGER; return; }
+    const total = Math.min(Math.max(cmd.length * 14, 120), 320);
+    const per = total / cmd.length;
+    let stop = false;
+    let h: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      if (stop) return;
+      typedN = Math.min(typedN + 1, cmd.length);
+      if (typedN < cmd.length) h = setTimeout(tick, per * (0.6 + Math.random() * 0.9));
+    };
+    h = setTimeout(tick, per);
+    return () => { stop = true; clearTimeout(h); };
+  });
+
+  // tty-wait: command entered, no output yet → an empty output well with an
+  // idle cursor (a terminal waiting is a cursor on a blank line, not a blank
+  // card). The header cursor hands off to the well cursor once typing ends.
+  const showWait = $derived(running && !typing && !hasOut && mode !== "minimal");
+
+  // Output lands whole (the CLI can't stream stdout mid-run) — when it arrives
+  // on a live block, the entrance cascade plays with the cursor parked on the
+  // next line for a beat, terminal-print style, before the receipt settles.
+  let ride = $state(false);
+  let rideTimer: ReturnType<typeof setTimeout> | null = null;
+  let hadOut = false;
+  $effect(() => {
+    if (!hasOut || hadOut) return;
+    hadOut = true;
+    if (mountedLive && !reducedMotion) {
+      ride = true;
+      rideTimer = setTimeout(() => { ride = false; rideTimer = null; }, 750);
+    }
+  });
+  $effect(() => () => { if (rideTimer) clearTimeout(rideTimer); });
+
   // "full" auto-expands (live in-and-out); "peek"/"minimal" start collapsed.
   // While a command is still running in "full" mode, keep it open so the user
   // watches output land. User can override either way once it's done.
@@ -97,11 +147,18 @@
       <span class="ssh-prompt {flavor}" use:tooltip={flavor === "pwsh" ? "Ran in PowerShell" : flavor === "cmd" ? "Ran in cmd.exe" : "Ran in bash"} aria-hidden="true">{promptGlyph}</span>
     {/snippet}
     {#snippet title()}
-      <code class="ssh-cmd" title={fullCmd}>{#if cmdHtml}{@html cmdHtml}{:else}{tool.cap}{/if}</code>
+      <code class="ssh-cmd" title={fullCmd}>{#if typing}{(tool.cap ?? "").slice(0, typedN)}{:else if cmdHtml}{@html cmdHtml}{:else}{tool.cap}{/if}</code>
       {#if poll && poll > 1}<span class="ssh-poll" title="Ran {poll} times waiting on this — showing the latest run">{running ? "waiting" : "polled"} ×{poll}</span>{/if}
-      {#if running}<span class="ssh-cursor" aria-hidden="true"></span>{/if}
+      {#if running && !showWait}<span class="ssh-cursor" aria-hidden="true"></span>{/if}
     {/snippet}
   </BlockHeader>
+
+  {#if showWait}
+    <div class="ssh-outwrap">
+      <div class="ssh-outlabel"><span>output</span></div>
+      <div class="ssh-wait"><span class="ssh-cursor" aria-hidden="true"></span></div>
+    </div>
+  {/if}
 
   {#if hasOut && mode !== "minimal"}
     {#if mode === "peek" && !open}
@@ -117,7 +174,7 @@
       <!-- OUT: the command's output, under a labeled rule so IN vs OUT is clear. -->
       <div class="ssh-outwrap" transition:slide={{ duration: 140 }}>
         <div class="ssh-outlabel"><span>output</span>{#if failed}<span class="ssh-outlabel-bad">error</span>{/if}</div>
-        <OutputBlock text={tool.result ?? ""} start={mode === "full" ? "expanded" : "collapsed"} live={running} tone="shell" fold="head-tail" />
+        <OutputBlock text={tool.result ?? ""} start={mode === "full" ? "expanded" : "collapsed"} live={running} cursor={running || ride} tone="shell" fold="head-tail" />
         {#if !running}
           <div class="ssh-exit" class:bad={failed}>
             <span class="ssh-exit-mark">{failed ? "✗" : "✓"}</span>
@@ -195,13 +252,18 @@
 
   /* Exit-status footer — a slim truthful receipt: ✓/✗ · duration · line count.
      (We deliberately don't invent an exit CODE — the envelope doesn't carry one.) */
-  .ssh-exit { display: flex; align-items: center; gap: 6px; padding: 4px 11px 6px;
+  .ssh-exit { animation: sshExitIn 240ms var(--ease-page) both;
+    display: flex; align-items: center; gap: 6px; padding: 4px 11px 6px;
     border-top: 1px solid color-mix(in oklch, var(--border) 45%, transparent);
     font-family: var(--font-mono); font-size: 10px; color: var(--fg-faint);
     font-variant-numeric: tabular-nums; }
   .ssh-exit .ssh-exit-mark { color: var(--ok); font-weight: 700; }
   .ssh-exit.bad .ssh-exit-mark { color: var(--danger); }
   .ssh-exit-pip { opacity: 0.5; }
+  @keyframes sshExitIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+  /* tty-wait well — blank output line with the cursor parked on it. */
+  .ssh-wait { padding: 2px 11px 8px; line-height: 1.55; display: flex; align-items: center; }
 
   .ssh-peekwrap { border-top: 1px solid var(--border); }
   .ssh-peek { padding: 2px 11px 7px;

@@ -23,6 +23,11 @@
 :root[data-density="comfy"]   { --stream-gap: 15px; --stream-gap-turn: 19px; --stream-gap-between-turns: 27px; }
 
 @keyframes blockIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+/* dropdown polish — an opened body's content fades in a beat after the slide
+   starts, so the reveal reads as surface-then-content instead of a hard pop */
+@keyframes bodyFadeIn { from { opacity: 0; } to { opacity: 1; } }
+.ssh-outwrap > *, .sr-out > * { animation: bodyFadeIn 200ms var(--ease-soft) 40ms both; }
+@media (prefers-reduced-motion: reduce) { .ssh-outwrap > *, .sr-out > * { animation: none; } }
 @keyframes workOpen { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 @keyframes ringspin { to { transform: rotate(360deg); } }
 @keyframes shim { from { background-position: 100% 0; } to { background-position: -100% 0; } }
@@ -145,6 +150,10 @@
 /* Empty thinking block (no plaintext reasoning): a static label, not a button —
    no pointer, no hover feedback (CC-UI ref §3). */
 .sthink-row.bare { cursor: default; }
+/* live pass — the label breathes while reasoning streams below it */
+.sthink-row.live { color: var(--fg-muted); }
+.sthink-row.live > span { animation: sthinkBreathe 2.2s ease-in-out infinite; }
+@keyframes sthinkBreathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
 .sthink-chev { transition: transform var(--dur-fast); }
 .sthink-chev.open { transform: rotate(180deg); }
 /* Thinking body — Markdown now (parity w/ MessageBubble's thinking block), in
@@ -241,7 +250,8 @@
 .wline-list { margin: 0; padding: 2px 11px 9px 38px; display: flex; flex-direction: column; gap: 5px;
   animation: workOpen 0.3s var(--ease-page) both; }
 .wline-row { font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.55; color: var(--fg-faint);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  animation: workOpen 0.24s var(--ease-page) both; }
 .wline-row .wr-verb { color: var(--fg-subtle); }
 .wline-row .wr-dir { color: var(--fg-faint); opacity: 0.7; }
 /* Result meta — what the tool came back with ("→ 214 lines", "→ 3 matches"),
@@ -262,20 +272,15 @@
 .wline-row b { color: var(--fg-2); font-weight: 600; }
 /* in-flight tool — single active line, now on the same island shell as .wline
    (a live read/grep is the one row the eye hunts for during a working turn; a
-   bare line under framed siblings read as a glitch, not a design). The faint
-   accent sweep travels INSIDE the card while it runs; the accent-tinted
-   hairline marks it as the live one at a glance. */
+   bare line under framed siblings read as a glitch, not a design). The pulsing
+   dot + verb shimmer + accent-tinted hairline carry the live state — NO
+   traveling light-band across the card (DESIGN.md §8, 2026-07-21). */
 .wline-active { position: relative; display: flex; align-items: center; gap: 8px; margin: var(--stream-gap) 0;
   padding: 7px 11px; font-size: var(--fs-sm); color: var(--fg-muted);
   border: 1px solid color-mix(in oklab, var(--accent) 22%, var(--border));
   border-radius: var(--radius-lg); background: color-mix(in oklab, var(--fg) 2.5%, transparent);
   max-width: 100%; min-width: 0; overflow: hidden;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
-.wline-active::after { content: ""; position: absolute; inset: 0; pointer-events: none;
-  background: linear-gradient(100deg, transparent 20%,
-    color-mix(in oklab, var(--accent) 11%, transparent) 50%, transparent 80%);
-  background-size: 220% 100%; animation: waScan 2.1s var(--ease-page) infinite; }
-@keyframes waScan { from { background-position: 130% 0; } to { background-position: -130% 0; } }
 .wline-active .wa-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; animation: streamLivePulse var(--pulse-live) ease-out infinite; }
 .wline-active .wa-text { flex: none; }
 .wline-active .wa-cap { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-faint);

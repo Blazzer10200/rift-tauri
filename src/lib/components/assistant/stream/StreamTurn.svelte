@@ -160,8 +160,10 @@
   // or token lands, `thinkingNow` falls false and the head returns to "Working…"
   // (the footer verb + work rows take over). The done collapsible "Thought for
   // Xs" is still the StreamThinking block below.
+  // When the live pass streams visible text, the StreamThinking block below owns
+  // the "Thinking…" word — the head saying it too would double the label.
   const thinkingNow = $derived(
-    streaming && !!turn.thinking?.active && !liveTool && liveTokens == null,
+    streaming && !!turn.thinking?.active && !turn.thinking?.text && !liveTool && liveTokens == null,
   );
   const headLabel = $derived(
     !streaming
@@ -287,7 +289,9 @@
   </div>
 
   <div class="sturn-body" class:railed class:live={streaming}>
-  {#if turn.thinking && !turn.thinking.active}
+  <!-- Live pass WITH text streams open in place (word-reveal); a text-less live
+       pass (Opus omits thinking plaintext) keeps the head-only "Thinking…". -->
+  {#if turn.thinking && (!turn.thinking.active || turn.thinking.text)}
     <StreamThinking active={turn.thinking.active} durSecs={turn.thinking.durSecs} text={turn.thinking.text} />
   {/if}
 
@@ -405,6 +409,7 @@
       {/if}
       {#if turn.meta}
         <span class="sapplied-meta">{turn.meta.time}</span>
+        {#if turn.meta.tokens}<span class="sapplied-meta" use:tooltip={"Output tokens this turn generated"}>{fmtTokens(turn.meta.tokens)} tokens</span>{/if}
         {#if turn.meta.cost}<span class="sapplied-cost" use:tooltip={"Total cost of this turn"}>{turn.meta.cost}</span>{/if}
         {#if turn.meta.fast}<span class="sapplied-fast" use:tooltip={"This turn ran in fast mode — quicker Opus output, billed from your usage credits (pay-per-use)"}><Zap size={11} />fast</span>{/if}
       {/if}

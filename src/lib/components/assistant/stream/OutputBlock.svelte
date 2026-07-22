@@ -3,6 +3,7 @@
   import { ChevronDown, ChevronUp } from "lucide-svelte";
   import {
     splitOutput, splitOutputFold, nextRevealTier, ansiLines, classifyShellLine,
+    OUTPUT_CHAR_CAP,
     type RevealTier, type AnsiSeg,
   } from "./streamModel";
 
@@ -24,12 +25,16 @@
     live = false,
     tone = "plain",
     fold = "head",
+    cursor = false,
   }: {
     text: string;
     start?: RevealTier;
     live?: boolean;
     tone?: "plain" | "shell";
     fold?: "head" | "head-tail";
+    // Terminal cursor parked on the line after the output — shown while the
+    // command still runs and for a beat after output lands (print-settle).
+    cursor?: boolean;
   } = $props();
 
   const reducedMotion =
@@ -38,9 +43,8 @@
 
   // A pathological single-line blob (minified JSON, base64) has few lines but
   // can still freeze layout — hard char cap before any line math.
-  const CHAR_CAP = 60_000;
-  const capped = $derived(text.length > CHAR_CAP);
-  const body = $derived((capped ? text.slice(0, CHAR_CAP) : text).replace(/\s+$/, ""));
+  const capped = $derived(text.length > OUTPUT_CHAR_CAP);
+  const body = $derived((capped ? text.slice(0, OUTPUT_CHAR_CAP) : text).replace(/\s+$/, ""));
 
   // Init once from the prop — the tier is user-driven (Show more / Collapse)
   // after mount, so it deliberately doesn't track later `start` changes.
@@ -94,6 +98,9 @@
           <div class="term-line {classifyShellLine(cleanLine(i))}" style:animation-delay="{lineDelay(i)}ms">{#each segLines[i] as seg, si (si)}<span class={seg.cls}>{seg.text}</span>{:else}{" "}{/each}</div>
         {/each}
       {/if}
+      {#if cursor && !reducedMotion}
+        <div class="term-line term-cursorline" style:animation-delay="{lineDelay(view.shown)}ms"><span class="term-cursor" aria-hidden="true"></span></div>
+      {/if}
     </div>
   {:else}
     <pre class="oblock-out" class:scrolls>{view.lines.slice(0, view.shown).join("\n")}</pre>
@@ -141,6 +148,13 @@
     animation: termLineIn var(--dur-base) var(--ease-page) both; }
   @keyframes termLineIn { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
   @media (prefers-reduced-motion: reduce) { .term-line { animation: none; } }
+  /* Cursor parked on the next line after output — terminal print-settle. */
+  .term-cursorline { line-height: 1.55; }
+  .term-cursor { display: inline-block; width: 7px; height: 13px; border-radius: 1.5px;
+    vertical-align: text-bottom;
+    background: color-mix(in oklab, var(--accent) 80%, transparent);
+    animation: termCurBlink 1.06s steps(1) infinite; }
+  @keyframes termCurBlink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
   /* Semantic tone (keyword-based) — the line's base color. */
   .term-line.ok   { color: var(--ok); }
   .term-line.err  { color: var(--danger); }

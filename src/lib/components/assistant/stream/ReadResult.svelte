@@ -3,7 +3,7 @@
   // blocks) with a real line-number gutter. Handles BOTH backend shapes: the
   // CLI Read tool's `cat -n`-style gutter (sniffed + stripped into structured
   // numbers) and rift's MCP read_file raw content (numbered from `offset`).
-  import { parseReadOutput } from "./streamModel";
+  import { parseReadOutput, OUTPUT_CHAR_CAP } from "./streamModel";
   import { highlightSync, normalizeLang, whenReady } from "$lib/state/highlighter.svelte";
   import { leafName } from "$lib/utils/path";
 
@@ -14,9 +14,8 @@
   }: { text: string; path?: string | null; offset?: number | null } = $props();
 
   // Shiki cost guard — a 500KB read shouldn't lock the frame on highlight.
-  const CHAR_CAP = 60_000;
-  const capped = $derived(text.length > CHAR_CAP);
-  const raw = $derived((capped ? text.slice(0, CHAR_CAP) : text).replace(/\s+$/, ""));
+  const capped = $derived(text.length > OUTPUT_CHAR_CAP);
+  const raw = $derived((capped ? text.slice(0, OUTPUT_CHAR_CAP) : text).replace(/\s+$/, ""));
 
   const parsed = $derived(parseReadOutput(raw));
   const code = $derived(parsed ? parsed.code : raw);

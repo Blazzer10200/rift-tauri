@@ -170,7 +170,7 @@ export type TurnModel = {
   thinking: { active: boolean; durSecs: number; text: string } | null;
   outcome: TurnOutcome;
   files: number; // distinct files edited/created (only meaningful for "applied")
-  meta: { time: string; cost: string | null; fast: boolean } | null; // footer time·cost(·fast) line
+  meta: { time: string; cost: string | null; tokens: number | null; fast: boolean } | null; // footer time·tokens·cost(·fast) line
   totalSecs: number;
 };
 
@@ -626,6 +626,13 @@ export function outputPeek(result: string | null | undefined, n = 3): { lines: s
 //
 // The cap steps are line COUNTS, not pixels, so a wall of short lines and a few
 // long ones both cap predictably. Kept pure + exported for unit tests.
+// Hard char caps before any render/line math — ONE source for every output
+// body in both trees (a pathological blob can freeze layout regardless of
+// line counts). 60k for structured output bodies; 20k for model-controlled
+// free text (errors, agent results) that also hits marked/DOMPurify.
+export const OUTPUT_CHAR_CAP = 60_000;
+export const RESULT_TEXT_CAP = 20_000;
+
 export const REVEAL_COLLAPSED = 12; // first glance — a head tall enough to be useful
 export const REVEAL_EXPANDED = 40;  // after one "Show more" — most output fits here
 // Never hide a tail this short behind a click — a "Show 4 more lines" button
@@ -739,7 +746,8 @@ export function messageToTurn(m: ChatMessage): TurnModel {
   const cost = typeof m.costUsd === "number" && m.costUsd > 0 ? `$${m.costUsd.toFixed(2)}` : null;
   // `fast` is stamped at result-time only when the CLI confirmed fast output
   // (streaming.ts) — the chip is honest state, never a request echo.
-  const meta = outcome === "text" ? null : { time: fmtDur(shownSecs), cost, fast: m.fast === true };
+  const tokens = typeof m.outputTokens === "number" && m.outputTokens > 0 ? m.outputTokens : null;
+  const meta = outcome === "text" ? null : { time: fmtDur(shownSecs), cost, tokens, fast: m.fast === true };
 
   return { blocks, thinking, outcome, files: changedFiles.size, meta, totalSecs: shownSecs };
 }

@@ -187,6 +187,15 @@ seed rules below.
   line in the row itself (not just a tooltip), and a first-enable toast. Accent = free;
   amber = costs money. Same family as the bypass pill.
 
+- DON'T use a traveling light-band shimmer (skeleton-loader sweep) as a "working"
+  state (2026-07-21, stream-blocks comp — owner: "that little loading blurry block…
+  looks old school"). A blurry gradient sweeping across content is 2015 skeleton-UI
+  vocabulary and reads as fake progress. Show waiting in the surface's OWN idiom:
+  a terminal waits with an idle cursor where output will appear + a ticking elapsed
+  timer + the breathing live dot — honest signals, no light show. (Scope: banded
+  sweeps over blocks/rows; the owner-approved accent `.shim` on single live VERB
+  text is a different, settled treatment — don't extend it to blocks either.)
+
 ## 9. Agent guide — process over palette
 
 1. **Intent first:** before pixels, state in ≤2 sentences what the element's job is and

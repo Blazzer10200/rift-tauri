@@ -1267,6 +1267,13 @@ export function onStreamLine(tab: TabState, raw: string) {
         mutateStreaming(tab, (m) => ({ ...m, turnDurationMs: (m.turnDurationMs ?? 0) + wallMs }));
       }
       const resultUsage = (env as { usage?: Record<string, unknown> }).usage;
+      // Token total for the done receipt — same accumulate-don't-overwrite rule
+      // as costUsd (merged continuations reopen the message).
+      const outTok = resultUsage && typeof resultUsage.output_tokens === "number"
+        ? (resultUsage.output_tokens as number) : null;
+      if (outTok != null && outTok > 0) {
+        mutateStreaming(tab, (m) => ({ ...m, outputTokens: (m.outputTokens ?? 0) + outTok }));
+      }
       if (resultUsage) recordTurnUsage(tab, resultUsage, true);
       // Ground-truth context window (#94 self-correction): the CLI reports the
       // window each model actually ran against — modelUsage[id].contextWindow —
