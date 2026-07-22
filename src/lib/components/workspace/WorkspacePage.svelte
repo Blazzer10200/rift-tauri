@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import {
     FolderOpen, Plus, Trash2, Check, X, Pencil,
@@ -154,19 +154,49 @@
   let dInclude = $state("");
   let dExclude = $state("");
   let recentOpen = $state(false);
+  // Scope globs are power-user territory — folded behind a disclosure so the
+  // default flow is just Folder → Create. Forced open while a pattern is invalid
+  // (the error must stay visible until fixed).
+  let advOpen = $state(false);
+  // Once the user types a name themselves, stop auto-deriving it from the folder.
+  let nameTouched = $state(false);
   let nameEl = $state<HTMLInputElement | null>(null);
-  // Land the caret in Name whenever the editor opens (or switches target).
-  $effect(() => { if (editing) nameEl?.focus(); });
+  let folderEl = $state<HTMLInputElement | null>(null);
+  // Land the caret where the flow starts: Folder when empty, else Name.
+  $effect(() => {
+    if (editing) untrack(() => (dRoot.trim() ? nameEl : folderEl)?.focus());
+  });
 
   const incGlobs = $derived(globSummary(dInclude));
   const excGlobs = $derived(globSummary(dExclude));
   const canSave = $derived(
     dName.trim().length > 0 && dRoot.trim().length > 0 && incGlobs.invalid === 0 && excGlobs.invalid === 0,
   );
+  const advForced = $derived(incGlobs.invalid > 0 || excGlobs.invalid > 0);
+  // One-line rollup shown on the collapsed disclosure — tells the user the
+  // scope is already sane without making them open it.
+  const scopeSummary = $derived.by(() => {
+    if (advForced) return "fix invalid pattern";
+    const inc = incGlobs.total;
+    const exc = excGlobs.total;
+    if (inc === 0 && exc === 0) return "reading the whole folder";
+    if (inc === 0) return `whole folder · ${exc} junk pattern${exc === 1 ? "" : "s"} skipped`;
+    return `${inc} include · ${exc} exclude`;
+  });
 
   const linesToList = (s: string) => s.split("\n").map((l) => l.trim()).filter(Boolean);
   const listToLines = (l: string[]) => l.join("\n");
   const folderName = (root: string) => root.replace(/[/\\]+$/, "").split(/[/\\]/).pop() || root;
+  // Junk nobody wants Rift reading — seeded into every NEW project so the
+  // default scope is sane with zero glob knowledge. Fully editable in Advanced.
+  const DEFAULT_EXCLUDE = [
+    "**/node_modules/**", "**/.git/**", "**/dist/**", "**/build/**",
+    "**/target/**", "**/.svelte-kit/**", "**/__pycache__/**", "*.lock",
+  ];
+  // Keep Name in lockstep with Folder until the user claims it.
+  function autoName() {
+    if (!nameTouched || !dName.trim()) dName = dRoot.trim() ? folderName(dRoot.trim()) : "";
+  }
 
   // Folders not yet wired to a project, offered inside the editor's Folder field.
   const editorRecents = $derived(
@@ -182,8 +212,10 @@
     dRoot = prettyPath(root);
     dName = root ? folderName(root) : "";
     dInclude = "";
-    dExclude = "";
+    dExclude = DEFAULT_EXCLUDE.join("\n");
     recentOpen = false;
+    advOpen = false;
+    nameTouched = false;
   }
 
   // "Adopt" = New project pre-seeded from a folder the user already has open.
@@ -197,13 +229,15 @@
     dInclude = listToLines(p.include);
     dExclude = listToLines(p.exclude);
     recentOpen = false;
+    advOpen = false;
+    nameTouched = true;
   }
 
   function cancelEdit() { editing = null; isNew = false; recentOpen = false; }
 
   function pickRecentInEditor(r: string) {
     dRoot = prettyPath(r);
-    if (!dName.trim()) dName = folderName(r);
+    autoName();
     recentOpen = false;
   }
 
@@ -221,7 +255,7 @@
       const path = typeof result === "string" ? result : null;
       if (path) {
         dRoot = path;
-        if (!dName.trim()) dName = folderName(path);
+        autoName();
       }
     } catch (e) {
       notify.warn("Folder picker failed", { detail: String(e) });
@@ -384,7 +418,7 @@
             <div class="ed-id">
               <span class="ed-title">{isNew ? "New project" : "Edit project"}</span>
               <span class="ed-sub">{isNew
-                ? "Point Rift at a folder and scope which files it can read."
+                ? "Pick a folder — Rift names the project for you and skips the usual junk (node_modules, build output)."
                 : "Rename, move, or re-scope this project."}</span>
             </div>
             <button class="ico-btn" type="button" onclick={cancelEdit} aria-label="Cancel">
@@ -393,16 +427,11 @@
           </div>
 
           <div class="id-grid">
-          <label class="fld">
-            <span class="fld-lbl">Name</span>
-            <input class="rift-input" type="text" placeholder="My project" bind:value={dName} bind:this={nameEl} autocomplete="off"
-              onkeydown={(e) => { if (e.key === "Enter" && canSave && !saving) { e.preventDefault(); void save(); } }} />
-          </label>
-
           <div class="fld">
             <span class="fld-lbl">Folder</span>
             <div class="folder-row">
-              <input class="rift-input mono" type="text" placeholder="Pick a folder…" bind:value={dRoot} autocomplete="off"
+              <input class="rift-input mono" type="text" placeholder="Pick a folder…" bind:value={dRoot} bind:this={folderEl} autocomplete="off"
+                oninput={autoName}
                 onkeydown={(e) => { if (e.key === "Enter" && canSave && !saving) { e.preventDefault(); void save(); } }} />
               {#if editorRecents.length > 0}
                 <div class="recent-wrap">
@@ -435,9 +464,25 @@
               </button>
             </div>
           </div>
+
+          <label class="fld">
+            <span class="fld-lbl">Name <span class="fld-hint">auto-filled from the folder</span></span>
+            <input class="rift-input" type="text" placeholder="My project" bind:value={dName} bind:this={nameEl} autocomplete="off"
+              oninput={() => (nameTouched = true)}
+              onkeydown={(e) => { if (e.key === "Enter" && canSave && !saving) { e.preventDefault(); void save(); } }} />
+          </label>
           </div>
 
-          <div class="pat-grid">
+          <!-- Scope is a power feature — collapsed to a one-line rollup by
+               default; forced open while a pattern is invalid. -->
+          <button class="adv-toggle" type="button" onclick={() => (advOpen = !advOpen)}
+            aria-expanded={advOpen || advForced} aria-controls="ed-adv">
+            <ChevronDown size={14} class={"adv-chev" + (advOpen || advForced ? " open" : "")} />
+            <span class="adv-tt">File scope</span>
+            <span class="adv-sum" class:bad={advForced}>{scopeSummary}</span>
+          </button>
+          {#if advOpen || advForced}
+          <div class="pat-grid" id="ed-adv">
             <label class="fld">
               <span class="fld-lbl">Include <span class="fld-hint">one glob per line · empty = everything</span>
                 {#if incGlobs.invalid === 0 && incGlobs.total > 0}<span class="glob-ct">{incGlobs.total} pattern{incGlobs.total === 1 ? "" : "s"}</span>{/if}</span>
@@ -453,6 +498,7 @@
               {#if excGlobs.invalid > 0}<span class="glob-err">{excGlobs.invalid} invalid · {excGlobs.firstError}</span>{/if}
             </label>
           </div>
+          {/if}
 
           <div class="ed-foot">
             {#if !isNew}
@@ -503,7 +549,7 @@
                  the user, so we don't repeat the instruction here. -->
             <div class="empty lean">
               <div class="empty-tt">No projects yet</div>
-              <div class="empty-sub">Name a project folder and scope which files Rift can read.</div>
+              <div class="empty-sub">Point Rift at a folder — it names the project and skips the junk for you.</div>
               <button class="save-btn" type="button" onclick={() => startNew()}>
                 <Plus size={15} strokeWidth={2.4} /> New project
               </button>
@@ -567,7 +613,7 @@
               <span class="sc-ic"><Sparkles size={14} /></span>
               <span class="sc-tx">
                 Save <b>{ctxName}</b> as a project
-                <small>Scope which files Rift reads and pin it to the sidebar</small>
+                <small>One click — pins it to the sidebar with a sane scope built in</small>
               </span>
               <ArrowRight size={15} class="sc-go" />
             </button>
@@ -737,7 +783,9 @@
   /* Tight vertical rhythm — the whole hub targets the DEFAULT window (1600×1000)
      with no scrollbar; scroll appears only when content genuinely demands it
      (5+ projects, expanded news). */
-  .sb-wrap { max-width: 1200px; margin: 0 auto; padding: 14px 40px; display: flex; flex-direction: column; gap: 10px; }
+  /* 1200 → 1340: fullscreen on wide monitors gets a 4-up project grid instead
+     of dead gutters, while the default window (1600×1000) still reads centered. */
+  .sb-wrap { max-width: 1340px; margin: 0 auto; padding: 14px 40px; display: flex; flex-direction: column; gap: 10px; }
 
   /* ── Header ─────────────────────────────────────────────────────────────── */
   .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
@@ -936,8 +984,9 @@
   .ed-id { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
   .ed-title { font-size: var(--fs-lg); font-weight: 680; letter-spacing: -0.01em; color: var(--fg); }
   .ed-sub { font-size: var(--fs-sm); color: var(--fg-muted); }
-  /* Name (short) + Folder (long) share one row; stack when narrow. */
-  .id-grid { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(0, 1.9fr); gap: 14px; }
+  /* Folder (long, leads the flow) + Name (short, auto-filled) share one row;
+     stack when narrow. */
+  .id-grid { display: grid; grid-template-columns: minmax(0, 1.9fr) minmax(200px, 1fr); gap: 14px; }
   @media (max-width: 760px) { .id-grid { grid-template-columns: minmax(0, 1fr); } }
   :global(.editor .spin) { animation: wsActSpin 0.9s linear infinite; }
   .ico-btn { width: 30px; height: 30px; display: grid; place-items: center; border-radius: var(--radius); color: var(--fg-muted);
@@ -982,6 +1031,18 @@
     transition: opacity var(--dur-fast), background var(--dur-fast), color var(--dur-fast); }
   .recent-row:hover .recent-forget { opacity: 1; }
   .recent-forget:hover { background: var(--danger-soft); color: var(--danger); }
+
+  /* ── Advanced (file scope) disclosure ───────────────────────────────────── */
+  .adv-toggle { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; margin-top: -4px;
+    border-radius: var(--radius-lg); border: 1px dashed var(--border); background: transparent;
+    font: inherit; text-align: left; cursor: pointer; color: var(--fg-muted);
+    transition: background var(--dur-fast), border-color var(--dur-fast), color var(--dur-fast); }
+  .adv-toggle:hover { background: color-mix(in oklab, var(--fg) 3%, transparent); border-color: var(--border-strong); color: var(--fg-2); }
+  .adv-toggle :global(.adv-chev) { flex: none; color: var(--fg-faint); transition: transform var(--dur-fast); }
+  .adv-toggle :global(.adv-chev.open) { transform: rotate(180deg); }
+  .adv-tt { font-size: var(--fs-sm); font-weight: 600; color: var(--fg-2); flex: none; }
+  .adv-sum { font-size: var(--fs-xs); color: var(--fg-subtle); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .adv-sum.bad { color: var(--danger); font-weight: 600; }
 
   .pat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   @media (max-width: 680px) { .pat-grid { grid-template-columns: minmax(0, 1fr); } }

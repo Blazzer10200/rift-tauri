@@ -2,6 +2,13 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## Unreleased (on main)
+- **Background agents no longer fake "Done".** A turn that hands work to a background agent now shows a pulsing "Agent working in background — you can keep chatting" footer until the agent actually reports back.
+- **Project setup, de-confused.** New Project is folder-first: pick the folder, the name fills itself, and 8 common junk patterns (node_modules, .git, build output…) are excluded by default. Include/exclude globs live behind a collapsed "File scope" row with a plain-English summary.
+- **Workspace page uses big screens** — wider layout; fullscreen gets a 4-up project grid instead of dead gutters.
+- **Code blocks:** one unified header (language · line count · Copy) on every block type, 6 new languages (Go, YAML, SQL, HTML, CSS, C#), tidier diff padding + faithful diff copy.
+- **GitHub popover:** refresh spinner no longer loops forever; adds "checked Xm ago", a live elapsed timer while CI runs, and a green in-sync dot.
+
 ## v0.139.0 — Dictation you can trust, smarter GitHub, sharper chrome
 
 - **Speech-to-text overhaul.** Sending while words were still gray silently discarded them — the ghost tail now rides along with every send, so you never wait for text to "turn white." Held-mic silence no longer invents filler words (".yeah"): segment commits and the stop-time pass are gated on real voiced audio, and stray leading punctuation is scrubbed. The model pre-warms at launch and on engine/model switches, killing the first-press stall. Ghost text is brighter with a live blinking caret.
