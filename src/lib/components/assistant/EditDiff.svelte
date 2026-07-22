@@ -266,7 +266,9 @@
   const unifiedLines = $derived.by<UnifiedLine[]>(() =>
     unifiedStruct.map((l) => {
       if (l.kind !== "ctx" && l.kind !== "add" && l.kind !== "del") return l;
-      const base = hl(l.text);
+      // Del lines stay monochrome-dimmed (the past is grey, the new is alive);
+      // syntax color only on ctx/add.
+      const base = l.kind === "del" ? null : hl(l.text);
       const html = l.em?.length
         ? emphasizeHtml(l.text, l.em, l.kind === "add" ? "dem-add" : "dem-del", base)
         : base;
@@ -395,10 +397,12 @@
     --diff-fs: 12px;
     margin: 8px 0;
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--radius-lg, 10px);
     overflow: hidden;
-    background: var(--bg-inset);
+    background: color-mix(in oklab, var(--fg) 2.8%, transparent);
+    transition: border-color 240ms var(--ease-soft, ease-out);
   }
+  .edit-diff:hover { border-color: var(--border-strong); }
   .edit-diff.compact {
     --diff-fs: 10px;
     margin: 0;
@@ -414,11 +418,12 @@
   .edit-diff.embedded .diff-body { max-height: none; }
 
   /* ── Breadcrumb header ─────────────────────────────────────────────────── */
+  /* Flat header over the inset well — same two-tone as the reskinned shell. */
   .edit-head {
     display: flex; align-items: center; gap: 8px;
     width: 100%;
-    padding: 8px 11px;
-    background: color-mix(in oklch, var(--bg-elev-1) 70%, transparent);
+    padding: 7px 11px 5px;
+    background: transparent;
     border: 0;
     border-bottom: 1px solid var(--border);
     font: inherit;
@@ -490,14 +495,11 @@
     font-size: 10px; color: var(--ok);
   }
 
+  /* Quiet label, matching the reskinned code-fence head — no pill chrome. */
   .edit-lang {
     flex-shrink: 0;
-    font-size: 9px; font-weight: 700; letter-spacing: 0.08em;
-    color: var(--fg-subtle);
-    background: var(--bg-elev-2);
-    border: 1px solid var(--border);
-    padding: 2px 6px;
-    border-radius: 5px;
+    font-size: 9.5px; font-weight: 600; letter-spacing: 0.09em;
+    color: var(--fg-faint);
   }
   .edit-counts {
     display: inline-flex; gap: 8px;
@@ -505,10 +507,9 @@
     font-size: 10.5px;
     font-variant-numeric: tabular-nums;
   }
-  /* Mockup `.ct-diff-stat`: counts as soft pills, not bare text. */
-  .ct-add, .ct-del { padding: 1px 6px; border-radius: 5px; font-weight: 600; }
-  .ct-add { color: var(--ok); background: color-mix(in oklch, var(--ok) 15%, transparent); }
-  .ct-del { color: var(--danger); background: color-mix(in oklab, var(--danger) 15%, transparent); }
+  .ct-add, .ct-del { font-weight: 600; }
+  .ct-add { color: var(--ok); }
+  .ct-del { color: var(--danger); }
 
   /* ── Unified body ──────────────────────────────────────────────────────── */
   .diff-body {
@@ -518,7 +519,9 @@
     line-height: 1.65;
     max-height: 480px;
     overflow: auto;
+    background: var(--bg-inset);
   }
+  .edit-diff.embedded .diff-body { background: transparent; }
   .edit-diff.compact .diff-body { max-height: 280px; }
 
   .diff-line {
@@ -567,29 +570,29 @@
     padding-right: 10px;
     min-height: 1.5em;
   }
-  /* Mockup `.ct-diff-line`: softer fill + a left change-bar so add/del read at a
-     glance without the heavier full-row tint. */
+  /* Comp `.dl`: faint 6% wash + colored +/− sig only — no left change-bar,
+     no green numbers. Del text dims (the past is grey, the new is alive). */
   .diff-line[data-kind="add"] {
     background: color-mix(in oklch, var(--ok) 6%, transparent);
-    box-shadow: inset 2.5px 0 0 color-mix(in oklch, var(--ok) 85%, transparent);
   }
-  .diff-line[data-kind="add"] .diff-num { color: var(--ok); opacity: 0.7; }
+  /* Creates (numbered) are ALL additions — a full green slab says nothing.
+     The + gutter and head counts carry it; the well stays quiet. */
+  .diff-body:not(.no-nums) .diff-line[data-kind="add"] { background: transparent; }
   .diff-line[data-kind="add"] .diff-gutter { color: var(--ok); }
   .diff-line[data-kind="add"] .diff-code { color: var(--fg); }
   .diff-line[data-kind="del"] {
     background: color-mix(in oklab, var(--danger) 6%, transparent);
-    box-shadow: inset 2.5px 0 0 color-mix(in oklab, var(--danger) 85%, transparent);
   }
-  .diff-line[data-kind="del"] .diff-gutter,
-  .diff-line[data-kind="del"] .diff-code { color: oklch(0.86 0.06 22); }
-  /* #11: word-level change emphasis inside mod pairs — a stronger tint than
-     the line wash so the changed fragment pops (GitHub/VS Code convention). */
+  .diff-line[data-kind="del"] .diff-gutter { color: var(--danger); }
+  .diff-line[data-kind="del"] .diff-code { color: var(--fg-subtle); }
+  /* #11: word-level change emphasis inside mod pairs — a step above the line
+     wash, calm enough not to read as a highlighter blob. */
   .diff-code :global(.dem-add) {
-    background: color-mix(in oklch, var(--ok) 24%, transparent);
+    background: color-mix(in oklch, var(--ok) 14%, transparent);
     border-radius: 3px;
   }
   .diff-code :global(.dem-del) {
-    background: color-mix(in oklab, var(--danger) 24%, transparent);
+    background: color-mix(in oklab, var(--danger) 14%, transparent);
     border-radius: 3px;
   }
 

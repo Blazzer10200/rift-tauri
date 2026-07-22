@@ -98,12 +98,14 @@
     margin: 4px 0 9px 0;
     padding: 4px 0;
     border: 1px solid var(--border);
-    border-radius: var(--radius-xl);
+    border-radius: var(--radius-lg);
     overflow: hidden;
-    background: color-mix(in oklab, var(--fg) 2%, transparent);
+    background: var(--bg-inset);
     box-shadow: none;
     animation: wb-rise var(--dur-rise) var(--ease-page) both;
+    transition: border-color 240ms var(--ease-soft, ease-out);
   }
+  .wb-diffwrap:hover { border-color: var(--border-strong); }
   @keyframes wb-rise {
     from { opacity: 0; transform: translateY(5px); }
     to   { opacity: 1; transform: translateY(0); }
