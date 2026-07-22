@@ -255,8 +255,13 @@
   // prefix dropped here (the row above carries the full path); footer stays tight.
   // Suppressed in the 'focused' (calm) narration density: that mode's whole point
   // is a clean, minimal stream, so the footer stays a bare verb + meter there.
+  // Some caps ARE verb phrases (ExitPlanMode → "Proposed a plan") — pairing
+  // those with a footer verb reads doubled ("Proposed a plan Proposed a plan").
+  const capIsVerbPhrase = (t: StreamTool) => t.cap === VERB_PAST[t.kind];
   const footerCap = $derived(
-    liveTool && !awaitingInput && uiPrefs.narration !== "focused" ? (liveTool.cap ?? null) : null,
+    liveTool && !awaitingInput && uiPrefs.narration !== "focused" && !capIsVerbPhrase(liveTool)
+      ? (liveTool.cap ?? null)
+      : null,
   );
   // Dead-air trail — with no tool in flight the footer used to collapse to a
   // bare "Working…" for the whole between-tools gap (the #1 "is it stuck?"
@@ -276,17 +281,24 @@
   });
   const idleTrail = $derived(
     !liveTool && !awaitingInput && stallLevel === 0 && lastDone && uiPrefs.narration !== "focused"
-      ? `${VERB_PAST[lastDone.kind]} ${lastDone.cap}`
+      ? capIsVerbPhrase(lastDone)
+        ? VERB_PAST[lastDone.kind]
+        : `${VERB_PAST[lastDone.kind]} ${lastDone.cap}`
       : null,
   );
 </script>
 
 <div class="sturn">
-  <div class="sturn-head {streaming ? 'live' : ''}" class:awaiting-head={awaitingInput}>
+  <!-- The head earns its row ONLY when it says something the footer can't:
+       a text-less thinking pause, an awaiting-input park, a compaction. Plain
+       "Working…" liveness lives in the footer (comp: no top status bar), and
+       done-state lives in the receipt below. -->
+  {#if streaming && (thinkingNow || awaitingInput || compacting)}
+  <div class="sturn-head live" class:awaiting-head={awaitingInput}>
     <span class="sh-dot"></span>
     <span class="sh-label">{headLabel}</span>
-    {#if turnTime}<span class="sh-time" use:tooltip={"When this turn ran"}>{turnTime}</span>{/if}
   </div>
+  {/if}
 
   <div class="sturn-body" class:railed class:live={streaming}>
   <!-- Live pass WITH text streams open in place (word-reveal); a text-less live
@@ -357,22 +369,21 @@
          — the footer would just duplicate it (and there's no action/tokens to
          report yet), so it's suppressed until a tool or token lands. -->
     <div class="sfooter" class:stalled={stallLevel > 0} class:awaiting={awaitingInput}>
+      <span class="sf-dot" aria-hidden="true"></span>
       {#key footerVerbShown ?? idleTrail}<span class="sf-verb-wrap">{#if footerVerbShown}<span class="sf-verb">{footerVerbShown}</span>{/if}{#if footerCap}<span class="sf-cap" class:sf-lead={!footerVerbShown}>{footerCap}</span>{:else if idleTrail}<span class="sf-cap sf-last" class:sf-lead={!footerVerbShown}>{footerVerbShown ? "· " : ""}{idleTrail}</span>{/if}</span>{/key}
       {#if awaitingInput}
         <!-- Parked on the user: no climbing clock (it's human time, not the
              model's), no token meter. Just the calm verb + a nudge. -->
         <span class="sf-meta sf-await-hint">— choose an option above to continue</span>
       {:else if liveSecs != null || liveTokens != null}
-        <!-- verb+caption read as one phrase on the left; elapsed·tokens sit as a
-             quiet mono cluster hugging the right edge. -->
-        <span class="sf-fill" aria-hidden="true"></span>
+        <!-- one quiet left-clustered line (comp cstat): dot · verb · elapsed · ↑ tokens -->
         <span class="sf-cluster">
           {#if liveSecs != null}
             <span class="sf-meta"><AnimatedCount value={liveSecs} format={fmtDur} durationMs={300} /></span>
           {/if}
           {#if liveSecs != null && liveTokens != null}<span class="sf-pip">·</span>{/if}
           {#if liveTokens != null}
-            <span class="sf-meta"><AnimatedCount value={liveTokens} format={fmtTokens} /> tokens</span>
+            <span class="sf-meta">↑ <AnimatedCount value={liveTokens} format={fmtTokens} /> tokens</span>
           {/if}
         </span>
       {/if}
@@ -395,7 +406,7 @@
         it'll stream as soon as a response starts. You can keep waiting or press Stop.
       </div>
     {/if}
-  {:else if !streaming && turn.outcome !== "text"}
+  {:else if !streaming}
     <div class="sapplied" data-outcome={turn.outcome}>
       {#if turn.outcome === "applied"}
         <span class="ok"><Check size={13} strokeWidth={2.5} /> Applied</span>
@@ -409,10 +420,13 @@
       {/if}
       {#if turn.meta}
         <span class="sapplied-meta">{turn.meta.time}</span>
-        {#if turn.meta.tokens}<span class="sapplied-meta" use:tooltip={"Output tokens this turn generated"}>{fmtTokens(turn.meta.tokens)} tokens</span>{/if}
+        {#if turn.meta.tokens}<span class="sapplied-meta" use:tooltip={"Output tokens this turn generated"}>↑ {fmtTokens(turn.meta.tokens)} tokens</span>{/if}
         {#if turn.meta.cost}<span class="sapplied-cost" use:tooltip={"Total cost of this turn"}>{turn.meta.cost}</span>{/if}
         {#if turn.meta.fast}<span class="sapplied-fast" use:tooltip={"This turn ran in fast mode — quicker Opus output, billed from your usage credits (pay-per-use)"}><Zap size={11} />fast</span>{/if}
+      {:else if turn.totalSecs >= 1}
+        <span class="sapplied-meta">{fmtDur(turn.totalSecs)}</span>
       {/if}
+      {#if turnTime}<span class="sapplied-time" use:tooltip={"When this turn ran"}>{turnTime}</span>{/if}
     </div>
   {/if}
 

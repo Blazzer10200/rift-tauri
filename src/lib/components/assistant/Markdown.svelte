@@ -1050,13 +1050,15 @@
   .md :global(.shiki-block) {
     margin: 14px 0;
     border: 1px solid var(--border);
-    border-radius: var(--radius-xl);
+    border-radius: var(--radius-lg);
     overflow: hidden;
-    background: color-mix(in oklab, var(--fg) 2%, transparent);
+    background: color-mix(in oklab, var(--fg) 2.8%, transparent);
     position: relative;
     box-shadow: none;
     animation: code-rise var(--dur-rise) var(--ease-page) both;
+    transition: border-color 240ms var(--ease-soft, ease-out);
   }
+  .md :global(.shiki-block:hover) { border-color: var(--border-strong); }
   @keyframes code-rise {
     from { opacity: 0; transform: translateY(6px) scale(0.992); }
     to   { opacity: 1; transform: translateY(0) scale(1); }
@@ -1064,73 +1066,55 @@
   @media (prefers-reduced-motion: reduce) {
     .md :global(.shiki-block) { animation: none; }
   }
+  /* Quiet graphite chrome (block-redesign comp): tiny faint uppercase label,
+     no accent pill, copy reveals on hover. Chrome never takes color — the code
+     body is the content and owns the tint. */
   .md :global(.shiki-head) {
     display: flex;
     align-items: center;
-    gap: 9px;
-    padding: 9px 13px;
-    background: color-mix(in oklch, var(--bg-elev-1) 30%, transparent);
-    backdrop-filter: blur(8px) saturate(120%);
-    -webkit-backdrop-filter: blur(8px) saturate(120%);
-    border-bottom: 1px solid color-mix(in oklch, var(--accent) 10%, var(--border));
-    font-size: 10px;
-    color: var(--fg-muted);
-    letter-spacing: 0.04em;
-  }
-  /* Lang label — a refined accent pill with a glowing leading dot. */
-  .md :global(.shiki-lang) {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 2px 9px 2px 7px;
-    border: 1px solid color-mix(in oklch, var(--accent) 25%, transparent);
-    border-radius: 999px;
-    background: color-mix(in oklch, var(--accent) 12%, transparent);
-    color: color-mix(in oklch, var(--accent) 60%, var(--fg));
-    font-size: 9px;
-    font-weight: 700;
+    gap: 10px;
+    padding: 6px 13px 4px;
+    font-size: 9.5px;
+    font-weight: 600;
     letter-spacing: 0.09em;
     text-transform: uppercase;
+    color: var(--fg-faint);
+  }
+  .md :global(.shiki-lang) {
+    color: var(--fg-faint);
     font-family: var(--font-mono, ui-monospace, monospace);
   }
-  .md :global(.shiki-lang::before) {
-    content: "";
-    width: 5px; height: 5px;
-    border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 6px color-mix(in oklch, var(--accent) 70%, transparent);
-  }
-  .md :global(.shiki-sep) { color: var(--fg-faint); opacity: 0.6; }
+  .md :global(.shiki-sep) { display: none; }
   .md :global(.shiki-lines) {
-    color: var(--fg-muted);
+    color: var(--fg-faint);
+    opacity: 0.75;
     font-variant-numeric: tabular-nums;
     font-family: var(--font-mono, ui-monospace, monospace);
-    font-size: 9.5px;
+    letter-spacing: 0.04em;
   }
   .md :global(.shiki-head .code-copy) {
     margin-left: auto;
-    padding: 2px 8px;
+    padding: 1px 4px;
     font-family: var(--font-mono, ui-monospace, monospace);
     font-size: 9.5px;
     font-weight: 600;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: var(--fg-muted);
+    color: var(--fg-subtle);
     background: transparent;
-    border: 1px solid transparent;
+    border: 0;
     border-radius: 4px;
     cursor: pointer;
     user-select: none;
-    transition: color var(--dur-fast) ease-out, background var(--dur-fast) ease-out, border-color var(--dur-fast) ease-out;
+    opacity: 0;
+    transition: opacity var(--dur-fast) ease-out, color var(--dur-fast) ease-out;
   }
-  .md :global(.shiki-head .code-copy:hover) {
-    color: var(--fg);
-    background: var(--bg-elev-2);
-    border-color: var(--border);
-  }
+  .md :global(.shiki-block:hover .code-copy),
+  .md :global(.shiki-head .code-copy:focus-visible) { opacity: 1; }
+  .md :global(.shiki-head .code-copy:hover) { color: var(--fg-2); }
   .md :global(.shiki-head .code-copy.copied) {
-    color: var(--accent);
-    border-color: color-mix(in oklab, var(--accent) 35%, var(--border));
+    color: var(--ok);
+    opacity: 1;
   }
   /* Shiki's own <pre.shiki> — strip our default border/radius/elev so the
      wrapper's chrome takes over. */

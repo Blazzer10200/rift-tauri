@@ -56,8 +56,10 @@
   background: linear-gradient(to bottom,
     color-mix(in oklch, var(--border) 95%, transparent) 55%,
     color-mix(in oklab, var(--accent) 40%, transparent)); }
-.sturn-head { display: flex; align-items: center; gap: 9px; padding-bottom: 11px; margin-bottom: 2px;
-  border-bottom: 1px solid var(--border); font-size: var(--fs-sm); color: var(--fg-subtle); letter-spacing: 0.003em;
+/* Quiet state line, not a bar (comp: no top rule) — renders only for states the
+   footer can't carry: thinking pause · awaiting input · compacting. */
+.sturn-head { display: flex; align-items: center; gap: 9px; padding-bottom: 6px; margin-bottom: 2px;
+  font-size: var(--fs-sm); color: var(--fg-subtle); letter-spacing: 0.003em;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
 /* Cascade: the dot springs in first, the label rises a beat behind it. Plays
    ONCE on mount (both), then the live dot settles into its calm breathing pulse.
@@ -76,9 +78,10 @@
 @keyframes headRise { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
 /* Hover timestamp — quiet mono at the head's right edge; invisible until the
    pointer asks "when?". */
-.sturn-head .sh-time { margin-left: auto; font-family: var(--font-mono, monospace); font-size: 9.5px;
+/* Clock time rides the receipt now (head is live-only) — invisible until hover. */
+.sapplied .sapplied-time { font-family: var(--font-mono, monospace); font-size: 9.5px;
   color: var(--fg-faint); letter-spacing: 0.02em; opacity: 0; transition: opacity var(--dur-fast) ease-out; }
-.sturn:hover .sturn-head .sh-time { opacity: 0.9; }
+.sturn:hover .sapplied-time { opacity: 0.9; }
 
 /* bright narration — the only high-contrast text in the turn */
 .snarr { color: var(--fg-2); margin: var(--stream-gap) 0; animation: blockIn var(--dur-base) var(--ease-page) both; }
@@ -166,6 +169,11 @@
    rise instead of a hard cut. */
 .sfooter { display: flex; align-items: center; gap: 7px; margin: var(--stream-gap-turn) 0 2px; font-size: var(--fs-sm);
   color: var(--fg-faint); font-variant-numeric: tabular-nums; animation: blockIn var(--dur-base) var(--ease-page) both; }
+/* Liveness anchor — the turn's only status dot now lives here (comp cstat). */
+.sfooter .sf-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none;
+  animation: dotPop 420ms var(--ease-spring) both, streamLivePulse var(--pulse-live) ease-out 420ms infinite; }
+.sfooter.stalled .sf-dot { background: var(--warn); animation: none; }
+.sfooter.awaiting .sf-dot { background: var(--accent); animation: none; }
 .sfooter .sf-verb { color: var(--fg-muted); }
 /* The live target ("composer.svelte", "git status …") right after the verb, so
    the footer reads as one honest phrase. Quiet mono, truncates before it can
@@ -182,10 +190,11 @@
 .sfooter .sf-verb-wrap { display: inline-flex; align-items: baseline; min-width: 0; max-width: 60%;
   animation: verbIn 320ms var(--ease-spring) both; }
 @keyframes verbIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-.sfooter .sf-fill { flex: 1; min-width: 16px; }
 /* the meta cluster trails the verb by a beat — the footer assembles as a small
-   wave (verb+caption ride the wrap's spring, the cluster follows on a delay) */
+   wave (verb+caption ride the wrap's spring, the cluster follows on a delay).
+   Left-clustered with the verb (comp cstat) — no right-edge float. */
 .sfooter .sf-cluster { display: inline-flex; align-items: baseline; gap: 7px; flex: none;
+  margin-left: 2px;
   font-family: var(--font-mono, monospace); font-size: var(--fs-xs); letter-spacing: 0.02em;
   color: var(--fg-faint); opacity: 0.85;
   animation: clusterIn 380ms var(--ease-spring) 150ms both; }

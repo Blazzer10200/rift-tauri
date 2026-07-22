@@ -140,7 +140,7 @@
     expandable={hasOut && mode !== "minimal"}
     expanded={open}
     onToggle={toggle}
-    pill={running ? { text: fmtDur(elapsed), tone: "running" } : failed ? { text: "failed", tone: "bad" } : null}
+    pill={running ? { text: fmtDur(elapsed), tone: "running" } : failed ? { text: "failed", tone: "bad" } : { text: "ok", tone: "ok" }}
     durationLabel={!running && tool.durSecs >= 1 ? fmtDur(tool.durSecs) : null}
     copyText={running ? null : copyText}
   >
@@ -196,8 +196,13 @@
      rule. The two-tone fill + the prompt glyph make input-vs-output obvious at a
      glance. Meta cluster (pill/duration/copy/chevron) comes from BlockHeader. */
   .sshell { display: flex; flex-direction: column; margin: var(--stream-gap, 12px) 0; border-radius: var(--radius-lg);
-    border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 2.5%, transparent); overflow: hidden;
-    animation: blockIn var(--dur-base) var(--ease-page) both; }
+    border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 2.8%, transparent); overflow: hidden;
+    animation: blockIn var(--dur-base) var(--ease-page) both;
+    transition: border-color 240ms var(--ease-soft, ease-out); }
+  .sshell:hover { border-color: var(--border-strong); }
+  /* a live command tints the whole frame toward the accent — the block itself
+     reads as in-flight, not just the glyph */
+  .sshell.running { border-color: color-mix(in oklab, var(--accent) 28%, var(--border)); }
   .sshell.bad { border-color: color-mix(in oklab, var(--danger) 34%, var(--border)); }
   /* the prompt glyph breathes while the command is still running — a soft glow
      halo makes a live command read as genuinely in-flight (terminal cursor
@@ -212,11 +217,13 @@
     .ssh-cursor { animation: none; }
   }
 
-  /* IN row container chrome — layout/cluster mechanics live in BlockHeader. */
+  /* IN row container chrome — layout/cluster mechanics live in BlockHeader.
+     Header sits flat on the tile; the OUTPUT well is the inset (comp: the two-
+     tone reads terminal-paper-under-prompt, not raised-toolbar-over-body). */
   .sshell :global(.bh) { padding: 8px 11px; gap: 9px;
-    background: color-mix(in oklab, var(--fg) 3.5%, transparent);
+    background: transparent;
     transition: background var(--dur-fast); }
-  .sshell :global(.bh:hover:not(:disabled)) { background: color-mix(in oklab, var(--fg) 6%, transparent); }
+  .sshell :global(.bh:hover:not(:disabled)) { background: color-mix(in oklab, var(--fg) 4%, transparent); }
 
   /* Prompt glyph — the "IN" marker, tinted per shell (bash green · pwsh blue ·
      cmd amber) so the flavor reads without a separate badge. */
@@ -245,7 +252,7 @@
 
   /* OUT — the command's output, on the base (darker) fill so it recedes behind
      the raised IN row. The line-capping / fold tiers live in OutputBlock. */
-  .ssh-outwrap { border-top: 1px solid var(--border); }
+  .ssh-outwrap { border-top: 1px solid var(--border); background: var(--bg-inset); }
   /* "output" boundary label — a tiny uppercase rule so IN vs OUT is spelled out,
      not just implied by the fill shift. */
   .ssh-outlabel { display: flex; align-items: center; gap: 7px; padding: 5px 11px 2px;
@@ -267,7 +274,7 @@
   /* tty-wait well — blank output line with the cursor parked on it. */
   .ssh-wait { padding: 2px 11px 8px; line-height: 1.55; display: flex; align-items: center; }
 
-  .ssh-peekwrap { border-top: 1px solid var(--border); }
+  .ssh-peekwrap { border-top: 1px solid var(--border); background: var(--bg-inset); }
   .ssh-peek { padding: 2px 11px 7px;
     font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.5; color: var(--fg-subtle); }
   .ssh-line { white-space: pre-wrap; word-break: break-word; }

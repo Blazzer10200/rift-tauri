@@ -167,7 +167,7 @@ export function buildReplaySteps(): ReplayStep[] {
   // ── 13 · ask user: pending → answered chips ──────────────────────────────
   say(900, "An ask — options render as chips, then the answered state:");
   const ask = "gal-ask";
-  start(600, ask, "AskUserQuestion", {
+  start(600, ask, "ask_user", {
     questions: [{
       question: "Which block should we redesign first?",
       header: "Redesign",
