@@ -182,7 +182,7 @@
           {#if p.header}<span class="sask-q-header">{p.header}</span>{/if}
           <div class="sask-q-text">{p.question}</div>
           <div class="sask-chips">
-            {#each p.answers as a (a)}
+            {#each p.answers as a, ai (ai)}
               <span class="sask-chip"><Check size={11} strokeWidth={2.5} />{a}</span>
             {/each}
           </div>

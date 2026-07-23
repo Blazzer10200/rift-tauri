@@ -185,7 +185,7 @@
             <p class="rel-maint">Maintenance — bug fixes &amp; reliability improvements</p>
           {:else}
             <ul class="rel-bullets">
-              {#each shown as b (b)}<li>{b}</li>{/each}
+              {#each shown as b, i (i)}<li>{b}</li>{/each}
             </ul>
             {#if more > 0}
               <button class="rel-more" type="button" onclick={() => toggle(it.version)}>

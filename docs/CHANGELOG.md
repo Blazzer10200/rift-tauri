@@ -2,6 +2,10 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.140.1 — The long-turn freeze is dead
+
+- **Fixed the recurring mid-turn UI freeze (blank `$` rows, stuck "Editing file" chips, frozen timers).** Root cause after 4 occurrences: command-output previews keyed their lines by *content*, so any command whose output repeated a line (`git push`, `gh run watch`, cargo progress) crashed the renderer's update loop — every chip after that moment rendered blank forever while the turn kept running fine underneath. Previews now key by position; same landmine also cleared from web-source chips, answer chips, and release notes. Your work was never lost — the transcript always healed on disk; only the live paint wedged.
+
 ## v0.140.0 — Split panes grew up
 
 - **Split panes grew up.** A visible "Split" button now lives in the status bar (it was keyboard/drag-only before). Maximize any pane full-width and back — header button, double-click the header, or Alt+Enter; Alt+←/→ walks focus between panes. New panes start empty with a resume picker instead of grabbing a random open tab. Pane sizes survive opening/closing a pane instead of resetting, the width guard now accounts for the browser dock (no more sliver panes), and a background pane that finishes flashes "✓ done" so you don't miss it.

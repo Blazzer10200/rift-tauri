@@ -22,7 +22,7 @@
     </span>
     {#if sources.length}
       <div class="sweb-src">
-        {#each sources.slice(0, 5) as s (s)}
+        {#each sources.slice(0, 5) as s, i (i)}
           <span class="sweb-chip"><span class="sweb-fav" style="--fav-h:{favHue(s)}"></span>{s}</span>
         {/each}
         {#if sources.length > 5}<span class="sweb-more">+{sources.length - 5} more</span>{/if}

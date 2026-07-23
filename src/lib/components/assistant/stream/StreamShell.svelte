@@ -179,7 +179,10 @@
       <div class="ssh-peekwrap">
         <div class="ssh-outlabel"><span>output</span>{#if failed}<span class="ssh-outlabel-bad">error</span>{/if}</div>
         <div class="ssh-peek">
-          {#each peek.lines as ln (ln)}<div class="ssh-line">{ln}</div>{/each}
+          <!-- Index key, NEVER (ln): two identical trailing lines (git push "remote:",
+               gh run watch reprints) threw each_key_duplicate, aborting the whole Svelte
+               flush → transcript froze blank mid-turn (ISSUES glitch, occurrence #4). -->
+          {#each peek.lines as ln, i (i)}<div class="ssh-line">{ln}</div>{/each}
           {#if peek.more > 0}<div class="ssh-more">+{peek.more} more line{peek.more > 1 ? "s" : ""}</div>{/if}
           {#if ride}<div class="ssh-line ssh-peek-cursorline"><span class="ssh-cursor" aria-hidden="true"></span></div>{/if}
         </div>

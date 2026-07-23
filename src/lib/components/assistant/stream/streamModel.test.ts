@@ -361,6 +361,16 @@ describe("outputPeek — trailing-lines preview for command output", () => {
   it("exactly one line past N → shows it instead of a '+1 more' indicator", () => {
     expect(outputPeek("a\nb\nc\nd", 3)).toEqual({ lines: ["a", "b", "c", "d"], more: 0 });
   });
+
+  // Occurrence #4 of the blank-transcript wedge: `git push` / `gh run watch`
+  // output ends with identical repeated lines; StreamShell's peek each was keyed
+  // by line CONTENT → each_key_duplicate threw and aborted every Svelte flush.
+  // outputPeek must pass duplicates through verbatim — render keys must be
+  // positional (index), never the line text. Pins the data contract.
+  it("keeps duplicate trailing lines verbatim (render must key by index)", () => {
+    const out = "remote:\nremote:\nremote:";
+    expect(outputPeek(out, 3)).toEqual({ lines: ["remote:", "remote:", "remote:"], more: 0 });
+  });
 });
 
 describe("splitOutput — progressive reveal tiers", () => {
