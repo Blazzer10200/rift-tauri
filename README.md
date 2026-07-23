@@ -22,13 +22,15 @@
   <!-- GitHub READMEs do NOT play <video> tags whose src is an in-repo path
        (verified 2026-07-08: only github.com/user-attachments/assets/... URLs
        render as players) — the GIF is the reliable always-animating hero.
-       Full-quality upgrade path: drag docs/media/rift-tour.mp4 (1080p60)
-       into any GitHub issue/PR comment box, copy the generated
-       user-attachments URL, and paste it on its own line below this block. -->
-  <img src="docs/media/rift-tour.gif" width="820" alt="Rift product tour: open a workspace, chat with Claude about the code, split panes, check AI Health, and re-theme the app live from Settings." />
+       Both tour files are hosted as v0.143.0 release assets (moved out of the
+       tree 2026-07-23: 18MB of binaries don't belong in every clone).
+       Full-quality upgrade path: drag rift-tour.mp4 (1080p60) into any GitHub
+       issue/PR comment box, copy the generated user-attachments URL, and
+       paste it on its own line below this block. -->
+  <img src="https://github.com/Blazzer10200/rift-tauri/releases/download/v0.143.0/rift-tour.gif" width="820" alt="Rift product tour: open a workspace, chat with Claude about the code, split panes, check AI Health, and re-theme the app live from Settings." />
 </p>
 
-<p align="center"><sub>The 45-second tour — workspace to chat to split panes to Settings, with the whole app re-tinting live. Full-quality video: <a href="docs/media/rift-tour.mp4">rift-tour.mp4</a>.</sub></p>
+<p align="center"><sub>The 45-second tour — workspace to chat to split panes to Settings, with the whole app re-tinting live. Full-quality video: <a href="https://github.com/Blazzer10200/rift-tauri/releases/download/v0.143.0/rift-tour.mp4">rift-tour.mp4</a>.</sub></p>
 
 ## Install
 
