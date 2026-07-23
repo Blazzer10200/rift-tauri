@@ -639,19 +639,31 @@ class AssistantStore {
   }
 
   /** Add a new pane to the right of the focused one. Caps at MAX_PANES.
-   *  New pane is auto-filled with the next openTab not already in any pane,
-   *  else stays empty (drop a tab in from the tabsbar). Focus moves to new
-   *  pane. Persists. */
-  addPane() { tabsAddPane(this); this.drainQueue(this.activeTab); }
+   *  New pane always starts EMPTY (its card offers New chat + recent picks) —
+   *  auto-filling with a surprise tab read as "where did this chat come from".
+   *  Focus moves to new pane. Persists. */
+  addPane() { this.maximizedPaneIdx = null; tabsAddPane(this); this.drainQueue(this.activeTab); }
 
   /** Close a pane (the pane container, not the tab inside it). Tabs stay in
    *  openTabs — closing a pane just unhooks it. Last pane never closes (always
    *  length≥1). Focused idx is clamped to the new array bounds. Persists. */
-  closePane(idx: number) { tabsClosePane(this, idx); }
+  closePane(idx: number) { this.maximizedPaneIdx = null; tabsClosePane(this, idx); }
 
   /** Move focus to a pane. Stashes outgoing composer draft + restores incoming
    *  so each pane carries its own draft. No-op in single-pane mode. */
   setFocusedPane(idx: number) { tabsSetFocusedPane(this, idx); this.drainQueue(this.activeTab); }
+
+  /** Maximize/restore a split pane in place — a temporary zoom, not a layout
+   *  change (pane fracs untouched; restore lands exactly where you were).
+   *  Maximizing also focuses the pane. */
+  toggleMaximizePane(idx?: number) {
+    if (!this.splitActive) return;
+    const i = idx ?? this.focusedPaneIdx;
+    if (i < 0 || i >= this.panes.length) return;
+    if (this.maximizedPaneIdx === i) { this.maximizedPaneIdx = null; return; }
+    this.setFocusedPane(i);
+    this.maximizedPaneIdx = i;
+  }
 
   /** Drop a tab from the tabsbar into a specific pane. See tabs.ts for the
    *  single→split / sibling-swap / end-sentinel behavior. */
@@ -865,6 +877,10 @@ class AssistantStore {
    *  keep working without per-pane branching. */
   panes = $state<PaneState[]>([{ tabId: null }]);
   focusedPaneIdx = $state(0);
+  /** Temporarily zoom one split pane full-width (null = normal tiling). Not
+   *  persisted — a maximize is a moment, not a layout. Cleared on any pane
+   *  add/close so the index can't go stale. */
+  maximizedPaneIdx = $state<number | null>(null);
   /** Set on tab dragstart so AssistantPane can render drop affordance.
    *  Cleared on dragend. Cross-component drag state. */
   draggingTabId = $state<string | null>(null);

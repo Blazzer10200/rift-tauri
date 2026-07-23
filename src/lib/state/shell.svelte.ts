@@ -2,6 +2,8 @@
 // (rail) and Topbar (the show-side toggle). Persisted to localStorage so the
 // rail's open/collapsed state and width survive reloads.
 
+import { browserDock } from "./browserDock.svelte";
+
 const COLLAPSE_KEY = "rift.ui.sidebar-collapsed.v1";
 const WIDTH_KEY = "rift.ui.sidebar-width.v1";
 const PINNED_KEY = "rift.ui.pinned-convos.v1";
@@ -170,11 +172,14 @@ class ShellState {
   }
 
   /** How many chat panes the current viewport can hold without slivers.
-   *  Accounts for the live sidebar footprint when it's open. Always ≥1. */
+   *  Accounts for the live sidebar footprint AND the browser dock when open —
+   *  both eat real content width, so ignoring either hands out sliver panes.
+   *  Always ≥1. */
   maxPanesForWidth(): number {
     if (typeof window === "undefined") return 1;
     const sidebar = this.collapsed ? 0 : this.width;
-    const content = Math.max(0, window.innerWidth - sidebar);
+    const dock = browserDock.open ? browserDock.width : 0;
+    const content = Math.max(0, window.innerWidth - sidebar - dock);
     return Math.max(1, Math.floor(content / MIN_PANE_W));
   }
 

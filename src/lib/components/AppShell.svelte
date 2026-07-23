@@ -210,6 +210,23 @@
       if (target) assistant.openTab(target).catch(err => toast.push({ severity: "danger", title: String(err) }));
       return;
     }
+    // Split-pane keys (Alt-only, chat + split gated): Alt+←/→ walks pane
+    // focus; Alt+Enter maximizes/restores the focused pane.
+    if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey
+        && workspace.activeId === "chat" && assistant.splitActive) {
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        e.preventDefault();
+        const n = assistant.panes.length;
+        const dir = e.key === "ArrowLeft" ? -1 : 1;
+        assistant.setFocusedPane((assistant.focusedPaneIdx + dir + n) % n);
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        assistant.toggleMaximizePane();
+        return;
+      }
+    }
     const meta = e.ctrlKey || e.metaKey;
     if (!meta) return;
     // Chat-tab keybinds — gated to the Chat workspace so tabs only respond when

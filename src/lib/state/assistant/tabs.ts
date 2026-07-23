@@ -60,10 +60,10 @@ type TabsHost = {
 
 /** Add a new pane to the right of the focused one. Caps at MAX_PANES, and
  *  further at however many panes the current viewport can hold without
- *  unusable slivers (narrow laptops / scaled displays). New pane is auto-filled
- *  with the next openTab not already in any pane, else stays empty (drop a tab
- *  in from the tabsbar). Focus moves to new pane. Persists. Returns true if a
- *  pane was added. */
+ *  unusable slivers (narrow laptops / scaled displays). New pane always starts
+ *  EMPTY — its card offers New chat / recent picks / drag-in, which reads as a
+ *  deliberate choice instead of a surprise tab appearing. Focus moves to the
+ *  new pane. Persists. Returns true if a pane was added. */
 export function addPane(host: TabsHost): boolean {
   if (host.panes.length >= MAX_PANES) return false;
   // Width-fit guard: don't split below the min usable pane width.
@@ -74,23 +74,13 @@ export function addPane(host: TabsHost): boolean {
     });
     return false;
   }
-  const taken = new Set(host.panes.map((p) => p.tabId).filter((x): x is string => !!x));
-  const fill = host.openTabs.find((id) => !taken.has(id)) ?? null;
   const insertAt = host.focusedPaneIdx + 1;
   const next = host.panes.slice();
-  next.splice(insertAt, 0, { tabId: fill });
+  next.splice(insertAt, 0, { tabId: null });
   host.panes = next;
-  host.telemetry.event("pane.add", { count: next.length, fill });
+  host.telemetry.event("pane.add", { count: next.length });
   // Focus the freshly-added pane so subsequent newTab/openTab assigns to it.
   host.focusedPaneIdx = insertAt;
-  if (fill) {
-    const inMeta = host.conversations.some((c) => c.id === fill);
-    if (inMeta && !host.tabs.get(fill)) {
-      void host.loadConversation(fill);
-    } else {
-      host.currentConvoId = fill;
-    }
-  }
   host.persistTabs();
   return true;
 }

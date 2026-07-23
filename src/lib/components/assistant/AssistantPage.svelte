@@ -64,10 +64,57 @@
     try { localStorage.setItem(STORE_KEY(fracs.length), JSON.stringify(fracs)); } catch { /* noop */ }
   }
 
+  // Index removed btw `old` and `cur` (cur = old minus one element), -1 if the
+  // change isn't a single removal. Tries each candidate — n ≤ 4, so brute force.
+  function removedIndex(old: (string | null)[], cur: (string | null)[]): number {
+    for (let k = 0; k < old.length; k++) {
+      if (old.filter((_, i) => i !== k).every((v, i) => v === cur[i])) return k;
+    }
+    return -1;
+  }
+
+  // Pane add/close ADAPTS the live sizes instead of reloading a stale layout
+  // stored for the new count: a removed pane's share redistributes across the
+  // survivors; an added pane takes 1/n with the rest scaled down. Anything
+  // else (restore, multi-change) falls back to the per-count store.
+  let prevPaneIds: (string | null)[] = [];
   $effect(() => {
-    const n = assistant.panes.length || 1;
-    if (untrack(() => fracs.length) !== n) fracs = loadFracs(n);
+    const ids = assistant.panes.map((p) => p.tabId);
+    const n = ids.length || 1;
+    untrack(() => {
+      const old = prevPaneIds;
+      prevPaneIds = ids;
+      if (fracs.length === n) return;
+      if (old.length === n + 1 && fracs.length === n + 1) {
+        const k = removedIndex(old, ids);
+        if (k !== -1) {
+          const kept = fracs.filter((_, i) => i !== k);
+          const sum = kept.reduce((a, b) => a + b, 0);
+          fracs = sum > 0 ? kept.map((v) => v / sum) : Array(n).fill(1 / n);
+          persistFracs();
+          return;
+        }
+      }
+      if (old.length === n - 1 && fracs.length === n - 1) {
+        const k = removedIndex(ids, old);
+        if (k !== -1) {
+          const scaled = fracs.map((v) => v * (1 - 1 / n));
+          fracs = [...scaled.slice(0, k), 1 / n, ...scaled.slice(k)];
+          persistFracs();
+          return;
+        }
+      }
+      fracs = loadFracs(n);
+    });
   });
+
+  // Maximize guard — clamps a stale index (store clears on add/close, but a
+  // hydration race must never render an out-of-range pane).
+  const maxIdx = $derived(
+    assistant.maximizedPaneIdx != null && assistant.maximizedPaneIdx < assistant.panes.length
+      ? assistant.maximizedPaneIdx
+      : null,
+  );
 
   const gridTemplate = $derived.by(() => {
     const parts: string[] = [];
@@ -189,7 +236,16 @@
     data-dock-dragging={dockDragging}
   >
   <div class="layout">
-    {#if assistant.splitActive}
+    {#if assistant.splitActive && maxIdx != null}
+      <!-- Maximized pane — temporary zoom; fracs untouched, restore returns
+           to the exact prior tiling. Siblings unmount (streams live in the
+           store; scroll comes back via the per-tab cache). -->
+      <AssistantPane
+        tabId={assistant.panes[maxIdx].tabId}
+        focused={true}
+        paneIdx={maxIdx}
+      />
+    {:else if assistant.splitActive}
       <div
         class="split"
         bind:this={splitEl}

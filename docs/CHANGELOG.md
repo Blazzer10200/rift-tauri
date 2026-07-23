@@ -3,6 +3,7 @@
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
 ## Unreleased (on main)
+- **Split panes grew up.** A visible "Split" button now lives in the status bar (it was keyboard/drag-only before). Maximize any pane full-width and back — header button, double-click the header, or Alt+Enter; Alt+←/→ walks focus between panes. New panes start empty with a resume picker instead of grabbing a random open tab. Pane sizes survive opening/closing a pane instead of resetting, the width guard now accounts for the browser dock (no more sliver panes), and a background pane that finishes flashes "✓ done" so you don't miss it.
 - **Background agents no longer fake "Done".** A turn that hands work to a background agent now shows a pulsing "Agent working in background — you can keep chatting" footer until the agent actually reports back.
 - **Project setup, de-confused.** New Project is folder-first: pick the folder, the name fills itself, and 8 common junk patterns (node_modules, .git, build output…) are excluded by default. Include/exclude globs live behind a collapsed "File scope" row with a plain-English summary.
 - **Workspace page uses big screens** — wider layout; fullscreen gets a 4-up project grid instead of dead gutters.

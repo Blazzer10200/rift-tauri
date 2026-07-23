@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { ChevronDown, ChevronUp, Plus, X, MessageSquarePlus, ChevronRight, FolderOpen, HardDrive } from "lucide-svelte";
+  import { ChevronDown, ChevronUp, Plus, X, MessageSquarePlus, ChevronRight, FolderOpen, HardDrive, Maximize2, Minimize2 } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { workspace } from "../../state/workspace.svelte";
   import { stt } from "../../state/stt.svelte";
@@ -418,6 +418,35 @@
     assistant.closePane(paneIdx);
   }
 
+  // ── Maximize (temporary zoom) ──────────────────────────────────────────────
+  const isMax = $derived(assistant.maximizedPaneIdx === paneIdx);
+  function onToggleMax(e: MouseEvent) {
+    e.stopPropagation();
+    assistant.toggleMaximizePane(paneIdx);
+  }
+  function onHeadDblClick(e: MouseEvent) {
+    if ((e.target as HTMLElement).closest("button")) return;
+    assistant.toggleMaximizePane(paneIdx);
+  }
+
+  // ── Done-flash — a background pane that finishes streaming announces it for
+  // a few seconds, so "the pulse vanished" doesn't have to carry the news.
+  // Focused pane skips it (you watched it finish); focusing clears it.
+  let doneFlash = $state(false);
+  let doneTimer: ReturnType<typeof setTimeout> | undefined;
+  let prevStreamFlag = false;
+  $effect(() => {
+    const s = streaming;
+    if (prevStreamFlag && !s && !focused && assistant.splitActive) {
+      doneFlash = true;
+      clearTimeout(doneTimer);
+      doneTimer = setTimeout(() => { doneFlash = false; }, 6000);
+    }
+    prevStreamFlag = s;
+  });
+  $effect(() => { if (focused && doneFlash) doneFlash = false; });
+  $effect(() => () => clearTimeout(doneTimer));
+
   // Per-pane folder picker — sets THIS pane's tab root only (pickTabFolder never
   // touches the global default), so two panes can run in different projects at
   // once. Focus first so the @-mention/branch caches refresh against this pane.
@@ -517,7 +546,8 @@
   tabindex={focused ? -1 : 0}
 >
   {#if assistant.splitActive}
-    <div class="pane-head" class:focused>
+    <!-- svelte-ignore a11y_no_static_element_interactions -- dblclick zoom is a mouse shortcut; the maximize button + Alt+Enter are the accessible paths -->
+    <div class="pane-head" class:focused ondblclick={onHeadDblClick}>
       <span class="pane-label" use:tooltip={`Pane ${paneIdx + 1} of ${assistant.panes.length}`}>{paneIdx + 1}</span>
       <span class="pane-head-title" use:tooltip={paneTitle}>{paneTitle}</span>
       {#if tabId && tab}
@@ -540,6 +570,8 @@
       {/if}
       {#if streaming}
         <span class="pane-live" use:tooltip={"This pane is working"}><span class="pane-live-dot"></span>working</span>
+      {:else if doneFlash}
+        <span class="pane-done" use:tooltip={"Finished while you were in another pane"}>✓ done</span>
       {/if}
       {#if tabId && tab}
         <span class="pane-ctx-chip" data-tone={paneCtxTone} use:tooltip={paneChipTitle}>
@@ -550,6 +582,15 @@
           {/if}
         </span>
       {/if}
+      <button
+        class="pane-max"
+        type="button"
+        use:tooltip={isMax ? "Restore split (Alt+Enter · double-click header)" : "Maximize this pane (Alt+Enter · double-click header)"}
+        aria-label={isMax ? "Restore split" : "Maximize pane"}
+        onclick={onToggleMax}
+      >
+        {#if isMax}<Minimize2 size={11}/>{:else}<Maximize2 size={11}/>{/if}
+      </button>
       <button
         class="pane-close"
         type="button"
@@ -937,7 +978,22 @@
     border-color: color-mix(in oklab, var(--accent) 35%, var(--border));
     background: var(--accent-soft);
   }
-  .pane-close {
+  /* Done-flash — background pane finished streaming; same chip language as
+     pane-live but in the ok tone, gone after a few seconds or on focus. */
+  .pane-done {
+    flex-shrink: 0;
+    display: inline-flex; align-items: center; gap: 4px;
+    height: 16px; padding: 0 7px;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--ok) 12%, transparent);
+    border: 1px solid color-mix(in oklab, var(--ok) 30%, var(--border));
+    color: var(--ok);
+    font-size: 10px; font-weight: 600; line-height: 1;
+    animation: pane-done-in var(--dur-base) var(--ease-soft) backwards;
+  }
+  @keyframes pane-done-in { from { opacity: 0; transform: translateY(-2px); } }
+  @media (prefers-reduced-motion: reduce) { .pane-done { animation: none; } }
+  .pane-max, .pane-close {
     flex-shrink: 0;
     display: inline-flex; align-items: center; justify-content: center;
     width: 18px; height: 18px;
@@ -948,6 +1004,11 @@
     color: var(--fg-muted);
     cursor: pointer;
     transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast);
+  }
+  .pane-max:hover {
+    color: var(--accent);
+    border-color: color-mix(in oklab, var(--accent) 35%, var(--border));
+    background: color-mix(in oklab, var(--accent) 10%, transparent);
   }
   .pane-close:hover {
     color: var(--danger);

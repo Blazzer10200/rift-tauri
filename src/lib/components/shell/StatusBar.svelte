@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { GitBranch, ShieldCheck } from "lucide-svelte";
+  import { GitBranch, ShieldCheck, Columns2 } from "lucide-svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { github } from "$lib/state/github.svelte";
   import GhPopover from "../assistant/GhPopover.svelte";
@@ -126,6 +126,24 @@
     </button>
   {/if}
 
+  <!-- Split affordance — split mode's only discoverable entry point (the rest
+       are Ctrl+\, the palette, and drag-to-half). Chat surface only. -->
+  {#if workspace.activeId === "chat"}
+    <span class="sb-sep"></span>
+    <button
+      class="sb-item sb-btn"
+      type="button"
+      disabled={!assistant.canAddPane}
+      onclick={() => assistant.addPane()}
+      use:tooltip={assistant.canAddPane
+        ? (assistant.splitActive ? "Add another chat pane (Ctrl+\\)" : "Split the chat into two panes (Ctrl+\\)")
+        : "Pane limit reached"}
+    >
+      <Columns2 size={11} />
+      {assistant.splitActive ? `${assistant.panes.length} panes` : "Split"}
+    </button>
+  {/if}
+
   <span class="sb-note">Claude can make mistakes — double-check important work.</span>
 
   {#if limits.length}
@@ -162,7 +180,8 @@
      the hover pad) so the bar's rhythm doesn't shift. */
   .sb-btn { border: 0; background: transparent; font: inherit; color: inherit; cursor: pointer;
     padding: 3px 6px; margin: 0 -6px; border-radius: 5px; -webkit-app-region: no-drag; }
-  .sb-btn:hover { background: color-mix(in oklab, var(--fg) 7%, transparent); color: var(--fg-muted); }
+  .sb-btn:hover:not(:disabled) { background: color-mix(in oklab, var(--fg) 7%, transparent); color: var(--fg-muted); }
+  .sb-btn:disabled { opacity: 0.5; cursor: default; }
   .sb-conn { color: var(--fg-muted); }
   .sb-conn:hover { color: var(--fg); }
   .sb-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px color-mix(in oklch, var(--ok) 18%, transparent); }
