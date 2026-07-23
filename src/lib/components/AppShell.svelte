@@ -27,6 +27,7 @@
   import { goHome } from "../state/nav";
   import { onboarding } from "../state/onboarding.svelte";
   import { betaNotice } from "../state/betaNotice.svelte";
+  import { intro } from "../state/intro.svelte";
   import OnboardingFlow from "./onboarding/OnboardingFlow.svelte";
   import CloseConfirm from "./shell/CloseConfirm.svelte";
   import { listen } from "@tauri-apps/api/event";
@@ -290,7 +291,7 @@
   }
 </script>
 
-<div class="app">
+<div class="app" data-intro={intro.phase === "settled" ? undefined : intro.phase}>
   {#if showOnboarding}
     <Titlebar />
     <div class="ob-host">
@@ -412,6 +413,21 @@
   }
   @keyframes wsIn { from { transform: translateY(7px); } to { transform: none; } }
   @media (prefers-reduced-motion: reduce) { .workspace { animation: none; } }
+
+  /* Launch handoff (intro.svelte.ts drives data-intro): while the splash veil
+     lifts, the main island rises into place — Sidebar slides in from its own
+     styles. veil = held offset, invisible behind the opaque splash; settled =
+     attr removed, transforms released. wsIn is suppressed so the rise doesn't
+     double-animate on cold boot. */
+  .app[data-intro] .workspace { animation: none; }
+  .app[data-intro="veil"] .main { opacity: 0; transform: translateY(12px); }
+  .app[data-intro="handoff"] .main {
+    opacity: 1;
+    transform: none;
+    transition:
+      opacity var(--dur-rise) var(--ease-page) 60ms,
+      transform var(--dur-rise) var(--ease-page) 60ms;
+  }
 
   /* Onboarding takes the full surface below a minimal (brand + winctls) titlebar. */
   .ob-host {

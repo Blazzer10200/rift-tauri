@@ -250,6 +250,16 @@
       inset 0 0 0 1px oklch(0 0 0 / 0.22); }
   .side-rail.collapsed .side-resize { display: none; }
 
+  /* Launch handoff (data-intro on .app, intro.svelte.ts): the island slides in
+     from the rail edge while the splash veil lifts — same vocabulary as the
+     collapse state. Skipped when the rail boots collapsed. */
+  :global(.app[data-intro="veil"]) .side-rail:not(.collapsed) .sidebar { transform: translateX(-16px); opacity: 0; }
+  :global(.app[data-intro="handoff"]) .side-rail:not(.collapsed) .sidebar {
+    transform: none;
+    opacity: 1;
+    transition: transform var(--dur-rise) var(--ease-page), opacity var(--dur-rise) var(--ease-page);
+  }
+
   /* Handle rides the island's right edge (8px inside the rail). */
   .side-resize { position: absolute; top: 48px; right: 4px; width: 8px; height: calc(100% - 64px); z-index: 6; cursor: col-resize; -webkit-app-region: no-drag; }
   .side-resize::after { content: ""; position: absolute; top: 0; right: 3px; width: 2px; height: 100%; border-radius: 2px; background: transparent; transition: background var(--dur-fast); }

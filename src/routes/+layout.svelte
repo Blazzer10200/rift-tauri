@@ -8,6 +8,7 @@
   import { workspace } from "$lib/state/workspace.svelte";
   import { projects } from "$lib/state/projects.svelte";
   import { accessibility } from "$lib/state/accessibility.svelte";
+  import { intro } from "$lib/state/intro.svelte";
   import SplashOverlay from "$lib/components/SplashOverlay.svelte";
   import ContextMenuHost from "$lib/components/shell/ContextMenuHost.svelte";
   import { handleGlobalContextMenu } from "$lib/state/contextMenu.svelte";
@@ -29,10 +30,12 @@
   // launches always replay the splash. Dev HMR / page-refresh within the
   // same window skips — set inline so we never flash-mount the overlay.
   // To force-replay during iteration: `sessionStorage.removeItem("rift.splash.seen")`
-  let splashDone = $state(
+  const seenSplash =
     typeof sessionStorage !== "undefined" &&
-      !!sessionStorage.getItem("rift.splash.seen"),
-  );
+    !!sessionStorage.getItem("rift.splash.seen");
+  let splashDone = $state(seenSplash);
+  // Cold boot (splash will play) → arm the shell's island-assembly entrance.
+  if (!seenSplash) intro.arm();
 
   onMount(() => {
     uiPrefs.init();
@@ -50,5 +53,5 @@
 <ContextMenuHost />
 
 {#if !splashDone}
-  <SplashOverlay onComplete={() => (splashDone = true)} />
+  <SplashOverlay onComplete={() => { splashDone = true; intro.handoff(); }} />
 {/if}

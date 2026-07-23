@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from "svelte";
   import RiftLogo from "$lib/components/shell/RiftLogo.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
+  import { intro } from "$lib/state/intro.svelte";
 
   type Props = {
     onComplete: () => void;
@@ -13,11 +14,15 @@
   // a slow boot can never leak the half-built surface underneath. MIN_MS keeps
   // one full choreography beat on fast boots; CAP_MS drops the veil regardless
   // so a wedged probe can't trap the window behind it.
-  const MIN_MS = 1600;
+  const MIN_MS = 900;
   const CAP_MS = 10_000;
+  // Readout is progressive disclosure: fast boots get a pure brand beat; the
+  // stage line + bar only fade in once boot has genuinely run long.
+  const SLOW_MS = 1400;
 
   let minHeld = $state(false);
   let capped = $state(false);
+  let showBoot = $state(false);
   let exiting = $state(false);
   let destroyed = false;
   onDestroy(() => { destroyed = true; });
@@ -41,6 +46,7 @@
   // on ready. The stages are real — only the in-between pacing is estimated.
   let shownP = $state(0);
   $effect(() => {
+    if (!showBoot) return;
     const target = stage.p;
     if (prefersReducedMotion) { shownP = target; return; }
     let raf = 0;
@@ -68,7 +74,10 @@
       } catch {
         /* private-mode / disabled storage — ignore */
       }
-      const exitMs = prefersReducedMotion ? 120 : 700;
+      // Hand the entrance to the shell just after the veil starts lifting —
+      // the islands assemble UNDER it, one continuous move (intro store).
+      setTimeout(() => intro.handoff(), 80);
+      const exitMs = prefersReducedMotion ? 120 : 560;
       setTimeout(() => { if (!destroyed) onComplete(); }, exitMs);
     }
   });
@@ -76,7 +85,8 @@
   onMount(() => {
     const t1 = setTimeout(() => { minHeld = true; }, MIN_MS);
     const t2 = setTimeout(() => { capped = true; }, CAP_MS);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
+    const t3 = setTimeout(() => { if (!ready) showBoot = true; }, SLOW_MS);
+    return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3); };
   });
 </script>
 
@@ -96,13 +106,15 @@
       {#each "RIFT".split("") as ch, i (i)}<span class="wl" style="--i:{i}">{ch}</span>{/each}
     </div>
   </div>
-  <div class="boot" aria-hidden="true">
-    <div class="bootbar"><span class="bootfill" style="transform:scaleX({shownP})"></span></div>
-    <div class="bootrow">
-      {#key stage.label}<span class="bootline">{stage.label}</span>{/key}
-      <span class="bootpct">{Math.round(shownP * 100)}%</span>
+  {#if showBoot}
+    <div class="boot" aria-hidden="true">
+      <div class="bootbar"><span class="bootfill" style="transform:scaleX({shownP})"></span></div>
+      <div class="bootrow">
+        {#key stage.label}<span class="bootline">{stage.label}</span>{/key}
+        <span class="bootpct">{Math.round(shownP * 100)}%</span>
+      </div>
     </div>
-  </div>
+  {/if}
   {#if exiting}<span style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap">Ready</span>{/if}
 </div>
 
@@ -132,8 +144,9 @@
       );
     pointer-events: auto;
     opacity: 1;
-    /* Exit: content settles out first, then the veil lifts and the UI lands. */
-    transition: opacity 460ms cubic-bezier(0.4, 0, 0.2, 1) 180ms;
+    /* Exit: content settles out first, then the veil lifts WHILE the islands
+       assemble beneath it (AppShell/Sidebar data-intro entrance). */
+    transition: opacity 380ms cubic-bezier(0.4, 0, 0.2, 1) 120ms;
     will-change: opacity;
   }
   .splash::after {
@@ -259,11 +272,16 @@
      boot stages + a quiet mono status line and a ticking percentage. Honest
      signals, no fake shimmer (DESIGN.md §8). */
   .boot {
+    /* Out of flow: the readout mounts LATE (slow-boot disclosure) — as a flex
+       child its arrival would reflow and jump the centered lockup. */
+    position: absolute;
+    left: calc(50% - 100px);
+    top: calc(50% + 100px);
     display: flex;
     flex-direction: column;
     gap: 12px;
     width: 200px;
-    animation: boot-in 400ms cubic-bezier(0.22, 1, 0.36, 1) 620ms both;
+    animation: boot-in 400ms cubic-bezier(0.22, 1, 0.36, 1) 80ms both;
     transition: opacity 220ms cubic-bezier(0.4, 0, 0.2, 1);
   }
   @keyframes boot-in {
