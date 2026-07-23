@@ -18,7 +18,7 @@
   import { stt, isLocalEngine, type ModelInfo } from "../../state/stt.svelte";
   import { accessibility } from "../../state/accessibility.svelte";
   import { commandPalette } from "../../state/command-palette.svelte";
-  import { uiPrefs, ACCENTS, TOOL_DETAILS, DENSITY_PRESETS, VIVIDNESS_MIN, VIVIDNESS_MAX } from "../../state/ui-prefs.svelte";
+  import { uiPrefs, ACCENTS, TOOL_DETAILS, DENSITY_PRESETS, VIVIDNESS_MIN, VIVIDNESS_MAX, UI_SCALE_MIN, UI_SCALE_MAX } from "../../state/ui-prefs.svelte";
   import { onboarding } from "../../state/onboarding.svelte";
   import { betaNotice } from "../../state/betaNotice.svelte";
   import { environment } from "../../state/environment.svelte";
@@ -64,6 +64,7 @@
   const SEARCH_INDEX: SearchEntry[] = [
     { tab: "appearance", anchor: "card-accent",    card: "Accent color",      title: "Accent color",        kw: "theme hue swatch color highlight" },
     { tab: "appearance", anchor: "card-accent",    card: "Accent color",      title: "Vividness",           kw: "saturation intensity accent" },
+    { tab: "appearance", anchor: "card-interface", card: "Interface & code",  title: "UI scale",            kw: "zoom size bigger smaller resolution scaling percent" },
     { tab: "appearance", anchor: "card-interface", card: "Interface & code",  title: "Interface density",   kw: "spacing compact comfy regular rows" },
     { tab: "appearance", anchor: "card-interface", card: "Interface & code",  title: "Code font size",      kw: "monospace px code blocks" },
     { tab: "appearance", anchor: "card-interface", card: "Interface & code",  title: "Tab width",           kw: "indentation spaces code" },
@@ -163,6 +164,8 @@
   }
 
   const vivPct = $derived(Math.round(((uiPrefs.vividness - VIVIDNESS_MIN) / (VIVIDNESS_MAX - VIVIDNESS_MIN)) * 100));
+  const scalePct = $derived(Math.round(uiPrefs.uiScale * 100));
+  const scaleFillPct = $derived(Math.round(((uiPrefs.uiScale - UI_SCALE_MIN) / (UI_SCALE_MAX - UI_SCALE_MIN)) * 100));
 
   // Command-palette deep-link: open the requested tab, then clear (one-shot).
   $effect(() => {
@@ -583,6 +586,13 @@
           <div class="card" id="card-interface">
             <div class="card-tt">Interface &amp; code</div>
             <div class="card-sub">Spacing across the app, and how code renders in Claude's replies.</div>
+            <div class="ctl-row tight">
+              <div><div class="ctl-t">UI scale</div><div class="ctl-s">Zoom the whole app — <kbd>Ctrl</kbd>+<kbd>=</kbd> / <kbd>Ctrl</kbd>+<kbd>-</kbd>, <kbd>Ctrl</kbd>+<kbd>0</kbd> resets.</div></div>
+              <div class="range-wrap grow">
+                <input class="set-range" type="range" min={UI_SCALE_MIN} max={UI_SCALE_MAX} step="0.05" value={uiPrefs.uiScale} style="--fill: {scaleFillPct}%" oninput={(e) => uiPrefs.setUiScale(Number(e.currentTarget.value))} aria-label="UI scale" use:sliderBubble={{ format: (v) => `${Math.round(v * 100)}%` }} />
+                <span class="range-val">{scalePct}%</span>
+              </div>
+            </div>
             <div class="ctl-row tight">
               <div><div class="ctl-t">Interface density</div><div class="ctl-s">Compact fits more on screen; comfy breathes.</div></div>
               <div class="seg">

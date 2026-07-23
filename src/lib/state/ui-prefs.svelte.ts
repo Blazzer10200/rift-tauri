@@ -1,4 +1,6 @@
 // (screen-tint comfort filter removed 2026-06-20 — overlapped all surfaces)
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+
 type Density = "compact" | "regular" | "comfy";
 type CodePrefs = { fontSize: number; tabWidth: number; ligatures: boolean };
 
@@ -10,6 +12,13 @@ const NARRATION_KEY = "rift.ui.narration.v1";
 const COMMAND_OUTPUT_KEY = "rift.ui.command-output.v1";
 const TOOL_DETAIL_KEY = "rift.ui.tool-detail.v1";
 const VIVIDNESS_KEY = "rift.ui.vividness.v1";
+const UI_SCALE_KEY = "rift.ui.scale.v1";
+
+// Whole-app zoom via the webview's page zoom (WebView2 setZoom) — scales every
+// px in one move, so the fixed-px token system stays untouched. 1 = 100%.
+export const UI_SCALE_MIN = 0.8;
+export const UI_SCALE_MAX = 1.5;
+const UI_SCALE_STEP = 0.05;
 
 // How much of the model's between-tool narration to surface in the live stream.
 //  - "focused": hide pure connective filler ("Now I'll build:") — the work rows
@@ -101,6 +110,8 @@ class UiPrefs {
   commandOutput = $state<CommandOutput>("peek");
   // How much per-tool action detail to render (see ToolDetail). Default "balanced".
   toolDetail = $state<ToolDetail>("balanced");
+  // Whole-app zoom factor (see UI_SCALE_* above). Default 100%.
+  uiScale = $state(1);
 
   init() {
     if (typeof window === "undefined") return;
@@ -113,6 +124,12 @@ class UiPrefs {
     if (accentRaw !== null) {
       const hue = Number(accentRaw);
       if (Number.isFinite(hue) && hue >= 0 && hue <= 360) this.accentHue = hue;
+    }
+
+    const scaleRaw = localStorage.getItem(UI_SCALE_KEY);
+    if (scaleRaw !== null) {
+      const s = Number(scaleRaw);
+      if (Number.isFinite(s)) this.uiScale = Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, s));
     }
 
     const vivRaw = localStorage.getItem(VIVIDNESS_KEY);
@@ -173,6 +190,19 @@ class UiPrefs {
     this.applyAccent();
   }
 
+  setUiScale(s: number) {
+    // round to 2dp — the 0.05 step math otherwise leaves float noise (0.9500…01)
+    this.uiScale = Math.round(Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, s)) * 100) / 100;
+    localStorage.setItem(UI_SCALE_KEY, String(this.uiScale));
+    this.applyZoom();
+  }
+
+  /** Ctrl+= / Ctrl+- — nudge one 5% notch, snapped so repeated steps land on round stops. */
+  stepUiScale(dir: 1 | -1) {
+    const snapped = Math.round((this.uiScale + dir * UI_SCALE_STEP) / UI_SCALE_STEP) * UI_SCALE_STEP;
+    this.setUiScale(snapped);
+  }
+
   /** Back to the stock emerald accent (hue + vividness only — texture/density untouched). */
   resetAccent() {
     this.setAccentHue(163);
@@ -184,6 +214,7 @@ class UiPrefs {
     this.resetAccent();
     this.setDensity("compact");
     this.setCode({ ...DEFAULT_CODE });
+    this.setUiScale(1);
   }
 
   /** Chat-rendering knobs → factory defaults: stream view on, Standard dial triple. */
@@ -248,6 +279,13 @@ class UiPrefs {
     document.documentElement.dataset.density = this.density;
     this.applyAccent();
     this.applyCode();
+    this.applyZoom();
+  }
+
+  private applyZoom() {
+    if (typeof window === "undefined") return;
+    // No-op outside Tauri (plain-browser vite dev has no webview to zoom).
+    getCurrentWebview().setZoom(this.uiScale).catch((e) => console.warn("setZoom failed:", e));
   }
 
   private applyAccent() {

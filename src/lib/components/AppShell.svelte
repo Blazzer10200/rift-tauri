@@ -26,6 +26,7 @@
   import { isFileDrag, attachImageFiles, summarizeAttach } from "./assistant/composer/helpers";
   import { goHome } from "../state/nav";
   import { onboarding } from "../state/onboarding.svelte";
+  import { uiPrefs } from "../state/ui-prefs.svelte";
   import { betaNotice } from "../state/betaNotice.svelte";
   import { intro } from "../state/intro.svelte";
   import OnboardingFlow from "./onboarding/OnboardingFlow.svelte";
@@ -198,6 +199,12 @@
   });
 
   function onGlobalKey(e: KeyboardEvent) {
+    // UI zoom (Ctrl+= / Ctrl+- / Ctrl+0) — app chrome, works even over onboarding.
+    if (e.ctrlKey && !e.altKey && !e.metaKey) {
+      if (e.key === "=" || e.key === "+") { e.preventDefault(); uiPrefs.stepUiScale(1); return; }
+      if (e.key === "-")                  { e.preventDefault(); uiPrefs.stepUiScale(-1); return; }
+      if (e.key === "0" && !e.shiftKey)   { e.preventDefault(); uiPrefs.setUiScale(1); return; }
+    }
     // First-run setup is modal — no palette / workspace-switch / tab shortcuts
     // may fire over (or behind) it. Its own Escape handler still works.
     if (showOnboarding) return;

@@ -27,6 +27,7 @@ pub mod stt;
 pub mod update_service;
 pub mod usage;
 pub mod watchdog;
+pub mod window_state;
 
 use tauri::Manager;
 
@@ -59,11 +60,20 @@ pub(crate) fn center_in_work_area(window: &tauri::WebviewWindow) {
         )
     };
     if ok == 0 { return; }
-    let Ok(size) = window.outer_size() else { return; };
+    let Ok(mut size) = window.outer_size() else { return; };
     let work_w = wa.right - wa.left;
     let work_h = wa.bottom - wa.top;
-    let x = wa.left + (work_w - size.width as i32) / 2;
-    let y = wa.top + (work_h - size.height as i32) / 2;
+    // The 1600×1000 logical default overflows small/high-DPI screens (1080p @
+    // 125% = 2000 physical px) — shrink to fit the work area before centering,
+    // else the center math goes negative and the window hangs off-screen.
+    if size.width as i32 > work_w || size.height as i32 > work_h {
+        let w = (size.width as i32).min(work_w).max(1) as u32;
+        let h = (size.height as i32).min(work_h).max(1) as u32;
+        let _ = window.set_size(tauri::PhysicalSize::new(w, h));
+        if let Ok(s) = window.outer_size() { size = s; }
+    }
+    let x = wa.left + (work_w - size.width as i32).max(0) / 2;
+    let y = wa.top + (work_h - size.height as i32).max(0) / 2;
     let _ = window.set_position(tauri::PhysicalPosition::new(x, y));
 }
 #[cfg(not(target_os = "windows"))]
@@ -175,12 +185,17 @@ pub fn run() {
         // passes through (dead-webview escape hatch, shutdown::should_intercept_close).
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                if window.label() == "main" && shutdown::should_intercept_close() {
-                    api.prevent_close();
-                    use tauri::Emitter;
-                    let _ = window
-                        .app_handle()
-                        .emit_to(window.label(), "rift://close-requested", ());
+                if window.label() == "main" {
+                    // Geometry persists whether the close is intercepted or
+                    // final — the second (pass-through) ✕ just re-saves.
+                    window_state::save(window);
+                    if shutdown::should_intercept_close() {
+                        api.prevent_close();
+                        use tauri::Emitter;
+                        let _ = window
+                            .app_handle()
+                            .emit_to(window.label(), "rift://close-requested", ());
+                    }
                 }
             }
         })
@@ -188,7 +203,9 @@ pub fn run() {
             // Window starts hidden (`visible: false` in tauri.conf.json) so we
             // can position it before the user sees it.
             if let Some(main) = app.get_webview_window("main") {
-                center_in_work_area(&main);
+                if !window_state::restore(&main) {
+                    center_in_work_area(&main);
+                }
                 // show() makes the window visible (taskbar entry + a flash) but
                 // does NOT steal foreground. Deliberately NO set_focus() here:
                 // an auto-update/dev relaunch firing set_focus() yanks the user
