@@ -818,24 +818,46 @@
     border: 1px solid transparent;
     transition: border-color var(--dur-fast) ease-out, background var(--dur-fast) ease-out;
   }
-  /* Split mode: each pane reads as a rounded card (spec .pane) — inset border,
-     dimmed when not focused, accent ghost-ring on focus. Single pane stays bare. */
+  /* Split mode: each pane reads as a rounded card (spec .pane) — REAL 1px
+     border (an inset box-shadow "border" anti-aliases rough on rounded corners
+     in WebView2 — the torn-corner look), dimmed when not focused. Entry is
+     fade+drift, never scale: scaling a rounded-clip box shimmers its corners
+     mid-animation. isolation pins children into one compositing group so the
+     corner clip stays clean. */
   .pane.split {
-    border: 0;
+    border: 1px solid var(--border);
     border-radius: 14px;
     overflow: hidden;
+    isolation: isolate;
     margin: 6px 0 6px 6px;
     background: color-mix(in oklab, var(--bg-inset) 26%, transparent);
-    box-shadow: inset 0 0 0 1px var(--border);
-    transition: box-shadow var(--dur-base) var(--ease-soft), opacity var(--dur-base) var(--ease-soft);
+    transition: border-color var(--dur-base) var(--ease-soft), box-shadow var(--dur-base) var(--ease-soft), opacity var(--dur-base) var(--ease-soft);
     animation: paneIn var(--dur-base) var(--ease-page) backwards;
   }
   .pane.split:not(.focused) { opacity: 0.84; }
-
-  .pane.split.focused { box-shadow: inset 0 0 0 1px var(--ghost-border); }
+  /* Focused accent rail — an inset pseudo-element that stops short of the
+     radius (the old inset box-shadow ran square through the rounded corners
+     and tore). Slides open on focus. */
+  .pane.split::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 14px; right: 14px;
+    height: 2px;
+    border-radius: 0 0 2px 2px;
+    background: var(--accent);
+    opacity: 0;
+    transform: scaleX(0.6);
+    transition: opacity var(--dur-base) var(--ease-soft), transform var(--dur-base) var(--ease-soft);
+    z-index: 5;
+    pointer-events: none;
+  }
+  .pane.split.focused::before { opacity: 1; transform: none; }
   .pane-shell:last-child .pane.split { margin-right: 6px; }
-  @keyframes paneIn { from { transform: scale(0.985); } to { transform: none; } }
-  @media (prefers-reduced-motion: reduce) { .pane.split { animation: none; } }
+  @keyframes paneIn { from { opacity: 0; transform: translateY(4px); } }
+  @media (prefers-reduced-motion: reduce) {
+    .pane.split { animation: none; }
+    .pane.split::before { transition: none; }
+  }
   /* Pane header — a slim, always-legible strip atop each pane in split mode.
      Replaces the old floating low-opacity chrome: shows the pane index, its
      conversation title (so a split is identifiable at a glance), the ctx chip
@@ -848,6 +870,10 @@
     height: 28px;
     padding: 0 6px 0 8px;
     background: color-mix(in oklch, var(--bg-elev-1) 55%, transparent);
+    /* Round own top corners (radius minus the 1px border) instead of leaning
+       on the parent clip — a square strip under a rounded clip is where the
+       corner fringing showed. */
+    border-radius: 13px 13px 0 0;
     border-bottom: 1px solid var(--border);
     transition: background var(--dur-fast) ease-out, border-color var(--dur-fast) ease-out;
   }
@@ -1015,12 +1041,11 @@
     border-color: color-mix(in oklab, var(--danger) 35%, var(--border));
     background: color-mix(in oklab, var(--danger) 10%, transparent);
   }
-  /* Focused pane — visible accent rail along the top edge plus a stronger
-     border. Subtle in single-pane mode (no split visible); pronounced in
-     split mode where multiple panes compete for attention. */
+  /* Focused pane — accent-warmed border + a soft accent-tinted drop; the top
+     rail comes from ::before above (radius-aware, no corner tearing). */
   .pane.split.focused {
-    border-color: color-mix(in oklab, var(--accent) 60%, transparent);
-    box-shadow: inset 0 2px 0 0 var(--accent);
+    border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
+    box-shadow: 0 8px 22px -14px color-mix(in oklab, var(--accent) 40%, transparent);
   }
   .pane.split:not(.focused) {
     cursor: pointer;
@@ -1028,7 +1053,7 @@
   }
   .pane.split:not(.focused):hover {
     background: var(--bg);
-    border-color: color-mix(in oklab, var(--accent) 22%, transparent);
+    border-color: color-mix(in oklab, var(--accent) 26%, var(--border));
   }
   /* ── Merged home ⇄ conversation column ──────────────────────────────────
      One flex column per pane. HOME centers its content (welcome + hero

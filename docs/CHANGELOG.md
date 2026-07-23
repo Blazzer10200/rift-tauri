@@ -2,25 +2,15 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased (on main)
+## v0.140.0 — Split panes grew up
+
 - **Split panes grew up.** A visible "Split" button now lives in the status bar (it was keyboard/drag-only before). Maximize any pane full-width and back — header button, double-click the header, or Alt+Enter; Alt+←/→ walks focus between panes. New panes start empty with a resume picker instead of grabbing a random open tab. Pane sizes survive opening/closing a pane instead of resetting, the width guard now accounts for the browser dock (no more sliver panes), and a background pane that finishes flashes "✓ done" so you don't miss it.
+- **Pane corners are crisp now.** The rough/torn corners on split-pane cards are gone — real borders instead of shadow tricks, a focus rail that respects the rounded corners, and a smooth fade-in entrance instead of the scale pop that shimmered.
 - **Background agents no longer fake "Done".** A turn that hands work to a background agent now shows a pulsing "Agent working in background — you can keep chatting" footer until the agent actually reports back.
 - **Project setup, de-confused.** New Project is folder-first: pick the folder, the name fills itself, and 8 common junk patterns (node_modules, .git, build output…) are excluded by default. Include/exclude globs live behind a collapsed "File scope" row with a plain-English summary.
 - **Workspace page uses big screens** — wider layout; fullscreen gets a 4-up project grid instead of dead gutters.
 - **Code blocks:** one unified header (language · line count · Copy) on every block type, 6 new languages (Go, YAML, SQL, HTML, CSS, C#), tidier diff padding + faithful diff copy.
 - **GitHub popover:** refresh spinner no longer loops forever; adds "checked Xm ago", a live elapsed timer while CI runs, and a green in-sync dot.
-
-## v0.139.0 — Dictation you can trust, smarter GitHub, sharper chrome
-
-- **Speech-to-text overhaul.** Sending while words were still gray silently discarded them — the ghost tail now rides along with every send, so you never wait for text to "turn white." Held-mic silence no longer invents filler words (".yeah"): segment commits and the stop-time pass are gated on real voiced audio, and stray leading punctuation is scrubbed. The model pre-warms at launch and on engine/model switches, killing the first-press stall. Ghost text is brighter with a live blinking caret.
-- **GitHub chip got honest.** Polls every 30s while CI runs, relative times tick live, finished runs toast pass/fail, and the popover offers one-click "Pull/Push N commits with Claude."
-- **Autocorrect actually works** — Enter-send and Shift+Enter no longer skip the final word, right-click Auto-correct fixes the whole text, ~55 new common typos.
-- **Composer fixes:** no longer creeps taller after long drafts; toolbar slimmed to attach + mic + enhance (Escape still clears the draft).
-- **Sidebar:** shows Pinned + today's chats only; everything older folds behind "Show earlier."
-- **Plan card + HUD:** long plans fold completed items behind one "N completed" row; the floating plan/activity bars got a glass upgrade (deeper shadow, top catch-light, accent hairline, staggered stack-in). The turn rail is a tapered hairline with a drifting live glint.
-- **Self-diagnosis:** frontend errors + `console.error` now reach the backend event bus and a rotating `events.ndjson`; the assistant gains `read_events` + `crash_reports` tools.
-- **Compaction you can see.** `/compact` shows a live progress card — estimated percent, how many messages/tokens are being summarized, and a time estimate. When the CLI auto-compacts mid-turn (which used to look like an unexplained 3-minute hang), Rift now detects it and says exactly what's happening.
-- **Sharper, faster chrome.** Launch intro rebuilt as a proper warmup: slab material, ticking boot percentage, breathing light, staged readout. Sidebar open/close is snappier (240ms, fewer reflow frames), full-screen backdrop blurs that caused lag + fuzzy rendering are gone (WebView2 mis-composites them on fixed overlays), and frosted menus are crisper (opaque fill + lighter blur).
 
 ## Known issues
 - **While elevated, dragging files from Explorer into the window doesn't work** (Windows blocks lower→higher integrity drag-drop); the attach button / file picker still works fine.
