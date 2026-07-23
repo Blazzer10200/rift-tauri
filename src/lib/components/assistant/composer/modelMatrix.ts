@@ -71,6 +71,11 @@ export const MODEL_OPTIONS: ModelOpt[] = [
 // 1-based number shortcut → model id (digit keys pick directly in the menu).
 export const modelShortcut = (id: ModelSel) => MODEL_OPTIONS.findIndex((m) => m.id === id) + 1;
 
+// Opus 5 — announced for 2026-07-23. Display-only teaser row in the picker
+// (deliberately NOT in MODEL_OPTIONS: unselectable, takes no hotkey slot,
+// nothing persistable). Release day: flip false + add the real row above.
+export const OPUS5_TEASER = true;
+
 /** The context-window tag shown beside a model in the picker, HONEST under the
  *  user's plan: a 1M-native model capped to 200K by a Free plan must read "200K
  *  context", not the static "1M context" baked into MODEL_OPTIONS. Derives from

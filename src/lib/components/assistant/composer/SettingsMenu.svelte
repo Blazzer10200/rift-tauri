@@ -13,7 +13,7 @@
   import { portal } from "$lib/actions/portal";
   import { tooltip } from "$lib/actions/tooltip";
   import {
-    MODEL_OPTIONS, currentModels, legacyModels, modelShortcut, modelWindowSuffix,
+    MODEL_OPTIONS, OPUS5_TEASER, currentModels, legacyModels, modelShortcut, modelWindowSuffix,
     dialStopsFor, dialIdxFor, clampEffortIdx,
     type ModelOpt, type SettingsRow,
   } from "./modelMatrix";
@@ -215,6 +215,21 @@
   {/snippet}
 
   <div class="rift-menu-head">Model</div>
+  {#if OPUS5_TEASER}
+    <!-- Display-only teaser (modelMatrix.OPUS5_TEASER) — not a menu item, no
+         hotkey, unselectable until the real row lands on release day. -->
+    <div
+      class="pop-item model-row soon"
+      role="presentation"
+      aria-disabled="true"
+      use:tooltip={"Opus 5 — next-generation Opus, releasing imminently. Selectable here the moment it goes live."}
+    >
+      <span class="pi-name">
+        <span class="model-name">Opus 5</span>
+        <span class="pi-tag">Coming soon</span>
+      </span>
+    </div>
+  {/if}
   {#each currentModels as m (m.id)}
     {@render modelRow(m)}
   {/each}
@@ -550,6 +565,10 @@
   }
   :global(.settings-menu .model-row.sel .pi-name) { color: var(--fg); font-weight: 600; }
   :global(.settings-menu .model-row.limited .model-name) { color: var(--accent); }
+  /* Coming-soon teaser — present but visibly not-yet: dimmed, inert, no hover lift. */
+  :global(.settings-menu .model-row.soon) { cursor: default; opacity: 0.68; }
+  :global(.settings-menu .model-row.soon:hover) { background: transparent; }
+  :global(.settings-menu .model-row.soon:hover .pi-name) { color: var(--fg-muted); }
   :global(.settings-menu .pop-ck) {
     flex: none; color: var(--accent);
     animation: ck-in 0.28s var(--ease-page) both;
