@@ -1,11 +1,6 @@
 // Pure helpers extracted from Composer.svelte (#20 C1 — composer-split.md).
 // Zero DOM-state/store deps beyond the args passed in; unit-tested in helpers.test.ts.
 
-export function fmtClock(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-}
-
 // Light fuzzy match with three tiers: literal substring in basename,
 // fuzzy match in basename, fuzzy match anywhere. `Comp` against
 // `lib/foo/Composer.svelte` should beat `compress.lua` because the match

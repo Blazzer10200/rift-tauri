@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attachImageFiles, bytesToBase64, fmtClock, fmtSize, fuzzyScore, isFileDrag, queueChipLabel, slashMatchSegments, slashScore, summarizeAttach, summarizeTextAttach } from "./helpers";
+import { attachImageFiles, bytesToBase64, fmtSize, fuzzyScore, isFileDrag, queueChipLabel, slashMatchSegments, slashScore, summarizeAttach, summarizeTextAttach } from "./helpers";
 
 describe("slashScore", () => {
   it("returns 0 for an empty query (everything matches, original order kept)", () => {
@@ -56,21 +56,6 @@ describe("queueChipLabel", () => {
   });
   it("never renders blank — degenerate empty item gets a placeholder", () => {
     expect(queueChipLabel({ text: "" })).toBe("(empty)");
-  });
-});
-
-describe("fmtClock", () => {
-  it("formats zero and sub-second values", () => {
-    expect(fmtClock(0)).toBe("0:00");
-    expect(fmtClock(999)).toBe("0:00");
-  });
-  it("pads seconds and rolls minutes", () => {
-    expect(fmtClock(5_000)).toBe("0:05");
-    expect(fmtClock(65_000)).toBe("1:05");
-    expect(fmtClock(600_000)).toBe("10:00");
-  });
-  it("clamps negative input to 0:00", () => {
-    expect(fmtClock(-5_000)).toBe("0:00");
   });
 });
 

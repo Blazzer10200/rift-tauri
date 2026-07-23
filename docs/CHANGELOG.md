@@ -2,9 +2,13 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## v0.140.1 — The long-turn freeze is dead
+## v0.141.0 — Every model, honest compaction radar
 
-- **Fixed the recurring mid-turn UI freeze (blank `$` rows, stuck "Editing file" chips, frozen timers).** Root cause after 4 occurrences: command-output previews keyed their lines by *content*, so any command whose output repeated a line (`git push`, `gh run watch`, cargo progress) crashed the renderer's update loop — every chip after that moment rendered blank forever while the turn kept running fine underneath. Previews now key by position; same landmine also cleared from web-source chips, answer chips, and release notes. Your work was never lost — the transcript always healed on disk; only the live paint wedged.
+- **The model picker now carries the full Claude lineup.** Opus 4.6 and 4.5, Sonnet 4.6 and 4.5 join the legacy flyout (correct context windows + effort ceilings each — the old "Sonnet 4.6 can't do X-High" limit is gone upstream, so the dial goes all the way up), and Haiku 4.5 is back (Anthropic reinstated it). Plus an **Opus 5 "Coming soon"** row — it becomes selectable the moment the release lands.
+- **Auto-compaction detection finally respects your CLI settings.** If you tuned auto-compact (custom window, trigger percent, or turned it off), Rift now reads the same config the CLI does — the "Auto-compacting conversation…" card and the "context getting full" heads-up fire at *your* real trigger instead of assuming compaction happens near a full window. Manual and auto compaction now both land accurately.
+- **Sub-agent cards show the agent's actual work.** On CLI 2.1.211+, background agents stream their text and reasoning into their inline card — not just tool calls.
+- **Smarter long-tool handling on new CLIs:** heartbeat frames from slow tool calls are recognized (no more stray "unknown event" breadcrumbs), and the EndConversation safety tool renders honestly. Recommended CLI is now 2.1.214.
+- **Split/chrome polish:** cleaner pane divider + calmer focus border, the empty pane offers project quick-picks, the status bar got re-zoned, and the composer's orbiting light is retired for a calm breathing ring. Fixed the folder chip above the composer showing a stale folder after switching workspaces in a split.
 
 ## v0.140.0 — Split panes grew up
 
