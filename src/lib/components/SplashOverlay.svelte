@@ -74,10 +74,10 @@
       } catch {
         /* private-mode / disabled storage — ignore */
       }
-      // Hand the entrance to the shell just after the veil starts lifting —
-      // the islands assemble UNDER it, one continuous move (intro store).
+      // Hand the entrance to the shell just as the seam starts to part —
+      // the islands assemble in the opening gap, one continuous move.
       setTimeout(() => intro.handoff(), 80);
-      const exitMs = prefersReducedMotion ? 120 : 560;
+      const exitMs = prefersReducedMotion ? 120 : 680;
       setTimeout(() => { if (!destroyed) onComplete(); }, exitMs);
     }
   });
@@ -99,7 +99,12 @@
   aria-label="Starting Rift"
   inert={exiting}
 >
-  <div class="shaft" aria-hidden="true"></div>
+  <!-- Two chassis half-panels + the seam between them. On exit the surface
+       PARTS along the seam — the rift opens — revealing the app assembling
+       underneath (AppShell/Sidebar data-intro entrance). -->
+  <div class="panel left" aria-hidden="true"></div>
+  <div class="panel right" aria-hidden="true"></div>
+  <div class="seam" aria-hidden="true"></div>
   <div class="lockup">
     <div class="mark"><RiftLogo size={64} /></div>
     <div class="wordmark">
@@ -119,131 +124,128 @@
 </div>
 
 <style>
-  /* Opaque slab — the SAME material language as the app's islands: a vertical
-     tonal crown over the base tone, a grounded foot, and whisper film grain
-     (banding-killer). No translucency: nothing behind it may read until the
-     reveal. Quality reads as finish, not illumination (DESIGN.md §5). */
+  /* The splash IS the chassis — the same recessed machined material the app's
+     islands sit in (AppShell .app), split into two half-panels with a seam
+     between them. Brand reads as engraving on the surface, not a lit stage;
+     the ONE accent voice is the seam. On exit the halves part along it —
+     the rift opens onto the app (DESIGN.md §5, amended 2026-07-23). */
   .splash {
     position: fixed;
     inset: 0;
     z-index: 9999;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 38px;
     overflow: hidden;
     isolation: isolate;
-    background:
-      linear-gradient(
-        180deg,
-        color-mix(in oklab, var(--fg) 3.5%, var(--bg)),
-        var(--bg) 42%,
-        var(--bg) 82%,
-        color-mix(in oklab, black 22%, var(--bg))
-      );
     pointer-events: auto;
-    opacity: 1;
-    /* Exit: content settles out first, then the veil lifts WHILE the islands
-       assemble beneath it (AppShell/Sidebar data-intro entrance). */
-    transition: opacity 380ms cubic-bezier(0.4, 0, 0.2, 1) 120ms;
-    will-change: opacity;
   }
-  .splash::after {
+  .splash[data-exiting="true"] {
+    pointer-events: none;
+  }
+
+  /* Half-panels — the recessed-chassis recipe (vertical falloff + faint accent
+     temperature + grain), kept in lockstep with AppShell .app. Left overlaps
+     center by 1px so no sub-pixel gap ever leaks the app early. */
+  .panel {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: linear-gradient(180deg,
+      color-mix(in oklab, var(--accent) 2.5%, color-mix(in oklab, oklch(0 0 0) 30%, var(--bg))),
+      color-mix(in oklab, var(--accent) 1%, color-mix(in oklab, oklch(0 0 0) 42%, var(--bg))));
+    transition: transform 520ms cubic-bezier(0.65, 0, 0.35, 1) 140ms;
+    will-change: transform;
+  }
+  .panel.left  { left: 0; width: calc(50% + 1px); }
+  .panel.right { right: 0; width: 50%; }
+  .panel::after {
     content: "";
     position: absolute;
     inset: 0;
-    z-index: -1;
     pointer-events: none;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
     background-size: 160px 160px;
-    opacity: 0.03;
+    opacity: 0.025;
   }
-  .splash[data-exiting="true"] {
-    opacity: 0;
-    pointer-events: none;
-  }
+  /* Machined inner edges: each half carries a dark seam-facing cut. Only
+     visible once the halves part — the cut edge of the material. */
+  .panel.left  { box-shadow: inset -1px 0 0 oklch(0 0 0 / 0.45); }
+  .panel.right { box-shadow: inset 1px 0 0 oklch(0 0 0 / 0.45); }
+  .splash[data-exiting="true"] .panel.left  { transform: translateX(-101%); }
+  .splash[data-exiting="true"] .panel.right { transform: translateX(101%); }
 
-  /* The rift — a vertical shaft of accent light behind the lockup; draws in
-     first, breathes softly while the app warms, flares briefly on exit. One
-     light source, no stacked atmosphere. */
-  .shaft {
+  /* The rift — a full-height 1px accent seam where the surface will part.
+     Draws in from center, breathes by opacity only (stationary liveness,
+     never traveling motion). Whisper halo, not a glow blob. */
+  .seam {
     position: absolute;
     left: 50%;
-    top: 50%;
-    width: 2px;
-    height: min(36vh, 270px);
-    transform: translate(-50%, -62%) scaleY(0);
-    border-radius: 2px;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    transform: scaleY(0);
+    transform-origin: center;
     background: linear-gradient(
       180deg,
       transparent,
-      color-mix(in oklab, var(--accent) 75%, transparent) 30%,
-      color-mix(in oklab, white 35%, var(--accent)) 50%,
-      color-mix(in oklab, var(--accent) 75%, transparent) 70%,
+      color-mix(in oklab, var(--accent) 65%, transparent) 22%,
+      color-mix(in oklab, white 25%, var(--accent)) 50%,
+      color-mix(in oklab, var(--accent) 65%, transparent) 78%,
       transparent
     );
-    box-shadow:
-      0 0 18px color-mix(in oklab, var(--accent) 55%, transparent),
-      0 0 90px 6px color-mix(in oklab, var(--accent) 16%, transparent);
-    opacity: 0.5;
+    box-shadow: 0 0 10px color-mix(in oklab, var(--accent) 22%, transparent);
+    opacity: 0.55;
     animation:
-      shaft-draw 480ms cubic-bezier(0.22, 1, 0.36, 1) 80ms both,
-      shaft-breathe 3.8s ease-in-out 900ms infinite;
+      seam-draw 520ms cubic-bezier(0.22, 1, 0.36, 1) 100ms both,
+      seam-breathe 3.8s ease-in-out 900ms infinite;
   }
-  @keyframes shaft-draw {
-    from { transform: translate(-50%, -62%) scaleY(0); opacity: 0; }
-    to   { transform: translate(-50%, -62%) scaleY(1); opacity: 0.5; }
+  @keyframes seam-draw {
+    from { transform: scaleY(0); opacity: 0; }
+    to   { transform: scaleY(1); opacity: 0.55; }
   }
-  /* Warmup pulse — opacity only (the draw owns transform); reads as the light
-     source idling, not a loading trick. */
-  @keyframes shaft-breathe {
-    0%, 100% { opacity: 0.5; }
-    50%      { opacity: 0.66; }
+  @keyframes seam-breathe {
+    0%, 100% { opacity: 0.55; }
+    50%      { opacity: 0.72; }
   }
-  .splash[data-exiting="true"] .shaft {
-    animation: shaft-draw 480ms cubic-bezier(0.22, 1, 0.36, 1) 80ms both;
+  /* Exit: the seam flares once as the surface parts, then it's gone — the
+     opening gap replaces it. */
+  .splash[data-exiting="true"] .seam {
+    animation: none;
+    transform: scaleY(1);
     opacity: 0;
-    transform: translate(-50%, -62%) scaleY(1.25);
-    filter: brightness(1.5);
-    transition: opacity 320ms ease-out, transform 320ms ease-out, filter 320ms ease-out;
+    filter: brightness(1.6);
+    transition: opacity 260ms ease-out 100ms, filter 200ms ease-out;
   }
 
   .lockup {
-    position: relative;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -58%);
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 20px;
     transition:
-      opacity 280ms cubic-bezier(0.4, 0, 0.2, 1),
-      transform 340ms cubic-bezier(0.4, 0, 0.2, 1),
-      filter 340ms cubic-bezier(0.4, 0, 0.2, 1);
+      opacity 240ms cubic-bezier(0.4, 0, 0.2, 1),
+      filter 280ms cubic-bezier(0.4, 0, 0.2, 1);
   }
   .splash[data-exiting="true"] .lockup {
     opacity: 0;
-    transform: translateY(-6px) scale(1.02);
-    filter: blur(4px);
+    filter: blur(3px);
   }
 
+  /* The mark sits ON the material — grounded contact shadow, no halo. */
   .mark {
-    filter: drop-shadow(0 10px 34px color-mix(in oklab, var(--accent) 30%, transparent));
-    animation:
-      settle-mark 560ms cubic-bezier(0.22, 1, 0.36, 1) 140ms both,
-      mark-breathe 3.8s ease-in-out 900ms infinite;
+    filter: drop-shadow(0 2px 8px oklch(0 0 0 / 0.55));
+    animation: settle-mark 560ms cubic-bezier(0.22, 1, 0.36, 1) 140ms both;
   }
   @keyframes settle-mark {
     from { opacity: 0; transform: translateY(8px) scale(0.94); filter: blur(8px); }
     to   { opacity: 1; transform: none; filter: blur(0); }
   }
-  /* Same tempo as the shaft so the whole scene breathes as ONE light source. */
-  @keyframes mark-breathe {
-    0%, 100% { filter: drop-shadow(0 10px 34px color-mix(in oklab, var(--accent) 30%, transparent)); }
-    50%      { filter: drop-shadow(0 10px 38px color-mix(in oklab, var(--accent) 42%, transparent)); }
-  }
 
-  /* Wordmark — Lexend is sanctioned for brand/splash. Letters rise with a
-     small stagger so the name assembles instead of popping. */
+  /* Wordmark — Lexend is sanctioned for brand/splash. Engraved into the
+     chassis: solid fg, a dark cut above and the faintest light catch below —
+     no glow. Letters rise with a small stagger. */
   .wordmark {
     display: flex;
     font-family: "Lexend Variable", var(--font-ui);
@@ -255,8 +257,8 @@
     color: var(--fg);
     user-select: none;
     text-shadow:
-      0 0 26px color-mix(in oklab, var(--accent) 40%, transparent),
-      0 0 60px color-mix(in oklab, var(--accent) 15%, transparent);
+      0 -1px 0 oklch(0 0 0 / 0.6),
+      0 1px 0 oklch(1 0 0 / 0.05);
   }
   .wl {
     display: inline-block;
@@ -268,21 +270,21 @@
     to   { opacity: 1; transform: none; filter: blur(0); }
   }
 
-  /* Boot readout — the app's own terminal idiom: a hairline that fills on REAL
-     boot stages + a quiet mono status line and a ticking percentage. Honest
-     signals, no fake shimmer (DESIGN.md §8). */
+  /* Boot readout — a quiet engineering readout: 1px hairline that fills on
+     REAL boot stages + mono status line. Honest signals, no glow, no shimmer
+     (DESIGN.md §8). */
   .boot {
     /* Out of flow: the readout mounts LATE (slow-boot disclosure) — as a flex
        child its arrival would reflow and jump the centered lockup. */
     position: absolute;
-    left: calc(50% - 100px);
-    top: calc(50% + 100px);
+    left: calc(50% - 110px);
+    top: calc(50% + 104px);
     display: flex;
     flex-direction: column;
     gap: 12px;
-    width: 200px;
+    width: 220px;
     animation: boot-in 400ms cubic-bezier(0.22, 1, 0.36, 1) 80ms both;
-    transition: opacity 220ms cubic-bezier(0.4, 0, 0.2, 1);
+    transition: opacity 200ms cubic-bezier(0.4, 0, 0.2, 1);
   }
   @keyframes boot-in {
     from { opacity: 0; transform: translateY(4px); }
@@ -291,18 +293,15 @@
   .splash[data-exiting="true"] .boot { opacity: 0; }
   .bootbar {
     width: 100%;
-    height: 2px;
-    border-radius: 2px;
+    height: 1px;
     overflow: hidden;
-    background: color-mix(in oklab, var(--fg) 7%, transparent);
+    background: color-mix(in oklab, var(--fg) 8%, transparent);
   }
   .bootfill {
     display: block;
     height: 100%;
     transform-origin: left;
-    border-radius: 2px;
-    background: linear-gradient(90deg, color-mix(in oklab, var(--accent) 70%, transparent), var(--accent));
-    box-shadow: 0 0 10px color-mix(in oklab, var(--accent) 45%, transparent);
+    background: var(--accent);
   }
   .bootrow {
     display: flex;
@@ -333,12 +332,14 @@
 
   @media (prefers-reduced-motion: reduce) {
     .splash { transition: opacity 100ms linear; }
-    .splash[data-exiting="true"] { transition: opacity 100ms linear; }
-    .shaft { animation: none; opacity: 0.35; transform: translate(-50%, -62%) scaleY(1); }
-    .splash[data-exiting="true"] .shaft { transition: none; }
+    .splash[data-exiting="true"] { opacity: 0; }
+    .panel { transition: none; }
+    .splash[data-exiting="true"] .panel.left,
+    .splash[data-exiting="true"] .panel.right { transform: none; }
+    .seam { animation: none; opacity: 0.4; transform: scaleY(1); }
+    .splash[data-exiting="true"] .seam { transition: none; }
     .lockup { transition: none; }
     .mark, .wl, .boot, .bootline { animation: none; }
-    .mark { filter: drop-shadow(0 10px 34px color-mix(in oklab, var(--accent) 30%, transparent)); }
     .bootline::after { animation: none; }
   }
 </style>

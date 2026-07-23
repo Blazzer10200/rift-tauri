@@ -303,6 +303,7 @@
     <UpdateBanner />
     <div class="app-body" class:rail-collapsed={shell.collapsed}>
       <Sidebar />
+      <div class="rift-seam" aria-hidden="true"></div>
       <div class="main">
         <Topbar />
         <main class="workspace">
@@ -334,10 +335,13 @@
     inset: 0;
     display: flex;
     flex-direction: column;
-    /* Plain flat canvas — matches the sidebar's calm (owner call 2026-07-16).
-       All atmosphere lives INSIDE the main island; the window around it is
-       just the base tone. */
-    background: var(--bg);
+    /* Recessed chassis (owner call 2026-07-23, supersedes plain-flat): the
+       window sits a step DARKER than the islands — same slab family, faint
+       accent temperature, strictly vertical falloff — so the docked islands
+       read as panels seated in a housing, not cards on a void. */
+    background: linear-gradient(180deg,
+      color-mix(in oklab, var(--accent) 2.5%, color-mix(in oklab, oklch(0 0 0) 30%, var(--bg))),
+      color-mix(in oklab, var(--accent) 1%, color-mix(in oklab, oklch(0 0 0) 42%, var(--bg))));
     color: var(--fg);
     font-family: var(--font-ui);
     font-size: 13px;
@@ -353,6 +357,18 @@
     position: relative;
     z-index: 1;
   }
+  /* Chassis grain — same static SVG noise as the islands, on the recessed
+     canvas: one material family at two depths (also kills gradient banding). */
+  .app-body::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size: 160px 160px;
+    opacity: 0.025;
+  }
   /* Main island — the content surface floats on the same canvas as the
      sidebar island: inset gutters, rounded hairline card, translucent lift so
      the ambient glow still reads through it. The topbar rides inside as the
@@ -363,7 +379,7 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
-    margin: 8px 8px 8px 0;
+    margin: 12px 12px 12px 0;
     border-radius: var(--island-radius);
     border: 1px solid var(--island-border);
     /* Onyx slab — the island reads as a machined surface, not a lit stage
@@ -373,12 +389,16 @@
        vertical gradients — angled washes read as glare. */
     background:
       linear-gradient(0deg, oklch(0 0 0 / 0.16) 0%, transparent 12%),
-      linear-gradient(180deg, color-mix(in oklab, var(--fg) 4%, var(--bg)), color-mix(in oklab, var(--fg) 1.8%, var(--bg)) 280px);
+      linear-gradient(180deg, color-mix(in oklab, var(--fg) 6.5%, var(--bg)), color-mix(in oklab, var(--fg) 3.5%, var(--bg)) 280px);
     /* Machined bevel: a dark seam just inside the hairline border, plus the
-       faintest accent-cooled light catching the top edge. */
+       faintest accent-cooled light catching the top edge. Outer pair =
+       contact AO seating the panel in the recessed chassis (2026-07-23) —
+       occlusion, not a float shadow; keep in lockstep w/ Sidebar. */
     box-shadow:
       inset 0 1px 0 oklch(0.92 calc(var(--accent-c) * 0.25) var(--accent-h) / 0.07),
-      inset 0 0 0 1px oklch(0 0 0 / 0.22);
+      inset 0 0 0 1px oklch(0 0 0 / 0.22),
+      0 1px 2px oklch(0 0 0 / 0.35),
+      0 0 14px oklch(0 0 0 / 0.4);
     overflow: hidden;
     position: relative;
     isolation: isolate;
@@ -399,8 +419,49 @@
     background-size: 160px 160px;
     opacity: 0.03;
   }
+  /* Cavity shading — an inward shadow falling from the window edges onto the
+     recessed canvas. This is what makes the recess read as a HOLLOW the
+     islands sit in rather than flat dark paint; islands paint above it. */
+  .app-body::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    box-shadow:
+      inset 0 2px 22px oklch(0 0 0 / 0.55),
+      inset 0 0 70px oklch(0 0 0 / 0.32);
+  }
+  /* The rift — the brand seam living in the gutter between the two docked
+     plates (same motif as the splash). Whisper-dim accent, fades at both
+     ends; a signature detail, not a light source. Zero-width flex spacer so
+     it never shifts layout; the line paints into the gutter beside it. */
+  .rift-seam {
+    position: relative;
+    width: 0;
+    flex: none;
+    align-self: stretch;
+    z-index: 0;
+  }
+  .rift-seam::before {
+    content: "";
+    position: absolute;
+    left: -6.5px;
+    top: 12%;
+    bottom: 12%;
+    width: 1px;
+    background: linear-gradient(
+      180deg,
+      transparent,
+      color-mix(in oklab, var(--accent) 26%, transparent) 26%,
+      color-mix(in oklab, var(--accent) 36%, transparent) 50%,
+      color-mix(in oklab, var(--accent) 26%, transparent) 74%,
+      transparent
+    );
+  }
+  .app-body.rail-collapsed .rift-seam { display: none; }
   /* Rail collapsed → rail width is 0, so the island keeps its own left gutter. */
-  .app-body.rail-collapsed .main { margin-left: 8px; }
+  .app-body.rail-collapsed .main { margin-left: 12px; }
   .workspace {
     flex: 1;
     min-height: 0;

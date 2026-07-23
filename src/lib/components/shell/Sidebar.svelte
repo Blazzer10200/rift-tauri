@@ -97,9 +97,9 @@
   }
   function moveResize(e: PointerEvent) {
     if (!shell.resizing) return;
-    // The island's right edge sits 8px inside the rail's right edge, so the
-    // rail width that puts the island edge under the cursor is clientX + 8.
-    shell.setWidth(e.clientX + 8);
+    // The island's right edge sits 12px inside the rail's right edge, so the
+    // rail width that puts the island edge under the cursor is clientX + 12.
+    shell.setWidth(e.clientX + 12);
   }
   function endResize(e: PointerEvent) {
     if (!shell.resizing) return;
@@ -129,7 +129,7 @@
     class="sidebar"
     class:mini
     inert={shell.collapsed && !shell.peek}
-    style="width:{mini ? MINI_W : shell.width - 16}px"
+    style="width:{mini ? MINI_W : shell.width - 24}px"
   >
     <!-- Head hides in the mini peek — the topbar cluster right above it already
          carries the brand context + pin trigger; repeating them wastes rows. -->
@@ -269,7 +269,7 @@
   /* The island card — inset from the window edges, rounded, hairline-bordered.
      Pinned it reads as furniture (lift, no shadow); .peeking above adds the
      float shadow when it truly hovers over content. */
-  .sidebar { position: absolute; top: 8px; bottom: 8px; left: 8px;
+  .sidebar { position: absolute; top: 12px; bottom: 12px; left: 12px;
     display: flex; flex-direction: column; gap: 4px; min-height: 0;
     padding: 0 10px 10px;
     border-radius: var(--island-radius);
@@ -279,10 +279,12 @@
        keep every layer in lockstep. */
     background:
       linear-gradient(0deg, oklch(0 0 0 / 0.16) 0%, transparent 12%),
-      linear-gradient(180deg, color-mix(in oklab, var(--fg) 4%, var(--bg)), color-mix(in oklab, var(--fg) 1.8%, var(--bg)) 280px);
+      linear-gradient(180deg, color-mix(in oklab, var(--fg) 6.5%, var(--bg)), color-mix(in oklab, var(--fg) 3.5%, var(--bg)) 280px);
     box-shadow:
       inset 0 1px 0 oklch(0.92 calc(var(--accent-c) * 0.25) var(--accent-h) / 0.07),
-      inset 0 0 0 1px oklch(0 0 0 / 0.22);
+      inset 0 0 0 1px oklch(0 0 0 / 0.22),
+      0 1px 2px oklch(0 0 0 / 0.35),
+      0 0 14px oklch(0 0 0 / 0.4);
     overflow: hidden;
     box-sizing: border-box;
     isolation: isolate;

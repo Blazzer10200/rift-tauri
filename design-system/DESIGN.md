@@ -78,6 +78,22 @@ wash/glow/grain behind content — local atmosphere layers stack into blotches
 (see §8). Tight component effects (a button aura, a dialog head-glow) are fine;
 surface-scale washes are not.
 
+**Amended 2026-07-23** (owner: the flat canvas behind the islands "seems off",
+then "I want something more different"): the canvas is now a RECESSED CHASSIS,
+not plain `--bg` — four layers, all in AppShell: (1) recess — canvas a step
+darker than the islands (30→42% black mix, vertical falloff, ~2% accent
+temperature, grain at 2.5%), islands lifted to fg 6.5%→3.5% and gutters
+widened 8→12px so the step has room to read; (2) contact AO — both docked
+islands wear a tight dark outer shadow pair (occlusion, not float); (3) cavity
+shading — `.app-body::after` inward edge shadow so the recess reads as a
+hollow, not flat paint; (4) the RIFT SEAM — a whisper accent hairline in the
+gutter between the two docked plates (`.rift-seam`), the same motif the splash
+parts along; fades at both ends, hidden when the rail collapses. Still
+material, never light: no glow blob, no pattern, no motion. "No shadow on the
+docked tier" (§8) now means no FLOAT shadow — contact occlusion is part of the
+slab recipe. The splash chassis (SplashOverlay panels) stays in lockstep with
+the canvas recipe.
+
 ## 6. Motion
 
 - Shared vocabulary only: `--ease-page` (entrances) / `--ease-soft` (layout shifts);
