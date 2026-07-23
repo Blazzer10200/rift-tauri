@@ -439,6 +439,7 @@
     animation: rowIn 0.22s var(--ease-page) both; animation-delay: calc(min(var(--i, 0), 12) * 14ms); }
   .crow:hover { background: var(--surface-hover); color: var(--fg-2); }
   .crow.on { background: color-mix(in oklab, var(--fg) 10%, transparent); color: var(--fg); }
+  .crow.on .crow-title { font-weight: 580; }
   .crow.on::before { content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
     width: 3px; height: 15px; border-radius: 0 3px 3px 0; background: var(--accent); animation: barPop 0.28s var(--ease-page) both; }
   /* Pinned rows read as a different KIND of row than the time buckets: a faint

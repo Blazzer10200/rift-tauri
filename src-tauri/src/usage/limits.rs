@@ -338,28 +338,59 @@ pub async fn usage_rate_limits(cli_version: Option<String>, force: Option<bool>)
         if ver.is_empty() { env!("CARGO_PKG_VERSION") } else { ver.as_str() }
     );
 
-    let resp = crate::certs::usage_client()
+    let resp = match crate::certs::usage_client()
         .get(USAGE_URL)
         .header("Authorization", format!("Bearer {token}"))
         .header("anthropic-beta", "oauth-2025-04-20")
         .header("User-Agent", ua)
         .send()
         .await
-        .map_err(|e| format!("usage endpoint unreachable: {e}"))?;
+    {
+        Ok(r) => r,
+        Err(e) => {
+            crate::diagnostics::emit_with_fields(
+                crate::diagnostics::DiagStage::Log,
+                crate::diagnostics::DiagLevel::Warn,
+                Some("usage"),
+                Some(file!()),
+                "usage endpoint unreachable",
+                serde_json::json!({ "error": e.to_string() }),
+            );
+            return Err(format!("usage endpoint unreachable: {e}"));
+        }
+    };
 
     match resp.status().as_u16() {
         401 => return Err("Claude session expired — open Settings and use Sign In to re-authenticate".into()),
         429 => return Err("usage endpoint rate-limited — retry in a few minutes".into()),
         s if !(200..300).contains(&s) => {
+            crate::diagnostics::emit_with_fields(
+                crate::diagnostics::DiagStage::Log,
+                crate::diagnostics::DiagLevel::Warn,
+                Some("usage"),
+                Some(file!()),
+                "usage endpoint non-success status",
+                serde_json::json!({ "status": s }),
+            );
             return Err(format!("usage endpoint returned HTTP {s}"));
         }
         _ => {}
     }
 
-    let mut limits: RateLimits = resp
-        .json()
-        .await
-        .map_err(|e| format!("unexpected usage response shape: {e}"))?;
+    let mut limits: RateLimits = match resp.json().await {
+        Ok(l) => l,
+        Err(e) => {
+            crate::diagnostics::emit_with_fields(
+                crate::diagnostics::DiagStage::Log,
+                crate::diagnostics::DiagLevel::Warn,
+                Some("usage"),
+                Some(file!()),
+                "unexpected usage response shape",
+                serde_json::json!({ "error": e.to_string() }),
+            );
+            return Err(format!("unexpected usage response shape: {e}"));
+        }
+    };
     limits.fetched_at = stamp_ms();
     *CACHE.lock().unwrap_or_else(|p| p.into_inner()) = Some((Instant::now(), limits.clone()));
     Ok(limits)

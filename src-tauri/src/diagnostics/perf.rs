@@ -33,6 +33,12 @@ pub struct ToolSpan {
     pub at_ms: u64,
     /// Open → matching tool_result round-trip, ms.
     pub dur_ms: u64,
+    /// "ok" | "error" from the tool_result frame's `is_error` flag — lets a turn
+    /// inspector mark which calls failed without carrying args/paths (redaction
+    /// guarantee intact). `serde(default)` + skip-when-none: pre-existing lines
+    /// and success-only turns stay lean.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome: Option<String>,
 }
 
 /// One record per completed assistant turn — one NDJSON line in `turns.ndjson`.
@@ -64,6 +70,12 @@ pub struct TurnPerf {
 
     // ── Metadata ─────────────────────────────────────────────────────────────
     pub session_id: String,
+    /// Correlation id (`"<session_id>#<turn_epoch>"`) shared with every
+    /// `DiagEvent` this turn emitted — the join key a turn inspector uses to
+    /// stitch this record to its interleaved event stream. `serde(default)` so
+    /// historical NDJSON lines deserialize as None.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
     /// Result-frame `subtype` (e.g. "success", "error_max_turns").
     pub result_subtype: Option<String>,
 
@@ -640,6 +652,7 @@ mod tests {
             cost_usd: Some(0.01),
             cache_hit_rate: None,
             session_id: "s".into(),
+            turn_id: None,
             result_subtype: Some("success".into()),
             model: None,
             effort: None,
@@ -674,6 +687,7 @@ mod tests {
             cost_usd: Some(0.01),
             cache_hit_rate: None,
             session_id: "s".into(),
+            turn_id: None,
             result_subtype: Some("success".into()),
             model: Some(model.into()),
             effort: Some(effort.into()),
@@ -704,6 +718,7 @@ mod tests {
             cost_usd: Some(0.01),
             cache_hit_rate: None,
             session_id: "s".into(),
+            turn_id: None,
             result_subtype: Some("success".into()),
             model: Some("opus".into()),
             effort: Some("deep".into()),
@@ -735,6 +750,7 @@ mod tests {
             cost_usd: Some(0.01),
             cache_hit_rate: None,
             session_id: "s".into(),
+            turn_id: None,
             result_subtype: Some("success".into()),
             model: Some("opus".into()),
             effort: Some("deep".into()),
@@ -891,6 +907,7 @@ mod tests {
             cost_usd: Some(0.01),
             cache_hit_rate: None,
             session_id: "s".into(),
+            turn_id: None,
             result_subtype: Some("success".into()),
             model: Some("opus".into()),
             effort: Some("smart".into()),

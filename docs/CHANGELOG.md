@@ -2,6 +2,12 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.145.0 — Every turn leaves a trail
+
+- **When something goes wrong, you can now see why.** Every turn gets one trace id that follows it across all three moving parts — the app, the Claude process, and the tools it drives — so a slow or failed turn reads as a single connected story in the Diagnostics console instead of three disconnected logs.
+- **The quiet failures aren't quiet anymore.** The in-app browser now reports blocked or unsafe links, webview failures, and dev-server timeouts; the usage meter reports when the endpoint is unreachable or returns something unexpected — spots that used to fail silently and leave you guessing.
+- **Sidebar polish.** The settings cog no longer pushes past the bottom edge of the rail, the notification bell lines up cleanly, and the active conversation title reads a touch bolder.
+
 ## v0.144.0 — The chassis update
 
 - **The app has a place to live now.** The dark space behind the floating panels is a machined housing: a recessed, subtly accent-tinted surface the sidebar and main panel sit *into*, with real contact shadows where they meet it. Wider breathing room around the panels so the depth actually reads.
@@ -11,10 +17,6 @@
 ## v0.143.0 — Plan mode, made real
 
 - Plan proposals land as an editable approval card (Edit / Refine rN / Approve with or without build rights / Discard); approving flips your mode back and the same turn rolls into execution. Typing-caret draft reveal, composer plan chip (ready → building → built), plan mode floors the thinking dial to High with restore + toast.
-
-## v0.142.0 — Agents you can watch, autocorrect that thinks
-
-- Intentional launch choreography, live agent cards (heartbeat, markdown results, token costs, nesting, persistence), per-pane model/effort in split view, dictionary-backed autocorrect, effort-slider dress-up, steer-marker image thumbs.
 
 ## Known issues
 - **While elevated, dragging files from Explorer into the window doesn't work** (Windows blocks lower→higher integrity drag-drop); the attach button / file picker still works fine.

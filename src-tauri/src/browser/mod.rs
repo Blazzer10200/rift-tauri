@@ -34,7 +34,17 @@ pub(crate) fn parse_url(raw: &str) -> Result<Url, String> {
         // targets (`about:srcdoc`, `about:newtab`, …) can render attacker HTML
         // or privileged browser UI in the embedded webview.
         "about" if u.as_str() == "about:blank" => Ok(u),
-        other => Err(format!("blocked URL scheme '{other}:' — only http/https are allowed")),
+        other => {
+            crate::diagnostics::emit_with_fields(
+                crate::diagnostics::DiagStage::Log,
+                crate::diagnostics::DiagLevel::Warn,
+                Some("browser"),
+                Some(file!()),
+                "blocked non-web URL scheme",
+                serde_json::json!({ "scheme": other }),
+            );
+            Err(format!("blocked URL scheme '{other}:' — only http/https are allowed"))
+        }
     }
 }
 
@@ -93,6 +103,14 @@ pub async fn open_probed(app: &AppHandle, url: &str, x: f64, y: f64, w: f64, h: 
                 _ => {}
             }
             if std::time::Instant::now() >= deadline {
+                crate::diagnostics::emit_with_fields(
+                    crate::diagnostics::DiagStage::Log,
+                    crate::diagnostics::DiagLevel::Info,
+                    Some("browser"),
+                    Some(file!()),
+                    "loopback probe timed out — navigating anyway",
+                    serde_json::json!({ "host": host, "port": port }),
+                );
                 break;
             }
             tokio::time::sleep(Duration::from_millis(300)).await;
@@ -164,7 +182,21 @@ pub fn open(app: &AppHandle, url: &str, x: f64, y: f64, w: f64, h: f64) -> Resul
                 let _ = wv.show();
                 return Ok(());
             }
-            None => return Err(format!("create embedded webview: {e}")),
+            None => {
+                crate::diagnostics::emit_with_fields(
+                    crate::diagnostics::DiagStage::Log,
+                    crate::diagnostics::DiagLevel::Warn,
+                    Some("browser"),
+                    Some(file!()),
+                    "embedded webview create failed",
+                    serde_json::json!({
+                        "scheme": u.scheme(),
+                        "host": u.host_str().unwrap_or(""),
+                        "error": e.to_string(),
+                    }),
+                );
+                return Err(format!("create embedded webview: {e}"));
+            }
         },
     };
     // The builder's initial External URL doesn't reliably load on the child

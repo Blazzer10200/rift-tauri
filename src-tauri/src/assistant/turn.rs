@@ -1881,7 +1881,7 @@ async fn dispatch_turn(
         // lock order the rest of the pool uses (registry → child) — a deadlock
         // hazard + extra contention on the hottest path. `reuse.is_some()` ⇒ hit.
         if let Some((_, _, ctls)) = reuse.as_ref() {
-            emit_dispatch(&session_id, if ctls.is_empty() { "hit" } else { "live_switch" }, &model, &key);
+            emit_dispatch(&session_id, if ctls.is_empty() { "hit" } else { "live_switch" }, &model, &key, turn_epoch);
         }
         // `user_line` is moved into the TurnCmd only on the reuse path; on every
         // fall-through (mismatch / dead-on-send) it's recovered so the cold path
@@ -1912,7 +1912,7 @@ async fn dispatch_turn(
                             // respawn with the preserved user_line — no UI error.
                             Ok(Err(ref s)) if s == RETRY_COLD_SENTINEL => {
                                 in_progress.store(false, Ordering::Release);
-                                emit_dispatch(&session_id, "dead_on_send", &model, &key);
+                                emit_dispatch(&session_id, "dead_on_send", &model, &key, turn_epoch);
                                 // #88: if the dead attempt stashed in-flight tools,
                                 // this retry must carry the reconciliation note —
                                 // it re-sends the same prompt the interrupted tool
@@ -1940,7 +1940,7 @@ async fn dispatch_turn(
                         in_progress.store(false, Ordering::Release);
                         warm_pool::remove_if(&session_id, &arc);
                         log::info!("warm_pool: warm child for {session_id} dead on send — cold respawn");
-                        emit_dispatch(&session_id, "dead_on_send", &model, &key);
+                        emit_dispatch(&session_id, "dead_on_send", &model, &key, turn_epoch);
                         send_err.0.user_line
                     }
                 }
@@ -1958,7 +1958,7 @@ async fn dispatch_turn(
                     kill_child_tree_async(p).await;
                     log::info!("warm_pool: drained + reaped old child pid={p} for {session_id} (signature change)");
                 }
-                emit_dispatch(&session_id, "signature_drain", &model, &key);
+                emit_dispatch(&session_id, "signature_drain", &model, &key, turn_epoch);
                 user_line
             }
         };
@@ -1968,7 +1968,7 @@ async fn dispatch_turn(
     }
 
     // 2) Cold path: no warm child at all — spawn one, register it, run turn 1.
-    emit_dispatch(&session_id, "cold", &model, &key);
+    emit_dispatch(&session_id, "cold", &model, &key, turn_epoch);
     cold_spawn_and_run(app, window_label, session_id, key, cmd, user_line, mcp_guard, is_first_turn, model, turn_epoch).await
 }
 
@@ -1976,7 +1976,7 @@ async fn dispatch_turn(
 /// "hit" | "signature_drain" | "cold" | "dead_on_send". Fire-and-forget; the bus
 /// scrubs + rate-limits. Resource "warm_pool" so the console can isolate the
 /// latency-critical path the cont.219 hunt had to hand-probe.
-fn emit_dispatch(session_id: &str, outcome: &str, model: &str, key: &warm_pool::SpawnKey) {
+fn emit_dispatch(session_id: &str, outcome: &str, model: &str, key: &warm_pool::SpawnKey, turn_epoch: u64) {
     // Phase 5: also bump a per-outcome counter via the metric! primitive — gives
     // the health panel a running warm-hit total without re-scanning the ring.
     match outcome {
@@ -1987,7 +1987,8 @@ fn emit_dispatch(session_id: &str, outcome: &str, model: &str, key: &warm_pool::
         "live_switch" => crate::metric!("warm_pool.live_switch"),
         _ => {}
     }
-    crate::diagnostics::emit_with_fields(
+    let turn_id = format!("{session_id}#{turn_epoch}");
+    crate::diagnostics::emit_scoped(
         crate::diagnostics::DiagStage::Log,
         crate::diagnostics::DiagLevel::Info,
         Some("warm_pool"),
@@ -2000,6 +2001,7 @@ fn emit_dispatch(session_id: &str, outcome: &str, model: &str, key: &warm_pool::
             "effort": key.effort_level.as_str(),
             "pool_size": warm_pool::pool_size(),
         }),
+        Some(&turn_id),
     );
 }
 
@@ -3277,6 +3279,7 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                             perf_ttft_text_ms, stream_sid, model, effort, thinking_on,
                             perf_first_line_ms, perf_pre_text_tool_ms, !was_reused,
                             std::mem::take(&mut perf_tool_spans),
+                            format!("{stream_sid}#{turn_epoch}"),
                         );
                         let _ = app_out.emit_to(win_label, STREAM_EVENT, serde_json::json!({
                             "session_id": stream_sid, "line": trimmed, "turn_epoch": turn_epoch,
@@ -3375,10 +3378,18 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                                         .and_then(|id| tool_open_times.remove(id))
                                     {
                                         if perf_tool_spans.len() < 200 {
+                                            // The tool_result frame flags failures via `is_error`;
+                                            // record ok/error so a turn inspector can mark the call
+                                            // without ever carrying its args.
+                                            let outcome = match block.get("is_error").and_then(|b| b.as_bool()) {
+                                                Some(true) => Some("error".to_string()),
+                                                _ => Some("ok".to_string()),
+                                            };
                                             perf_tool_spans.push(crate::diagnostics::perf::ToolSpan {
                                                 name,
                                                 at_ms,
                                                 dur_ms: (turn_start.elapsed().as_millis() as u64).saturating_sub(at_ms),
+                                                outcome,
                                             });
                                         }
                                     }
@@ -3557,6 +3568,7 @@ fn record_turn_perf(
     pre_text_tool_ms: u64,
     was_cold: bool,
     tool_spans: Vec<crate::diagnostics::perf::ToolSpan>,
+    turn_id: String,
 ) {
     use crate::diagnostics::{self, perf::TurnPerf, DiagLevel, DiagStage};
 
@@ -3611,6 +3623,7 @@ fn record_turn_perf(
         cost_usd,
         cache_hit_rate,
         session_id: stream_sid.to_owned(),
+        turn_id: Some(turn_id),
         result_subtype,
         model: Some(model.to_owned()),
         effort: Some(effort.to_owned()),
@@ -3631,13 +3644,14 @@ fn record_turn_perf(
     // Structured bus event — DiagStage::Log so it rides the normal 200/s cap,
     // not the System critical-bypass. Useful for the live diagnostics pane.
     let fields = serde_json::to_value(&rec).unwrap_or(Value::Null);
-    diagnostics::emit_with_fields(
+    diagnostics::emit_scoped(
         DiagStage::Log,
         DiagLevel::Info,
         Some("assistant"),
         Some("turn.rs"),
         "turn-perf",
         fields,
+        rec.turn_id.as_deref(),
     );
     diagnostics::perf::append_turn_perf(rec);
 

@@ -74,6 +74,13 @@ pub struct DiagEvent {
     pub stage: DiagStage,
     pub level: DiagLevel,
     pub resource: Option<String>,
+    /// Correlation id tying every event of one assistant turn together —
+    /// `"<session_id>#<turn_epoch>"`. First-class (not buried in `fields`) so
+    /// `read_events` / the console can filter a whole turn by it. `serde(default)`
+    /// + skip-when-none keeps historical NDJSON lines readable and tool-less
+    /// events lean.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
     pub file: Option<String>,
     pub message: String,
     pub fields: serde_json::Value,
@@ -169,12 +176,30 @@ pub fn emit_with_fields(
     message: impl Into<String>,
     fields: serde_json::Value,
 ) {
+    emit_scoped(stage, level, resource, file, message, fields, None);
+}
+
+/// `emit_with_fields` + a turn correlation id. Callers on the turn hot path
+/// (dispatch outcomes, per-turn perf) pass `Some("<session>#<epoch>")` so the
+/// whole turn's events share a filterable key; everything else uses the plain
+/// helper above (turn_id defaults to None).
+#[allow(clippy::too_many_arguments)]
+pub fn emit_scoped(
+    stage: DiagStage,
+    level: DiagLevel,
+    resource: Option<&str>,
+    file: Option<&str>,
+    message: impl Into<String>,
+    fields: serde_json::Value,
+    turn_id: Option<&str>,
+) {
     bus().publish(DiagEvent {
         at: Utc::now(),
         seq: 0,
         stage,
         level,
         resource: resource.map(|s| s.to_string()),
+        turn_id: turn_id.map(|s| s.to_string()),
         file: file.map(|s| s.to_string()),
         message: message.into(),
         fields,
@@ -491,6 +516,7 @@ impl log::Log for LogForwarder {
             stage: DiagStage::Log,
             level: DiagLevel::from(record.level()),
             resource: None,
+            turn_id: None,
             file: None,
             message,
             fields: serde_json::json!({ "target": target }),

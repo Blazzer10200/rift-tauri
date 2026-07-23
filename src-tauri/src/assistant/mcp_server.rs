@@ -1171,10 +1171,19 @@ fn handle_request(req: RpcRequest, roots: &[PathBuf]) -> Option<RpcResponse> {
             {
                 use crate::diagnostics::{DiagLevel, DiagStage};
                 let level = if tool_ok { DiagLevel::Info } else { DiagLevel::Warn };
+                // Stamp the driving session (write_mcp_config injects RIFT_SESSION_ID
+                // into this subprocess's env) + a proc marker so a tool call made in
+                // the MCP child correlates back across the process boundary —
+                // `read_events --resource mcp --filter <session>` reconstructs every
+                // tool a session's subprocess ran.
+                let session = std::env::var("RIFT_SESSION_ID").unwrap_or_default();
                 crate::diagnostics::emit_with_fields(
                     DiagStage::Log, level, Some("mcp"), Some(file!()),
                     "mcp tool call",
-                    serde_json::json!({ "tool": name, "dur_ms": tool_dur_ms, "ok": tool_ok }),
+                    serde_json::json!({
+                        "tool": name, "dur_ms": tool_dur_ms, "ok": tool_ok,
+                        "session": session, "proc": "mcp_subprocess",
+                    }),
                 );
                 // Phase 5: feed the same sample into the metrics registry — a
                 // tool-call counter + a latency histogram the health panel reads

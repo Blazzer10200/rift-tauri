@@ -193,9 +193,10 @@ pub fn diag_frontend_event(level: String, message: String, fields: Option<serde_
 }
 
 /// One-click support bundle: copy the diagnostic sinks (rift.log + rotation,
-/// turns.ndjson + rotation, crash reports) into a timestamped folder under
-/// Downloads and return its path. Explicit file allowlist — never glob the
-/// whole log dir. Log contents are already scrubbed at the write boundary.
+/// turns.ndjson + rotation, events.ndjson + rotation, crash reports) into a
+/// timestamped folder under Downloads and return its path. Explicit file
+/// allowlist — never glob the whole log dir. Log contents are already scrubbed
+/// at the write boundary.
 #[tauri::command]
 pub async fn diag_export_bundle() -> Result<String, String> {
     tokio::task::spawn_blocking(|| {
@@ -208,7 +209,11 @@ pub async fn diag_export_bundle() -> Result<String, String> {
         let out = home.join("Downloads").join(format!("rift-diagnostics-{ts}"));
         std::fs::create_dir_all(&out).map_err(|e| format!("create {}: {e}", out.display()))?;
         let mut copied = 0usize;
-        for name in ["rift.log", "rift.log.old", "turns.ndjson", "turns.ndjson.old"] {
+        for name in [
+            "rift.log", "rift.log.old",
+            "turns.ndjson", "turns.ndjson.old",
+            "events.ndjson", "events.ndjson.old",
+        ] {
             let src = log_dir.join(name);
             if src.is_file() && std::fs::copy(&src, out.join(name)).is_ok() {
                 copied += 1;
