@@ -37,6 +37,51 @@ describe("correctWord", () => {
   });
 });
 
+describe("fuzzy layer (edit-distance vs wordFreq)", () => {
+  it("fixes typos the exact dictionary misses", () => {
+    expect(correctWord("wrok")).toBe("work");
+    expect(correctWord("hte")).toBe("the");
+    expect(correctWord("responsibilty")).toBe("responsibility");
+    expect(correctWord("beacuseee")).toBeNull(); // nothing plausible → leave
+  });
+
+  it("never touches real words, even rare-ish ones", () => {
+    for (const w of ["the", "work", "asynchronous", "throughput", "hierarchy"]) {
+      expect(correctWord(w)).toBeNull();
+    }
+  });
+
+  it("never touches chat/dev vocabulary", () => {
+    for (const w of ["svelte", "tauri", "gonna", "lol", "npm", "async", "regex"]) {
+      expect(correctWord(w)).toBeNull();
+    }
+  });
+
+  it("never touches identifiers, acronyms, or proper nouns mid-sentence", () => {
+    expect(correctWord("myVar")).toBeNull();
+    expect(correctWord("SvelteKit")).toBeNull();
+    expect(correctWord("HTTP")).toBeNull();
+    expect(correctWord("Blazzer")).toBeNull(); // capitalized, not sentence start
+  });
+
+  it("corrects a capitalized word when told it starts a sentence", () => {
+    expect(correctWord("Grofile", true)).toBe("Profile"); // very common target
+    expect(correctWord("Blazzer", true)).toBeNull(); // "blazer" too rare to overrule a name
+  });
+
+  it("sentence-start detection flows through boundaryAutocorrect", () => {
+    const v = "done. Grofile next ";
+    expect(apply(v, 14)).toBe("done. Profile next "); // caret after "Grofile "
+    const mid = "the Grofile ";
+    expect(apply(mid, mid.length)).toBeNull(); // mid-sentence cap = proper noun
+  });
+
+  it("leaves very short and apostrophe words to the exact map only", () => {
+    expect(correctWord("hi")).toBeNull();
+    expect(correctWord("it'sx")).toBeNull();
+  });
+});
+
 describe("boundaryAutocorrect", () => {
   it("fixes the word just finished by a space", () => {
     const v = "fix teh ";

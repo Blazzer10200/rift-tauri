@@ -377,6 +377,7 @@
       <div
         class="er-track"
         role="presentation"
+        style="--kx: {knobPct}%"
         bind:this={trackEl}
         onpointerdown={onRailPointerDown}
         onpointermove={onRailPointerMove}
@@ -696,14 +697,43 @@
     padding: 0 3px 6px;
     font-size: 10px; color: var(--fg-faint); line-height: 1; user-select: none;
   }
-  /* Detent-slider anatomy (owner call 2026-07-22): bare dot detents + a blocky
-     machined thumb — no groove, no fill bar. Drag free-follows the pointer;
-     release spring-snaps to the nearest DIAL_STOPS gear. */
+  /* Detent-slider anatomy (owner call 2026-07-23, third pass): the slider
+     speaks the menu's SWITCH dialect — a slim pill track in the .fast-switch
+     off-recipe, the traveled side tinted switch-ON accent, dot detents + the
+     machined thumb riding on top. Drag free-follows; release spring-snaps to
+     the nearest DIAL_STOPS gear. */
   :global(.settings-menu .er-track) {
     position: relative;
     height: 26px; margin: 0 12px; /* half-knob breathing room at 0% / 100% */
     cursor: grab; touch-action: none;
   }
+  /* Pill track — .fast-switch off-state recipe, stretched. Extends past the
+     stop range by the 12px knob margin so the thumb never overhangs its ends. */
+  :global(.settings-menu .er-track)::before {
+    content: ""; position: absolute; z-index: 0;
+    left: -12px; right: -12px; top: 50%; height: 14px;
+    transform: translateY(-50%);
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--fg) 12%, transparent);
+    border: 1px solid color-mix(in oklab, var(--fg) 20%, transparent);
+    box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.05);
+    pointer-events: none;
+  }
+  /* Traveled range — switch-ON accent tint up to the thumb (right cap hides
+     under it). Springs with the knob on release, raw-follows while dragging. */
+  :global(.settings-menu .er-track)::after {
+    content: ""; position: absolute; z-index: 0;
+    left: -12px; top: 50%; height: 14px;
+    width: calc(12px + var(--kx, 0%));
+    transform: translateY(-50%);
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--accent) 30%, transparent);
+    border: 1px solid color-mix(in oklab, var(--accent) 55%, transparent);
+    box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.08);
+    pointer-events: none;
+    transition: width var(--dur-base) var(--ease-spring);
+  }
+  :global(.settings-menu .effort-rail.dragging .er-track)::after { transition: none; }
   :global(.settings-menu .effort-rail.dragging .er-track) { cursor: grabbing; }
   :global(.settings-menu .er-stop) {
     position: absolute; top: 0; z-index: 1;
@@ -713,8 +743,8 @@
     background: transparent; border: 0; cursor: pointer;
   }
   :global(.settings-menu .er-stop i) {
-    width: 4px; height: 4px; border-radius: 50%;
-    background: color-mix(in oklab, var(--fg) 26%, transparent);
+    width: 5px; height: 5px; border-radius: 50%;
+    background: color-mix(in oklab, var(--fg) 34%, transparent);
     transition: background var(--dur-fast), opacity var(--dur-fast), transform var(--dur-fast) ease;
   }
   :global(.settings-menu .er-stop:hover i) {
@@ -722,7 +752,7 @@
     transform: scale(1.3);
   }
   /* Detents behind the thumb glow a touch brighter — the traveled range. */
-  :global(.settings-menu .er-stop.passed i) { background: color-mix(in oklab, var(--fg) 45%, transparent); }
+  :global(.settings-menu .er-stop.passed i) { background: color-mix(in oklab, var(--fg) 58%, transparent); }
   /* The engaged detent hides under the thumb (swallowed by the mechanism). */
   :global(.settings-menu .er-stop.on i) { opacity: 0; }
   /* Top-gear detent carries a quiet accent — the ceiling is visible at a glance. */
@@ -734,13 +764,13 @@
     width: 18px; height: 22px; border-radius: 6px;
     transform: translate(-50%, -50%);
     background: linear-gradient(180deg,
-      color-mix(in oklab, var(--fg) 98%, transparent),
-      color-mix(in oklab, var(--fg) 84%, transparent));
-    border: 1px solid color-mix(in oklab, var(--bg) 35%, transparent);
+      color-mix(in oklab, var(--fg) 100%, transparent),
+      color-mix(in oklab, var(--fg) 86%, transparent));
+    border: 1px solid oklch(0 0 0 / 0.5);
     box-shadow:
-      0 2px 6px oklch(0 0 0 / 0.45),
-      inset 0 1px 0 oklch(1 0 0 / 0.35),
-      inset 0 -1px 0 oklch(0 0 0 / 0.2);
+      0 1px 3px oklch(0 0 0 / 0.5),
+      inset 0 1px 0 oklch(1 0 0 / 0.4),
+      inset 0 -1px 0 oklch(0 0 0 / 0.25);
     pointer-events: none;
     transition: left var(--dur-base) var(--ease-spring), transform var(--dur-fast) ease;
   }
@@ -774,6 +804,7 @@
     :global(.settings-menu .pop-ck),
     :global(.settings-menu .legacy-flyout),
     :global(.settings-menu .er-knob),
+    :global(.settings-menu .er-track)::after,
     :global(.settings-menu .er-stop i) { animation: none; transition: none; }
   }
 </style>

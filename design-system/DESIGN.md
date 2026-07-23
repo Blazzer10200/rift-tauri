@@ -196,6 +196,15 @@ seed rules below.
   sweeps over blocks/rows; the owner-approved accent `.shim` on single live VERB
   text is a different, settled treatment — don't extend it to blocks either.)
 
+- DON'T drop a sunken panel into a flat surface (2026-07-23, effort-slider well —
+  owner: "looks like shit compared to the rest of the menu"). A recessed near-black
+  well behind the effort rail clashed with a menu whose every other row is flat.
+  When a control inside a popover/menu needs a background, borrow the recipe of a
+  sibling control in the SAME surface (the slider now wears the .fast-switch pill
+  track + switch-ON accent fill) instead of inventing a new depth treatment. Same
+  session, first pass: replacing an owner-called anatomy (bare detents) when the ask
+  was additive ("add a background") also got rejected — additive ask, additive change.
+
 - DON'T orbit a light around a container as a "working" state (2026-07-22,
   composer comet arc — owner: "I like it but it's disturbing… too distracting").
   Same family as the banned skeleton sweep: TRAVELING motion pinned to a fixed
