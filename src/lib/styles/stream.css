@@ -150,6 +150,16 @@
   text-transform: uppercase;
   color: var(--fg-faint);
 }
+/* Images that rode the mid-turn message — small muted thumbs under the text,
+   same quiet register as the stub (no accent, no lightbox chrome). */
+.ssteer-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.ssteer-imgs { display: flex; flex-wrap: wrap; gap: 6px; padding-bottom: 2px; }
+.ssteer-thumb {
+  width: 44px; height: 44px; object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border-strong);
+  opacity: 0.9;
+}
 
 .snarr-beat::before {
   content: "";

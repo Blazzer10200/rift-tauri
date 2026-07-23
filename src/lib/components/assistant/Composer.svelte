@@ -299,8 +299,8 @@
     // Touch the signature inputs so the effect re-runs on any change.
     void tabId;
     void assistant.effectiveModel;
-    void assistant.thinkingEffort;
-    void assistant.thinkingEnabled;
+    void assistant.effectiveEffort;
+    void assistant.effectiveThinkingOn;
     void assistant.permissionMode;
     void tab?.convoCreatedAt;
     void tab?.workspaceRoot;
@@ -434,13 +434,13 @@
   // tier. See modelMatrix DIAL_STOPS for the wire-truth rationale.
   const effortStops = $derived(dialStopsFor(currentModel));
   const dialApplies = $derived(effortStops.length > 0);
-  const effortIdx = $derived(dialIdxFor(effortStops, assistant.thinkingEnabled, assistant.thinkingEffort));
+  const effortIdx = $derived(dialIdxFor(effortStops, assistant.thinkingOnFor(tab), assistant.effortFor(tab)));
   const currentEffort = $derived(effortStops[effortIdx] ?? effortStops[0]);
   function setEffortByIdx(i: number) {
     const s = effortStops[clampEffortIdx(effortStops, i)];
     if (!s) return;
-    if (s.effort === null) assistant.setThinkingDial(false);
-    else assistant.setThinkingDial(true, s.effort);
+    if (s.effort === null) assistant.setThinkingDial(false, undefined, tab);
+    else assistant.setThinkingDial(true, s.effort, tab);
   }
   // Switching to a lower-ceiling model (e.g. Opus@ultra → a capped model) must
   // pull the stored TIER down to that model's ceiling, so we never send a flag
@@ -450,8 +450,8 @@
   // so a stops-membership check would false-positive on `none`.
   $effect(() => {
     if (!dialApplies) return;
-    const clamped = clampEffort(assistant.thinkingEffort, paneEffectiveModel);
-    if (clamped !== assistant.thinkingEffort) assistant.setThinkingEffort(clamped);
+    const clamped = clampEffort(assistant.effortFor(tab), paneEffectiveModel);
+    if (clamped !== assistant.effortFor(tab)) assistant.setThinkingEffort(clamped, tab);
   });
   // Caption + pointer-drag dial live in composer/SettingsMenu.svelte (C7).
 
@@ -532,7 +532,7 @@
   }
 
   function pickModel(m: ModelOpt) {
-    assistant.setModel(m.id);
+    assistant.setModel(m.id, tab);
     settingsOpen = false;
     void tick().then(() => ta?.focus());
   }
@@ -1283,8 +1283,8 @@
       <SlashMenu commands={slashFiltered} activeIdx={slashIdx} query={draft.slice(1).toLowerCase()} onPick={pickSlash} />
     {/if}
 
-    {#if assistant.ui.usageOpen}
-      <UsagePanel {tab} mode={assistant.ui.usageOpen === "full" ? "full" : "ctx"} onClose={() => (assistant.ui.usageOpen = false)} />
+    {#if tab && tab.usageOpen}
+      <UsagePanel {tab} mode={tab.usageOpen === "full" ? "full" : "ctx"} onClose={() => { if (tab) tab.usageOpen = false; }} />
     {/if}
 
     {#if mentionState && mentionResults.length > 0}
@@ -1600,6 +1600,7 @@
 
           {#if settingsOpen}
             <SettingsMenu
+              {tab}
               {settingsIdx}
               activeKind={settingsRows[settingsIdx]?.kind ?? null}
               anchor={modelWrap}
@@ -1613,8 +1614,8 @@
               pct={paneCtxPct}
               tokens={paneCtxTokens}
               window={paneCtxWindow}
-              open={!!assistant.ui.usageOpen}
-              onClick={() => (assistant.ui.usageOpen = assistant.ui.usageOpen ? false : "ctx")}
+              open={!!tab?.usageOpen}
+              onClick={() => { if (tab) tab.usageOpen = tab.usageOpen ? false : "ctx"; }}
             />
           {/if}
 

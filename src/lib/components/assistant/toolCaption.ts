@@ -111,8 +111,14 @@ export function captionForTool(name: string, input: Input = {}): string {
  *  Shared by StreamAgent (inline card) + ActivityHud (pinned periscope) so the
  *  two readouts can never drift. Structurally typed — this module stays free
  *  of state imports (see basename note above). */
-export type AgentNowLine = { label: string; thinking: boolean };
-type SpawnBlock = { type: string; name?: string; input?: Input; status?: string };
+export type AgentNowLine = { label: string; thinking: boolean; snip?: string };
+type SpawnBlock = { type: string; name?: string; input?: Input; status?: string; text?: string };
+/** Tail of the agent's newest prose — sub-agent frames arrive at envelope
+ *  granularity, so the latest text tail IS the live stream readout. */
+function tailSnip(s: string, n = 110): string {
+  const t = s.trim().replace(/\s+/g, " ");
+  return t.length > n ? "…" + t.slice(-n) : t;
+}
 export function agentNowLine(blocks: SpawnBlock[]): AgentNowLine {
   for (let i = blocks.length - 1; i >= 0; i--) {
     const b = blocks[i];
@@ -122,8 +128,12 @@ export function agentNowLine(blocks: SpawnBlock[]): AgentNowLine {
       return { label: "Thinking", thinking: true };
   }
   const last = blocks[blocks.length - 1];
-  if (last && last.type === "tool")
+  if (last?.type === "tool")
     return { label: captionForTool(last.name ?? "", last.input ?? {}), thinking: false };
+  if (last?.type === "thinking" && last.text?.trim())
+    return { label: "Thinking", thinking: true, snip: tailSnip(last.text) };
+  if (last?.type === "text" && last.text?.trim())
+    return { label: "Writing", thinking: false, snip: tailSnip(last.text) };
   return { label: "Spinning up", thinking: true };
 }
 

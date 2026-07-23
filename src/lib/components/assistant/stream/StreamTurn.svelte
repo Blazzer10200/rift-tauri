@@ -169,7 +169,6 @@
     const last = liveTab?.lastStreamEventAt ?? liveTab?.activity.turnStartedAt;
     return last != null ? Math.max(0, (now - last) / 1000) : 0;
   });
-  const ctxPctNow = $derived(liveTab ? assistant.ctxPctFor(liveTab) : 0);
   const acTrigger = $derived(liveTab ? assistant.autoCompactTriggerFor(liveTab) : null);
   const autoCompacting = $derived(
     streaming && !manualCompacting && !awaitingInput && !turn.thinking?.active &&
@@ -359,9 +358,19 @@
         </div>
       {/if}
     {:else if g.type === "steer"}
-      <div class="ssteer" use:tooltip={"Sent while Claude was working — read mid-turn"}>
+      <div class="ssteer" class:has-imgs={g.imgs.length > 0} use:tooltip={"Sent while Claude was working — read mid-turn"}>
         <CornerDownRight size={11} />
-        <span class="ssteer-text">{g.text}</span>
+        <span class="ssteer-body">
+          <span class="ssteer-text">{g.text}</span>
+          {#if g.imgs.length > 0}
+            <span class="ssteer-imgs">
+              {#each g.imgs as im, ii (ii)}
+                {@const safeMime = /^image\/(png|jpeg|gif|webp|svg\+xml|avif|bmp)$/.test(im.mime ?? "") ? im.mime : "image/png"}
+                <img class="ssteer-thumb" src={`data:${safeMime};base64,${im.dataBase64}`} alt="" loading="lazy" />
+              {/each}
+            </span>
+          {/if}
+        </span>
         <span class="ssteer-tag">mid-turn</span>
       </div>
     {:else}
@@ -376,7 +385,8 @@
             <StreamResult tool={seg.tool} />
           {:else if seg.tool.kind === "agent"}
             {@const spawn = liveTab?.agentSpawns.find((a) => a.id === seg.tool.id)}
-            <StreamAgent tool={seg.tool} {spawn} />
+            {@const childSpawns = liveTab?.agentSpawns.filter((a) => a.parentSpawnId === seg.tool.id) ?? []}
+            <StreamAgent tool={seg.tool} {spawn} {childSpawns} />
           {:else if seg.tool.kind === "ask"}
             <StreamAskUser tool={seg.tool} live={streaming} />
           {:else if seg.tool.kind === "exitplan"}
@@ -439,14 +449,13 @@
         </div>
         <div class="scompact-note">
           {#if autoCompacting}
-            The conversation reached its auto-compact limit ({Math.round(ctxPctNow)}% of the
-            window used), so Claude paused to summarize older messages before continuing. This
-            runs automatically and usually takes a minute or two — the turn resumes on its own.
-            Nothing on screen is deleted.
+            This chat filled up Claude's working memory, so it's making a quick recap of the
+            older messages to clear some room. That usually takes a minute or two, and the turn
+            picks back up on its own when it's done. Everything you see here stays put.
           {:else}
-            Older messages are being condensed into a short summary to free up context.
-            Nothing is deleted — the full transcript stays right here, and the chat continues
-            where it left off once the summary lands.
+            Claude is rolling the older messages into a short recap to free up room. The full
+            chat stays on screen, and things pick up right where they left off once the recap
+            is ready.
           {/if}
         </div>
       </div>

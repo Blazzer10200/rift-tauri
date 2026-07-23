@@ -79,6 +79,10 @@ export type ToolBlock = {
   // (content_block_stop parse or the assistant envelope); never true on
   // persisted records (terminal sweeps clear it).
   inputPartial?: boolean;
+  // CLI 2.1.214+ tool_progress heartbeat — wall-clock of the newest "still
+  // alive" ping for a long-silent pending call. Lets the UI distinguish a
+  // working tool from a hung one; absent once the call settles.
+  lastProgressAt?: number;
 };
 
 export type TextBlock = {
@@ -153,8 +157,9 @@ export type ModelSwitchBlock = {
  *  into the LIVE turn's stdin (assistant_steer), so Claude reads it after the
  *  current tool call — same turn, same context. Rendered inline inside the
  *  assistant bubble at the exact point of delivery (chronological transcript).
- *  Image/file attachments ride the wire envelope; the block keeps only count
- *  markers so no base64 lands in the transcript twice. */
+ *  Image attachments keep a copy here (same persistence deal as the user
+ *  bubble's ImageBlock) so the marker can show what rode along; text files
+ *  stay count-only. */
 export type SteerBlock = {
   type: "steer";
   id: string;
@@ -162,6 +167,7 @@ export type SteerBlock = {
   at: number;
   images?: number;
   files?: number;
+  imgs?: { mime: string; dataBase64: string }[];
 };
 
 /** #98.3: a content-block type this build doesn't recognize (a newer CLI
@@ -253,6 +259,24 @@ export type ConversationMeta = {
   workspaceRoot?: string | null;
 };
 
+/** One delegated sub-agent's card record (TabState.agentSpawns entry). Lives
+ *  here so the conversation record can persist it — a reopened convo keeps
+ *  expandable agent cards instead of dead chips. */
+export type AgentSpawn = {
+  id: string;
+  subagentType: string;
+  description: string;
+  startedAt: number;
+  completedAt: number | null;
+  isError: boolean;
+  blocks: Block[];
+  kind?: "agent" | "skill";
+  /** Output tokens this agent generated (summed envelope usage). */
+  tokens?: number;
+  /** Depth-2 link: the spawn whose tool block spawned this one. */
+  parentSpawnId?: string;
+};
+
 export type ConversationRecord = {
   id: string;
   title: string;
@@ -270,6 +294,13 @@ export type ConversationRecord = {
   /** Per-project scope: workspace folder active when this convo's turns run.
    *  Stamped on save so the sidebar can filter to the open project. */
   workspaceRoot?: string | null;
+  /** Agent transcripts (capped on save) — restores expandable agent cards.
+   *  Rides the Rust record's serde-flatten catch-all; absent on legacy convos. */
+  agentSpawns?: AgentSpawn[];
+  /** Effective thinking dial when last saved — reopening pins it to the tab
+   *  (like `model`) so a chat keeps its effort across restarts. Serde-flatten. */
+  effort?: ThinkingEffort;
+  thinkingOn?: boolean;
 };
 
 // Minimal stream-json envelope shape we care about.

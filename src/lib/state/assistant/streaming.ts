@@ -462,7 +462,12 @@ export function flushPendingText(tab: TabState) {
  *  and appendText's tail-merge then starts a FRESH text block after it, so
  *  post-steer prose never fuses into pre-steer prose. Returns the block id
  *  (for removal if delivery fails) or null when nothing is streaming. */
-export function appendSteerBlock(tab: TabState, text: string, images: number, files: number): string | null {
+export function appendSteerBlock(
+  tab: TabState,
+  text: string,
+  images: { mime: string; dataBase64: string }[],
+  files: number,
+): string | null {
   if (!tab.streamingMsgId) return null;
   flushPendingText(tab);
   const id = crypto.randomUUID();
@@ -478,7 +483,7 @@ export function appendSteerBlock(tab: TabState, text: string, images: number, fi
           id,
           text,
           at: Date.now(),
-          ...(images > 0 ? { images } : {}),
+          ...(images.length > 0 ? { images: images.length, imgs: images } : {}),
           ...(files > 0 ? { files } : {}),
         },
       ],
@@ -1052,6 +1057,18 @@ function applySubAgentFrame(tab: TabState, agentId: string, env: StreamEnvelope)
     if (newBlocks.length > 0) {
       mutateAgent(tab, agentId, (blocks) => [...blocks, ...newBlocks]);
     }
+    // Per-agent spend: sum the envelope's output tokens onto the spawn (the
+    // card's token chip). Envelope granularity — one bump per API turn.
+    const usage = env.message?.usage as { output_tokens?: unknown } | undefined;
+    const outTok = typeof usage?.output_tokens === "number" ? usage.output_tokens : 0;
+    if (outTok > 0) {
+      const idx = tab.agentSpawns.findIndex((a) => a.id === agentId);
+      if (idx !== -1) {
+        const next = tab.agentSpawns.slice();
+        next[idx] = { ...next[idx], tokens: (next[idx].tokens ?? 0) + outTok };
+        tab.agentSpawns = next;
+      }
+    }
   } else if (env.type === "user") {
     for (const block of env.message?.content ?? []) {
       if (block.type === "tool_result") {
@@ -1072,6 +1089,18 @@ function applySubAgentFrame(tab: TabState, agentId: string, env: StreamEnvelope)
           ),
         );
       }
+    }
+  } else if (env.type === "tool_progress") {
+    // Heartbeat for one of this agent's own pending calls — same stamp as the
+    // main-turn path so the card's step row can show liveness.
+    const tid = env.tool_use_id;
+    if (typeof tid === "string" && tid.length > 0) {
+      const beat = Date.now();
+      mutateAgent(tab, agentId, (blocks) =>
+        blocks.map((b) =>
+          b.type === "tool" && b.id === tid && b.status === "pending" ? { ...b, lastProgressAt: beat } : b,
+        ),
+      );
     }
   } else if (env.type === "result") {
     // The sub-agent emitted its own terminal `result` envelope (carrying this
@@ -1176,6 +1205,33 @@ export function onStreamLine(tab: TabState, raw: string) {
       if (skill) {
         promoteSkillSpawn(tab, skill);
         applySubAgentFrame(tab, parentId, env);
+      } else {
+        // Depth-2: the parent id matches a Task/Agent tool call INSIDE a
+        // tracked spawn's transcript — an agent's own sub-agent. Register a
+        // child spawn (parentSpawnId link) so its frames render nested in the
+        // parent's card instead of vanishing.
+        const owner = tab.agentSpawns.find((a) =>
+          a.blocks.some((b) => b.type === "tool" && b.id === parentId),
+        );
+        if (owner) {
+          const t = owner.blocks.find((b) => b.type === "tool" && b.id === parentId);
+          const input = (t?.type === "tool" ? t.input : {}) as Record<string, unknown>;
+          tab.agentSpawns = capSpawns([
+            ...tab.agentSpawns,
+            {
+              id: parentId,
+              subagentType: String(input.subagent_type ?? "agent"),
+              description: String(input.description ?? input.prompt ?? "").slice(0, 140),
+              startedAt: Date.now(),
+              completedAt: null,
+              isError: false,
+              blocks: [],
+              kind: "agent",
+              parentSpawnId: owner.id,
+            },
+          ]);
+          applySubAgentFrame(tab, parentId, env);
+        }
       }
     }
     return;
@@ -1401,9 +1457,18 @@ export function onStreamLine(tab: TabState, raw: string) {
       break;
     }
     case "tool_progress": {
-      // CLI 2.1.214+ heartbeat for a long-silent tool call. Recognized so the
-      // default-case breadcrumb doesn't fire once per heartbeat; carries no
-      // renderable content (pills already tick elapsed locally).
+      // CLI 2.1.214+ heartbeat for a long-silent tool call — stamp the pending
+      // block so the UI can show "confirmed alive" vs "possibly hung".
+      const tid = env.tool_use_id;
+      if (typeof tid === "string" && tid.length > 0) {
+        const beat = Date.now();
+        mutateStreaming(tab, (m) => ({
+          ...m,
+          blocks: m.blocks.map((b) =>
+            b.type === "tool" && b.id === tid && b.status === "pending" ? { ...b, lastProgressAt: beat } : b,
+          ),
+        }));
+      }
       break;
     }
     default: {

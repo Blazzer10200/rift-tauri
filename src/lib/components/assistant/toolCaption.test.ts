@@ -110,4 +110,20 @@ describe("agentNowLine", () => {
     ])).toEqual({ label: "Running `cargo`", thinking: false });
     expect(agentNowLine([])).toEqual({ label: "Spinning up", thinking: true });
   });
+  it("surfaces the tail of the newest prose/thinking between tool batches", () => {
+    expect(agentNowLine([
+      { type: "tool", name: "Read", input: {}, status: "done" },
+      { type: "text", text: "Found the gate in cli_caps." },
+    ])).toEqual({ label: "Writing", thinking: false, snip: "Found the gate in cli_caps." });
+    expect(agentNowLine([
+      { type: "thinking", status: "done", text: "The flag lands at 2.1.211" },
+    ])).toEqual({ label: "Thinking", thinking: true, snip: "The flag lands at 2.1.211" });
+  });
+  it("tail-clips long prose to the newest words", () => {
+    const long = "a".repeat(200) + " the actual conclusion";
+    const r = agentNowLine([{ type: "text", text: long }]);
+    expect(r.label).toBe("Writing");
+    expect(r.snip!.startsWith("…")).toBe(true);
+    expect(r.snip!.endsWith("the actual conclusion")).toBe(true);
+  });
 });

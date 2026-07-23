@@ -211,7 +211,7 @@ export async function send(
   // a warm-pool cold respawn — `effort_level` is baked into the SpawnKey
   // (warm_pool.rs), so the "optimization" silently triggered the ~1.7s slow path
   // it was meant to avoid. Stable effort across turns = the warm child is reused.)
-  const sendEffort = store.thinkingEffort;
+  const sendEffort = store.effortFor(tab);
   const turnRecord: TurnRecord = {
     ts: Date.now(),
     convoId,
@@ -335,7 +335,7 @@ export async function send(
       attachments: turnAttachments.length > 0 ? turnAttachments : null,
       dyslexiaMode: accessibility.dyslexiaMode,
       thinkingEffort: sendEffort,
-      thinkingEnabled: store.thinkingEnabled,
+      thinkingEnabled: store.thinkingOnFor(tab),
       permissionMode: store.permissionMode,
       // Sent pre-gated by model family so an ineligible model never carries a
       // stale global `on` into the SpawnKey; the backend re-gates by CLI
@@ -386,7 +386,12 @@ async function steerOrQueue(
   if (imgCount > 0) markerParts.push(`📎 ${imgCount} image${imgCount === 1 ? "" : "s"}`);
   if (fileCount > 0) markerParts.push(`📄 ${fileCount} file${fileCount === 1 ? "" : "s"}`);
   const markerText = item.text.length > 0 ? item.text : markerParts.join(" · ");
-  const blockId = appendSteerBlock(tab, markerText, imgCount, fileCount);
+  const blockId = appendSteerBlock(
+    tab,
+    markerText,
+    (item.images ?? []).map((a) => ({ mime: a.mime, dataBase64: a.dataBase64 })),
+    fileCount,
+  );
   if (!blockId) {
     // Nothing streaming to attach to (terminal raced us) — plain queue path.
     enqueue();
@@ -608,9 +613,11 @@ function runSlash(store: AssistantStore, input: string, tab: TabState | null): b
     case "copy":
       void copyLastAssistant(store);
       return true;
-    case "usage":
-      store.ui.usageOpen = "full";
+    case "usage": {
+      const t = tab ?? store.activeTab;
+      if (t) t.usageOpen = "full";
       return true;
+    }
     case "cost":
       if (store.totalCostUsd != null) {
         const turns = store.messages.filter((m) => m.role === "assistant").length;

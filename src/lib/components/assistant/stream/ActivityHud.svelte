@@ -42,7 +42,9 @@
   // turnStartedAt (maybeBeginContinuation) and would otherwise hide a spawn
   // that's still genuinely alive.
   const spawns = $derived.by((): Spawn[] => {
-    const all = (tab?.agentSpawns ?? []) as Spawn[];
+    // Depth-2 children (parentSpawnId) live inside their parent's card — the
+    // HUD lists top-level spawns only.
+    const all = ((tab?.agentSpawns ?? []) as Spawn[]).filter((s) => !s.parentSpawnId);
     const turnStart = tab?.activity.turnStartedAt ?? 0;
     return all.filter((s) => s.completedAt == null || s.startedAt >= turnStart);
   });
@@ -64,7 +66,7 @@
     if (running.length === 0) return null;
     const s = running[running.length - 1];
     const now = agentNowLine((s.blocks ?? []) as Block[]);
-    return `${s.subagentType} · ${now.label}`;
+    return `${s.subagentType} · ${now.snip ?? now.label}`;
   });
 
   let open = $state(false);
@@ -283,7 +285,7 @@
               {#if nowL}
                 <span class="ahud-now">
                   {#if nowL.thinking}<Brain size={11} />{/if}
-                  {nowL.label}
+                  {nowL.snip ?? nowL.label}
                 </span>
               {/if}
               {#if secs != null}<span class="ahud-dur">{fmtDur(secs)}</span>{/if}

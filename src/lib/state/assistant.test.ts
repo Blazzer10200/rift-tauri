@@ -612,6 +612,39 @@ describe("openProjectInPane — open a project into a (split) pane", () => {
   });
 });
 
+describe("split-pane model/effort scoping — a pick in one pane never restyles a sibling", () => {
+  it("setModel pins sibling tabs that followed the global default, then moves it", () => {
+    assistant.model = "sonnet";
+    const a = assistant.ensureTab("scope-a", "scope-a");
+    const b = assistant.ensureTab("scope-b", "scope-b");
+    a.modelOverride = null;
+    b.modelOverride = null;
+
+    assistant.setModel("opus", a);
+
+    expect(assistant.modelFor(a)).toBe("opus");
+    // Sibling keeps what it was showing — pinned, not leaked.
+    expect(assistant.modelFor(b)).toBe("sonnet");
+    // The new-chat default still moves (the pick came from a global-root pane).
+    expect(assistant.model).toBe("opus");
+  });
+
+  it("setThinkingDial scopes the effort pick to its tab; the sibling keeps its tier", () => {
+    assistant.thinkingEnabled = true;
+    assistant.thinkingEffort = "smart";
+    const a = assistant.ensureTab("scope-c", "scope-c");
+    const b = assistant.ensureTab("scope-d", "scope-d");
+    a.effortOverride = null; a.thinkingOverride = null;
+    b.effortOverride = null; b.thinkingOverride = null;
+
+    assistant.setThinkingDial(true, "ultra", a);
+
+    expect(assistant.effortFor(a)).toBe("ultra");
+    expect(assistant.effortFor(b)).toBe("smart");
+    expect(assistant.thinkingOnFor(b)).toBe(true);
+  });
+});
+
 describe("assistant.sessionUsage default", () => {
   it("returns zeroed structure when no active tab", () => {
     // Test runs in node env with no tabs initialized → the getter falls back

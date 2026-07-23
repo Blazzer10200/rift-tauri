@@ -26,7 +26,7 @@ export type {
 import type {
   WorkspaceState,
   AuthStatus,
-  Block,
+  AgentSpawn,
   ChatMessage,
   ConversationMeta,
   ThinkingEffort,
@@ -257,6 +257,14 @@ export class TabState {
    *  (its saved model scopes to this tab) and on explicit pick; null = follow
    *  the global default. Opening a chat no longer rewrites the new-chat default. */
   modelOverride = $state<ModelSel | null>(null);
+  /** Per-tab thinking-dial overrides (split-pane: an effort pick in one pane
+   *  must not restyle its sibling). null = follow the global pair. Written on
+   *  explicit picks + by the sibling-pinning guard in the store setters. */
+  effortOverride = $state<ThinkingEffort | null>(null);
+  thinkingOverride = $state<boolean | null>(null);
+  /** "This conversation" popover (ctx ring / /usage) — per-tab so opening it
+   *  in one split pane doesn't pop the card in the other. Transient. */
+  usageOpen = $state<false | "ctx" | "full">(false);
   /** The model this session is actually PINNED to backend-side — captured on the
    *  first send (and hydrated from disk on resume). The backend ignores a picker
    *  switch on a resumed session (thinking-block signatures are model-bound,
@@ -317,19 +325,7 @@ export class TabState {
    *  own transcript (text / thinking / tool steps) at envelope granularity —
    *  no token-level deltas for sub-agents — and feeds the live sub-agent dock.
    *  See applySubAgentFrame in streaming.ts. */
-  agentSpawns = $state<{
-    id: string;
-    subagentType: string;
-    description: string;
-    startedAt: number;
-    completedAt: number | null;
-    isError: boolean;
-    blocks: Block[];
-    // "agent" = Task/Agent delegation; "skill" = a forking slash-command
-    // (/plan etc.) lazily promoted when its first nested frame arrives. Omitted
-    // on legacy/Task entries → treated as "agent" by the dock.
-    kind?: "agent" | "skill";
-  }[]>([]);
+  agentSpawns = $state<AgentSpawn[]>([]);
 
   /** Live shell processes under this session's CLI child (ActivityHud rows).
    *  Pushed by the backend per-turn poller over `assistant://shell-rows`;
@@ -612,7 +608,7 @@ class AssistantStore {
    *  workspace default. Used for the per-pane picker display, the @-mention
    *  walk, and the root passed to `assistant_send`. */
   effectiveRoot(tab: TabState | null): string | null {
-    return tab?.workspaceRoot ?? this.workspace.current ?? null;
+    return tab?.workspaceRoot ?? this.workspace?.current ?? null;
   }
 
   /** Effective root of the focused tab — drives the global @-mention walk +
@@ -867,9 +863,8 @@ class AssistantStore {
   // (see ctxWindowFor). Global, persisted; default `max` (1M). Free/uncredited-Pro
   // users set it once in Settings to cap the gauge honestly at 200K.
   plan = $state<RiftPlan>(loadPlan());
-  // usageOpen: "ctx" = compact conversation-context popover (composer ring),
-  // "full" = plan-limits panel (/usage command; status bar owns its own copy).
-  ui = $state({ tasksUpdatedAt: 0, usageOpen: false as false | "ctx" | "full" });
+  // usageOpen moved to TabState (per-pane popover); status bar owns its own copy.
+  ui = $state({ tasksUpdatedAt: 0 });
 
   // Conversation history.
   //   - `currentConvoId` is null before the first message is sent; first
@@ -957,7 +952,16 @@ class AssistantStore {
    *  old convo is opened) else the global default. Per-chat surfaces
    *  (composer, send, tabsbar, live harness) read this; Home quick-ask and
    *  onboarding read `model` — the new-chat default. (ui-audit #5) */
-  get effectiveModel(): ModelSel { return this.activeTab?.modelOverride ?? this.model; }
+  get effectiveModel(): ModelSel { return this.modelFor(this.activeTab); }
+
+  /** Tab-scoped reads for the model/effort pair — per-pane surfaces (composer
+   *  pill, settings menu, send, prewarm) MUST use these, not the bare globals,
+   *  or split-pane displays the focused pane's picks everywhere. */
+  modelFor(tab: TabState | null): ModelSel { return tab?.modelOverride ?? this.model; }
+  effortFor(tab: TabState | null): ThinkingEffort { return tab?.effortOverride ?? this.thinkingEffort; }
+  thinkingOnFor(tab: TabState | null): boolean { return tab?.thinkingOverride ?? this.thinkingEnabled; }
+  get effectiveEffort(): ThinkingEffort { return this.effortFor(this.activeTab); }
+  get effectiveThinkingOn(): boolean { return this.thinkingOnFor(this.activeTab); }
 
   /** The model the active chat's turns have been RUNNING on (seeded on the
    *  first turn, advanced by send() when a mid-chat switch takes effect), or
@@ -974,34 +978,56 @@ class AssistantStore {
     return pinned !== null && pinned !== this.effectiveModel;
   }
 
-  setModel(v: ModelSel) {
-    const prev = this.effectiveModel;
+  /** Split-pane leak guards: before a global default moves, freeze every OTHER
+   *  open tab that still follows it — a pick in one pane must never restyle a
+   *  sibling that was showing (and sending with) the old value. */
+  private pinSiblingModels(except: TabState | null) {
+    for (const t of this.tabs.values()) {
+      if (t !== except && t.modelOverride === null) t.modelOverride = this.model;
+    }
+  }
+  private pinSiblingEffort(except: TabState | null) {
+    for (const t of this.tabs.values()) {
+      if (t === except) continue;
+      if (t.effortOverride === null) t.effortOverride = this.thinkingEffort;
+      if (t.thinkingOverride === null) t.thinkingOverride = this.thinkingEnabled;
+    }
+  }
+
+  setModel(v: ModelSel, tab: TabState | null = this.activeTab) {
+    const prev = this.modelFor(tab);
     // Re-picking the already-effective model is a no-op — falling through here
     // when a tab override diverges from the global default would silently
     // rewrite the global default on a same-model reselect.
     if (prev === v) return;
     // Split-pane: a pick inside a pane with its OWN folder scopes to that chat
     // + that folder's pin. Only a pick in a pane following the global root
-    // moves the shared new-chat default (cont.339 model-leak fix).
-    if (!this.activeTab?.workspaceRoot) this.model = v;
-    if (this.activeTab) this.activeTab.modelOverride = v;
-    saveModel(v, this.activeRoot);
+    // moves the shared new-chat default (cont.339 model-leak fix) — and pins
+    // siblings first so they keep what they were showing.
+    if (!tab?.workspaceRoot) {
+      this.pinSiblingModels(tab);
+      this.model = v;
+    }
+    if (tab) tab.modelOverride = v;
+    saveModel(v, this.effectiveRoot(tab));
     // Coerce effort down to the new model's ceiling so the slider and the tier
     // we actually send can't exceed what the model honors (e.g. Opus@ultra →
     // Sonnet caps at smart). No-op when already in range. setThinkingEffort
     // handles the persist + cache-bust + telemetry and early-returns on no change.
-    this.setThinkingEffort(clampEffort(this.thinkingEffort, v));
-    const midConvo = (this.activeTab?.messages.length ?? 0) > 0;
+    this.setThinkingEffort(clampEffort(this.effortFor(tab), v), tab);
+    const midConvo = (tab?.messages.length ?? 0) > 0;
     this.telemetry.event("model.change", { from: prev, to: v, midConvo });
     if (midConvo && prev !== v) this.cacheBustHint("model");
   }
 
-  setThinkingEffort(v: ThinkingEffort) {
-    if (this.thinkingEffort === v) return;
-    const prev = this.thinkingEffort;
+  setThinkingEffort(v: ThinkingEffort, tab: TabState | null = this.activeTab) {
+    const prev = this.effortFor(tab);
+    if (prev === v) return;
+    this.pinSiblingEffort(tab);
     this.thinkingEffort = v;
-    saveEffort(v, this.activeRoot);
-    const midConvo = (this.activeTab?.messages.length ?? 0) > 0;
+    if (tab) tab.effortOverride = v;
+    saveEffort(v, this.effectiveRoot(tab));
+    const midConvo = (tab?.messages.length ?? 0) > 0;
     this.telemetry.event("effort.change", { from: prev, to: v, midConvo });
     if (midConvo) this.cacheBustHint("effort");
   }
@@ -1012,19 +1038,21 @@ class AssistantStore {
    *  restores it — but a dial rung always carries an explicit tier, so the
    *  on-rungs never leave a stale tier behind. One write per change keeps the
    *  warm-pool cache-bust to a single hint instead of two. */
-  setThinkingDial(enabled: boolean, effort?: ThinkingEffort) {
-    const nextEffort = effort ?? this.thinkingEffort;
-    const changed = this.thinkingEnabled !== enabled || this.thinkingEffort !== nextEffort;
-    if (!changed) return;
-    const prevEnabled = this.thinkingEnabled;
-    const prevEffort = this.thinkingEffort;
+  setThinkingDial(enabled: boolean, effort?: ThinkingEffort, tab: TabState | null = this.activeTab) {
+    const prevEnabled = this.thinkingOnFor(tab);
+    const prevEffort = this.effortFor(tab);
+    const nextEffort = effort ?? prevEffort;
+    if (prevEnabled === enabled && prevEffort === nextEffort) return;
+    this.pinSiblingEffort(tab);
     this.thinkingEnabled = enabled;
-    saveThinkingEnabled(enabled, this.activeRoot);
+    if (tab) tab.thinkingOverride = enabled;
+    saveThinkingEnabled(enabled, this.effectiveRoot(tab));
     if (nextEffort !== prevEffort) {
       this.thinkingEffort = nextEffort;
-      saveEffort(nextEffort, this.activeRoot);
+      saveEffort(nextEffort, this.effectiveRoot(tab));
     }
-    const midConvo = (this.activeTab?.messages.length ?? 0) > 0;
+    if (tab) tab.effortOverride = nextEffort;
+    const midConvo = (tab?.messages.length ?? 0) > 0;
     this.telemetry.event("thinking.dial", {
       enabled, effort: nextEffort, fromEnabled: prevEnabled, fromEffort: prevEffort, midConvo,
     });

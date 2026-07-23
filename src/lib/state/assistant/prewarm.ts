@@ -58,8 +58,8 @@ function signatureOf(
     // Mirror the backend key: thinking-off wires `--effort low` whatever tier
     // is parked, so fold it here too — a parked-tier change while thinking is
     // off must not re-arm a prewarm for an identical spawn.
-    store.thinkingEnabled ? effortToFlag(store.thinkingEffort, store.effectiveModel) : "low",
-    String(store.thinkingEnabled),
+    store.effectiveThinkingOn ? effortToFlag(store.effectiveEffort, store.effectiveModel) : "low",
+    String(store.effectiveThinkingOn),
     store.permissionMode,
     // Mirror the send-path gating (fastEligible) so the spare's SpawnKey
     // matches the real send — an ineligible model folds to "false" both here
@@ -130,8 +130,8 @@ export function requestPrewarm(store: AssistantStore): void {
     void invoke("assistant_prewarm", {
       sessionId,
       model: store.effectiveModel,
-      thinkingEffort: store.thinkingEffort,
-      thinkingEnabled: store.thinkingEnabled,
+      thinkingEffort: store.effectiveEffort,
+      thinkingEnabled: store.effectiveThinkingOn,
       permissionMode: store.permissionMode,
       fastMode: store.fastMode && fastEligible(store.effectiveModel),
       root,

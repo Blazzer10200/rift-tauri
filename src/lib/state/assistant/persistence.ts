@@ -16,12 +16,14 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { notify } from "../toast.svelte";
 import { asModelSel } from "./helpers";
 import type {
+  AgentSpawn,
   ChatMessage,
   ConversationMeta,
   ConversationRecord,
   ModelSel,
   PaneState,
   QueueItem,
+  ThinkingEffort,
 } from "./types";
 
 /** Subset of TabState fields the save plumbing reads/writes. Structural —
@@ -36,10 +38,13 @@ type SaveableTab = {
   cliSessionId: string;
   titleGenerated: boolean;
   modelOverride: ModelSel | null;
+  effortOverride: ThinkingEffort | null;
+  thinkingOverride: boolean | null;
   lastTurnUsage: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
   // Per-project scope: the folder this tab's turns run in. Stamped onto the
   // saved record so the sidebar can filter chats to the open project.
   workspaceRoot: string | null;
+  agentSpawns: AgentSpawn[];
 };
 
 /** Wider tab shape needed by loadConversation — adds the fields it resets
@@ -64,6 +69,8 @@ type PersistenceHost = {
   currentCliSessionId: string | null;
   activeTab: SaveableTab | null;
   model: string;
+  thinkingEffort: ThinkingEffort;
+  thinkingEnabled: boolean;
   openTabs: string[];
   panes: PaneState[];
   focusedPaneIdx: number;
@@ -208,6 +215,12 @@ export function buildSaveRecord(
     // background-tab save while another pane is focused elsewhere). null =
     // unfiled, and a genuinely-unfiled tab stays unfiled.
     workspaceRoot: tab.workspaceRoot ?? host.workspaceCurrent ?? null,
+    // Agent transcripts, capped (last 30 spawns × 80 blocks) so reopened convos
+    // keep expandable agent cards without unbounded record growth.
+    agentSpawns: (tab.agentSpawns ?? []).slice(-30).map((s) => ({ ...s, blocks: s.blocks.slice(-80) })),
+    // Effective dial at save time — mirrors `model` so reopening restores it.
+    effort: tab.effortOverride ?? host.thinkingEffort,
+    thinkingOn: tab.thinkingOverride ?? host.thinkingEnabled,
   };
 }
 
@@ -410,6 +423,16 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     tab.messages = (convo.messages ?? []).map((m) =>
       (m.bgAgentsPending ?? 0) > 0 ? { ...m, bgAgentsPending: 0 } : m,
     );
+    // Restore agent cards. Anything persisted mid-run died with the previous
+    // app's CLI child — settle it (same honesty rule as bgAgentsPending above)
+    // so restored cards can't spin forever.
+    tab.agentSpawns = (convo.agentSpawns ?? []).map((s) => ({
+      ...s,
+      completedAt: s.completedAt ?? s.startedAt,
+      blocks: (s.blocks ?? []).map((b) =>
+        b.type === "tool" && b.status === "pending" ? { ...b, status: "done" as const } : b,
+      ),
+    }));
     tab.cliSessionId = cliSid;
     // Hydrate last-activity from disk so reopening doesn't reset the order;
     // legacy records lacking it fall back to their createdAt.
@@ -459,6 +482,12 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     // ui-audit #5: the saved model scopes to THIS tab only — opening an old
     // chat must not rewrite the global new-chat default (or toast about it).
     tab.modelOverride = asModelSel(convo.model);
+    // Saved dial scopes to this tab too — like model, opening an old chat must
+    // not rewrite the global defaults. Unknown/legacy values fall back to null.
+    tab.effortOverride =
+      convo.effort === "none" || convo.effort === "smart" || convo.effort === "deep" || convo.effort === "ultra"
+        ? convo.effort : null;
+    tab.thinkingOverride = typeof convo.thinkingOn === "boolean" ? convo.thinkingOn : null;
     // The saved model is the model the chat's turns were running on — hydrate
     // it as the switch-detection baseline (send() compares the next pick
     // against it) so the picker's "this chat" tag + the mid-chat switch

@@ -417,7 +417,22 @@
         {:else if b.type === "steer"}
           <div class="steer-note" title="Sent while Claude was working — read mid-turn">
             <CornerDownRight size={11} />
-            <span class="steer-body">{b.text}</span>
+            <span class="steer-body">
+              {b.text}
+              {#if b.imgs?.length}
+                <span class="steer-imgs">
+                  {#each b.imgs as im, ii (ii)}
+                    {@const steerMime = /^image\/(png|jpeg|gif|webp|svg\+xml|avif|bmp)$/.test(im.mime ?? "") ? im.mime : "image/png"}
+                    <button
+                      type="button"
+                      class="steer-thumb"
+                      aria-label="View full size image"
+                      onclick={() => (lightboxSrc = `data:${steerMime};base64,${im.dataBase64}`)}
+                    ><img src={`data:${steerMime};base64,${im.dataBase64}`} alt="" loading="lazy" /></button>
+                  {/each}
+                </span>
+              {/if}
+            </span>
             <span class="steer-tag">mid-turn</span>
           </div>
         {:else if b.type === "unknown"}
@@ -1104,6 +1119,12 @@
     margin-top: 3px;
     color: color-mix(in oklab, var(--accent) 60%, var(--fg-muted));
   }
+  .steer-imgs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .steer-thumb {
+    padding: 0; border: 1px solid var(--border-strong); border-radius: 8px;
+    background: none; cursor: zoom-in; overflow: hidden; line-height: 0;
+  }
+  .steer-thumb img { width: 44px; height: 44px; object-fit: cover; display: block; }
   .steer-body {
     flex: 1;
     min-width: 0;

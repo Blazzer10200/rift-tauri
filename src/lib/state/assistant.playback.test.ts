@@ -325,6 +325,34 @@ describe("playback — sub-agent live routing", () => {
     expect(agent.blocks[2]).toEqual({ type: "text", text: "found 3" });
   });
 
+  it("registers a depth-2 child spawn when a frame parents to an agent's own Task call", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    feed(tab, [
+      agentSpawnEnv("task-1", "recon", "map the files"),
+      // The agent itself delegates: a Task tool_use INSIDE its own transcript.
+      nestedToolUseEnv("task-1", "task-2", "Task", { subagent_type: "verifier", description: "check claims" }),
+      // Frames parented to that inner call = depth-2 output → child spawn.
+      nestedTextEnv("task-2", "verifying claim 1"),
+      nestedResultEnv("task-2"),
+    ]);
+    const child = tab.agentSpawns.find((a) => a.id === "task-2")!;
+    expect(child).toMatchObject({ subagentType: "verifier", description: "check claims", parentSpawnId: "task-1" });
+    expect(child.blocks[0]).toEqual({ type: "text", text: "verifying claim 1" });
+    expect(child.completedAt).not.toBeNull();
+  });
+
+  it("sums nested envelope output tokens onto the spawn's token chip", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    feed(tab, [
+      agentSpawnEnv("task-1", "recon", "map the files"),
+      { ...nestedTextEnv("task-1", "pass one"), message: { content: [{ type: "text", text: "pass one" }], usage: { output_tokens: 120 } } },
+      { ...nestedTextEnv("task-1", "pass two"), message: { content: [{ type: "text", text: "pass two" }], usage: { output_tokens: 80 } } },
+    ]);
+    expect(tab.agentSpawns.find((a) => a.id === "task-1")!.tokens).toBe(200);
+  });
+
   it("marks the spawn done when the top-level Task tool_result arrives (parent null)", () => {
     const tab = freshTab();
     beginTurn(tab);

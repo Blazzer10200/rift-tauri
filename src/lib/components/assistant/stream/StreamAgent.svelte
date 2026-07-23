@@ -3,6 +3,8 @@
     FileSearch, FilePen, FilePlus, Search, FolderTree, Terminal, Globe, AppWindow, GitBranch, ListChecks, Wrench } from "lucide-svelte";
   import { fmtDur, type StreamTool } from "./streamModel";
   import { captionForTool, agentNowLine } from "../toolCaption";
+  import { fmtTokens } from "$lib/state/assistant/helpers";
+  import Markdown from "../Markdown.svelte";
   import type { Block, TabState } from "$lib/state/assistant.svelte";
 
   // Live delegated sub-agent, rendered inline in the transcript (CC-UI ref §5) —
@@ -12,7 +14,7 @@
   // frames arrive — see applySubAgentFrame in streaming.ts). Falls back to `tool`
   // alone when the spawn was pruned (MAX_SPAWNS) or predates tracking.
   type Spawn = TabState["agentSpawns"][number];
-  let { tool, spawn = undefined }: { tool: StreamTool; spawn?: Spawn } = $props();
+  let { tool, spawn = undefined, childSpawns = [] }: { tool: StreamTool; spawn?: Spawn; childSpawns?: Spawn[] } = $props();
 
   // Tool-kind → glyph (ported from the retired SubAgentDock) so each step reads
   // as a distinct action, not a flat bullet.
@@ -78,6 +80,19 @@
   const result = $derived(tool.result);
   const expandable = $derived(blocks.length > 0 || !!result);
   let open = $state(false);
+
+  // Terminal-style tail-follow: while running + open, the timeline sticks to
+  // the newest row as frames land — unless the user scrolled up to read back.
+  let bodyEl = $state<HTMLDivElement | null>(null);
+  let follow = $state(true);
+  function onBodyScroll() {
+    if (!bodyEl) return;
+    follow = bodyEl.scrollHeight - bodyEl.scrollTop - bodyEl.clientHeight < 40;
+  }
+  $effect(() => {
+    void blocks.length;
+    if (open && status === "running" && follow && bodyEl) bodyEl.scrollTop = bodyEl.scrollHeight;
+  });
 </script>
 
 <div class="sacard" data-status={status} id={"sacard-" + tool.id}>
@@ -87,6 +102,7 @@
     <span class="sa-pill">{agentType}</span>
     {#if desc}<span class="sa-desc">{desc}</span>{/if}
     {#if toolSteps.length > 0 && !open}<span class="sa-dur">{toolSteps.length} step{toolSteps.length === 1 ? "" : "s"}</span>{/if}
+    {#if spawn?.tokens}<span class="sa-dur">{fmtTokens(spawn.tokens)} tok</span>{/if}
     {#if durSecs != null}<span class="sa-dur">{fmtDur(durSecs)}</span>{/if}
     <span class="sa-stat" aria-label={status}>
       {#if status === "running"}<Loader2 size={13} class="sa-spin" />
@@ -101,41 +117,70 @@
       <span class="sa-now-ic" aria-hidden="true">
         {#if nowLine.thinking}<Brain size={12} />{:else}<Loader2 size={12} class="sa-spin" />{/if}
       </span>
-      <span class="sa-now-label">{nowLine.label}{#if nowLine.thinking}<span class="sa-dots"><span></span><span></span><span></span></span>{/if}</span>
+      <span class="sa-now-label" class:has-snip={!!nowLine.snip}>{nowLine.label}{#if nowLine.thinking && !nowLine.snip}<span class="sa-dots"><span></span><span></span><span></span></span>{/if}</span>
+      {#if nowLine.snip}<span class="sa-now-snip">{nowLine.snip}</span>{/if}
     </div>
   {/if}
 
-  {#if open && expandable}
-    <div class="sa-body">
-      {#each blocks as b, i (i)}
-        {#if b.type === "tool"}
-          {@const Ic = toolIcon(b.name)}
-          <div class="sa-step" data-status={b.status}>
-            <span class="sa-step-stat" aria-hidden="true">
-              {#if b.status === "pending"}<Loader2 size={11} class="sa-spin" />
-              {:else if b.status === "error"}<AlertCircle size={11} />
-              {:else}<CheckCircle2 size={11} />{/if}
-            </span>
-            <span class="sa-step-ic" aria-hidden="true"><Ic size={12} /></span>
-            <span class="sa-step-label">{captionForTool(b.name, b.input ?? {})}</span>
-            {#if b.status !== "pending" && typeof b.durationMs === "number" && b.durationMs >= 1000}
-              <span class="sa-step-dur">{fmtDur(b.durationMs / 1000)}</span>
-            {/if}
-          </div>
-          {#if b.status === "error" && b.result}
-            <div class="sa-step-err">{snip(b.result, 160)}</div>
+  {#snippet timeline(bs: Block[], kids: Spawn[])}
+    {#each bs as b, i (i)}
+      {#if b.type === "tool"}
+        {@const Ic = toolIcon(b.name)}
+        <div class="sa-step" data-status={b.status}>
+          <span class="sa-step-stat" aria-hidden="true">
+            {#if b.status === "pending"}<Loader2 size={11} class="sa-spin" />
+            {:else if b.status === "error"}<AlertCircle size={11} />
+            {:else}<CheckCircle2 size={11} />{/if}
+          </span>
+          <span class="sa-step-ic" aria-hidden="true"><Ic size={12} /></span>
+          <span class="sa-step-label">{captionForTool(b.name, b.input ?? {})}</span>
+          {#if b.status === "pending" && typeof b.lastProgressAt === "number" && now > 0 && now - b.lastProgressAt < 6000}
+            <span class="sa-beat" title="CLI heartbeat — tool confirmed alive" aria-hidden="true"></span>
           {/if}
-        {:else if b.type === "thinking" && b.text.trim()}
-          <div class="sa-think">
-            <span class="sa-step-ic" aria-hidden="true"><Brain size={12} /></span>
-            <span>{snip(b.text)}</span>
-          </div>
-        {:else if b.type === "text" && b.text.trim()}
-          <div class="sa-prose">{snip(b.text)}</div>
+          {#if b.status === "pending" && typeof b.startedAt === "number" && now > 0 && now - b.startedAt >= 3000}
+            <span class="sa-step-dur">{fmtDur((now - b.startedAt) / 1000)}</span>
+          {:else if b.status !== "pending" && typeof b.durationMs === "number" && b.durationMs >= 1000}
+            <span class="sa-step-dur">{fmtDur(b.durationMs / 1000)}</span>
+          {/if}
+        </div>
+        {#if b.status === "error" && b.result}
+          <div class="sa-step-err">{snip(b.result, 160)}</div>
         {/if}
-      {/each}
+        {@const kid = kids.find((c) => c.id === b.id)}
+        {#if kid}
+          <!-- Depth-2 child agent — nested tint-group under the step that
+               spawned it (hairline rail, not a second full card — island
+               nesting ceiling, DESIGN §8). -->
+          <div class="sa-kid" data-status={kid.completedAt == null ? "running" : kid.isError ? "error" : "done"}>
+            <div class="sa-kid-head">
+              <span class="sa-kid-stat" aria-hidden="true">
+                {#if kid.completedAt == null}<Loader2 size={10} class="sa-spin" />
+                {:else if kid.isError}<AlertCircle size={10} />
+                {:else}<CheckCircle2 size={10} />{/if}
+              </span>
+              <span class="sa-kid-pill">{kid.subagentType}</span>
+              {#if kid.description}<span class="sa-kid-desc">{kid.description}</span>{/if}
+              {#if kid.tokens}<span class="sa-step-dur">{fmtTokens(kid.tokens)} tok</span>{/if}
+            </div>
+            {@render timeline(kid.blocks as Block[], [])}
+          </div>
+        {/if}
+      {:else if b.type === "thinking" && b.text.trim()}
+        <div class="sa-think">
+          <span class="sa-step-ic" aria-hidden="true"><Brain size={12} /></span>
+          <span>{snip(b.text)}</span>
+        </div>
+      {:else if b.type === "text" && b.text.trim()}
+        <div class="sa-prose">{snip(b.text)}</div>
+      {/if}
+    {/each}
+  {/snippet}
+
+  {#if open && expandable}
+    <div class="sa-body" bind:this={bodyEl} onscroll={onBodyScroll}>
+      {@render timeline(blocks, childSpawns)}
       {#if result}
-        <div class="sa-result"><ArrowRight size={13} strokeWidth={2} /><span>{result}</span></div>
+        <div class="sa-result"><ArrowRight size={13} strokeWidth={2} /><div class="sa-result-md"><Markdown text={result} /></div></div>
       {/if}
     </div>
   {/if}
@@ -207,6 +252,12 @@
   }
   .sa-now-ic { display: inline-flex; flex: none; color: var(--status-busy); }
   .sa-now-label { color: var(--fg-muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sa-now-label.has-snip { flex: none; }
+  /* The agent's own newest words — the live feed the forwarded frames carry. */
+  .sa-now-snip {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--fg-faint); font-size: 11.5px; font-style: italic;
+  }
   .sa-dots { display: inline-flex; gap: 3px; margin-left: 6px; vertical-align: middle; }
   .sa-dots span { width: 3px; height: 3px; border-radius: 50%; background: var(--status-busy); animation: sa-dot 1.1s ease-in-out infinite; }
   .sa-dots span:nth-child(2) { animation-delay: 0.15s; }
@@ -241,6 +292,12 @@
     line-height: 1.4; padding-left: 39px; /* indent under the step label */
     overflow-wrap: anywhere;
   }
+  /* New rows rise in as frames land — orientation beat, not theater. */
+  .sa-step, .sa-think, .sa-prose { animation: sa-row-in 0.22s var(--ease-page) both; }
+  @keyframes sa-row-in {
+    from { opacity: 0; transform: translateY(3px); }
+    to { opacity: 1; transform: none; }
+  }
   .sa-step { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--fg-muted); }
   .sa-step-stat { display: inline-flex; flex: none; color: var(--fg-faint); }
   .sa-step[data-status="pending"] .sa-step-stat { color: var(--status-busy); }
@@ -249,16 +306,52 @@
   .sa-step-ic { display: inline-flex; flex: none; color: var(--fg-subtle); }
   .sa-step-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sa-step-dur { flex: none; font-size: 10px; color: var(--fg-faint); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+  /* Heartbeat — the CLI's "still alive" ping for a long-silent call; breathing
+     live dot (sanctioned stationary liveness signal, DESIGN §8). */
+  .sa-beat {
+    flex: none; width: 5px; height: 5px; border-radius: 50%;
+    background: var(--status-busy);
+    animation: sa-beat var(--pulse-live) ease-in-out infinite;
+  }
+  @keyframes sa-beat { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+  /* Depth-2 child agent — indented tint-group with a hairline rail. */
+  .sa-kid {
+    display: flex; flex-direction: column; gap: 4px;
+    margin: 1px 0 3px 19px; padding: 5px 8px 6px;
+    border-left: 2px solid color-mix(in oklab, var(--accent) 25%, var(--border));
+    border-radius: 0 6px 6px 0;
+    background: color-mix(in oklab, var(--fg) 2.5%, transparent);
+  }
+  .sa-kid-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
+  .sa-kid-stat { display: inline-flex; flex: none; color: var(--fg-faint); }
+  .sa-kid[data-status="running"] .sa-kid-stat { color: var(--status-busy); }
+  .sa-kid[data-status="done"] .sa-kid-stat { color: color-mix(in oklch, var(--ok) 78%, var(--fg-faint)); }
+  .sa-kid[data-status="error"] .sa-kid-stat { color: var(--danger); }
+  .sa-kid-pill {
+    display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 999px;
+    background: var(--accent-soft); color: var(--accent);
+    font-size: 9.5px; font-weight: 600; font-family: var(--font-mono); flex: none;
+  }
+  .sa-kid-desc {
+    flex: 1; min-width: 0; font-size: 11px; color: var(--fg-faint);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
   .sa-result {
     display: flex; align-items: flex-start; gap: 7px; margin-top: 3px; padding-top: 8px;
     border-top: 1px dashed color-mix(in oklch, var(--border) 60%, transparent);
     font-size: 12px; color: var(--fg-2); line-height: 1.5;
   }
   .sa-result > :global(svg) { color: var(--fg-subtle); flex: none; margin-top: 2px; }
+  .sa-result-md { flex: 1; min-width: 0; }
+  /* Agent results are compact digests — pull the markdown's outer margins in. */
+  .sa-result-md :global(> :first-child) { margin-top: 0; }
+  .sa-result-md :global(> :last-child) { margin-bottom: 0; }
 
   @media (prefers-reduced-motion: reduce) {
     .sacard { animation: none; }
     .sa-body { animation: none; }
+    .sa-step, .sa-think, .sa-prose { animation: none; }
+    .sa-beat { animation: none; opacity: 0.8; }
     :global(.sa-spin) { animation: none; }
     .sa-dots span { animation: none; opacity: 0.7; }
   }
