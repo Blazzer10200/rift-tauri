@@ -196,6 +196,14 @@ seed rules below.
   sweeps over blocks/rows; the owner-approved accent `.shim` on single live VERB
   text is a different, settled treatment — don't extend it to blocks either.)
 
+- DON'T orbit a light around a container as a "working" state (2026-07-22,
+  composer comet arc — owner: "I like it but it's disturbing… too distracting").
+  Same family as the banned skeleton sweep: TRAVELING motion pinned to a fixed
+  chrome edge competes with the stream for the eye, and it never stops while a
+  turn runs. Liveness on chrome = stationary signals only (breathing opacity,
+  tinted border/halo, a live dot); motion may travel WITH content as it enters,
+  never around a frame.
+
 ## 9. Agent guide — process over palette
 
 1. **Intent first:** before pixels, state in ≤2 sentences what the element's job is and
