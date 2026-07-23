@@ -2,12 +2,15 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.144.0 — The chassis update
+
+- **The app has a place to live now.** The dark space behind the floating panels is a machined housing: a recessed, subtly accent-tinted surface the sidebar and main panel sit *into*, with real contact shadows where they meet it. Wider breathing room around the panels so the depth actually reads.
+- **The rift is the brand — literally.** A faint accent seam runs in the gap between the two panels, and the new launch screen opens along it: the surface draws a line of light, then *parts in two* to reveal the app assembling underneath. The old glowing-logo loader is gone; the boot readout stays honest (real startup stages, no fake progress).
+- **Lighter repo for contributors:** the README's product tour now streams from release assets instead of shipping 18MB of media in every clone.
+
 ## v0.143.0 — Plan mode, made real
 
-- **Plans are a real approval now.** In plan mode the proposed plan lands as a rich card in the chat: read it, **Edit** it right there (your edited version is what gets built), ask for changes with **Refine** (the card re-proposes as r2, r3…), approve with build rights or ask-first rights, or **Discard**. Approving flips your permission mode back automatically and the *same turn* rolls straight into execution — no re-prompting.
-- **Watch the plan being written.** The card streams the draft in with a typing caret as it's composed, instead of popping in finished.
-- **A plan chip lives by the composer** tracking where the plan stands — ready → building → built — with the full plan one click away. It fades out shortly after the build lands.
-- **Plan mode thinks harder.** Entering plan mode raises the thinking dial to at least High (your own setting comes back when you leave, and a toast tells you), and the model is steered to read the code it would touch before proposing. The permission menu now says what plan mode really does: you approve the plan before anything is built.
+- Plan proposals land as an editable approval card (Edit / Refine rN / Approve with or without build rights / Discard); approving flips your mode back and the same turn rolls into execution. Typing-caret draft reveal, composer plan chip (ready → building → built), plan mode floors the thinking dial to High with restore + toast.
 
 ## v0.142.0 — Agents you can watch, autocorrect that thinks
 
