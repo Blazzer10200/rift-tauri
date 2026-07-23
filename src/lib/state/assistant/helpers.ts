@@ -375,6 +375,31 @@ export function ctxWindowForModelId(model: string | null, planCap?: number): num
   return planCap !== undefined ? Math.min(native, planCap) : native;
 }
 
+/** CLI auto-compact config probed backend-side (`assistant_autocompact_config`
+ *  — env `CLAUDE_CODE_AUTO_COMPACT_WINDOW` / `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`
+ *  + settings `autoCompactWindow`/`autoCompactEnabled`). null = probe hasn't
+ *  landed; fields null = knob not configured (CLI defaults apply). */
+export type AutoCompactCfg = { enabled: boolean; windowTokens: number | null; pct: number | null };
+
+// Without an explicit pct override the CLI compacts a little before the window
+// is truly full (it reserves an output buffer) — 0.9 is the detection-side
+// approximation of that default, chosen so unconfigured users keep the old
+// "compacts near window-full" behavior.
+const AUTOCOMPACT_DEFAULT_FRACTION = 0.9;
+
+/** Context tokens at which the CLI will fire auto-compaction, or null when the
+ *  user disabled it. Trigger = min(configured window, real window) × pct. The
+ *  detection surfaces (StreamTurn's auto-compacting card, healthAlerts' nudge)
+ *  gate on THIS instead of raw %-of-window, so a tuned-down auto-compact
+ *  window (e.g. 250K on a 1M model) is still detected. */
+export function autoCompactTriggerTokens(cfg: AutoCompactCfg | null, ctxWindow: number): number | null {
+  if (cfg?.enabled === false) return null;
+  if (ctxWindow <= 0) return null;
+  const acWin = Math.min(cfg?.windowTokens ?? ctxWindow, ctxWindow);
+  const frac = cfg?.pct != null && cfg.pct > 0 ? cfg.pct / 100 : AUTOCOMPACT_DEFAULT_FRACTION;
+  return Math.round(acWin * frac);
+}
+
 /** Effort tiers low→high — canonical order for clamping + ladder UIs. */
 export const EFFORT_ORDER: readonly ThinkingEffort[] = [
   "none", "smart", "deep", "ultra",

@@ -3,7 +3,7 @@ import {
   FABLE_DISABLED, FABLE_SUNSET_MS, clampEffort, effortToFlag, fableAvailable,
   fastEligible, flattenToolResult, isStaleTurnEpoch, loadEffort,
   migrateThinkingPins, modelFamily, previewToolInput, ctxWindowForModelId,
-  modelNativeWindow, planContextCap,
+  modelNativeWindow, planContextCap, autoCompactTriggerTokens,
 } from "./helpers";
 
 afterEach(() => vi.useRealTimers());
@@ -256,6 +256,29 @@ describe("isStaleTurnEpoch (#80 stale-event discrimination)", () => {
   });
   it("accepts anything while the tab has no epoch yet (fresh store, no send this app-life)", () => {
     expect(isStaleTurnEpoch(0, 5)).toBe(false);
+  });
+});
+
+describe("autoCompactTriggerTokens (user auto-compact tuning → effective trigger)", () => {
+  it("defaults to ~90% of the window when nothing is configured (probe absent or all-null)", () => {
+    expect(autoCompactTriggerTokens(null, 200_000)).toBe(180_000);
+    expect(autoCompactTriggerTokens({ enabled: true, windowTokens: null, pct: null }, 1_000_000)).toBe(900_000);
+  });
+  it("honors a tuned-down window + pct (the 250K-on-1M repro)", () => {
+    const cfg = { enabled: true, windowTokens: 312_500, pct: 80 };
+    expect(autoCompactTriggerTokens(cfg, 1_000_000)).toBe(250_000);
+  });
+  it("clamps a configured window larger than the real one", () => {
+    const cfg = { enabled: true, windowTokens: 1_000_000, pct: 80 };
+    expect(autoCompactTriggerTokens(cfg, 200_000)).toBe(160_000);
+  });
+  it("applies the default fraction to a window override without a pct", () => {
+    const cfg = { enabled: true, windowTokens: 312_500, pct: null };
+    expect(autoCompactTriggerTokens(cfg, 1_000_000)).toBe(281_250);
+  });
+  it("returns null when the user disabled auto-compact, or without a window", () => {
+    expect(autoCompactTriggerTokens({ enabled: false, windowTokens: null, pct: null }, 1_000_000)).toBeNull();
+    expect(autoCompactTriggerTokens(null, 0)).toBeNull();
   });
 });
 

@@ -152,23 +152,29 @@
     return streaming && lt > 0 ? lt : null;
   });
 
-  // Auto-compaction detector. The CLI compacts in-process when the window fills
-  // — at turn start or mid-turn the stream just goes silent for minutes until
-  // the compact_boundary lands, which used to read as an unexplained hang (the
-  // stall copy even blamed the model). No early event exists, so infer it:
-  // context nearly full + a long stream silence + not thinking/parked. A wrong
-  // guess is cheap — the card hedges and the backend watchdog still auto-ends a
-  // truly dead turn. lastStreamEventAt is a plain field; the 1s `now` ticker is
-  // what re-evaluates this.
+  // Auto-compaction detector. The CLI compacts in-process when context reaches
+  // its auto-compact trigger — at turn start or mid-turn the stream just goes
+  // silent for minutes until the compact_boundary lands, which used to read as
+  // an unexplained hang (the stall copy even blamed the model). No early event
+  // exists, so infer it: near the trigger + a long stream silence + not
+  // thinking/parked. The trigger honors the user's auto-compact tuning
+  // (autoCompactTriggerFor — a 250K override on a 1M window fires at 25% of
+  // the gauge, which the old `ctxPct >= 80` gate could never see; null =
+  // user disabled auto-compact, so never claim it). A wrong guess is cheap —
+  // the card hedges and the backend watchdog still auto-ends a truly dead
+  // turn. lastStreamEventAt is a plain field; the 1s `now` ticker is what
+  // re-evaluates this.
   const sinceEventSecs = $derived.by(() => {
     if (!streaming || now === 0) return 0;
     const last = liveTab?.lastStreamEventAt ?? liveTab?.activity.turnStartedAt;
     return last != null ? Math.max(0, (now - last) / 1000) : 0;
   });
   const ctxPctNow = $derived(liveTab ? assistant.ctxPctFor(liveTab) : 0);
+  const acTrigger = $derived(liveTab ? assistant.autoCompactTriggerFor(liveTab) : null);
   const autoCompacting = $derived(
     streaming && !manualCompacting && !awaitingInput && !turn.thinking?.active &&
-    ctxPctNow >= 80 && sinceEventSecs >= 12,
+    acTrigger != null && assistant.ctxTokensFor(liveTab) >= acTrigger * 0.9 &&
+    sinceEventSecs >= 12,
   );
   const compacting = $derived(manualCompacting || autoCompacting);
   // Honest-estimate progress: the CLI emits no compaction progress events, so
@@ -433,9 +439,10 @@
         </div>
         <div class="scompact-note">
           {#if autoCompacting}
-            The context window filled up ({Math.round(ctxPctNow)}% used), so Claude paused to
-            summarize older messages before continuing. This runs automatically and usually
-            takes a minute or two — the turn resumes on its own. Nothing on screen is deleted.
+            The conversation reached its auto-compact limit ({Math.round(ctxPctNow)}% of the
+            window used), so Claude paused to summarize older messages before continuing. This
+            runs automatically and usually takes a minute or two — the turn resumes on its own.
+            Nothing on screen is deleted.
           {:else}
             Older messages are being condensed into a short summary to free up context.
             Nothing is deleted — the full transcript stays right here, and the chat continues

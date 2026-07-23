@@ -12,6 +12,7 @@
 
 pub mod ask_user;
 pub mod auth_update;
+pub mod autocompact;
 pub mod bridge;
 pub mod cli_caps;
 pub mod cli_install;
@@ -38,6 +39,7 @@ pub use ask_user::AskUserRegistry;
 // R4 split (2026-06-09): auth probe + in-app sign-in + multi-install CLI
 // updater in `auth_update.rs`. Glob re-export for the __cmd__ items.
 pub use auth_update::*;
+pub use autocompact::*;
 // R1 split (2026-06-09): CLI discovery/ranking/cache + spawn-command builder
 // in `cli_install.rs`. Re-exports keep `assistant::ClaudeInstall` (DTO) and
 // `crate::assistant::claude_command()` (turn/oneshot/stt callers) path-stable.

@@ -107,18 +107,30 @@ export function askUserStaleNudge(store: AssistantStore, tab: TabState) {
 export function checkTurnHealth(store: AssistantStore, tab: TabState, convoId: string | undefined) {
   const rec = convoId ? lastTurnFor(store, convoId) : null;
 
-  // Context nearly full — the CLI will auto-compact mid-turn without warning
-  // once it runs out of headroom. Saying so at 85% lets the user pick the
-  // compaction point (a natural break) instead of having one forced on them.
+  // Context nearing the point where the CLI will auto-compact mid-turn
+  // without warning. Measured against the USER's effective auto-compact
+  // trigger (autoCompactTriggerFor — window/pct overrides included), not raw
+  // %-of-window: a tuned-down trigger (250K on a 1M model) compacts at 25% of
+  // the gauge, where an 85%-of-window gate never fires. Warning at 85% of the
+  // trigger lets the user pick the compaction point (a natural break) instead
+  // of having one forced on them. Trigger null = auto-compact disabled — fall
+  // back to raw window fill with copy that doesn't promise a compaction.
   if (convoId) {
-    const pct = store.ctxPctFor(tab);
+    const trigger = store.autoCompactTriggerFor(tab);
+    const pct = trigger != null && trigger > 0
+      ? Math.min(100, (store.ctxTokensFor(tab) / trigger) * 100)
+      : store.ctxPctFor(tab);
     const t = ctxAlertTransition(pct, ctxWarned.get(convoId) ?? false);
     ctxWarned.set(convoId, t.latched);
     if (t.fire) {
       toast.push({
         severity: "warn",
-        title: `Context is ${Math.round(pct)}% full`,
-        detail: "Claude will auto-compact soon. Compacting at a natural break keeps the recap cleaner.",
+        title: trigger != null
+          ? `Context is ${Math.round(pct)}% of the way to auto-compact`
+          : `Context is ${Math.round(pct)}% full`,
+        detail: trigger != null
+          ? "Claude will auto-compact soon. Compacting at a natural break keeps the recap cleaner."
+          : "Auto-compact is disabled — compact at a natural break to keep headroom.",
         action: {
           label: "Compact",
           onClick: () => void store.send("/compact", convoId),

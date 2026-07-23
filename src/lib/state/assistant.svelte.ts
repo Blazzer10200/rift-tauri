@@ -63,6 +63,8 @@ import {
   migrateThinkingPins,
   ctxWindowForModelId,
   isStaleTurnEpoch,
+  autoCompactTriggerTokens,
+  type AutoCompactCfg,
 } from "./assistant/helpers";
 
 // cont.276: stream/done/error listener bodies extracted for testability —
@@ -567,6 +569,12 @@ class AssistantStore {
     const w = this.ctxWindowFor(tab);
     return w > 0 ? Math.min(100, (this.ctxTokensFor(tab) / w) * 100) : 0;
   }
+  /** Context tokens at which the CLI will auto-compact this tab, honoring the
+   *  user's auto-compact tuning (window/pct overrides). null = user disabled
+   *  auto-compaction. See helpers.autoCompactTriggerTokens. */
+  autoCompactTriggerFor(tab: TabState | null): number | null {
+    return autoCompactTriggerTokens(this.autoCompactCfg, this.ctxWindowFor(tab));
+  }
   get activity() {
     return this.activeTab?.activity ?? { currentLabel: null, turnStartedAt: null };
   }
@@ -775,6 +783,10 @@ class AssistantStore {
    *  onboarding so it never flashes before we know whether a key is set. */
   configLoaded = $state<boolean>(false);
   useFullConfig = $state<boolean>(true);
+  /** CLI auto-compact tuning probed from the user's env/settings (backend
+   *  `assistant_autocompact_config`). Drives autoCompactTriggerFor so the
+   *  detection surfaces track the REAL trigger, not %-of-window. */
+  autoCompactCfg = $state<AutoCompactCfg | null>(null);
   maxBudgetUsd = $state<number | null>(null);
   // Trust level gating the local git tools (mcp__rift__git_*). Loaded from the
   // backend; defaults to "readonly" when unset. Settings seg treats full ⊇ standard.
@@ -1183,6 +1195,11 @@ class AssistantStore {
       this.useFullConfig = await invoke<boolean>("assistant_get_use_full_config");
     } catch (e) {
       console.warn("assistant_get_use_full_config failed", e);
+    }
+    try {
+      this.autoCompactCfg = await invoke<AutoCompactCfg>("assistant_autocompact_config");
+    } catch (e) {
+      console.warn("assistant_autocompact_config failed", e);
     }
     try {
       this.maxBudgetUsd = await invoke<number | null>("assistant_get_max_budget_usd");
@@ -1731,6 +1748,13 @@ class AssistantStore {
     try {
       await invoke("assistant_set_use_full_config", { value });
       this.useFullConfig = value;
+      // Full-config gates whether the user settings source applies to the CLI
+      // — the effective auto-compact trigger can change with it.
+      try {
+        this.autoCompactCfg = await invoke<AutoCompactCfg>("assistant_autocompact_config");
+      } catch (e) {
+        console.warn("assistant_autocompact_config failed", e);
+      }
     } catch (e) {
       notify.danger("Couldn't change config setting", { detail: humanizeError(e) });
       throw e;

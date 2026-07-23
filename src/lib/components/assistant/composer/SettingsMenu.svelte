@@ -221,7 +221,6 @@
     <div
       class="pop-item model-row soon"
       role="presentation"
-      aria-disabled="true"
       use:tooltip={"Opus 5 — next-generation Opus, releasing imminently. Selectable here the moment it goes live."}
     >
       <span class="pi-name">

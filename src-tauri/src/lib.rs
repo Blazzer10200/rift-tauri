@@ -265,6 +265,7 @@ pub fn run() {
             commands::cli_native_latest,
             commands::assistant_get_api_key_present,
             commands::assistant_set_api_key,
+            commands::assistant_autocompact_config,
             commands::assistant_get_use_full_config,
             commands::assistant_set_use_full_config,
             commands::assistant_get_max_budget_usd,
