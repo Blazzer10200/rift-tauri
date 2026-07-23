@@ -87,6 +87,8 @@
     <span class="sb-sep"></span>
     <span class="sb-item"><Skeleton w="66px" h="11px" radius="5px" delay={110} /></span>
   {:else}
+  <!-- LEFT ZONE — session identity: Claude connection, then the workspace
+       (project + branch) as one tight cluster. One separator total. -->
   <button
     class="sb-item sb-btn sb-conn"
     type="button"
@@ -97,75 +99,76 @@
     {connected ? "Claude" : "Not connected"}
   </button>
   <span class="sb-sep"></span>
-  <button class="sb-item sb-btn" type="button" onclick={() => workspace.setActive("home")} use:tooltip={"Open Workspace"}>
-    {repoName}
-  </button>
-  {/if}
-  {#if assistant.workspaceBranch}
-    {#if ghActive}
-      <button class="sb-item sb-btn" type="button" bind:this={ghAnchor}
-        onclick={() => (ghOpen = !ghOpen)} use:tooltip={"GitHub — branch status"}
-        aria-haspopup="dialog" aria-expanded={ghOpen}>
-        <GitBranch size={11} />{assistant.workspaceBranch}
-        {#if github.dot !== "none"}<span class="gh-dot {github.dot}"></span>{/if}
-      </button>
-    {:else}
-      <span class="sb-item"><GitBranch size={11} />{assistant.workspaceBranch}</span>
+  <span class="sb-group">
+    <button class="sb-item sb-btn" type="button" onclick={() => workspace.setActive("home")} use:tooltip={"Open Workspace"}>
+      {repoName}
+    </button>
+    {#if assistant.workspaceBranch}
+      {#if ghActive}
+        <button class="sb-item sb-btn" type="button" bind:this={ghAnchor}
+          onclick={() => (ghOpen = !ghOpen)} use:tooltip={"GitHub — branch status"}
+          aria-haspopup="dialog" aria-expanded={ghOpen}>
+          <GitBranch size={11} />{assistant.workspaceBranch}
+          {#if github.dot !== "none"}<span class="gh-dot {github.dot}"></span>{/if}
+        </button>
+      {:else}
+        <span class="sb-item"><GitBranch size={11} />{assistant.workspaceBranch}</span>
+      {/if}
     {/if}
+  </span>
   {/if}
   {#if ghOpen && ghAnchor}
     <GhPopover anchor={ghAnchor} onClose={() => (ghOpen = false)} />
   {/if}
-  <span class="sb-sep"></span>
-  <span class="sb-item sb-date">{today}</span>
-
-  {#if elevation.elevated}
-    <span class="sb-sep"></span>
-    <button class="sb-item sb-btn sb-admin" type="button" onclick={openAdminSettings} use:tooltip={"Running as Administrator — tools run elevated, no per-action UAC prompts"}>
-      <ShieldCheck size={11} /> Admin
-    </button>
-  {/if}
-
-  <!-- Split affordance — split mode's only discoverable entry point (the rest
-       are Ctrl+\, the palette, and drag-to-half). Chat surface only. -->
-  {#if workspace.activeId === "chat"}
-    <span class="sb-sep"></span>
-    <button
-      class="sb-item sb-btn"
-      type="button"
-      disabled={!assistant.canAddPane}
-      onclick={() => assistant.addPane()}
-      use:tooltip={assistant.canAddPane
-        ? (assistant.splitActive ? "Add another chat pane (Ctrl+\\)" : "Split the chat into two panes (Ctrl+\\)")
-        : "Pane limit reached"}
-    >
-      <Columns2 size={11} />
-      {assistant.splitActive ? `${assistant.panes.length} panes` : "Split"}
-    </button>
-  {/if}
 
   <span class="sb-note">Claude can make mistakes — double-check important work.</span>
 
-  {#if limits.length}
-    <span class="sb-usage">
-      {#each limits as l (l.t)}
-        <button
-          class="rl sb-btn"
-          type="button"
-          data-zone={l.z}
-          onclick={() => (usageOpen = !usageOpen)}
-          aria-expanded={usageOpen}
-          use:tooltip={`${l.t === "5h" ? "5-hour window" : "Weekly · all models"} — ${l.u}% used${fmtReset(l.r)}`}
-        >
-          <span class="rl-t">{l.t}</span>
-          <span class="rl-bar"><i style="width:{l.u}%"></i></span>
-        </button>
-      {/each}
-      {#if usageOpen}
-        <UsagePanel tab={assistant.activeTab} anchor="statusbar" ignoreSel=".sb-usage" onClose={() => (usageOpen = false)} />
-      {/if}
-    </span>
-  {/if}
+  <!-- RIGHT ZONE — controls + ambient info: split, admin, date, usage. Gap-
+       separated (no hairlines) so the bar reads as two calm clusters. -->
+  <span class="sb-group sb-right">
+    <!-- Split affordance — split mode's only discoverable entry point (the rest
+         are Ctrl+\, the palette, and drag-to-half). Chat surface only. -->
+    {#if workspace.activeId === "chat"}
+      <button
+        class="sb-item sb-btn"
+        type="button"
+        disabled={!assistant.canAddPane}
+        onclick={() => assistant.addPane()}
+        use:tooltip={assistant.canAddPane
+          ? (assistant.splitActive ? "Add another chat pane (Ctrl+\\)" : "Split the chat into two panes (Ctrl+\\)")
+          : "Pane limit reached"}
+      >
+        <Columns2 size={11} />
+        {assistant.splitActive ? `${assistant.panes.length} panes` : "Split"}
+      </button>
+    {/if}
+    {#if elevation.elevated}
+      <button class="sb-item sb-btn sb-admin" type="button" onclick={openAdminSettings} use:tooltip={"Running as Administrator — tools run elevated, no per-action UAC prompts"}>
+        <ShieldCheck size={11} /> Admin
+      </button>
+    {/if}
+    <span class="sb-item sb-date">{today}</span>
+    {#if limits.length}
+      <span class="sb-usage">
+        {#each limits as l (l.t)}
+          <button
+            class="rl sb-btn"
+            type="button"
+            data-zone={l.z}
+            onclick={() => (usageOpen = !usageOpen)}
+            aria-expanded={usageOpen}
+            use:tooltip={`${l.t === "5h" ? "5-hour window" : "Weekly · all models"} — ${l.u}% used${fmtReset(l.r)}`}
+          >
+            <span class="rl-t">{l.t}</span>
+            <span class="rl-bar"><i style="width:{l.u}%"></i></span>
+          </button>
+        {/each}
+        {#if usageOpen}
+          <UsagePanel tab={assistant.activeTab} anchor="statusbar" ignoreSel=".sb-usage" onClose={() => (usageOpen = false)} />
+        {/if}
+      </span>
+    {/if}
+  </span>
 </footer>
 
 <style>
@@ -193,9 +196,14 @@
   .sb-admin:hover { color: var(--warn); }
   .sb-admin :global(svg) { color: var(--warn); }
   .sb-sep { width: 1px; height: 11px; background: var(--border); }
+  /* Zone clusters — tighter internal gap than the bar's own 13px so related
+     items read as one unit and the bar resolves into two calm groups. */
+  .sb-group { display: inline-flex; align-items: center; gap: 9px; min-width: 0; }
+  .sb-right { flex: none; gap: 12px; }
   /* AI disclaimer — moved here from the composer (home revamp): ambient
-     app-level info belongs to the ambient bar. First to shrink when narrow. */
-  .sb-note { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+     app-level info belongs to the ambient bar. Centered between the identity
+     and control zones; first to shrink when narrow. */
+  .sb-note { margin-inline: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
     white-space: nowrap; color: var(--fg-faint); }
   .sb-usage { display: inline-flex; align-items: center; gap: 16px; position: relative; -webkit-app-region: no-drag; }
   .rl { display: inline-flex; align-items: center; gap: 7px; color: var(--fg-subtle); font-variant-numeric: tabular-nums; }

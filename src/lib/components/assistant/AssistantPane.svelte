@@ -3,6 +3,8 @@
   import { ChevronDown, ChevronUp, Plus, X, MessageSquarePlus, ChevronRight, FolderOpen, HardDrive, Maximize2, Minimize2 } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { workspace } from "../../state/workspace.svelte";
+  import { projects, projectRootKey } from "$lib/state/projects.svelte";
+  import { projectHue } from "$lib/utils/projectHue";
   import { stt } from "../../state/stt.svelte";
   import MessageBubble from "./MessageBubble.svelte";
   import StreamTurn from "./stream/StreamTurn.svelte";
@@ -482,6 +484,22 @@
       .filter((c) => !inPanes.has(c.id))
       .slice(0, 3);
   });
+  // Project quick-picks — a fresh chat scoped to that project, opened in THIS
+  // pane (per-tab root; the global default never moves).
+  function onEmptyOpenProject(root: string) {
+    void assistant.openProjectInPane(root, { paneIdx });
+  }
+  const emptyProjects = $derived.by(() => {
+    if (tabId) return [];
+    return projects.sorted.slice(0, 4);
+  });
+  const emptyActiveKey = $derived(projectRootKey(assistant.activeRoot));
+  const emptyMonogram = (name: string) => (name.trim().match(/[a-z0-9]/i)?.[0] ?? "·").toUpperCase();
+  const emptyNewTip = $derived(
+    assistant.activeRoot
+      ? `Start a fresh chat in ${leafName(assistant.activeRoot)}`
+      : "Start a fresh chat",
+  );
 
   function onPaneDragOver(e: DragEvent) {
     // Always preventDefault when a tab OR a project chip is being dragged —
@@ -611,10 +629,10 @@
           <div class="pane-empty-title">Empty pane</div>
           <div class="pane-empty-hint">
             <!-- No tabs BAR exists since the redesign — chats drag in from the sidebar. -->
-            Start a fresh chat here, or drag a chat in from the sidebar.
+            Start a chat, open a project, or drag a chat in from the sidebar.
           </div>
           <div class="pane-empty-actions">
-            <button class="btn primary sm" type="button" onclick={onEmptyNew}>
+            <button class="btn primary sm" type="button" onclick={onEmptyNew} use:tooltip={emptyNewTip}>
               <Plus size={12}/> New chat
             </button>
             {#if assistant.panes.length > 1}
@@ -623,19 +641,39 @@
               </button>
             {/if}
           </div>
+          {#if emptyProjects.length > 0}
+            <div class="pane-empty-section">
+              <div class="pane-empty-section-label">Open a project</div>
+              {#each emptyProjects as p (p.root)}
+                <button
+                  class="pane-empty-row"
+                  type="button"
+                  onclick={() => onEmptyOpenProject(p.root)}
+                  use:tooltip={`New chat in ${p.root}`}
+                >
+                  <span class="pane-empty-mk" style="--ph:{projectHue(p.name)}">{emptyMonogram(p.name)}</span>
+                  <span class="pane-empty-row-title">{p.name}</span>
+                  {#if emptyActiveKey && projectRootKey(p.root) === emptyActiveKey}
+                    <span class="pane-empty-row-meta">current</span>
+                  {/if}
+                  <ChevronRight class="pane-empty-row-chev" size={13}/>
+                </button>
+              {/each}
+            </div>
+          {/if}
           {#if emptyRecents.length > 0}
-            <div class="pane-empty-recent">
-              <div class="pane-empty-recent-label">RESUME</div>
+            <div class="pane-empty-section">
+              <div class="pane-empty-section-label">Resume</div>
               {#each emptyRecents as c (c.id)}
                 <button
-                  class="pane-empty-recent-row"
+                  class="pane-empty-row"
                   type="button"
                   onclick={() => onEmptyOpenRecent(c.id)}
                   use:tooltip={c.title}
                 >
-                  <span class="pane-empty-recent-title">{c.title}</span>
-                  <span class="pane-empty-recent-meta">{c.messageCount} msg</span>
-                  <ChevronRight class="pane-empty-recent-chev" size={13}/>
+                  <span class="pane-empty-row-title">{c.title}</span>
+                  <span class="pane-empty-row-meta">{c.messageCount} msg</span>
+                  <ChevronRight class="pane-empty-row-chev" size={13}/>
                 </button>
               {/each}
             </div>
@@ -1044,8 +1082,8 @@
   /* Focused pane — accent-warmed border + a soft accent-tinted drop; the top
      rail comes from ::before above (radius-aware, no corner tearing). */
   .pane.split.focused {
-    border-color: color-mix(in oklab, var(--accent) 45%, var(--border));
-    box-shadow: 0 8px 22px -14px color-mix(in oklab, var(--accent) 40%, transparent);
+    border-color: color-mix(in oklab, var(--accent) 30%, var(--border));
+    box-shadow: 0 8px 22px -14px color-mix(in oklab, var(--accent) 26%, transparent);
   }
   .pane.split:not(.focused) {
     cursor: pointer;
@@ -1230,15 +1268,15 @@
     justify-content: center;
     margin-top: 6px;
   }
-  .pane-empty-recent {
+  .pane-empty-section {
     display: flex; flex-direction: column;
-    gap: 3px;
-    margin-top: 12px;
-    padding-top: 14px;
-    border-top: 1px solid var(--border);
+    gap: 2px;
+    margin-top: 10px;
+    padding-top: 12px;
+    border-top: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
     width: 100%;
   }
-  .pane-empty-recent-label {
+  .pane-empty-section-label {
     font-size: 10px;
     letter-spacing: 0.08em;
     text-transform: uppercase;
@@ -1247,12 +1285,12 @@
     margin-bottom: 3px;
     padding: 0 4px;
   }
-  .pane-empty-recent-row {
+  .pane-empty-row {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 7px 9px;
-    border-radius: 9px;
+    padding: 6px 8px;
+    border-radius: 8px;
     border: 1px solid transparent;
     background: transparent;
     color: var(--fg);
@@ -1262,30 +1300,42 @@
     text-align: left;
     transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
   }
-  .pane-empty-recent-row:hover {
+  .pane-empty-row:hover {
     background: var(--surface-hover);
     border-color: var(--border);
   }
-  .pane-empty-recent-title {
+  /* Monogram tiles wear the project's identity hue (--ph) — same recipe as the
+     sidebar switcher, so a project is recognizable across surfaces. */
+  .pane-empty-mk {
+    flex-shrink: 0;
+    width: 18px; height: 18px;
+    display: grid; place-items: center;
+    border-radius: 5px;
+    font-size: 10px; font-weight: 700; letter-spacing: -0.01em;
+    color: oklch(0.78 0.14 var(--ph));
+    background: oklch(0.72 0.14 var(--ph) / 0.13);
+    box-shadow: inset 0 0 0 1px oklch(0.75 0.14 var(--ph) / 0.28);
+  }
+  .pane-empty-row-title {
     flex: 1; min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .pane-empty-recent-meta {
+  .pane-empty-row-meta {
     flex-shrink: 0;
     font-size: var(--fs-xs);
     color: var(--fg-faint);
     font-family: var(--font-mono, monospace);
   }
-  :global(.pane-empty-recent-chev) {
+  :global(.pane-empty-row-chev) {
     flex-shrink: 0;
     color: var(--fg-faint);
     opacity: 0;
     transform: translateX(-3px);
     transition: opacity var(--dur-fast) ease, transform var(--dur-fast) ease, color var(--dur-fast) ease;
   }
-  .pane-empty-recent-row:hover :global(.pane-empty-recent-chev) {
+  .pane-empty-row:hover :global(.pane-empty-row-chev) {
     opacity: 1;
     transform: none;
     color: var(--accent);

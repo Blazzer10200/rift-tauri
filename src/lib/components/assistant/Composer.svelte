@@ -84,7 +84,10 @@
   const streaming = $derived(tab?.streaming ?? false);
   // Context chips (in-chat only) — passive workspace · branch readout above
   // the well. Hero suppresses them: the welcome card already shows both.
-  const wsFolderName = $derived(assistant.workspace.current?.split(/[\\/]/).filter(Boolean).pop() ?? "");
+  // Reads THIS tab's effective root (per-tab pin else global default) — the
+  // global current alone showed a stale folder after a per-tab folder switch.
+  const wsRoot = $derived(tab ? assistant.effectiveRoot(tab) : (assistant.workspace.current ?? null));
+  const wsFolderName = $derived(wsRoot?.split(/[\\/]/).filter(Boolean).pop() ?? "");
   $effect(() => {
     if (!hero && assistant.workspace.current && assistant.workspaceBranch == null) void assistant.loadWorkspaceBranch();
   });
@@ -1294,9 +1297,9 @@
     {/if}
 
     <div class="composer" class:hero={hero} class:streaming={streaming} class:enchanting={enhancing} data-mode={mode}>
-      {#if !hero && assistant.workspace.current}
+      {#if !hero && wsRoot}
         <div class="ctx-chips" aria-label="Workspace context">
-          <span class="ctx-chip" use:tooltip={assistant.workspace.current}>
+          <span class="ctx-chip" use:tooltip={wsRoot}>
             <Folder size={11} />
             <span class="cc-label">{wsFolderName}</span>
           </span>
@@ -1761,10 +1764,11 @@
      prompt and the text you type read at the same size. */
   .composer.hero .placeholder-ghost { font-size: 14.5px; line-height: 1.55; top: 11px; left: 14px; right: 12px; }
 
-  /* Streaming = the composer visibly breathes: tinted ring (::before), an
-     orbiting comet arc (::after), and an outer halo carried on the box's OWN
-     box-shadow — pseudo shadows get clipped by the well's overflow:hidden,
-     so a halo on ::before never actually painted. */
+  /* Streaming = the composer visibly breathes: tinted ring (::before) + an
+     outer halo carried on the box's OWN box-shadow — pseudo shadows get
+     clipped by the well's overflow:hidden, so a halo on ::before never
+     actually painted. (The orbiting comet arc was retired 2026-07-22 —
+     traveling motion at the working edge pulled the eye off the stream.) */
   .composer.streaming .composer-box {
     border-color: color-mix(in oklch, var(--model-color) 55%, var(--border));
     box-shadow:
@@ -1783,37 +1787,12 @@
     animation: composer-stream 2.6s ease-in-out infinite;
     z-index: 2;
   }
-  /* Comet — a bright model-tinted arc tracing the frame edge (conic gradient
-     masked to a border-width ring, angle driven by a registered @property).
-     Asymmetric stops = long faint tail building into a hot head. */
-  .composer.streaming .composer-box::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    padding: 2px;
-    background: conic-gradient(from var(--stream-angle),
-      transparent 0deg,
-      color-mix(in oklch, var(--model-color) 60%, transparent) 34deg,
-      color-mix(in oklch, var(--model-color) 45%, white) 54deg,
-      transparent 62deg);
-    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-    -webkit-mask-composite: xor;
-    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-    mask-composite: exclude;
-    pointer-events: none;
-    animation: composer-orbit 3.4s linear infinite;
-    z-index: 3;
-  }
-  @property --stream-angle { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
   @keyframes composer-stream {
     0%, 100% { opacity: 0.5; }
     50%      { opacity: 0.85; }
   }
-  @keyframes composer-orbit { to { --stream-angle: 360deg; } }
   @media (prefers-reduced-motion: reduce) {
     .composer.streaming .composer-box::before { animation: none; opacity: 0.8; }
-    .composer.streaming .composer-box::after { display: none; }
   }
 
   .textarea-wrap {

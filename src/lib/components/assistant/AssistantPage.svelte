@@ -395,16 +395,30 @@
     display: grid;
     overflow: hidden;
   }
+  /* 6px hit area, 1px visible hairline — a solid 6px strip overshot the pane
+     cards' 6px vertical margins and left a bright stub above the rounded tops.
+     The line is margin-matched to the cards and warms on hover/drag. */
   .divider {
     position: relative;
     cursor: col-resize;
-    background: var(--border);
+    background: transparent;
     align-self: stretch;
+    margin: 6px 0;
     user-select: none;
-    transition: background var(--dur-fast) ease-out;
   }
-  .divider:hover,
-  .split[data-dragging="true"] > .divider {
+  .divider::before {
+    content: "";
+    position: absolute;
+    top: 0; bottom: 0; left: 50%;
+    width: 1px;
+    transform: translateX(-50%);
+    border-radius: 1px;
+    background: color-mix(in oklch, var(--border) 75%, transparent);
+    transition: background var(--dur-fast) ease-out, width var(--dur-fast) ease-out;
+  }
+  .divider:hover::before,
+  .split[data-dragging="true"] > .divider::before {
+    width: 2px;
     background: color-mix(in oklab, var(--accent) 50%, var(--border));
   }
   .divider:focus-visible {
