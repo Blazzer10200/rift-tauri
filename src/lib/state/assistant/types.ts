@@ -312,7 +312,11 @@ export type StreamEnvelope =
   // `--prompt-suggestions` (CLI 2.1.201+): one predicted next user prompt,
   // emitted after the turn's result. Shape confirmed against the 2.1.201 exe:
   // { type, suggestion, uuid, session_id }.
-  | { type: "prompt_suggestion"; suggestion?: unknown; [k: string]: unknown };
+  | { type: "prompt_suggestion"; suggestion?: unknown; [k: string]: unknown }
+  // CLI 2.1.214+: periodic progress heartbeat for long-running tool calls
+  // (shape from the 2.1.217 exe: tool_use_id, tool_name, parent_tool_use_id,
+  // elapsed seconds). Pure liveness signal — blocks tick elapsed locally.
+  | { type: "tool_progress"; tool_use_id?: string; tool_name?: string; parent_tool_use_id?: string | null; [k: string]: unknown };
 
 /** Extended-thinking tier, mirroring the CLI's effort ladder: none→low ·
  *  smart→medium (interactive default) · deep→high · ultra = ultracode: xhigh
@@ -328,7 +332,10 @@ export type ThinkingEffort = "none" | "smart" | "deep" | "ultra";
  *  that always resolves to the newest Opus (currently 4.8) with the 1M-ctx
  *  beta; `claude-opus-4-7` pins the prior Opus. `sonnet`/`haiku` stay aliases.
  *  Must satisfy the Rust `is_valid_model_name` validator (no brackets). */
-export type ModelSel = "sonnet" | "opus" | "claude-opus-4-7" | "haiku" | "claude-fable-5";
+export type ModelSel =
+  | "sonnet" | "opus" | "haiku" | "claude-fable-5"
+  | "claude-opus-4-7" | "claude-opus-4-6" | "claude-opus-4-5"
+  | "claude-sonnet-4-6" | "claude-sonnet-4-5";
 
 /** Visual family for the per-model aurora hue (sonnet=blue, opus=purple,
  *  haiku=teal). Both Opus versions collapse to "opus". */

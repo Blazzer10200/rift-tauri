@@ -399,6 +399,8 @@ function caption(tb: ToolBlock): string {
   if (n === "Workflow") return typeof inp.name === "string" ? inp.name : "workflow";
   if (n === "ExitPlanMode") return "Proposed a plan";
   if (n === "EnterPlanMode") return "entered plan mode";
+  // CLI 2.1.214 safety tool — Claude ending a session it judges abusive.
+  if (n === "EndConversation") return "Ended the conversation";
   if (n === "LSP") {
     const op = typeof inp.operation === "string" ? inp.operation : "lsp";
     const f = typeof inp.filePath === "string" ? ` · ${basename(inp.filePath)}` : "";

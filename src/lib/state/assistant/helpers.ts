@@ -6,6 +6,7 @@ import type { ModelFamily, ModelSel, PermissionMode, RiftPlan, ThinkingEffort } 
 
 const MODEL_SELS: readonly ModelSel[] = [
   "sonnet", "opus", "claude-opus-4-7", "haiku", "claude-fable-5",
+  "claude-opus-4-6", "claude-opus-4-5", "claude-sonnet-4-6", "claude-sonnet-4-5",
 ] as const;
 
 // Claude Fable 5 — owner call 2026-07-01: keep it ALWAYS VISIBLE (flag `false`)
@@ -23,12 +24,13 @@ export function fableAvailable(): boolean {
   return !FABLE_DISABLED && Date.now() < FABLE_SUNSET_MS;
 }
 
-// Haiku 4.5 — pulled by Anthropic 2026-06-26 (model removed). Kill-switch mirror
+// Haiku 4.5 — pulled by Anthropic 2026-06-26, REINSTATED upstream (probe-
+// confirmed serving 2026-07-22, "max models" owner call). Kill-switch mirror
 // of Fable: hides the picker row + coerces any stored/pinned Haiku pref → sonnet
 // (the fast-tier fallback). Label/effort/history fallbacks stay intact so old
 // Haiku conversations still render. Flip false to restore if it ever returns;
 // mirror HAIKU_DISABLED in config.rs (backend coerces a pinned Haiku session).
-export const HAIKU_DISABLED = true;
+export const HAIKU_DISABLED = false;
 export function haikuAvailable(): boolean {
   return !HAIKU_DISABLED;
 }
@@ -388,8 +390,14 @@ export const EFFORT_ORDER: readonly ThinkingEffort[] = [
 export const MODEL_MAX_EFFORT: Record<ModelSel, ThinkingEffort> = {
   opus: "ultra",
   "claude-opus-4-7": "ultra",
+  "claude-opus-4-6": "ultra",
+  "claude-opus-4-5": "ultra",
   "claude-fable-5": "ultra",
   sonnet: "ultra",
+  // Legacy Sonnets honor xhigh too — the old "4.6 rejects xhigh" ruling is
+  // stale (live probe 2026-07-22: 4-5/4-6 both accept `--effort xhigh`).
+  "claude-sonnet-4-6": "ultra",
+  "claude-sonnet-4-5": "ultra",
   haiku: "none",
 };
 

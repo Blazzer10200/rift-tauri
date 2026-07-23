@@ -63,13 +63,13 @@ function parseSemver(v: string): [number, number, number] | null {
 }
 
 /** The CLI version at which every Rift-gated spawn feature is available.
- *  Mirrors the HIGHEST gate in `cli_caps::mins` (`FAST_MODE` = 2.1.209; the
- *  live-switch control pushes gate at 2.1.208, everything else lower). Unlike
- *  the dormant prompt-suggestions case, fast mode + live model/permission
- *  switching are LIVE features an older install actually loses — so the
- *  recommendation nudges to the real floor. Keep in lockstep with new
+ *  Sits at 2.1.214: covers the HIGHEST gate in `cli_caps::mins`
+ *  (`FORWARD_SUBAGENT_TEXT` = 2.1.211 — live sub-agent reasoning in agent
+ *  cards) plus the ungated stream additions Rift renders (`tool_progress`
+ *  heartbeats + the EndConversation tool, both added at 2.1.214) and the
+ *  2.1.208 perf batch (7× faster tool rounds). Keep in lockstep with new
  *  Rust-side gates. */
-export const CLI_RECOMMENDED_VERSION = "2.1.209";
+export const CLI_RECOMMENDED_VERSION = "2.1.214";
 
 /** >0 if a is newer than b, <0 if older, 0 if equal/unparseable. An
  *  unparseable operand fails closed (returns 0 → treated up-to-date), so warn

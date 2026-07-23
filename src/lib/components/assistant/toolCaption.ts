@@ -88,6 +88,7 @@ export function captionForTool(name: string, input: Input = {}): string {
   }
   if (n === "git_push") return "Pushing to the remote";
   if (n === "ExitPlanMode") return "Presenting a plan";
+  if (n === "EndConversation") return "Ending the conversation";
   if (n === "SlashCommand") {
     const c = s("command");
     return c ? `Running ${clip(c, 40)}` : "Running a command";

@@ -586,9 +586,10 @@
   };
   const MODEL_LABEL: Record<string, string> = {
     opus: "Opus", sonnet: "Sonnet", haiku: "Haiku",
-    "claude-opus-4-7": "Opus", "claude-fable-5": "Fable",
+    "claude-opus-4-7": "Opus", "claude-opus-4-6": "Opus", "claude-opus-4-5": "Opus",
+    "claude-sonnet-4-6": "Sonnet", "claude-sonnet-4-5": "Sonnet", "claude-fable-5": "Fable",
   };
-  const modelKey = (m: string) => (m === "opus" || m === "claude-opus-4-7" ? "opus" : m === "haiku" ? "haiku" : m === "claude-fable-5" ? "fable" : "sonnet");
+  const modelKey = (m: string) => (m === "opus" || m.startsWith("claude-opus") ? "opus" : m === "haiku" ? "haiku" : m === "claude-fable-5" ? "fable" : "sonnet");
   // Inverse of modelKey: the advisor emits short keys ("fable"), but setModel
   // wants a ModelSel — and "fable" is NOT a valid ModelSel ("claude-fable-5" is).
   const applyKeyToModel = (k: string): ModelSel => (k === "fable" ? "claude-fable-5" : (k as ModelSel));

@@ -142,8 +142,8 @@
   function modelLimitFor(m: ModelOpt): ScopedLimit | null {
     const fam = m.id === "claude-fable-5" ? "fable"
       : m.id === "haiku" ? "haiku"
-      : m.id === "sonnet" ? "sonnet"
-      : "opus"; // opus + claude-opus-4-7 share the Opus bucket
+      : m.id.includes("sonnet") ? "sonnet"
+      : "opus"; // opus alias + pinned claude-opus-4-x share the Opus bucket
     const ls = usage.rateLimits?.limits ?? [];
     return ls.find((l) => (l.scope?.model?.displayName ?? "").toLowerCase().includes(fam)) ?? null;
   }

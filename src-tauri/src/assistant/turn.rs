@@ -1274,6 +1274,13 @@ async fn resolve_spawn(
     if caps.prompt_suggestions {
         cmd.arg("--prompt-suggestions");
     }
+    // Sub-agent text + thinking forwarded as nested stream-json frames — the
+    // parent_tool_use_id routing (applySubAgentFrame) already renders them in
+    // the inline agent cards. Gated: an older CLI rejects the unknown flag;
+    // without it cards show tool calls only.
+    if caps.forward_subagent_text {
+        cmd.arg("--forward-subagent-text");
+    }
     // Piece 2: route per-action permission asks over the stream-json control
     // channel. `stdio` makes the CLI emit a `can_use_tool` `control_request` on
     // stdout (instead of headless auto-deny) and block on a `control_response`

@@ -106,6 +106,13 @@ mod mins {
     /// control_request carried a non-string set_model payload" — floor at the
     /// hardened release rather than risk the hang class on older CLIs.
     pub const LIVE_SWITCH: Version = (2, 1, 208); // hardened @ 2.1.208 (changelog)
+
+    /// `--forward-subagent-text` (include sub-agent text + thinking blocks in
+    /// the nested parent_tool_use_id frames — Rift's agent cards already render
+    /// them; without the flag the CLI only forwards tool_use/tool_result).
+    /// Changelog: added at v2.1.211 (verified vs raw CHANGELOG.md 2026-07-22);
+    /// present in `--help` @ 2.1.217.
+    pub const FORWARD_SUBAGENT_TEXT: Version = (2, 1, 211); // confirmed @ 2.1.211
 }
 
 /// The hard minimum CLI version Rift can drive at all. Below this, no turn can
@@ -132,6 +139,7 @@ pub struct CliCaps {
     pub prompt_suggestions: bool,
     pub fast_mode: bool,
     pub live_switch: bool,
+    pub forward_subagent_text: bool,
 }
 
 /// `a >= b` on version triples.
@@ -158,6 +166,7 @@ impl CliCaps {
                 prompt_suggestions: false,
                 fast_mode: false,
                 live_switch: false,
+                forward_subagent_text: false,
             },
             Some(ver) => Self {
                 version: Some(ver),
@@ -173,6 +182,7 @@ impl CliCaps {
                 prompt_suggestions: at_least(ver, mins::PROMPT_SUGGESTIONS),
                 fast_mode: at_least(ver, mins::FAST_MODE),
                 live_switch: at_least(ver, mins::LIVE_SWITCH),
+                forward_subagent_text: at_least(ver, mins::FORWARD_SUBAGENT_TEXT),
             },
         }
     }
@@ -263,6 +273,8 @@ mod tests {
         assert!(CliCaps::from_version(Some((2, 1, 208))).live_switch);
         assert!(!CliCaps::from_version(Some((2, 1, 208))).fast_mode);
         assert!(CliCaps::from_version(Some((2, 1, 209))).fast_mode);
+        assert!(!CliCaps::from_version(Some((2, 1, 210))).forward_subagent_text);
+        assert!(CliCaps::from_version(Some((2, 1, 211))).forward_subagent_text);
         assert!(!CliCaps::from_version(None).prompt_suggestions);
     }
 

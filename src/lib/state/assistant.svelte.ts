@@ -1865,6 +1865,7 @@ class AssistantStore {
     if (base === "Agent" && typeof inp.description === "string") return `agent: ${trim(inp.description as string, 50)}`;
     if (base === "AskUserQuestion") return `asking…`;
     if (base === "ExitPlanMode") return `exit plan mode`;
+    if (base === "EndConversation") return `ended the conversation`;
     if (base === "SlashCommand" && typeof inp.command === "string") return `slash ${inp.command}`;
     if (base === "Skill" && typeof inp.skill === "string") return `skill ${inp.skill}`;
     if (base === "TodoWrite") {

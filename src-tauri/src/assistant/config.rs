@@ -263,13 +263,14 @@ pub(super) fn fable_unavailable() -> bool {
     FABLE_DISABLED || fable_sunset_passed()
 }
 
-/// Haiku 4.5 — pulled by Anthropic 2026-06-26 (model removed). Kill-switch mirror
-/// of Fable (frontend `HAIKU_DISABLED` in helpers.ts). A pinned/stale Haiku
-/// session falls back to sonnet before the id can reach the API. Flip false to
-/// restore if it returns; mirror on both sides.
+/// Haiku 4.5 — pulled by Anthropic 2026-06-26, REINSTATED upstream (probe-
+/// confirmed serving 2026-07-22). Kill-switch mirror of Fable (frontend
+/// `HAIKU_DISABLED` in helpers.ts). While disabled, a pinned/stale Haiku
+/// session falls back to sonnet before the id can reach the API. Flip true to
+/// pull it again; mirror on both sides.
 pub(super) const HAIKU_MODEL: &str = "haiku";
 pub(super) const HAIKU_FALLBACK_MODEL: &str = "sonnet";
-pub(super) const HAIKU_DISABLED: bool = true;
+pub(super) const HAIKU_DISABLED: bool = false;
 pub(super) fn haiku_unavailable() -> bool {
     HAIKU_DISABLED
 }

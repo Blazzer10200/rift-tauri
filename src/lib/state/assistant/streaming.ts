@@ -1400,6 +1400,12 @@ export function onStreamLine(tab: TabState, raw: string) {
       if (typeof s === "string" && s.trim().length > 0) tab.promptSuggestion = s.trim();
       break;
     }
+    case "tool_progress": {
+      // CLI 2.1.214+ heartbeat for a long-silent tool call. Recognized so the
+      // default-case breadcrumb doesn't fire once per heartbeat; carries no
+      // renderable content (pills already tick elapsed locally).
+      break;
+    }
     default: {
       // An event kind this build doesn't recognize — almost always a newer CLI
       // emitting something we predate. Don't render it (we don't know its shape),

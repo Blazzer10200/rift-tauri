@@ -114,6 +114,7 @@
     }
     if (n === "ExitPlanMode") return "exit plan mode";
     if (n === "EnterPlanMode") return "enter plan mode";
+    if (n === "EndConversation") return "ended the conversation";
     if (n === "SlashCommand") return typeof inp.command === "string" ? (inp.command as string) : "slash command";
     if (n === "Skill") return typeof inp.skill === "string" ? (inp.skill as string) : "skill";
     if (n === "Workflow") return typeof inp.name === "string" ? (inp.name as string) : "workflow";
@@ -156,7 +157,7 @@
     if (n === "Edit" || n === "MultiEdit" || n === "Write" || n === "NotebookEdit") return "write";
     if (n === "Bash" || n === "PowerShell" || n === "remote_bash" || n === "BashOutput" || n === "KillBash" || n === "KillShell" || n === "TaskOutput" || n === "TaskStop" || n === "Monitor" || n === "REPL") return "shell";
     if (n === "Agent" || n === "Task" || n === "Skill" || n === "SlashCommand" || n === "Workflow" || n === "SendMessage") return "agent";
-    if (n === "TodoWrite" || n === "TaskCreate" || n === "TaskUpdate" || n === "AskUserQuestion" || n === "ask_user" || n === "ExitPlanMode" || n === "EnterPlanMode" || n === "ReportFindings") return "meta";
+    if (n === "TodoWrite" || n === "TaskCreate" || n === "TaskUpdate" || n === "AskUserQuestion" || n === "ask_user" || n === "ExitPlanMode" || n === "EnterPlanMode" || n === "EndConversation" || n === "ReportFindings") return "meta";
     // Cloud publish + repo/worktree mutation read as consequential.
     if (n === "Artifact" || n === "EnterWorktree" || n === "ExitWorktree") return "write";
     // Local git: mutating ops read as consequential (write tint); read-only
