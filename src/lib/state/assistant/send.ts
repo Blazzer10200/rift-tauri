@@ -523,6 +523,7 @@ export async function stop(store: AssistantStore, tabId?: string | null) {
   tab.streamingMsgId = null;
   tab.streamingMsgIdx = null;
   tab.lastTurnDoneAt = null; // user-stopped — a trailing continuation must not merge into it
+  if (tab.plan?.status === "executing") tab.plan = { ...tab.plan, status: "approved" };
   tab.deltaCount = 0;
   tab.envelopeTextBuffer = '';
   tab.seenToolUseIds.clear();

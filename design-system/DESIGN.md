@@ -95,6 +95,10 @@ surface-scale washes are not.
 - **Copy:** name what the user controls, active voice, same verb through the whole flow.
   Errors say what happened + what to do — no apology, no vagueness. Empty states invite
   one action.
+- **In-card action bars** (plan approval card): decisions render where the content is —
+  a hairline-separated footer row inside the card, buttons borrowing the perm-btn recipe
+  (one solid primary CTA, quiet secondaries, destructive quiet + right-aligned). No new
+  depth treatment, no modal; the card that shows the thing is the card that approves it.
 
 ## 8. Do's & Don'ts — the rejection log
 

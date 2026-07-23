@@ -538,6 +538,36 @@
 .sxplan-chev.open { transform: rotate(180deg); }
 .sxplan-empty { padding: 2px 0 6px; font-size: var(--fs-sm); color: var(--fg-faint); font-style: italic; }
 .sxplan-body { padding: 2px 0 6px; font-size: 13px; }
+/* Approval action bar — the card's footer row, hairline-separated (no new depth
+   treatment; buttons borrow the perm-btn recipe, primary = the earned CTA). */
+.sxplan-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 4px; padding-top: 8px; border-top: 1px solid var(--border); }
+.sxa-btn { display: inline-flex; align-items: center; gap: 5px; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg-elev-1); color: var(--fg-2); font: inherit; font-size: var(--fs-sm); font-weight: 600; cursor: pointer;
+  transition: background var(--dur-fast) ease-out, border-color var(--dur-fast) ease-out, color var(--dur-fast) ease-out; }
+.sxa-btn:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg); }
+.sxa-btn:disabled { opacity: 0.5; cursor: default; }
+.sxa-btn.primary { background: var(--accent); border-color: transparent; color: var(--accent-fg); }
+.sxa-btn.primary:hover:not(:disabled) { background: color-mix(in oklch, var(--accent) 88%, white); color: var(--accent-fg); }
+.sxa-btn.quiet { border-color: transparent; background: none; color: var(--fg-muted); }
+.sxa-btn.quiet:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg); }
+.sxa-btn.discard { margin-left: auto; border-color: transparent; background: none; color: var(--fg-muted); }
+.sxa-btn.discard:hover:not(:disabled) { color: var(--danger); background: color-mix(in oklch, var(--danger) 10%, transparent); }
+.sxa-btn .sxa-spin { animation: sxa-spin 1s linear infinite; }
+@keyframes sxa-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+.sxa-btn.quiet.on { background: var(--surface-hover); color: var(--fg); border-color: var(--border-strong); }
+.sxplan-refine { flex: 1 1 220px; min-width: 0; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border-strong); background: var(--bg-inset); color: var(--fg); font: inherit; font-size: var(--fs-sm); }
+.sxplan-refine:focus { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+.sxplan-refine::placeholder { color: var(--fg-faint); }
+.sxplan-edit { width: 100%; resize: vertical; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--bg-inset); color: var(--fg); font-family: var(--font-mono); font-size: 12px; line-height: 1.55; }
+.sxplan-edit:focus { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+/* Live-drafting state: breathing icon + a typing caret trailing the markdown
+   as the plan streams in — stationary signals only, per DESIGN.md §8. */
+.sxplan-write { animation: sxplan-writepulse 1.5s ease-in-out infinite; }
+@keyframes sxplan-writepulse { 50% { opacity: 0.45; } }
+.sxplan-caret { display: inline-block; width: 7px; height: 13px; margin-left: 3px; border-radius: 2px; background: var(--accent); vertical-align: text-bottom; animation: sxplan-blink 1s steps(2, start) infinite; }
+@keyframes sxplan-blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .sxplan-write, .sxplan-caret { animation: none; }
+}
 
 /* ── web search / fetch ── */
 .sweb { display: flex; gap: 9px; margin: var(--stream-gap) 0; font-size: var(--fs-sm); color: var(--fg-muted); animation: blockIn var(--dur-base) var(--ease-page) both; }

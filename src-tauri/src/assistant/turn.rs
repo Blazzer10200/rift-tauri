@@ -371,6 +371,12 @@ const SESSION_LOST_EVENT: &str = "assistant://session-lost";
 /// tool name + input + suggestions. Frontend answers via
 /// `assistant_answer_permission`.
 const PERMISSION_EVENT: &str = "assistant://permission-request";
+/// Decision ceiling for an ExitPlanMode ask. Plans are READ before they're
+/// approved — human-review time, not a click — so they get 10 min instead of
+/// the 120s tool ceiling. Safe with the stall watchdog: the permission await
+/// runs inside the reader's select arm (the watchdog timer isn't polled while
+/// parked) and the deadline is re-armed right after the decision lands.
+const PLAN_DECISION_SECS: u64 = 600;
 /// ActivityHud shell rows: emitted by the per-turn poller whenever the set of
 /// live shell processes under this session's CLI child changes. Payload
 /// `{session_id, rows: [{pid, exe, cmd, started_at}], turn_epoch}`.
@@ -607,27 +613,14 @@ async fn handle_permission_request(
     }
 
     // ExitPlanMode is the native plan-approval gate (only surfaced in `plan`
-    // mode). In headless `-p` mode the CLI emits the tool_use and blocks waiting
-    // for an approval decision — but it does NOT reliably round-trip through the
-    // can_use_tool channel the way Edit/Write/Bash do, so a turn that reached
-    // ExitPlanMode wedged the whole stream (the model's plan text had already
-    // streamed; the freeze was a multi-minute "Working…" until the no-progress
-    // watchdog finally tripped — observed as a 223s hang, longer than the 120s
-    // permission timeout, confirming the Allow/Deny card never rendered). Rift
-    // is a single-screen assistant with no separate plan-mode UI to approve into,
-    // so auto-approve here: the plan already streamed, and exiting plan mode just
-    // lets the model continue. Mirrors the AskUserQuestion special-case above
-    // (auto-deny) — same "never surface the raw bar" treatment, opposite verdict.
-    // The CLI requires `updatedInput` on an allow, so backfill the original input.
-    if tool_name == "ExitPlanMode" {
-        log::info!("permission ask: auto-approving ExitPlanMode (no plan-mode UI to gate into) session={session_id} request_id={request_id}");
-        let mut decision = serde_json::json!({ "behavior": "allow" });
-        if let Value::Object(ref mut map) = decision {
-            map.insert("updatedInput".into(), original_input);
-        }
-        write_control_response(stdin, &request_id, decision).await?;
-        return Ok(());
-    }
+    // mode). It parks on the user like any other ask, but the event is tagged
+    // `kind:"plan"` so the frontend routes it to the plan card's action bar
+    // (StreamExitPlan) instead of the generic Allow/Deny bar, the wait ceiling
+    // is human-review-sized (PLAN_DECISION_SECS), and an allow may carry a
+    // Rift-private `riftReturnMode` — the permission mode to push onto the live
+    // child right after the approval, so the SAME turn continues straight into
+    // execution (Approve & build).
+    let is_plan = tool_name == "ExitPlanMode";
 
     let registry = match app.try_state::<std::sync::Arc<PermissionRegistry>>() {
         Some(r) => r.inner().clone(),
@@ -667,6 +660,7 @@ async fn handle_permission_request(
         "tool_name": req.get("tool_name").cloned().unwrap_or(Value::Null),
         "input": req.get("input").cloned().unwrap_or(Value::Null),
         "suggestions": req.get("permission_suggestions").cloned().unwrap_or(Value::Null),
+        "kind": if is_plan { "plan" } else { "tool" },
     })) {
         log::warn!("permission emit failed for {session_id} ({e}) — denying (UI unreachable)");
         registry.cancel(&request_id);
@@ -683,7 +677,8 @@ async fn handle_permission_request(
     // untested, since bypassPermissions never raises an ask). Deny-on-timeout
     // with an actionable message lets the user recover instead of staring at a
     // frozen "Working…". The model sees the deny and can ask in plain text.
-    let mut decision = match tokio::time::timeout(std::time::Duration::from_secs(120), rx).await {
+    let wait_secs = if is_plan { PLAN_DECISION_SECS } else { 120 };
+    let mut decision = match tokio::time::timeout(std::time::Duration::from_secs(wait_secs), rx).await {
         Ok(Ok(v)) => {
             log::info!("permission decision: tool={tool_name} session={session_id} → {}",
                 v.get("behavior").and_then(|b| b.as_str()).unwrap_or("?"));
@@ -692,15 +687,28 @@ async fn handle_permission_request(
         _ => {
             registry.cancel(&request_id);
             log::warn!(
-                "permission ask TIMED OUT after 120s: tool={tool_name} session={session_id} \
+                "permission ask TIMED OUT after {wait_secs}s: tool={tool_name} session={session_id} \
                  — no Allow/Deny answer arrived (card not shown or not clicked); auto-denying"
             );
-            serde_json::json!({ "behavior": "deny",
-                "message": "Permission prompt wasn't answered in time. Rift auto-denied this action. \
-                            If you didn't see an Allow/Deny prompt, switch the permission mode to \
-                            'Bypass' in the composer so tools run without asking." })
+            if is_plan {
+                // Steer the model to end the turn cleanly — the plan card stays
+                // in the transcript and its settled actions still work post-turn.
+                serde_json::json!({ "behavior": "deny",
+                    "message": "The user hasn't reviewed the plan yet. Stop here and end the turn \
+                                without executing anything — the plan stays visible and the user \
+                                can approve it later." })
+            } else {
+                serde_json::json!({ "behavior": "deny",
+                    "message": "Permission prompt wasn't answered in time. Rift auto-denied this action. \
+                                If you didn't see an Allow/Deny prompt, switch the permission mode to \
+                                'Bypass' in the composer so tools run without asking." })
+            }
         }
     };
+    // Rift-private plan field: strip BEFORE the control_response (not CLI
+    // schema). Present only on a plan approval that wants the child flipped
+    // out of plan mode so the same turn rolls into execution.
+    let return_mode = take_plan_return_mode(&mut decision);
     // The CLI requires `updatedInput` on an allow. The UI sends only the
     // behavior, so backfill the original (unmodified) tool input here.
     if decision.get("behavior").and_then(|b| b.as_str()) == Some("allow")
@@ -710,7 +718,40 @@ async fn handle_permission_request(
             map.insert("updatedInput".into(), original_input);
         }
     }
-    write_control_response(stdin, &request_id, decision).await
+    write_control_response(stdin, &request_id, decision).await?;
+    if let Some(mode) = return_mode {
+        // Approve & build: push the return mode onto the live child right after
+        // the approval — stdin is ordered, so the CLI applies it before the
+        // turn's next action. The ack rides stdout and is swallowed (error acks
+        // logged loudly) by the reader loop like every live-switch push. Update
+        // the warm-pool key so the next send's compare sees the pushed state.
+        use tokio::io::AsyncWriteExt;
+        let line = control_push_line("set_permission_mode", serde_json::json!({ "mode": mode }));
+        stdin.write_all(&line).await?;
+        stdin.flush().await?;
+        if let Some(arc) = warm_pool::get(session_id) {
+            let mut g = match arc.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+            g.key.permission_mode = mode.clone();
+        }
+        log::info!("plan approved: pushed set_permission_mode={mode} session={session_id}");
+    }
+    Ok(())
+}
+
+/// Pop `riftReturnMode` off a plan-approval decision. Returns the mode ONLY for
+/// an `allow` carrying a valid permission mode — a deny (or junk value) yields
+/// None and the stripped field never reaches the CLI either way.
+fn take_plan_return_mode(decision: &mut Value) -> Option<String> {
+    let mode = match decision {
+        Value::Object(map) => map.remove("riftReturnMode")?,
+        _ => return None,
+    };
+    if decision.get("behavior").and_then(|b| b.as_str()) != Some("allow") {
+        return None;
+    }
+    mode.as_str()
+        .filter(|m| super::config::is_valid_permission_mode(m))
+        .map(str::to_owned)
 }
 
 /// Streaming round-trip. Spawns `claude -p` over stdin, forwards stdout NDJSON
@@ -1604,6 +1645,15 @@ async fn resolve_spawn(
     // the stash for the real send that follows.
     if let Some(note) = interrupted_note_for_send(session_id, prewarm) {
         reminder_parts.push(note);
+    }
+    // Plan-mode steer. Per-turn like the env snapshot (permission_mode is
+    // live-switchable on a warm child, so a plan-specific system addendum
+    // would fork addendum_ptr and cold-respawn every mode flip).
+    if permission_mode == "plan" {
+        reminder_parts.push(
+            "This turn runs in plan mode: the deliverable is the plan itself. Plan deeply before proposing — read the code you would touch and check real signatures and call sites first. Rift renders your ExitPlanMode plan as a rich approval card the user reads, edits, and approves — write for that surface: markdown with a short title, ## phase sections, concrete file paths, and a final verification step. Keep it tight (it is read in-card); if the user is just asking a question, answer it instead of forcing a plan card."
+                .to_string(),
+        );
     }
     // Rift environment snapshot: volatile app facts (browser-dock page, plan
     // usage) the model can't see otherwise. Rides the user turn — a dynamic
@@ -3251,12 +3301,14 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                                 // A tool starts → suspend the watchdog (a long Bash
                                 // build / grep / ask_user is silent-but-healthy).
                                 // EXCEPTION: ExitPlanMode is the plan-approval gate
-                                // (auto-approved in handle_permission_request). If the
-                                // CLI ever emits its tool_use WITHOUT the can_use_tool
-                                // control_request (so the auto-approve never fires),
-                                // counting it as in-flight would suspend the watchdog
-                                // and the turn would freeze for minutes (the original
-                                // 223s hang) instead of recovering as Stalled at the
+                                // (parked on the user in handle_permission_request,
+                                // which blocks this select arm — the watchdog can't
+                                // tick while the ask is live). If the CLI ever emits
+                                // its tool_use WITHOUT the can_use_tool
+                                // control_request (so no ask ever parks), counting it
+                                // as in-flight would suspend the watchdog and the
+                                // turn would freeze for minutes (the original 223s
+                                // hang) instead of recovering as Stalled at the
                                 // no-progress ceiling. Don't let it disable the net.
                                 if block_ty == Some("tool_use") && block_name != Some("ExitPlanMode") {
                                     // Track the id so only ITS result closes this slot
@@ -3796,6 +3848,26 @@ mod tests {
         assert_eq!(p["request"]["subtype"], "set_permission_mode");
         assert_eq!(p["request"]["mode"], "acceptEdits");
         assert_ne!(p["request_id"], v["request_id"], "request ids are unique per push");
+    }
+
+    // Plan-approval return mode: stripped from the decision ALWAYS (Rift-private,
+    // never CLI schema), returned only for an allow carrying a valid mode.
+    #[test]
+    fn take_plan_return_mode_strips_and_validates() {
+        let mut allow = serde_json::json!({ "behavior": "allow", "riftReturnMode": "acceptEdits" });
+        assert_eq!(super::take_plan_return_mode(&mut allow).as_deref(), Some("acceptEdits"));
+        assert!(allow.get("riftReturnMode").is_none(), "stripped before the control_response");
+
+        let mut deny = serde_json::json!({ "behavior": "deny", "message": "no", "riftReturnMode": "acceptEdits" });
+        assert_eq!(super::take_plan_return_mode(&mut deny), None, "deny never pushes a mode");
+        assert!(deny.get("riftReturnMode").is_none(), "stripped even on deny");
+
+        let mut junk = serde_json::json!({ "behavior": "allow", "riftReturnMode": "sudo" });
+        assert_eq!(super::take_plan_return_mode(&mut junk), None, "invalid mode rejected");
+        assert!(junk.get("riftReturnMode").is_none());
+
+        let mut plain = serde_json::json!({ "behavior": "allow" });
+        assert_eq!(super::take_plan_return_mode(&mut plain), None, "absent field is a no-op");
     }
 
     #[test]

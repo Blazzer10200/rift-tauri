@@ -19,6 +19,7 @@
   import MentionPopover from "./composer/MentionPopover.svelte";
   import SettingsMenu from "./composer/SettingsMenu.svelte";
   import CtxRing from "./composer/CtxRing.svelte";
+  import PlanChip from "./composer/PlanChip.svelte";
   import PermMenu from "./composer/PermMenu.svelte";
   import {
     MODEL_OPTIONS, MODE_OPTIONS,
@@ -1608,6 +1609,8 @@
               onRequestClose={() => (settingsOpen = false)}
             />
           {/if}
+
+          <PlanChip {tab} />
 
           {#if paneCtxTokens > 0}
             <CtxRing

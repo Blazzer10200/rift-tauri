@@ -3,10 +3,48 @@ import {
   FABLE_DISABLED, FABLE_SUNSET_MS, clampEffort, effortToFlag, fableAvailable,
   fastEligible, flattenToolResult, isStaleTurnEpoch, loadEffort,
   migrateThinkingPins, modelFamily, previewToolInput, ctxWindowForModelId,
-  modelNativeWindow, planContextCap, autoCompactTriggerTokens,
+  modelNativeWindow, planContextCap, autoCompactTriggerTokens, planDecision,
+  partialPlanMd,
 } from "./helpers";
 
 afterEach(() => vi.useRealTimers());
+
+describe("planDecision (plan-card action → answer_permission payload)", () => {
+  it("build/ask approve and carry the Rift-private return mode", () => {
+    expect(planDecision("build", "acceptEdits")).toEqual({
+      behavior: "allow", riftReturnMode: "acceptEdits",
+    });
+    expect(planDecision("ask", "default")).toEqual({
+      behavior: "allow", riftReturnMode: "default",
+    });
+    // Null return mode still approves — the backend just skips the mode push.
+    expect(planDecision("build", null)).toEqual({ behavior: "allow" });
+  });
+
+  it("an edited plan rides updatedInput.plan on the approval", () => {
+    expect(planDecision("build", "acceptEdits", undefined, "## edited")).toEqual({
+      behavior: "allow", riftReturnMode: "acceptEdits", updatedInput: { plan: "## edited" },
+    });
+    // No edit → no updatedInput key at all.
+    expect(planDecision("build", "acceptEdits")).toEqual({
+      behavior: "allow", riftReturnMode: "acceptEdits",
+    });
+  });
+
+  it("refine denies with the feedback as in-turn steering", () => {
+    const d = planDecision("refine", null, "  split phase 2 into two PRs  ");
+    expect(d.behavior).toBe("deny");
+    expect(d.message).toContain("split phase 2 into two PRs");
+    expect(d.message).toContain("ExitPlanMode");
+  });
+
+  it("discard denies and tells the model to end the turn without executing", () => {
+    const d = planDecision("discard", null);
+    expect(d.behavior).toBe("deny");
+    expect(String(d.message)).toMatch(/discarded/i);
+    expect(String(d.message)).toMatch(/stop here/i);
+  });
+});
 
 describe("context window (model × plan)", () => {
   const MAX = planContextCap("max"); // 1M
@@ -279,6 +317,27 @@ describe("autoCompactTriggerTokens (user auto-compact tuning → effective trigg
   it("returns null when the user disabled auto-compact, or without a window", () => {
     expect(autoCompactTriggerTokens({ enabled: false, windowTokens: null, pct: null }, 1_000_000)).toBeNull();
     expect(autoCompactTriggerTokens(null, 0)).toBeNull();
+  });
+});
+
+describe("partialPlanMd — live plan extraction from a forming tool input", () => {
+  it("complete input → full plan", () => {
+    expect(partialPlanMd('{"plan": "## Goal\\nShip it"}')).toBe("## Goal\nShip it");
+  });
+  it("cut mid-string → everything that has streamed in", () => {
+    expect(partialPlanMd('{"plan": "## Goal\\nStep one, then')).toBe("## Goal\nStep one, then");
+  });
+  it("dangling backslash at the stream edge is dropped, not rendered", () => {
+    expect(partialPlanMd('{"plan": "line\\')).toBe("line");
+  });
+  it("incomplete unicode escape at the edge is dropped", () => {
+    expect(partialPlanMd('{"plan": "x\\u00')).toBe("x");
+  });
+  it("escaped quotes and tabs decode inside the plan", () => {
+    expect(partialPlanMd('{"plan": "say \\"hi\\"\\tnow"}')).toBe('say "hi"\tnow');
+  });
+  it("no plan key yet → empty", () => {
+    expect(partialPlanMd('{"pl')).toBe("");
   });
 });
 

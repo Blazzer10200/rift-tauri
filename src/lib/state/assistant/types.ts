@@ -297,6 +297,8 @@ export type ConversationRecord = {
   /** Agent transcripts (capped on save) — restores expandable agent cards.
    *  Rides the Rust record's serde-flatten catch-all; absent on legacy convos. */
   agentSpawns?: AgentSpawn[];
+  /** Plan-mode artifact (proposal + approval state). Serde-flatten; absent = no plan. */
+  plan?: PlanRecord | null;
   /** Effective thinking dial when last saved — reopening pins it to the tab
    *  (like `model`) so a chat keeps its effort across restarts. Serde-flatten. */
   effort?: ThinkingEffort;
@@ -405,11 +407,24 @@ export type PermissionSuggestion = {
 };
 
 /** A pending `can_use_tool` permission ask, keyed by the tool's `tool_use_id`
- *  so the streamed tool chip can render Allow / Deny inline. */
+ *  so the streamed tool chip can render Allow / Deny inline. `kind:"plan"`
+ *  (an ExitPlanMode ask) routes to the plan card's action bar instead of the
+ *  generic Allow/Deny bar — PermissionBar hides itself for those. */
 export type PermissionPromptInfo = {
   requestId: string;
   toolName: string;
   suggestions: PermissionSuggestion[];
+  kind?: "plan" | "tool";
+};
+
+/** The conversation's plan artifact (plan-mode ExitPlanMode proposal). Written
+ *  when the user acts on the plan card; persisted like `agentSpawns` so a
+ *  reopened convo keeps its plan state. */
+export type PlanRecord = {
+  md: string;
+  status: "proposed" | "approved" | "executing" | "done";
+  approvedAt: number | null;
+  revision: number;
 };
 
 /** Telemetry record for a single Claude turn. */

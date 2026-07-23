@@ -223,6 +223,43 @@ export function savePermissionMode(v: PermissionMode) {
   }
 }
 
+/** Plan-card action → the `assistant_answer_permission` decision payload.
+ *  `build`/`ask` approve; `riftReturnMode` is Rift-private (the backend strips
+ *  it and pushes `set_permission_mode` so the SAME turn rolls into execution).
+ *  `refine` denies with the feedback as in-turn steering — the model revises
+ *  and re-proposes; `discard` denies and lets the turn end. */
+export type PlanAction = "build" | "ask" | "refine" | "discard";
+export function planDecision(
+  action: PlanAction,
+  returnMode: PermissionMode | null,
+  feedback?: string,
+  editedPlan?: string,
+): Record<string, unknown> {
+  switch (action) {
+    case "build":
+    case "ask": {
+      const d: Record<string, unknown> = returnMode
+        ? { behavior: "allow", riftReturnMode: returnMode }
+        : { behavior: "allow" };
+      // Edit-before-approve: the CLI accepts user modifications via
+      // `updatedInput.plan` — the model executes the EDITED plan (backend
+      // backfill skips when updatedInput is already present).
+      if (editedPlan != null) d.updatedInput = { plan: editedPlan };
+      return d;
+    }
+    case "refine":
+      return {
+        behavior: "deny",
+        message: `Revise the plan with this feedback, then propose the updated plan again via ExitPlanMode: ${(feedback ?? "").trim()}`,
+      };
+    case "discard":
+      return {
+        behavior: "deny",
+        message: "User discarded the plan. Do not execute it — stop here and end the turn.",
+      };
+  }
+}
+
 /** Models the CLI's fast-output mode applies to — the Opus family only (the
  *  bare `opus` alias + pinned `claude-opus-4-x` ids). Fable shares Opus's
  *  VISUAL family (modelFamily) but is not fast-eligible upstream, so don't
@@ -398,6 +435,44 @@ export function autoCompactTriggerTokens(cfg: AutoCompactCfg | null, ctxWindow: 
   const acWin = Math.min(cfg?.windowTokens ?? ctxWindow, ctxWindow);
   const frac = cfg?.pct != null && cfg.pct > 0 ? cfg.pct / 100 : AUTOCOMPACT_DEFAULT_FRACTION;
   return Math.round(acWin * frac);
+}
+
+/** Extract the (possibly still-streaming) `plan` string from a partial JSON
+ *  tool-input buffer. The buffer is raw accumulated `input_json_delta` text —
+ *  usually `{"plan": "…` cut mid-string — so JSON.parse can't touch it. Scans
+ *  to the `"plan"` key's opening quote, then decodes escapes up to the first
+ *  unescaped closing quote (or the buffer edge), dropping any dangling escape
+ *  fragment so the tail never renders as a literal `\n`. */
+export function partialPlanMd(partial: string): string {
+  const key = partial.indexOf('"plan"');
+  if (key < 0) return "";
+  let i = partial.indexOf(":", key + 6);
+  if (i < 0) return "";
+  i = partial.indexOf('"', i + 1);
+  if (i < 0) return "";
+  let out = "";
+  for (let p = i + 1; p < partial.length; p++) {
+    const c = partial[p];
+    if (c === "\\") {
+      const n = partial[p + 1];
+      if (n === undefined) break; // dangling escape at the stream edge
+      p++;
+      if (n === "n") out += "\n";
+      else if (n === "t") out += "\t";
+      else if (n === "r") out += "\r";
+      else if (n === "u") {
+        const hex = partial.slice(p + 1, p + 5);
+        if (!/^[0-9a-fA-F]{4}$/.test(hex)) break; // incomplete \uXXXX at the edge
+        out += String.fromCharCode(parseInt(hex, 16));
+        p += 4;
+      } else out += n;
+    } else if (c === '"') {
+      break;
+    } else {
+      out += c;
+    }
+  }
+  return out;
 }
 
 /** Effort tiers low→high — canonical order for clamping + ladder UIs. */

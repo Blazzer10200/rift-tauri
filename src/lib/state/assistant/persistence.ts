@@ -22,6 +22,7 @@ import type {
   ConversationRecord,
   ModelSel,
   PaneState,
+  PlanRecord,
   QueueItem,
   ThinkingEffort,
 } from "./types";
@@ -45,6 +46,7 @@ type SaveableTab = {
   // saved record so the sidebar can filter chats to the open project.
   workspaceRoot: string | null;
   agentSpawns: AgentSpawn[];
+  plan: PlanRecord | null;
 };
 
 /** Wider tab shape needed by loadConversation — adds the fields it resets
@@ -218,6 +220,8 @@ export function buildSaveRecord(
     // Agent transcripts, capped (last 30 spawns × 80 blocks) so reopened convos
     // keep expandable agent cards without unbounded record growth.
     agentSpawns: (tab.agentSpawns ?? []).slice(-30).map((s) => ({ ...s, blocks: s.blocks.slice(-80) })),
+    // Plan-mode artifact — approval state survives reopen (P2 chip reads it).
+    plan: tab.plan ?? undefined,
     // Effective dial at save time — mirrors `model` so reopening restores it.
     effort: tab.effortOverride ?? host.thinkingEffort,
     thinkingOn: tab.thinkingOverride ?? host.thinkingEnabled,
@@ -434,6 +438,12 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
       ),
     }));
     tab.cliSessionId = cliSid;
+    // A loaded convo is never mid-turn — an "executing" plan on disk means the
+    // tab was evicted before its terminal settled it, so drop to approved
+    // (finish unverified) rather than spin the chip forever.
+    tab.plan = convo.plan
+      ? { ...convo.plan, status: convo.plan.status === "executing" ? "approved" : convo.plan.status }
+      : null;
     // Hydrate last-activity from disk so reopening doesn't reset the order;
     // legacy records lacking it fall back to their createdAt.
     tab.lastActivityAt = convo.lastActivityAt ?? convo.createdAt;

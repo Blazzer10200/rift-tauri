@@ -557,7 +557,9 @@ function adaptTool(tb: ToolBlock): StreamTool {
       if (dc) { t.add = dc.add; t.del = dc.del; }
     }
   }
-  if (kind === "exitplan") t.input = inp; // input.plan = the proposed plan markdown
+  // input.plan = the proposed plan markdown. While live-forming, streaming.ts
+  // keeps input.plan growing (partialPlanMd) so the card streams the draft.
+  if (kind === "exitplan") t.input = inp;
   if (kind === "plan") t.items = planItems(tb);
   if (kind === "web" || kind === "fetch") {
     t.query = t.cap; t.sources = []; t.count = null;

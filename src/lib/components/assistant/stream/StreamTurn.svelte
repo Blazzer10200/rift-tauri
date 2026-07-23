@@ -390,7 +390,7 @@
           {:else if seg.tool.kind === "ask"}
             <StreamAskUser tool={seg.tool} live={streaming} />
           {:else if seg.tool.kind === "exitplan"}
-            <StreamExitPlan tool={seg.tool} />
+            <StreamExitPlan tool={seg.tool} tab={liveTab} {isLast} />
           {:else if seg.tool.kind === "shell"}
             <StreamShell tool={seg.tool} poll={seg.poll} />
           {/if}

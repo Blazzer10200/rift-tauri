@@ -33,6 +33,7 @@ import type {
   ModelSel,
   PermissionMode,
   RiftPlan,
+  PlanRecord,
   TrustLevel,
   PermissionPromptInfo,
   PermissionSuggestion,
@@ -49,10 +50,13 @@ import {
   loadEffort,
   saveEffort,
   clampEffort,
+  EFFORT_ORDER,
   loadThinkingEnabled,
   saveThinkingEnabled,
   loadPermissionMode,
   savePermissionMode,
+  planDecision,
+  type PlanAction,
   loadAutocorrect,
   loadFastMode,
   saveAutocorrect,
@@ -327,6 +331,11 @@ export class TabState {
    *  See applySubAgentFrame in streaming.ts. */
   agentSpawns = $state<AgentSpawn[]>([]);
 
+  /** Plan-mode artifact for this conversation — written when the user acts on
+   *  the plan card (approve/discard), persisted with the record so a reopened
+   *  convo keeps its plan state. null = no plan proposed/acted on. */
+  plan = $state<PlanRecord | null>(null);
+
   /** Live shell processes under this session's CLI child (ActivityHud rows).
    *  Pushed by the backend per-turn poller over `assistant://shell-rows`;
    *  cleared on every turn terminal (the poller dies with the turn). */
@@ -410,6 +419,9 @@ export class TabState {
   onTodoApplied?: (tab: TabState, opensDock: boolean) => void;
   /** Fired on onDone — store handles scheduleSave + queue drain. */
   onTurnComplete?: (tab: TabState) => void;
+  /** Fired when the model calls EnterPlanMode — store flips the perm pill to
+   *  plan so the UI mode tracks what the CLI is actually doing. */
+  onEnterPlanMode?: (tab: TabState) => void;
   /** Fired when an ask_user card has sat unanswered past the nudge window —
    *  the turn (and CLI subprocess) is blocked on it. Store routes to a toast. */
   onAskUserStale?: (tab: TabState) => void;
@@ -756,6 +768,7 @@ class AssistantStore {
       this.ui.tasksUpdatedAt = Date.now();
     };
     tab.onTurnComplete = (t) => this.handleTurnComplete(t);
+    tab.onEnterPlanMode = () => this.setPermissionMode("plan");
     tab.onAskUserStale = (t) => askUserStaleNudge(this, t);
     tab.planCap = () => this.planCap;
   }
@@ -851,6 +864,13 @@ class AssistantStore {
   // model/effort). `bypassPermissions` until the user picks otherwise so
   // existing behavior is unchanged. Persisted to localStorage.
   permissionMode = $state<PermissionMode>(loadPermissionMode());
+  /** Mode to return to when a plan is approved (Approve & build). Captured on
+   *  entering plan mode, cleared on leaving it by any path. Session-scoped —
+   *  a restart mid-plan falls back to `acceptEdits` at approve time. */
+  planReturnMode: PermissionMode | null = null;
+  /** Dial snapshot taken when plan mode floors the active tab's thinking —
+   *  restored on exit unless the user moved the dial themselves meanwhile. */
+  private planEffortRestore: { tab: TabState; enabled: boolean; effort: ThinkingEffort } | null = null;
   // Fast mode (Opus fast output) — rides `--settings {"fastMode":true}` on
   // fast-eligible models. Global, persisted, default off. The backend re-gates
   // by model family + CLI version, so this can be sent unconditionally.
@@ -1064,7 +1084,42 @@ class AssistantStore {
     const prev = this.permissionMode;
     this.permissionMode = v;
     savePermissionMode(v);
+    // Entering plan mode remembers where Approve & build returns to; leaving
+    // plan mode (approval flip or manual pick) clears the memory.
+    this.planReturnMode = v === "plan" ? prev : null;
+    // Effort floor: a plan is only worth approving if it was thought through,
+    // so plan mode raises the dial to at least High and puts it back after.
+    if (v === "plan") this.floorPlanEffort();
+    else if (prev === "plan") this.unfloorPlanEffort();
     this.telemetry.event("permission_mode.change", { from: prev, to: v });
+  }
+
+  private floorPlanEffort() {
+    const tab = this.activeTab;
+    if (!tab) return;
+    const enabled = this.thinkingOnFor(tab);
+    const effort = this.effortFor(tab);
+    const target = clampEffort("deep", this.modelFor(tab));
+    if (target === "none") return; // model can't think — nothing to raise
+    if (enabled && EFFORT_ORDER.indexOf(effort) >= EFFORT_ORDER.indexOf(target)) return;
+    this.planEffortRestore = { tab, enabled, effort };
+    this.setThinkingDial(true, target, tab);
+    toast.push({
+      severity: "info",
+      title: "Thinking raised for planning",
+      detail: "Plan mode thinks harder so the plan is worth approving. Your usual setting comes back when you leave plan mode.",
+      timeoutMs: 6000,
+    });
+  }
+
+  private unfloorPlanEffort() {
+    const snap = this.planEffortRestore;
+    this.planEffortRestore = null;
+    if (!snap) return;
+    const target = clampEffort("deep", this.modelFor(snap.tab));
+    // A manual dial move while planning is the user's choice — keep it.
+    if (!this.thinkingOnFor(snap.tab) || this.effortFor(snap.tab) !== target) return;
+    this.setThinkingDial(snap.enabled, snap.effort, snap.tab);
   }
 
   /** Latched once per session — the enable-side billing disclosure below. */
@@ -1330,6 +1385,7 @@ class AssistantStore {
         tool_name: string;
         input: unknown;
         suggestions: PermissionSuggestion[] | null;
+        kind?: "plan" | "tool";
       }>(
         "assistant://permission-request",
         (e) => this.onPermissionRequest(e.payload),
@@ -1513,6 +1569,7 @@ class AssistantStore {
     tool_use_id: string;
     tool_name: string;
     suggestions: PermissionSuggestion[] | null;
+    kind?: "plan" | "tool";
   }) {
     const tab = this.tabByCliSession(payload.session_id);
     if (!tab) {
@@ -1527,6 +1584,7 @@ class AssistantStore {
       requestId: payload.request_id,
       toolName: payload.tool_name,
       suggestions: payload.suggestions ?? [],
+      kind: payload.kind ?? "tool",
     });
     tab.permissionPrompts = next;
   }
@@ -1571,6 +1629,84 @@ class AssistantStore {
     const next = new Map(tab.permissionPrompts);
     next.delete(toolUseId);
     tab.permissionPrompts = next;
+  }
+
+  /** Answer an ExitPlanMode ask from the plan card's action bar (live
+   *  transport — the ask is parked in `permissionPrompts`). `build`/`ask`
+   *  approve and carry the return mode; the backend strips it, answers the
+   *  CLI, and pushes `set_permission_mode` so the SAME turn rolls straight
+   *  into execution — the pill flips here in lockstep. `refine` denies with
+   *  the feedback as in-turn steering (the model revises and re-proposes);
+   *  `discard` denies and lets the turn end (tab stays in plan mode). */
+  async answerPlan(
+    toolUseId: string,
+    action: PlanAction,
+    opts?: { feedback?: string; planMd?: string; editedPlan?: string },
+  ): Promise<void> {
+    const tab = this.tabHoldingPermission(toolUseId);
+    if (!tab) return;
+    const info = tab.permissionPrompts.get(toolUseId);
+    if (!info) return;
+    const returnMode: PermissionMode | null =
+      action === "ask" ? "default"
+      : action === "build" ? (this.planReturnMode ?? "acceptEdits")
+      : null;
+    const decision = planDecision(action, returnMode, opts?.feedback, opts?.editedPlan);
+    // Same RR8 rule as submitPermissionDecision: pop the prompt only after a
+    // successful invoke so a failed answer keeps the action bar live for retry.
+    await invoke("assistant_answer_permission", { requestId: info.requestId, decision });
+    const next = new Map(tab.permissionPrompts);
+    next.delete(toolUseId);
+    tab.permissionPrompts = next;
+    const rev = tab.plan?.revision ?? 0;
+    if (returnMode) {
+      this.setPermissionMode(returnMode);
+      // The SAME turn rolls into execution now — onStreamDone/Error settle
+      // this to done (clean terminal) or back to approved (interrupted).
+      tab.plan = {
+        md: opts?.editedPlan ?? opts?.planMd ?? "",
+        status: "executing", approvedAt: Date.now(), revision: Math.max(rev, 1),
+      };
+      this.scheduleSave();
+    } else if (action === "refine") {
+      // The model revises in-turn and re-proposes — the next approval is a
+      // new revision of this conversation's one plan.
+      tab.plan = {
+        md: opts?.planMd ?? tab.plan?.md ?? "",
+        status: "proposed", approvedAt: null, revision: rev + 1,
+      };
+      this.scheduleSave();
+    } else if (action === "discard" && opts?.planMd) {
+      tab.plan = { md: opts.planMd, status: "proposed", approvedAt: null, revision: Math.max(rev, 1) };
+      this.scheduleSave();
+    }
+    this.telemetry.event("plan.decision", { action, mode: returnMode });
+  }
+
+  /** Send-shaped fallback for a SETTLED plan card — the ask never round-tripped
+   *  (old CLI, race, timeout already denied) or was denied/discarded. Approve =
+   *  flip the mode + auto-send the execute prompt as a fresh turn on the plan's
+   *  own tab. One card, two transports (see docs/design/plan-mode.md §1b). */
+  approvePlanFallback(tab: TabState, planMd: string): void {
+    const mode = this.planReturnMode ?? "acceptEdits";
+    this.setPermissionMode(mode);
+    tab.plan = {
+      md: planMd, status: "executing", approvedAt: Date.now(),
+      revision: Math.max(tab.plan?.revision ?? 0, 1),
+    };
+    let convoId: string | undefined;
+    for (const [cid, t] of this.tabs) {
+      if (t === tab) { convoId = cid; break; }
+    }
+    void this.send("Execute the approved plan exactly as written above.", convoId);
+    this.telemetry.event("plan.decision", { action: "build", mode, transport: "send" });
+  }
+
+  /** Settled-card Refine: prefill the composer so the user steers with their
+   *  own words — a fresh turn in plan mode re-proposes an updated plan. */
+  refinePlanPrefill(tab: TabState): void {
+    const prefix = "Refine the plan: ";
+    if (!tab.draft.startsWith(prefix)) tab.draft = prefix + tab.draft;
   }
 
 

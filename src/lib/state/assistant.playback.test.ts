@@ -1472,6 +1472,31 @@ describe("playback — live tool-block forming (S127)", () => {
     expect(plan).toBeTruthy();
   });
 
+  it("ExitPlanMode streams input.plan into the block as it forms (live drafting)", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    const id = tab.streamingMsgId!;
+    feed(tab, [toolStart(0, "tf-plan", "ExitPlanMode")]);
+    let tool = textBlocks(tab, id).find((b) => b.type === "tool");
+    expect(tool).toMatchObject({ name: "ExitPlanMode", status: "pending", inputPartial: true });
+
+    // Chunks land mid-string — the partial plan grows with each delta,
+    // decoded escapes and all, never a dangling backslash fragment.
+    feed(tab, [inputDelta(0, '{"plan": "## Goal\\nAdd the')]);
+    tool = textBlocks(tab, id).find((b) => b.type === "tool");
+    expect(tool).toMatchObject({ input: { plan: "## Goal\nAdd the" }, inputPartial: true });
+
+    feed(tab, [inputDelta(0, ' flag\\nThen ship\\')]);
+    tool = textBlocks(tab, id).find((b) => b.type === "tool");
+    expect(tool).toMatchObject({ input: { plan: "## Goal\nAdd the flag\nThen ship" } });
+
+    // content_block_stop parses the complete JSON and clears the partial flag.
+    feed(tab, [inputDelta(0, 'n- done"}'), blockStop(0)]);
+    tool = textBlocks(tab, id).find((b) => b.type === "tool");
+    expect(tool).toMatchObject({ input: { plan: "## Goal\nAdd the flag\nThen ship\n- done" } });
+    expect((tool as { inputPartial?: boolean }).inputPartial).toBeUndefined();
+  });
+
   it("huge input stays bounded: only caption fields are extracted, diff fields ignored", () => {
     const tab = freshTab();
     beginTurn(tab);
@@ -1640,5 +1665,51 @@ describe("playback — hidden-page text drain (#100)", () => {
     } finally {
       delete (globalThis as { document?: unknown }).document;
     }
+  });
+});
+
+// ── Plan artifact lifecycle (plan-mode P2) ──────────────────────────────────
+// The conversation's one plan rides tab.plan: an ExitPlanMode envelope stamps
+// it proposed, approval flips it executing (store-side), and the turn's
+// terminal settles it — clean done ⇒ built, error/stop ⇒ back to approved.
+describe("playback — plan artifact lifecycle", () => {
+  it("ExitPlanMode envelope stamps the proposal; a post-refine re-propose keeps the bumped revision", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    feed(tab, [toolUseEnv("plan-1", "ExitPlanMode", { plan: "## Do the thing" })]);
+    expect(tab.plan).toEqual({ md: "## Do the thing", status: "proposed", approvedAt: null, revision: 1 });
+    tab.onDone();
+    expect(tab.plan?.status).toBe("proposed"); // unapproved plan is untouched by the terminal
+
+    // Refine bumped the revision; the model's next proposal keeps it.
+    tab.plan = { md: "## Do the thing", status: "proposed", approvedAt: null, revision: 3 };
+    beginTurn(tab);
+    feed(tab, [toolUseEnv("plan-2", "ExitPlanMode", { plan: "## Take two" })]);
+    expect(tab.plan).toEqual({ md: "## Take two", status: "proposed", approvedAt: null, revision: 3 });
+    tab.onDone();
+  });
+
+  it("executing settles done on a clean terminal, back to approved on error", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    feed(tab, [toolUseEnv("plan-3", "ExitPlanMode", { plan: "## Build it" })]);
+    tab.plan = { md: "## Build it", status: "executing", approvedAt: 1, revision: 1 };
+    tab.onDone();
+    expect(tab.plan?.status).toBe("done");
+
+    beginTurn(tab);
+    tab.plan = { md: "## Build it", status: "executing", approvedAt: 1, revision: 1 };
+    tab.onError("stream broke");
+    expect(tab.plan?.status).toBe("approved");
+  });
+
+  it("EnterPlanMode envelope fires the pill-sync hook once", () => {
+    const tab = freshTab();
+    const fired: string[] = [];
+    tab.onEnterPlanMode = () => fired.push("plan");
+    beginTurn(tab);
+    feed(tab, [toolUseEnv("epm-1", "EnterPlanMode", {})]);
+    expect(fired).toEqual(["plan"]);
+    tab.onDone();
   });
 });

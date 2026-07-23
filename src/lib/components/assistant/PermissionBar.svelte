@@ -28,7 +28,9 @@
   }
 </script>
 
-{#if prompt}
+<!-- `kind:"plan"` asks belong to the plan card's action bar (StreamExitPlan) —
+     never double-render the generic bar for them. -->
+{#if prompt && prompt.kind !== "plan"}
   <!-- role="group" (not alertdialog): this prompt is intentionally NON-modal —
        it never traps focus or steals it from scrollback (CC-UI ref §8). An
        alertdialog role would promise focus containment we deliberately don't do. -->

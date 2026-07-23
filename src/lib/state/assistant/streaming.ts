@@ -17,7 +17,7 @@
 
 import type { TabState } from "../assistant.svelte";
 import type { Block, ChatMessage, StreamEnvelope, ThinkingBlock, ToolBlock } from "./types";
-import { ctxWindowForModelId, flattenToolResult, previewToolInput } from "./helpers";
+import { ctxWindowForModelId, flattenToolResult, partialPlanMd, previewToolInput } from "./helpers";
 import { checkMcpInitHealth } from "./healthAlerts";
 import { cliCommands } from "./cliCommands.svelte";
 import { browserDock } from "../browserDock.svelte";
@@ -706,6 +706,23 @@ function appendToolInputDelta(tab: TabState, index: number, partialJson: string)
   // big Write instead of freezing until the envelope lands.
   tab.liveOutputChars += partialJson.length;
   refreshLiveTokens(tab);
+  // ExitPlanMode's whole payload IS `plan` — stream it into the block each
+  // delta so the proposal card renders the plan being written live. No scan
+  // cap: plans outgrow the caption window and the card wants every chunk.
+  if (entry.name === "ExitPlanMode") {
+    const plan = partialPlanMd(entry.json);
+    if (plan !== "" && plan !== entry.extracted) {
+      entry.extracted = plan;
+      const id = entry.id;
+      mutateStreaming(tab, (m) => ({
+        ...m,
+        blocks: m.blocks.map((b) =>
+          b.type === "tool" && b.id === id && b.inputPartial ? { ...b, input: { plan } } : b,
+        ),
+      }));
+    }
+    return;
+  }
   // Past the scan cap the extraction window is frozen — fields can't change,
   // so skip the per-delta rescan (big Write inputs stream thousands of deltas).
   if (entry.json.length - partialJson.length >= FORM_SCAN_CAP) return;
@@ -784,6 +801,22 @@ function appendToolUse(tab: TabState, block: { id: string; name: string; input?:
   // for them this envelope call is the only guaranteed once-per-tool hook.
   if (block.name === "mcp__rift__read_browser_page" || block.name === "mcp__rift__read_browser_console") {
     browserDock.noteAssistantRead(block.name.endsWith("console") ? "console" : "page");
+  }
+  // Plan artifact hooks — also above the formed-tool early return (same
+  // once-per-tool guarantee as the dock chip note above).
+  if (block.name === "ExitPlanMode") {
+    const md = typeof block.input?.plan === "string" ? (block.input.plan as string) : "";
+    // A fresh proposal (or a post-Refine revision) becomes THE plan of this
+    // conversation; refine already bumped `revision`, so keep it.
+    if (md) {
+      tab.plan = tab.plan
+        ? { ...tab.plan, md, status: "proposed", approvedAt: null }
+        : { md, status: "proposed", approvedAt: null, revision: 1 };
+    }
+  } else if (block.name === "EnterPlanMode") {
+    // Model opted into plan mode itself — sync the composer pill so the UI
+    // mode matches what the CLI is actually doing.
+    tab.onEnterPlanMode?.(tab);
   }
   if (tab.seenToolUseIds.has(block.id)) {
     // Already live-formed from stream_events — the envelope finalizes input.
@@ -1588,6 +1621,12 @@ export function onStreamDone(tab: TabState) {
   // Clean-DONE stamp only (not error/stop): gates the continuation merge in
   // maybeBeginContinuation — never merge new frames into an errored bubble.
   tab.lastTurnDoneAt = tab.lastError == null ? Date.now() : null;
+  // Plan lifecycle: an executing plan settles with its turn — clean terminal
+  // means built (chip fades to done), an errored one drops back to approved so
+  // the artifact never claims a finish that didn't happen.
+  if (tab.plan?.status === "executing") {
+    tab.plan = { ...tab.plan, status: tab.lastError == null ? "done" : "approved" };
+  }
   tab.seenToolUseIds.clear();
   // Drop any unanswered permission asks — the backend auto-denies on turn
   // end, so a lingering Allow/Deny chip would be dead.
@@ -1682,6 +1721,7 @@ export function onStreamError(tab: TabState, msg: string) {
   tab.lastError = msg;
   tab.streaming = false;
   tab.lastTurnDoneAt = null; // errored turn — a trailing continuation must not merge into it
+  if (tab.plan?.status === "executing") tab.plan = { ...tab.plan, status: "approved" };
   if (tab.drainHandle !== null) {
     cancelAnimationFrame(tab.drainHandle);
     tab.drainHandle = null;
