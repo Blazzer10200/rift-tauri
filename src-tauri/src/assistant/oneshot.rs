@@ -776,6 +776,12 @@ pub const ANALYZE_PROGRESS_EVENT: &str = "usage-analyze-progress";
 
 #[tauri::command]
 pub async fn assistant_analyze_usage(app: AppHandle, snapshot_json: String) -> Result<String, String> {
+    // One analysis at a time — a double-click must not fire two paid spawns.
+    // Guard clears on every exit path (drop).
+    static ANALYZE_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let _in_flight = super::SpawnGuard::try_acquire(&ANALYZE_IN_FLIGHT)
+        .ok_or_else(|| "An analysis is already running — wait for it to finish.".to_string())?;
+
     let trimmed = snapshot_json.trim();
     if trimmed.is_empty() {
         return Err("no usage snapshot to analyze".into());

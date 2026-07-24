@@ -14,6 +14,13 @@
   let copied = $state(false);
   let copiedTimer: ReturnType<typeof setTimeout> | null = null;
   let exporting = $state(false);
+  let actionError = $state<string | null>(null);
+  let errorTimer: ReturnType<typeof setTimeout> | null = null;
+  function flashError(msg: string) {
+    actionError = msg;
+    if (errorTimer) clearTimeout(errorTimer);
+    errorTimer = setTimeout(() => (actionError = null), 4500);
+  }
 
   // Support bundle: logs + turn traces into a Downloads folder, then reveal it.
   async function exportBundle() {
@@ -24,6 +31,7 @@
       await openPath(dir);
     } catch (e) {
       console.error("diag export failed", e);
+      flashError(`Export failed — ${e}`);
     } finally {
       exporting = false;
     }
@@ -37,14 +45,23 @@
   let scrollTop = $state(0);
   let viewH = $state(0);
   let stick = $state(true);  // auto-follow the tail unless the user scrolls up
+  // Expanded rows (keyed by seq) — declared here because the windowing math below
+  // reads expanded.size to decide whether to virtualize.
+  let expanded = $state<Set<number>>(new Set());
 
   const rows = $derived(diagnostics.filtered);
   const total = $derived(rows.length);
-  const startIdx = $derived(Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN));
-  const endIdx = $derived(Math.min(total, Math.ceil((scrollTop + viewH) / ROW_H) + OVERSCAN));
+  // Windowing assumes fixed ROW_H. An expanded row adds a variable-height <pre>
+  // below it, which would desync the scrollTop→index math (rows jump / misalign).
+  // So when any row is expanded we render the full list — an inspection state
+  // where the user has stopped following the tail, and the layout above the
+  // expanded row is identical to padTop+slice, so nothing jumps on expand.
+  const windowed = $derived(expanded.size === 0);
+  const startIdx = $derived(windowed ? Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN) : 0);
+  const endIdx = $derived(windowed ? Math.min(total, Math.ceil((scrollTop + viewH) / ROW_H) + OVERSCAN) : total);
   const slice = $derived(rows.slice(startIdx, endIdx));
   const padTop = $derived(startIdx * ROW_H);
-  const padBottom = $derived(Math.max(0, (total - endIdx) * ROW_H));
+  const padBottom = $derived(windowed ? Math.max(0, (total - endIdx) * ROW_H) : 0);
 
   function onScroll() {
     if (!scrollEl) return;
@@ -52,6 +69,11 @@
     viewH = scrollEl.clientHeight;
     // Within ~2 rows of the bottom → keep sticking; scrolled up → release.
     stick = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < ROW_H * 2;
+  }
+
+  function jumpToLive() {
+    stick = true;
+    if (scrollEl) { scrollEl.scrollTop = scrollEl.scrollHeight; scrollTop = scrollEl.scrollTop; }
   }
 
   // New events arrived: if sticking, jump to the tail after the DOM updates.
@@ -78,16 +100,26 @@
       copiedTimer = setTimeout(() => (copied = false), 1600);
     } catch (e) {
       console.error("diag copy failed", e);
+      flashError(`Copy failed — ${e}`);
     }
   }
 
   // Expand/collapse the fields JSON per row (keyed by seq).
-  let expanded = $state<Set<number>>(new Set());
   function toggleRow(seq: number) {
     const next = new Set(expanded);
     next.has(seq) ? next.delete(seq) : next.add(seq);
     expanded = next;
   }
+
+  // Debounced search: the input drives `searchText` immediately (responsive box +
+  // clear button), but the store's `search` — which recomputes `filtered` across
+  // up to 2000 rows — only follows after a short pause, so typing stays smooth.
+  let searchText = $state(diagnostics.search);
+  $effect(() => {
+    const v = searchText;
+    const id = setTimeout(() => { diagnostics.search = v; }, 140);
+    return () => clearTimeout(id);
+  });
 
   function fmtTime(at: string): string {
     // ISO → HH:MM:SS.mmm, locale-independent, no Date-parse surprises.
@@ -101,6 +133,13 @@
   }
   function hasFields(e: DiagEvent): boolean {
     return fieldsStr(e.fields) !== "";
+  }
+  // A row is expandable when it carries structured fields OR its message is long
+  // enough to be clipped by the single-line ellipsis — otherwise a long fieldless
+  // message (a full path, a stack frame) is unreadable with no way to see the rest.
+  const MSG_CLIP_LEN = 84;
+  function expandable(e: DiagEvent): boolean {
+    return hasFields(e) || e.message.length > MSG_CLIP_LEN;
   }
 
   // ── At-a-glance summary (header) ─────────────────────────────────────────
@@ -158,6 +197,10 @@
       </div>
     </header>
 
+    {#if actionError}
+      <div class="dc-actionerr" role="alert">{actionError}</div>
+    {/if}
+
     <div class="dc-vitals" role="group" aria-label="Subsystem health">
       {#each diagnostics.health as h (h.key)}
         <button type="button" class="dc-vital {h.level}" class:active={diagnostics.resourceFilter === h.key}
@@ -176,7 +219,12 @@
     <div class="dc-filters">
       <div class="dc-search">
         <Search size={13} />
-        <input type="text" placeholder="Search message, resource, fields…" bind:value={diagnostics.search} spellcheck="false" />
+        <input type="text" placeholder="Search message, resource, fields…" aria-label="Search events" bind:value={searchText} spellcheck="false" />
+        {#if searchText}
+          <button type="button" class="dc-search-clear" onclick={() => (searchText = "")} use:tooltip={"Clear search"} aria-label="Clear search">
+            <X size={12} />
+          </button>
+        {/if}
       </div>
       <div class="dc-levels" role="group" aria-label="Minimum level">
         {#each LEVELS as lv (lv)}
@@ -209,22 +257,30 @@
           <div class="dc-rowwrap">
             <button type="button" class="dc-row lvl-{e.level}" class:sys={e.stage === "system"}
               class:open={expanded.has(e.seq)}
-              onclick={() => hasFields(e) && toggleRow(e.seq)} class:has-fields={hasFields(e)}>
+              onclick={() => expandable(e) && toggleRow(e.seq)} class:has-fields={expandable(e)}>
               <span class="dc-t">{fmtTime(e.at)}</span>
               <span class="dc-lvl">{e.level}</span>
               {#if e.resource}<span class="dc-res-tag">{e.resource}</span>{/if}
               <span class="dc-msg">{e.message}</span>
-              {#if hasFields(e)}<span class="dc-chev">{expanded.has(e.seq) ? "▾" : "▸"}</span>{/if}
+              {#if expandable(e)}<span class="dc-chev">{expanded.has(e.seq) ? "▾" : "▸"}</span>{/if}
               {#if e.file}<span class="dc-file">{e.file}</span>{/if}
             </button>
-            {#if expanded.has(e.seq) && hasFields(e)}
-              <pre class="dc-fields">{fieldsStr(e.fields)}</pre>
+            {#if expanded.has(e.seq) && expandable(e)}
+              {#if hasFields(e)}
+                <pre class="dc-fields">{fieldsStr(e.fields)}</pre>
+              {:else}
+                <pre class="dc-fields dc-fields-msg">{e.message}</pre>
+              {/if}
             {/if}
           </div>
         {/each}
         <div style="height:{padBottom}px"></div>
       {/if}
     </div>
+
+    {#if !stick && total > 0}
+      <button type="button" class="dc-jumplive" onclick={jumpToLive}>Jump to live ▾</button>
+    {/if}
 
     <footer class="dc-foot">
       <span class="dc-state" class:paused={diagnostics.paused}>
@@ -275,7 +331,7 @@
     border-radius: var(--radius-2xl, 16px); box-shadow: var(--shadow-lg, 0 24px 64px oklch(0 0 0 / 0.55));
     overflow: hidden; }
   /* page flavor — fills the workspace body instead of floating as a modal */
-  .dc-panel.page { width: 100%; height: 100%; max-width: none; }
+  .dc-panel.page { width: 100%; height: 100%; max-width: none; border: 0; border-radius: 0; box-shadow: none; }
   /* faint accent top-edge — Rift's "this surface is alive" cue */
   .dc-panel::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 1px; pointer-events: none;
     background: linear-gradient(90deg, transparent, color-mix(in oklab, var(--accent) 50%, transparent) 30% 70%, transparent); }
@@ -313,6 +369,13 @@
   :global(.dc-okicon) { color: var(--dc-ok, var(--ok)); }
   .dc-close:hover { color: var(--dc-bad); background: color-mix(in oklab, var(--dc-bad) 12%, transparent); }
 
+  /* action-error strip — surfaces export/copy failures that used to only reach the
+     dev console (silent to the user). Auto-dismisses; red-tinted, unmissable. */
+  .dc-actionerr { flex: none; padding: 7px 16px; font-size: var(--fs-xs); font-weight: 600;
+    color: color-mix(in oklab, var(--dc-bad) 30%, var(--fg));
+    background: color-mix(in oklab, var(--dc-bad) 12%, transparent);
+    border-bottom: 1px solid color-mix(in oklab, var(--dc-bad) 30%, var(--border)); }
+
   /* ── Vital signs (subsystem health) — the overview, above the raw stream ── */
   .dc-vitals { display: grid; grid-template-columns: repeat(auto-fill, minmax(155px, 1fr)); gap: 6px;
     padding: 11px 14px; flex: none; border-bottom: 1px solid var(--border); background: var(--bg, transparent); }
@@ -347,6 +410,10 @@
     padding: 6px 10px; color: var(--fg-muted); transition: border-color var(--dur-fast, .14s); }
   .dc-search:focus-within { border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--ring); }
   .dc-search input { flex: 1; border: 0; background: none; color: var(--fg); font: inherit; font-size: var(--fs-sm); outline: none; }
+  .dc-search-clear { display: grid; place-items: center; width: 18px; height: 18px; flex: none; padding: 0;
+    border: 0; border-radius: 4px; background: none; color: var(--fg-muted); cursor: pointer;
+    transition: background var(--dur-fast, .14s), color var(--dur-fast, .14s); }
+  .dc-search-clear:hover { background: var(--surface-hover); color: var(--fg); }
   .dc-levels { display: flex; gap: 0; }
   .dc-lv { font-size: var(--fs-xs); text-transform: capitalize; padding: 5px 10px; border: 1px solid var(--field-border);
     background: var(--bg-inset); color: var(--fg-muted); cursor: pointer; font-weight: 500;
@@ -387,7 +454,8 @@
     color: color-mix(in oklab, var(--accent) 78%, var(--fg)); }
   .dc-msg { flex: 1; overflow: hidden; text-overflow: ellipsis; color: var(--fg); }
   .dc-chev { flex: none; color: var(--fg-faint); font-size: 9px; }
-  .dc-file { flex: none; color: var(--fg-faint); font-size: 10px; }
+  .dc-file { flex: none; max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--fg-faint); font-size: 10px; }
 
   .lvl-warn  .dc-lvl { color: var(--dc-warn); background: color-mix(in oklab, var(--dc-warn) 16%, transparent); }
   .lvl-error .dc-lvl { color: var(--dc-bad);  background: color-mix(in oklab, var(--dc-bad) 18%, transparent); }
@@ -400,6 +468,17 @@
   .dc-fields { margin: 0; padding: 8px 14px 11px 50px; background: var(--bg-inset); color: var(--fg-2);
     font-family: var(--font-mono, ui-monospace, monospace); font-size: 11px; line-height: 1.55;
     white-space: pre-wrap; word-break: break-word; border-left: 2px solid color-mix(in oklab, var(--accent) 30%, var(--border)); }
+  .dc-fields-msg { color: var(--fg); font-family: var(--font-ui); font-size: var(--fs-sm); }
+
+  /* jump-to-live pill — appears only when scrolled up off the tail (#12). */
+  .dc-jumplive { position: absolute; left: 50%; bottom: 54px; transform: translateX(-50%);
+    display: inline-flex; align-items: center; gap: 5px; padding: 6px 13px; font-family: var(--font-ui);
+    font-size: var(--fs-xs); font-weight: 700; color: var(--accent); cursor: pointer;
+    border: 1px solid color-mix(in oklab, var(--accent) 45%, transparent);
+    background: color-mix(in oklab, var(--accent) 16%, var(--bg-elev-1, var(--surface)));
+    border-radius: 999px; box-shadow: 0 6px 18px oklch(0 0 0 / 0.3); z-index: 4;
+    transition: background var(--dur-fast, .14s); }
+  .dc-jumplive:hover { background: color-mix(in oklab, var(--accent) 24%, var(--bg-elev-1, var(--surface))); }
 
   /* ── Footer status bar ── */
   .dc-foot { display: flex; align-items: center; gap: 10px; flex: none; padding: 7px 14px;

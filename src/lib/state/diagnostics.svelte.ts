@@ -61,6 +61,11 @@ class DiagnosticsStore {
   #initing: Promise<void> | null = null;
   /** Events received while paused, flushed into the ring on resume. */
   #pausedBuf: DiagEvent[] = [];
+  /** Live events awaiting the next batched flush. Coalesces the bus's high event
+   *  rate (200/s Log + 50/s System) into ~one array rebuild per animation frame
+   *  instead of one full ring-copy per event. */
+  #pending: DiagEvent[] = [];
+  #flushHandle: number | null = null;
   /** Synthetic seq for frontend-originated events (negative to avoid clashes). */
   #feSeq = -1;
   #errHooked = false;
@@ -149,6 +154,8 @@ class DiagnosticsStore {
 
   dispose() {
     if (this.#unlisten) { this.#unlisten(); this.#unlisten = null; }
+    if (this.#flushHandle != null && typeof cancelAnimationFrame === "function") cancelAnimationFrame(this.#flushHandle);
+    this.#flushHandle = null;
     this.#unhookErrors();
     this.live = false;
   }
@@ -157,7 +164,7 @@ class DiagnosticsStore {
   resume() {
     this.paused = false;
     if (this.#pausedBuf.length) {
-      for (const ev of this.#pausedBuf) this.#append(ev);
+      this.#appendMany(this.#pausedBuf);
       this.#pausedBuf = [];
     }
   }
@@ -166,6 +173,7 @@ class DiagnosticsStore {
   clear() {
     this.events = [];
     this.#pausedBuf = [];
+    this.#pending = [];
     this.dropped = 0;
   }
 
@@ -188,15 +196,35 @@ class DiagnosticsStore {
       if (this.#pausedBuf.length > RING_CAP) this.#pausedBuf.shift();
       return;
     }
-    this.#append(ev);
+    // Queue for the next batched flush instead of rebuilding the ring per event.
+    this.#pending.push(ev);
+    this.#scheduleFlush();
   }
 
-  #append(ev: DiagEvent) {
-    // Reassign (not mutate) so Svelte 5 tracks the change.
-    const next = this.events.length >= RING_CAP
-      ? (this.dropped++, this.events.slice(1))   // drop oldest (index 0), not a tail-splice
-      : this.events.slice();
-    next.push(ev);
+  #scheduleFlush() {
+    if (this.#flushHandle != null) return;
+    const raf: (cb: FrameRequestCallback) => number =
+      typeof requestAnimationFrame === "function"
+        ? requestAnimationFrame
+        : (cb) => setTimeout(() => cb(0), 16) as unknown as number;
+    this.#flushHandle = raf(() => {
+      this.#flushHandle = null;
+      if (this.#pending.length === 0) return;
+      const batch = this.#pending;
+      this.#pending = [];
+      this.#appendMany(batch);
+    });
+  }
+
+  #appendMany(evs: DiagEvent[]) {
+    if (evs.length === 0) return;
+    // Reassign (not mutate) so Svelte 5 tracks the change — one rebuild per batch.
+    let next = this.events.slice();
+    for (const ev of evs) next.push(ev);
+    if (next.length > RING_CAP) {
+      this.dropped += next.length - RING_CAP;   // count everything rolled off the head
+      next = next.slice(next.length - RING_CAP);
+    }
     this.events = next;
   }
 

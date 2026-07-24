@@ -308,6 +308,16 @@ pub fn write_crash_report(location: &str, payload: &str) {
 static EVENTS_LOG: OnceLock<Option<Mutex<std::fs::File>>> = OnceLock::new();
 static EVENTS_LOG_BYTES: AtomicU64 = AtomicU64::new(0);
 const EVENTS_LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
+/// events.ndjson lines dropped because the disk-writer channel was full (the
+/// writer fell behind a burst). Bounded backpressure — the live console + bus
+/// stay complete; only the on-disk NDJSON mirror skips lines. Surfaced via the
+/// getter + a one-time warn so a lagging disk is never silently lossy.
+static DISK_SINK_DROPPED: AtomicU64 = AtomicU64::new(0);
+const DISK_SINK_CAP: usize = 4096;
+/// Count of events.ndjson lines skipped under disk-writer backpressure.
+pub fn disk_sink_dropped() -> u64 {
+    DISK_SINK_DROPPED.load(Ordering::Relaxed)
+}
 
 /// `<appLogDir>/events.ndjson` — beside `rift.log` (mirrors `turns_log_path`).
 pub fn events_log_path() -> Option<std::path::PathBuf> {
@@ -358,12 +368,16 @@ fn events_log_write(ev: &DiagEvent) {
 }
 
 /// Drain bus events onto the NDJSON sink from one dedicated OS thread — the
-/// broadcast receiver never blocks on disk I/O (unbounded mpsc absorbs bursts;
-/// the bus's own 4096 cap bounds total memory).
+/// broadcast receiver never blocks on disk I/O. The writer channel is BOUNDED
+/// (`DISK_SINK_CAP`): if the disk falls behind a burst, lines are dropped (and
+/// counted in `DISK_SINK_DROPPED`) rather than growing memory without limit.
+/// Only the on-disk NDJSON mirror skips lines — the live console + bus, fed from
+/// the broadcast directly, stay complete.
 pub fn spawn_event_sink() {
     use tokio::sync::broadcast::error::RecvError;
+    use std::sync::mpsc::TrySendError;
     let mut rx = bus().subscribe();
-    let (tx, file_rx) = std::sync::mpsc::channel::<DiagEvent>();
+    let (tx, file_rx) = std::sync::mpsc::sync_channel::<DiagEvent>(DISK_SINK_CAP);
     std::thread::spawn(move || {
         while let Ok(ev) = file_rx.recv() {
             events_log_write(&ev);
@@ -372,11 +386,17 @@ pub fn spawn_event_sink() {
     tauri::async_runtime::spawn(async move {
         loop {
             match rx.recv().await {
-                Ok(ev) => {
-                    if tx.send(ev).is_err() {
-                        break;
+                Ok(ev) => match tx.try_send(ev) {
+                    Ok(()) => {}
+                    // Writer fell behind — drop this line (bounded backpressure),
+                    // count it, and warn once so a lagging disk isn't silent.
+                    Err(TrySendError::Full(_)) => {
+                        if DISK_SINK_DROPPED.fetch_add(1, Ordering::Relaxed) == 0 {
+                            log::warn!("diagnostics disk sink lagging — dropping events.ndjson lines under load (console + bus stay complete)");
+                        }
                     }
-                }
+                    Err(TrySendError::Disconnected(_)) => break,
+                },
                 Err(RecvError::Lagged(_)) => continue,
                 Err(RecvError::Closed) => break,
             }

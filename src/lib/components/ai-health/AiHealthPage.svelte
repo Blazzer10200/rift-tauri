@@ -241,7 +241,9 @@
     if (t.includes("opus")) return "Opus";
     if (t.includes("sonnet")) return "Sonnet";
     if (t.includes("haiku")) return "Haiku";
-    return m.charAt(0).toUpperCase() + m.slice(1);
+    // Claude-only product now — any non-Claude legacy id left in the historical
+    // log folds into one "Other" bucket rather than being featured by name.
+    return "Other";
   };
   const modelSpend = $derived.by(() => {
     const merged = new Map<string, number>();
@@ -422,15 +424,22 @@
     // contradicts its own body. Demote the headline to an informational "API is
     // slow right now" rather than a user-actionable alarm.
     const flaggedDims = dims.filter((d) => d.tint !== "ok");
-    // Latency-only AND upstream → demote the whole headline (nothing to fix).
-    const latencyIsUpstream = !!latencyAttribution
+    // Latency flagged but attributed upstream (Anthropic API, not the user's
+    // setup) must never be what a red "Action needed" headline points at — there's
+    // nothing the user can do about it. Two cases:
+    //  • latency is the SOLE flag → demote the whole headline to a calm info line.
+    //  • latency is worst but something ELSE is also flagged → lead the headline
+    //    with that OTHER (actionable) dim, and add a short "slow replies are
+    //    upstream" reassurance tail so the strip never blames the user's setup.
+    const latencyUpstream = !!latencyAttribution;
+    const nonLatencyFlagged = flaggedDims.filter((d) => d.k !== "Latency");
+    const latencyIsSoleUpstream = latencyUpstream
       && flaggedDims.length === 1 && flaggedDims[0].k === "Latency";
-    // Worst dim is upstream-latency but something ELSE is also flagged → keep the
-    // alarm (the other dim is real) but reword latency's note so it doesn't read
-    // as "your latency is broken" when we know it's the API.
-    const worstIsUpstreamLatency = !!latencyAttribution && worst.k === "Latency";
-    const tint = worst.tint;
-    const label = latencyIsUpstream ? "API is slow right now"
+    const headlineDim = latencyUpstream && nonLatencyFlagged.length > 0
+      ? nonLatencyFlagged.reduce((a, b) => (RANK[b.tint] > RANK[a.tint] ? b : a))
+      : worst;
+    const tint = headlineDim.tint;
+    const label = latencyIsSoleUpstream ? "API is slow right now"
       : tint === "ok" ? "Healthy" : tint === "warn" ? "Needs a look" : "Action needed";
     // Green note names only the dimensions actually checked (some are absent
     // below their sample floor), so it never claims a clean bill on data it
@@ -439,19 +448,23 @@
     const okList = okNames.length === 1 ? okNames[0]
       : okNames.length === 2 ? `${okNames[0]} and ${okNames[1]}`
       : `${okNames.slice(0, -1).join(", ")}, and ${okNames[okNames.length - 1]}`;
-    const note = latencyIsUpstream ? "The wait is on Anthropic's side, not your setup — it usually clears on its own."
-      : worstIsUpstreamLatency ? "The slow replies are on Anthropic's side, not your setup."
+    // When the headline speaks to a real actionable dim AND latency is also
+    // flagged upstream, tack on the reassurance so the strip isn't read as
+    // blaming the user's setup for the slow replies.
+    const upstreamTail = latencyUpstream && headlineDim.k !== "Latency"
+      ? " Slow replies are on Anthropic's side, not your setup." : "";
+    const note = latencyIsSoleUpstream ? "The wait is on Anthropic's side, not your setup — it usually clears on its own."
       : tint === "ok"
       ? `${okList.charAt(0).toUpperCase()}${okList.slice(1)} ${okNames.length === 1 ? "looks" : "look"} good.`
-      : `${worst.k} ${tint === "hot" ? "needs attention" : "is worth a look"}.`;
+      : `${headlineDim.k} ${tint === "hot" ? "needs attention" : "is worth a look"}.${upstreamTail}`;
     // Problem dimensions get a labeled value pill on the right of the strip; when
-    // all-clear, the three dimension dots stand in (nothing to flag).
-    const flagged = dims.filter((d) => d.tint !== "ok");
-    // Display tint softens the headline to amber (warn) for the upstream-latency
+    // all-clear, the dimension dots stand in (nothing to flag).
+    const flagged = flaggedDims;
+    // Display tint softens the headline to amber (warn) only for the sole-upstream
     // case — a red "hot" strip reads as user-actionable breakage, but there's
-    // nothing to fix. The per-dimension flag pill keeps its true (hot) tint, so
-    // the real latency number is still honestly shown as high.
-    const displayTint = latencyIsUpstream ? "warn" : tint;
+    // nothing to fix. The per-dimension flag pill keeps its true (hot) tint, so the
+    // real latency number is still honestly shown as high.
+    const displayTint = latencyIsSoleUpstream ? "warn" : tint;
     return { tint: displayTint, label, note, dims, flagged };
   });
 
@@ -569,9 +582,15 @@
   });
 
   const impactRank: Record<string, number> = { high: 0, medium: 1, low: 2 };
-  const cards = $derived(
-    usage.advice ? [...usage.advice.cards].sort((a, b) => (impactRank[a.impact] ?? 3) - (impactRank[b.impact] ?? 3)) : [],
-  );
+  // Sort by impact, then dedupe by title — title is the only stable id the model
+  // emits, and it keys the apply/undo bookkeeping + the keyed each. Two cards
+  // sharing a title would collide; keep the first (highest-impact) of each.
+  const cards = $derived.by(() => {
+    if (!usage.advice) return [];
+    const sorted = [...usage.advice.cards].sort((a, b) => (impactRank[a.impact] ?? 3) - (impactRank[b.impact] ?? 3));
+    const seen = new Set<string>();
+    return sorted.filter((c) => (seen.has(c.title) ? false : (seen.add(c.title), true)));
+  });
 
   // ── Current harness config ── the live values an apply action would change.
   // Pretty labels so newcomers see plain words, not "xhigh"/"sonnet".
@@ -585,7 +604,7 @@
     none: "Low", smart: "Medium", deep: "High", ultra: "X-High",
   };
   const MODEL_LABEL: Record<string, string> = {
-    opus: "Opus", sonnet: "Sonnet", haiku: "Haiku",
+    opus: "Opus", sonnet: "Sonnet", haiku: "Haiku", fable: "Fable",
     "claude-opus-4-7": "Opus", "claude-opus-4-6": "Opus", "claude-opus-4-5": "Opus",
     "claude-sonnet-4-6": "Sonnet", "claude-sonnet-4-5": "Sonnet", "claude-fable-5": "Fable",
   };
@@ -792,6 +811,117 @@
         </section>
       {/if}
 
+      <!-- ── Speed & efficiency (B2: persisted turn telemetry) ── plain-English
+           labels: "first reply" = the wait before text starts; "typical" = the
+           middle of your replies (median), "slower" = your slow tail (≈1 in 10,
+           p90). Tooltips are banned app-wide (2026-06-15), so the meaning lives
+           in the labels + the footnote, not on hover. Sits high (right under the
+           advisor) because the verdict strip's Latency/Cache reads come straight
+           from here. -->
+      {#if perfStats}
+        <section class="ah-card">
+          <div class="ah-card-h"><Gauge size={15} strokeWidth={1.9} />Speed &amp; efficiency
+            <span class="ah-range" role="group" aria-label="Time range">
+              {#each ["24h", "7d", "30d", "all"] as const as w (w)}
+                <button type="button" class="ah-range-b" class:active={perfWindow === w} aria-pressed={perfWindow === w} onclick={() => setPerfWindow(w)}>
+                  {w === "all" ? "All" : w}
+                </button>
+              {/each}
+            </span>
+          </div>
+          {#if !hasPerf}
+          <p class="ah-muted">{perfWindow === "all"
+            ? "Not enough replies yet to measure — send a few Claude turns and check back."
+            : `Not enough replies in ${PERF_WINDOW_LABEL[perfWindow]} to measure — try a wider range.`}</p>
+          {:else}
+          <p class="ah-card-sub">How fast Claude responds and how efficiently it reuses your conversation — {fmtNum(perfStats.total_turns)} replies over {PERF_WINDOW_LABEL[perfWindow]}{latencyP90Source.recent ? " · live verdict from the last 24 hours" : ""}.</p>
+          <div class="ah-tiles">
+            <div class="ah-tile">
+              <div class="ah-tile-v">{fmtMs(perfStats.p50_ttft_text_ms)}</div>
+              <div class="ah-tile-k">typical wait to first reply</div>
+            </div>
+            {#if latencyP90Source.ms != null}
+              <!-- Warm-only slow-reply (cold-start excluded) so the tinted verdict
+                   reflects steady-state speed, not a one-time spawn cost. -->
+              <div class="ah-tile {latencyTint}">
+                <div class="ah-tile-v">{fmtMs(latencyP90Source.ms)}</div>
+                <div class="ah-tile-k">on a slow reply{#if latencyVerdict}<span class="ah-verdict {latencyTint}">{latencyVerdict}</span>{:else if !latencyP90Source.recent}<span class="ah-verdict">lifetime</span>{/if}</div>
+              </div>
+            {:else if latencyLearning}
+              <!-- G3: perf data exists but warm sample is below the floor. -->
+              <div class="ah-tile">
+                <div class="ah-tile-v">—</div>
+                <div class="ah-tile-k">slow-reply speed<span class="ah-verdict">learning</span></div>
+              </div>
+            {/if}
+            <div class="ah-tile">
+              <div class="ah-tile-v">{fmtMs(perfStats.p50_duration_ms)}</div>
+              <div class="ah-tile-k">typical full reply</div>
+            </div>
+            {#if perfStats.cache_hit_rate != null}
+              <div class="ah-tile {cacheTint}">
+                <div class="ah-tile-v">{Math.round(perfStats.cache_hit_rate * 100)}%</div>
+                <div class="ah-tile-k">conversation reused{#if cacheVerdict}<span class="ah-verdict {cacheTint}">{cacheVerdict}</span>{/if}</div>
+              </div>
+            {/if}
+            <div class="ah-tile">
+              <div class="ah-tile-v">{fmtNum(perfStats.total_output_tokens)}</div>
+              <div class="ah-tile-k">words written (tokens)</div>
+            </div>
+          </div>
+
+          <!-- G5: tell the user when slowness is upstream (the API), not their
+               setup — the single most reassuring thing to surface. -->
+          {#if latencyAttribution}
+            <p class="ah-attrib"><Wifi size={13} strokeWidth={1.9} />{latencyAttribution}</p>
+          {/if}
+          <!-- cont.219: model-vs-Rift split — proves the wait is the model, not
+               Rift's plumbing, on the user's own turns. -->
+          {#if splitAttribution}
+            <p class="ah-attrib subtle"><Gauge size={13} strokeWidth={1.9} />About {splitAttribution.pct}% of any wait is Claude itself working; Rift's own overhead adds just {splitAttribution.rift} per reply. The wait is the model, not the app.</p>
+          {/if}
+          <!-- G1: cold-start shown as the one-time warm-up it is, never as a
+               problem with the user's setup. Only when warm is meaningfully
+               faster than cold (≥2s gap) — else "keeping a chat going stays fast"
+               would be a hollow claim (warm is slow too → that's a real signal,
+               not a warm-up artifact, and the verdict/advisor already own it). -->
+          {#if showColdNote}
+            <p class="ah-attrib subtle"><Snowflake size={13} strokeWidth={1.9} />The first reply of a session takes ~{fmtMs(perfStats.p90_ttft_text_cold_ms)} while Claude warms up — a one-time cost, not counted against your speed above. Keeping a chat going stays fast.</p>
+          {/if}
+
+          {#if latencySpark}
+            <div class="ah-spark-row">
+              <span class="ah-spark-k">slow-reply wait · {PERF_WINDOW_LABEL[perfWindow]}</span>
+              <svg class="ah-spark" viewBox="0 0 {SPARK_W} {SPARK_H}" preserveAspectRatio="none" aria-hidden="true">
+                <polyline class="ah-spark-line {latencySpark.tint}" points={latencySpark.line} fill="none" />
+              </svg>
+              <span class="ah-spark-v">{fmtMs(latencySpark.first)} → {fmtMs(latencySpark.last)}</span>
+            </div>
+          {/if}
+
+          {#if modelLat.length > 0}
+            <!-- cont.300: by_model always existed in the aggregate (the advisor
+                 reads it) — now the user sees it too. -->
+            <div class="ah-mlat">
+              <span class="ah-mlat-h">By model</span>
+              {#each modelLat as g (`${g.model}:${g.effort ?? ""}`)}
+                <div class="ah-mlat-row">
+                  <span class="ah-mlat-k">{modelLabel(g.model)}{g.effort ? ` · ${g.effort}` : ""}</span>
+                  <span class="ah-mlat-v">typical {fmtMs(g.p50_ttft_text_ms)} · slow {fmtMs(g.p90_ttft_text_ms)} · {fmtNum(g.turn_count)} replies{g.dominant_cause ? ` · mostly ${g.dominant_cause}` : ""}</span>
+                </div>
+              {/each}
+            </div>
+          {/if}
+
+          <p class="ah-glossary">
+            <strong>Typical</strong> is the middle of your replies — half are faster, half slower.
+            <strong>Slow reply</strong> is one of your slower ones (about 1 in 10).
+            <strong>Conversation reused</strong> is how much of the chat Claude remembers without re-reading it — higher means faster, cheaper replies.
+          </p>
+          {/if}
+        </section>
+      {/if}
+
       <!-- ── Current setup ── the live harness knobs an apply action tunes -->
       <section class="ah-card half">
         <div class="ah-card-h"><SlidersHorizontal size={15} strokeWidth={1.9} />Your current setup</div>
@@ -837,6 +967,8 @@
           <p class="ah-muted">Plan limits apply to Claude subscription accounts. You're on an API key — billed per token — so there are no usage windows to track here. Your speed &amp; efficiency below still apply.</p>
         {:else if usage.rateLimitsError}
           <p class="ah-muted">Couldn't load your plan limits right now. {usage.rateLimitsError} They'll appear once you've run a Claude turn to refresh your login.</p>
+        {:else if usage.rateLimits === null}
+          <p class="ah-muted">Loading your plan limits…</p>
         {:else if limitRows.length === 0}
           <p class="ah-muted">No subscription limits to show yet — sign in with a Claude plan, or run a turn to refresh.</p>
         {:else}
@@ -928,7 +1060,7 @@
               {#each modelSpend as m (m.label)}
                 <div class="ah-model-row">
                   <span class="ah-model-k">{m.label}</span>
-                  <div class="ah-track sm"><div class="ah-fill warn" style:width="{Math.round(m.share * 100)}%"></div></div>
+                  <div class="ah-track sm"><div class="ah-fill spend" style:width="{Math.round(m.share * 100)}%"></div></div>
                   <span class="ah-model-v">{fmtUsd(m.usd)}</span>
                 </div>
               {/each}
@@ -936,113 +1068,6 @@
           {/if}
         {/if}
       </section>
-
-      <!-- ── Speed & efficiency (B2: persisted turn telemetry) ── plain-English
-           labels: "first reply" = the wait before text starts; "typical" = the
-           middle of your replies (median), "slower" = your slow tail (≈1 in 10,
-           p90). Tooltips are banned app-wide (2026-06-15), so the meaning lives
-           in the labels + the footnote, not on hover. -->
-      {#if perfStats && (hasPerf || perfWindow !== "all")}
-        <section class="ah-card">
-          <div class="ah-card-h"><Gauge size={15} strokeWidth={1.9} />Speed &amp; efficiency
-            <span class="ah-range" role="group" aria-label="Time range">
-              {#each ["24h", "7d", "30d", "all"] as const as w (w)}
-                <button type="button" class="ah-range-b" class:active={perfWindow === w} onclick={() => setPerfWindow(w)}>
-                  {w === "all" ? "All" : w}
-                </button>
-              {/each}
-            </span>
-          </div>
-          {#if perfStats.total_turns < 3}
-          <p class="ah-muted">Not enough replies in {PERF_WINDOW_LABEL[perfWindow]} to measure — widen the range.</p>
-          {:else}
-          <p class="ah-card-sub">How fast Claude responds and how efficiently it reuses your conversation — {fmtNum(perfStats.total_turns)} replies over {PERF_WINDOW_LABEL[perfWindow]}{latencyP90Source.recent ? " · live verdict from the last 24 hours" : ""}.</p>
-          <div class="ah-tiles">
-            <div class="ah-tile">
-              <div class="ah-tile-v">{fmtMs(perfStats.p50_ttft_text_ms)}</div>
-              <div class="ah-tile-k">typical wait to first reply</div>
-            </div>
-            {#if latencyP90Source.ms != null}
-              <!-- Warm-only slow-reply (cold-start excluded) so the tinted verdict
-                   reflects steady-state speed, not a one-time spawn cost. -->
-              <div class="ah-tile {latencyTint}">
-                <div class="ah-tile-v">{fmtMs(latencyP90Source.ms)}</div>
-                <div class="ah-tile-k">on a slow reply{#if latencyVerdict}<span class="ah-verdict {latencyTint}">{latencyVerdict}</span>{:else if !latencyP90Source.recent}<span class="ah-verdict">lifetime</span>{/if}</div>
-              </div>
-            {:else if latencyLearning}
-              <!-- G3: perf data exists but warm sample is below the floor. -->
-              <div class="ah-tile">
-                <div class="ah-tile-v">—</div>
-                <div class="ah-tile-k">slow-reply speed<span class="ah-verdict">learning</span></div>
-              </div>
-            {/if}
-            <div class="ah-tile">
-              <div class="ah-tile-v">{fmtMs(perfStats.p50_duration_ms)}</div>
-              <div class="ah-tile-k">typical full reply</div>
-            </div>
-            {#if perfStats.cache_hit_rate != null}
-              <div class="ah-tile {cacheTint}">
-                <div class="ah-tile-v">{Math.round(perfStats.cache_hit_rate * 100)}%</div>
-                <div class="ah-tile-k">conversation reused{#if cacheVerdict}<span class="ah-verdict {cacheTint}">{cacheVerdict}</span>{/if}</div>
-              </div>
-            {/if}
-            <div class="ah-tile">
-              <div class="ah-tile-v">{fmtNum(perfStats.total_output_tokens)}</div>
-              <div class="ah-tile-k">words written (tokens)</div>
-            </div>
-          </div>
-
-          <!-- G5: tell the user when slowness is upstream (the API), not their
-               setup — the single most reassuring thing to surface. -->
-          {#if latencyAttribution}
-            <p class="ah-attrib"><Wifi size={13} strokeWidth={1.9} />{latencyAttribution}</p>
-          {/if}
-          <!-- cont.219: model-vs-Rift split — proves the wait is the model, not
-               Rift's plumbing, on the user's own turns. -->
-          {#if splitAttribution}
-            <p class="ah-attrib subtle"><Gauge size={13} strokeWidth={1.9} />About {splitAttribution.pct}% of any wait is Claude itself working; Rift's own overhead adds just {splitAttribution.rift} per reply. The wait is the model, not the app.</p>
-          {/if}
-          <!-- G1: cold-start shown as the one-time warm-up it is, never as a
-               problem with the user's setup. Only when warm is meaningfully
-               faster than cold (≥2s gap) — else "keeping a chat going stays fast"
-               would be a hollow claim (warm is slow too → that's a real signal,
-               not a warm-up artifact, and the verdict/advisor already own it). -->
-          {#if showColdNote}
-            <p class="ah-attrib subtle"><Snowflake size={13} strokeWidth={1.9} />The first reply of a session takes ~{fmtMs(perfStats.p90_ttft_text_cold_ms)} while Claude warms up — a one-time cost, not counted against your speed above. Keeping a chat going stays fast.</p>
-          {/if}
-
-          {#if latencySpark}
-            <div class="ah-spark-row">
-              <span class="ah-spark-k">slow-reply wait · last {perfStats.latency_p90_by_day.filter((d) => d[1] != null).length} days</span>
-              <svg class="ah-spark" viewBox="0 0 {SPARK_W} {SPARK_H}" preserveAspectRatio="none" aria-hidden="true">
-                <polyline class="ah-spark-line {latencySpark.tint}" points={latencySpark.line} fill="none" />
-              </svg>
-              <span class="ah-spark-v">{fmtMs(latencySpark.first)} → {fmtMs(latencySpark.last)}</span>
-            </div>
-          {/if}
-
-          {#if modelLat.length > 0}
-            <!-- cont.300: by_model always existed in the aggregate (the advisor
-                 reads it) — now the user sees it too. -->
-            <div class="ah-mlat">
-              <span class="ah-mlat-h">By model</span>
-              {#each modelLat as g (`${g.model}:${g.effort ?? ""}`)}
-                <div class="ah-mlat-row">
-                  <span class="ah-mlat-k">{modelLabel(g.model)}{g.effort ? ` · ${g.effort}` : ""}</span>
-                  <span class="ah-mlat-v">typical {fmtMs(g.p50_ttft_text_ms)} · slow {fmtMs(g.p90_ttft_text_ms)} · {fmtNum(g.turn_count)} replies{g.dominant_cause ? ` · mostly ${g.dominant_cause}` : ""}</span>
-                </div>
-              {/each}
-            </div>
-          {/if}
-
-          <p class="ah-glossary">
-            <strong>Typical</strong> is the middle of your replies — half are faster, half slower.
-            <strong>Slow reply</strong> is one of your slower ones (about 1 in 10).
-            <strong>Conversation reused</strong> is how much of the chat Claude remembers without re-reading it — higher means faster, cheaper replies.
-          </p>
-          {/if}
-        </section>
-      {/if}
 
       <!-- ── Spend per day (cont.300) ── extracted from the Speed card into a
            real bar chart: per-day columns, peak + newest labeled, range-driven. -->
@@ -1098,7 +1123,10 @@
   .ah-wrap {
     max-width: 820px; margin: 0 auto; padding: 18px 40px 28px;
     display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px;
-    align-items: stretch;
+    /* start (not stretch): paired .half cards size to their own content instead
+       of stretching to the taller sibling — kills the dead space under a short
+       card (Plan limits next to the much taller usage-history card). */
+    align-items: start;
   }
   .ah-wrap > :global(*) { grid-column: 1 / -1; min-width: 0; }
   @media (min-width: 1160px) {
@@ -1315,6 +1343,9 @@
   .ah-fill { height: 100%; border-radius: 999px; transition: width 0.3s ease; background: var(--accent); }
   .ah-fill.warn { background: var(--warn); }
   .ah-fill.hot { background: var(--danger); }
+  /* spend bars: neutral grey — a spend breakdown is data, not a warning. Distinct
+     from the emerald message-share bars so the two lists don't read as the same. */
+  .ah-fill.spend { background: color-mix(in oklab, var(--fg) 40%, transparent); }
 
   .ah-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
   .ah-tile { padding: 12px 14px; border-radius: 10px; background: var(--bg-inset); box-shadow: inset 0 0 0 1px var(--ghost-border); }

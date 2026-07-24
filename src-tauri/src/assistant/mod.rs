@@ -214,6 +214,28 @@ impl Drop for McpConfigGuard {
     }
 }
 
+/// One-shot spawn de-duplication: a `compare_exchange` gate + RAII clear. Stops a
+/// double-click (or a queued retry) from firing two paid `claude` subprocesses at
+/// once — each costs the user's subscription and does real egress. `try_acquire`
+/// returns `None` when a spawn is already in flight; the returned guard clears the
+/// flag on drop, covering every early-return / timeout / cancellation path.
+pub struct SpawnGuard(&'static std::sync::atomic::AtomicBool);
+
+impl SpawnGuard {
+    pub fn try_acquire(flag: &'static std::sync::atomic::AtomicBool) -> Option<Self> {
+        use std::sync::atomic::Ordering;
+        flag.compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .ok()
+            .map(|_| SpawnGuard(flag))
+    }
+}
+
+impl Drop for SpawnGuard {
+    fn drop(&mut self) {
+        self.0.store(false, std::sync::atomic::Ordering::Release);
+    }
+}
+
 /// Write the Rift MCP server config the CLI will read via `--mcp-config`.
 /// Points at our own `current_exe()` with `RIFT_MCP_SERVER=1`; the binary
 /// branches to `mcp_server::run_stdio` instead of launching Tauri. Workspace

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Send, Square, X, Mic, Loader2, Wand2, Paperclip,
-    Sparkles, ChevronUp, Undo2, Folder, GitBranch } from "lucide-svelte";
+    Sparkles, ChevronUp, Folder, GitBranch } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { github } from "../../state/github.svelte";
   import GhPopover from "./GhPopover.svelte";
@@ -1270,16 +1270,6 @@
       onUndo={undoEnhanced}
     />
 
-    {#if stt.polishUndo}
-      <div class="dictate-undo" role="region" aria-label="Transcript cleaned">
-        <Sparkles size={12} />
-        <span class="du-label">Cleaned up</span>
-        <button type="button" class="du-btn" onclick={() => { stt.revertPolish(); void tick().then(autosize); }} use:tooltip={"Restore the raw transcript"}>
-          <Undo2 size={12} /> Show raw
-        </button>
-      </div>
-    {/if}
-
     {#if slashOpen}
       <SlashMenu commands={slashFiltered} activeIdx={slashIdx} query={draft.slice(1).toLowerCase()} onPick={pickSlash} />
     {/if}
@@ -2304,33 +2294,6 @@
     50% { opacity: 0.55; }
   }
   /* Post-polish restore chip — mirrors the enhance undo-mini pill. */
-  .dictate-undo {
-    position: absolute;
-    bottom: calc(100% + 8px);
-    left: 0;
-    display: flex; align-items: center; gap: 7px;
-    padding: 6px 10px;
-    border-radius: 999px;
-    background: color-mix(in oklch, var(--surface) 88%, transparent);
-    backdrop-filter: blur(14px) saturate(135%);
-    -webkit-backdrop-filter: blur(14px) saturate(135%);
-    border: 1px solid color-mix(in oklch, var(--model-color) 32%, var(--border));
-    color: var(--model-color);
-    font-size: var(--fs-sm);
-    z-index: 10;
-  }
-  .du-label { font-weight: 600; color: var(--fg); }
-  .du-btn {
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 3px 9px; border-radius: 999px;
-    font: inherit; font-size: 11px; font-weight: 600;
-    color: var(--fg-muted);
-    background: transparent;
-    border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
-    cursor: pointer;
-    transition: color var(--dur-fast), background var(--dur-fast), border-color var(--dur-fast);
-  }
-  .du-btn:hover { color: var(--fg); background: color-mix(in oklch, var(--surface-hover) 70%, transparent); border-color: var(--border-strong); }
   @media (prefers-reduced-motion: reduce) {
     .textarea-wrap.polishing textarea { animation: none; }
     .dg-tail.pending { animation: none; opacity: 0.7; }

@@ -258,6 +258,12 @@ today's date in ISO-8601.";
 /// difference is `--tools "WebSearch,WebFetch"`.
 #[tauri::command]
 pub async fn assistant_summarize_ai_news(app: AppHandle) -> Result<String, String> {
+    // One digest at a time — a double-click must not fire two paid web-enabled
+    // spawns. Guard clears on every exit path (drop).
+    static NEWS_IN_FLIGHT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let _in_flight = super::SpawnGuard::try_acquire(&NEWS_IN_FLIGHT)
+        .ok_or_else(|| "A news summary is already running — wait for it to finish.".to_string())?;
+
     let mut cmd = claude_command()
         .ok_or_else(|| "claude CLI not on PATH — install Claude Code or configure an API key".to_string())?;
 
