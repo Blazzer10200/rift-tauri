@@ -2,6 +2,13 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.147.1 — Tighter locks, honest labels
+
+- **First-run setup said "Opus 4.8" when the picker said "Opus 5".** Onboarding kept its own copy of the model list, and it had quietly drifted out of date. It now reads the same list the composer does, so the two can't disagree again.
+- **The in-app browser can no longer reach app-level permissions.** Permissions were granted per *window*, and the browser dock lives inside the main window — so a grant meant for Rift's own UI technically extended to whatever page you had open. They're now granted per *webview*, which leaves the browser out by construction. Nothing was exploitable in practice; this closes the door before it matters.
+- **Workspace file access is scoped correctly with more than one folder open.** The include/exclude rules the assistant's file tools respect only applied to your first workspace folder — anything under a second folder fell through unfiltered. Every folder is now checked against its own rules, and anything outside them is denied rather than allowed.
+- **"Open in VS Code" no longer misreads a path as a command flag.**
+
 ## v0.147.0 — Opus 5 is here
 
 - **Claude Opus 5.** Anthropic's newest, most capable Opus is now the default Opus in the picker — same price as 4.8, stronger at checking its own work and pushing a hard task through to done. Opus 4.8 moves into "More models" so anything pinned to it keeps running exactly as before.
@@ -15,12 +22,6 @@
 - **Zoom the whole app.** New UI scale control in Settings → Appearance (80%–150%), plus the shortcuts you'd expect: `Ctrl+=` / `Ctrl+-` to step, `Ctrl+0` to reset. Everything scales together — text, chrome, spacing — on any monitor.
 - **The window remembers you.** Size, position, and maximized state persist across launches. If your saved spot is on a monitor that's no longer connected, Rift falls back to centered instead of restoring somewhere unreachable.
 - **No more off-screen window on small or high-DPI screens.** The default 1600×1000 window overflowed 1366×768 laptops *and* 1080p displays at 125% scaling, hanging past the screen edge. It now shrinks to fit the monitor's work area before centering.
-
-## v0.145.0 — Every turn leaves a trail
-
-- **When something goes wrong, you can now see why.** Every turn gets one trace id that follows it across all three moving parts — the app, the Claude process, and the tools it drives — so a slow or failed turn reads as a single connected story in the Diagnostics console instead of three disconnected logs.
-- **The quiet failures aren't quiet anymore.** The in-app browser now reports blocked or unsafe links, webview failures, and dev-server timeouts; the usage meter reports when the endpoint is unreachable or returns something unexpected — spots that used to fail silently and leave you guessing.
-- **Sidebar polish.** The settings cog no longer pushes past the bottom edge of the rail, the notification bell lines up cleanly, and the active conversation title reads a touch bolder.
 
 ## Known issues
 - **While elevated, dragging files from Explorer into the window doesn't work** (Windows blocks lower→higher integrity drag-drop); the attach button / file picker still works fine.
