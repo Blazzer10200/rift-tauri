@@ -45,7 +45,7 @@
   {:else}
     <!-- composer controls in miniature: model · effort dial · working style -->
     <div class="ob-mini ob-mini-def">
-      <span class="ob-md-pill"><Sparkles size={12} /> Opus 4.8</span>
+      <span class="ob-md-pill"><Sparkles size={12} /> Opus 5</span>
       <span class="ob-md-dial"><i class="d1"></i><i class="d2"></i><i class="d3"></i><i class="d4"></i></span>
       <span class="ob-md-pill perm"><ShieldCheck size={12} /> Balanced</span>
     </div>

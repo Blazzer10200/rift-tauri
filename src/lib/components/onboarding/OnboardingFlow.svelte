@@ -10,9 +10,8 @@
   import RiftLogo from "$lib/components/shell/RiftLogo.svelte";
   import { uiPrefs, ACCENTS } from "$lib/state/ui-prefs.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
-  import { fableAvailable, haikuAvailable } from "$lib/state/assistant/helpers";
-  import { MODE_OPTIONS } from "$lib/components/assistant/composer/modelMatrix";
-  import type { ModelSel, ThinkingEffort } from "$lib/state/assistant/types";
+  import { MODE_OPTIONS, currentModels, type ModelOpt } from "$lib/components/assistant/composer/modelMatrix";
+  import type { ThinkingEffort } from "$lib/state/assistant/types";
   import {
     Check, ChevronLeft, ChevronRight, FolderGit2, FolderOpen,
     History, Loader2, TriangleAlert,
@@ -93,14 +92,7 @@
   // strip the Windows long-path prefix (\\?\C:\…) the backend stores
   const displayPath = (p: string) => p.replace(/^\\\\\?\\/, "");
 
-  // ── Defaults step — same matrix shape as Composer's picker, current models only ──
-  type ModelOpt = { id: ModelSel; label: string; version: string; effort: boolean; maxEffort: ThinkingEffort };
-  const MODEL_OPTIONS: ModelOpt[] = [
-    ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", effort: true, maxEffort: "ultra" as ThinkingEffort }] : []),
-    { id: "opus",   label: "Opus",   version: "4.8", effort: true,  maxEffort: "ultra" },
-    { id: "sonnet", label: "Sonnet", version: "5",   effort: true,  maxEffort: "ultra" },
-    ...(haikuAvailable() ? [{ id: "haiku" as ModelSel, label: "Haiku", version: "4.5", effort: false, maxEffort: "none" as ThinkingEffort }] : []),
-  ];
+  // ── Defaults step — Composer's own current-model rows, so labels can't drift ──
   function pickModel(m: ModelOpt) {
     assistant.setModel(m.id);
     // setModel already clamps the stored effort to the new model's ceiling.
@@ -285,7 +277,7 @@
               <div class="ob-field">
                 <span class="ob-flabel">Model</span>
                 <div class="ob-seg" role="radiogroup" aria-label="Default model">
-                  {#each MODEL_OPTIONS as m (m.id)}
+                  {#each currentModels as m (m.id)}
                     <button
                       type="button"
                       class="ob-seg-btn"

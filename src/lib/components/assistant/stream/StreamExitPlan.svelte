@@ -10,6 +10,7 @@
   // the mode and the SAME turn rolls into execution. If the ask never
   // round-tripped (old CLI, race, timeout), a settled last-turn card keeps
   // Approve/Refine as send-shaped fallbacks. One component, two transports.
+  import { untrack } from "svelte";
   import { ScrollText, ChevronDown, Check, X, MessageSquareText, Loader2, Pencil } from "lucide-svelte";
   import Markdown from "../Markdown.svelte";
   import type { StreamTool } from "./streamModel";
@@ -30,7 +31,7 @@
   // History cards (settled on load) skip straight to the full text.
   const REVEAL_STEP = 20, REVEAL_TICK_MS = 30;
   let reveal = $state(
-    tool.status === "pending" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : -1,
+    untrack(() => tool.status) === "pending" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : -1,
   );
   const revealing = $derived(reveal >= 0 && reveal < plan.length);
   $effect(() => {
