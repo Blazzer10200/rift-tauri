@@ -98,10 +98,10 @@ describe("perModel / topModel", () => {
     expect(m[0].model).toBe("opus");
     expect(m[0].messages).toBe(10);
     expect(m[0].share).toBeCloseTo(10 / 12);
-    expect(m[0].label).toBe("Opus 4.8");
+    expect(m[0].label).toBe("Opus 5");
   });
   it("topModel returns the busiest model's label", () => {
-    expect(topModel(stats)).toBe("Opus 4.8");
+    expect(topModel(stats)).toBe("Opus 5");
     expect(topModel([])).toBeNull();
   });
 });
@@ -150,7 +150,7 @@ describe("formatters", () => {
     expect(hourLabel(null)).toBe("—");
   });
   it("modelLabel maps known ids and passes through local ones", () => {
-    expect(modelLabel("opus")).toBe("Opus 4.8");
+    expect(modelLabel("opus")).toBe("Opus 5");
     expect(modelLabel("qwen3-coder:30b")).toBe("qwen3-coder:30b");
   });
 });

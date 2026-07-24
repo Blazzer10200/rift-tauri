@@ -18,6 +18,9 @@ class BrowserDock {
   // Bumped to request the address bar take focus + select-all (Ctrl+L). The
   // WebBrowserPage input watches this token rather than holding a DOM ref here.
   focusToken = $state(0);
+  // Bumped to open + focus the find-in-page bar (Ctrl+F). Same token pattern as
+  // focusToken — WebBrowserPage owns the find bar's DOM.
+  findToken = $state(0);
   // URL queued for the dock to navigate to — set by the assistant
   // (`assistant://open-browser`) or a localhost link click in the chat.
   // WebBrowserPage consumes it once its stage element exists (the dock may
@@ -49,6 +52,12 @@ class BrowserDock {
   focusAddress() {
     if (!this.open) this.toggle();
     this.focusToken++;
+  }
+
+  // Open the dock if needed, then ask the find-in-page bar to open + focus.
+  requestFind() {
+    if (!this.open) this.toggle();
+    this.findToken++;
   }
 
   // Queue a URL for the dock and make sure the dock is showing.

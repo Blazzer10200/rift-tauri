@@ -362,12 +362,12 @@ export type ThinkingEffort = "none" | "smart" | "deep" | "ultra";
 
 /** Model selection — stored value IS the string handed to the CLI's `--model`,
  *  so it flows through `assistant_send` untouched. `opus` is the short alias
- *  that always resolves to the newest Opus (currently 4.8) with the 1M-ctx
- *  beta; `claude-opus-4-7` pins the prior Opus. `sonnet`/`haiku` stay aliases.
+ *  that always resolves to the newest Opus (currently 5) with the 1M-ctx
+ *  window; `claude-opus-4-8` pins the prior Opus. `sonnet`/`haiku` stay aliases.
  *  Must satisfy the Rust `is_valid_model_name` validator (no brackets). */
 export type ModelSel =
   | "sonnet" | "opus" | "haiku" | "claude-fable-5"
-  | "claude-opus-4-7" | "claude-opus-4-6" | "claude-opus-4-5"
+  | "claude-opus-4-8" | "claude-opus-4-7" | "claude-opus-4-6" | "claude-opus-4-5"
   | "claude-sonnet-4-6" | "claude-sonnet-4-5";
 
 /** Visual family for the per-model aurora hue (sonnet=blue, opus=purple,

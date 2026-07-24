@@ -2,6 +2,14 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.147.0 — Opus 5 is here
+
+- **Claude Opus 5.** Anthropic's newest, most capable Opus is now the default Opus in the picker — same price as 4.8, stronger at checking its own work and pushing a hard task through to done. Opus 4.8 moves into "More models" so anything pinned to it keeps running exactly as before.
+- **Find on a page — `Ctrl+F`.** The in-app browser now has a real find bar: type to jump between matches, `Enter` / `Shift+Enter` to walk them, `Esc` to close. Native browser search, so it works on any page.
+- **Zoom a page.** A zoom stepper in the browser's ⋯ menu scales just the page you're viewing (separate from the app-wide UI zoom), and it sticks as you click around.
+- **Links stop vanishing.** Pages that open `target="_blank"` or `window.open` used to spawn an invisible popup that read as a dead click — those now just open in the dock you're looking at.
+- **A friendlier empty browser.** The blank browser panel now explains what it's for at a glance — share a page with the assistant, hand it console errors, or have it open a page for you — with a search box and the shortcuts worth knowing.
+
 ## v0.146.0 — Fits your screen now
 
 - **Zoom the whole app.** New UI scale control in Settings → Appearance (80%–150%), plus the shortcuts you'd expect: `Ctrl+=` / `Ctrl+-` to step, `Ctrl+0` to reset. Everything scales together — text, chrome, spacing — on any monitor.
@@ -13,12 +21,6 @@
 - **When something goes wrong, you can now see why.** Every turn gets one trace id that follows it across all three moving parts — the app, the Claude process, and the tools it drives — so a slow or failed turn reads as a single connected story in the Diagnostics console instead of three disconnected logs.
 - **The quiet failures aren't quiet anymore.** The in-app browser now reports blocked or unsafe links, webview failures, and dev-server timeouts; the usage meter reports when the endpoint is unreachable or returns something unexpected — spots that used to fail silently and leave you guessing.
 - **Sidebar polish.** The settings cog no longer pushes past the bottom edge of the rail, the notification bell lines up cleanly, and the active conversation title reads a touch bolder.
-
-## v0.144.0 — The chassis update
-
-- **The app has a place to live now.** The dark space behind the floating panels is a machined housing: a recessed, subtly accent-tinted surface the sidebar and main panel sit *into*, with real contact shadows where they meet it. Wider breathing room around the panels so the depth actually reads.
-- **The rift is the brand — literally.** A faint accent seam runs in the gap between the two panels, and the new launch screen opens along it: the surface draws a line of light, then *parts in two* to reveal the app assembling underneath. The old glowing-logo loader is gone; the boot readout stays honest (real startup stages, no fake progress).
-- **Lighter repo for contributors:** the README's product tour now streams from release assets instead of shipping 18MB of media in every clone.
 
 ## Known issues
 - **While elevated, dragging files from Explorer into the window doesn't work** (Windows blocks lower→higher integrity drag-drop); the attach button / file picker still works fine.

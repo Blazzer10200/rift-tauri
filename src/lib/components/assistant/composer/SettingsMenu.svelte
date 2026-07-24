@@ -13,7 +13,7 @@
   import { portal } from "$lib/actions/portal";
   import { tooltip } from "$lib/actions/tooltip";
   import {
-    MODEL_OPTIONS, OPUS5_TEASER, currentModels, legacyModels, modelShortcut, modelWindowSuffix,
+    MODEL_OPTIONS, currentModels, legacyModels, modelShortcut, modelWindowSuffix,
     dialStopsFor, dialIdxFor, clampEffortIdx,
     type ModelOpt, type SettingsRow,
   } from "./modelMatrix";
@@ -226,31 +226,9 @@
     </button>
   {/snippet}
 
-  {#snippet opus5Teaser()}
-    <!-- Display-only teaser (modelMatrix.OPUS5_TEASER) — not a menu item, no
-         hotkey, unselectable until the real row lands on release day. Sits
-         under Fable (owner call 2026-07-22). -->
-    <div
-      class="pop-item model-row soon"
-      role="presentation"
-      use:tooltip={"Opus 5 — next-generation Opus, releasing imminently. Selectable here the moment it goes live."}
-    >
-      <span class="pi-name">
-        <span class="model-name">Opus 5</span>
-        <span class="pi-tag accent">Coming soon</span>
-      </span>
-    </div>
-  {/snippet}
-
   <div class="rift-menu-head">Model</div>
-  {#if OPUS5_TEASER && !currentModels.some((m) => m.id === "claude-fable-5")}
-    {@render opus5Teaser()}
-  {/if}
   {#each currentModels as m (m.id)}
     {@render modelRow(m)}
-    {#if OPUS5_TEASER && m.id === "claude-fable-5"}
-      {@render opus5Teaser()}
-    {/if}
   {/each}
 
   {#if legacyModels.length > 0}

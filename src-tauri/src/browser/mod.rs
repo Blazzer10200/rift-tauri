@@ -147,6 +147,11 @@ pub fn open(app: &AppHandle, url: &str, x: f64, y: f64, w: f64, h: f64) -> Resul
         // Console capture rides every document this webview ever loads —
         // read_console / console_counts drain the buffer it maintains.
         .initialization_script(CONSOLE_CAPTURE_JS)
+        // The dock is single-instance (no tabs), so a `window.open` /
+        // `target="_blank"` click would open a detached WebView2 popup the user
+        // can't see — it reads as a dead click. Redirect both to in-place
+        // navigation so every link lands in the dock the user is looking at.
+        .initialization_script(POPUP_INTERCEPT_JS)
         .on_page_load(|webview, payload| {
             let phase = match payload.event() {
                 tauri::webview::PageLoadEvent::Started => "started",
@@ -391,6 +396,71 @@ fn current_dock_url(app: &AppHandle) -> String {
         })
         .unwrap_or_default()
 }
+
+/// History navigation with an explicit find. `window.find` scrolls to + selects
+/// the next/prev match of `query` in the dock page, wrapping at the ends. Native
+/// (Chromium) search — no page cooperation needed. Returns whether a match was
+/// found so the find bar can flag "no results".
+pub fn find_in_page(app: &AppHandle, query: &str, backwards: bool) -> Result<bool, String> {
+    let Some(wv) = app.get_webview(LABEL) else {
+        return Ok(false);
+    };
+    // JSON-encode the needle so quotes/backslashes/newlines can't break out of
+    // the JS string (page-reachable via the address bar, so treat as untrusted).
+    let q = serde_json::to_string(query).map_err(|e| format!("encode query: {e}"))?;
+    // window.find(aString, caseSensitive, backwards, wrapAround, wholeWord, …).
+    // Fire-and-forget: the scroll/selection is the visible result; the boolean
+    // return isn't marshalled back (eval, not eval_with_callback) to keep the
+    // per-keystroke find cheap.
+    let js = format!("window.find({q}, false, {backwards}, true, false, false, false)");
+    wv.eval(&js).map_err(|e| format!("find: {e}"))?;
+    Ok(true)
+}
+
+/// Clear any active find selection (find bar closed). No-op when closed.
+pub fn clear_find(app: &AppHandle) -> Result<(), String> {
+    if let Some(wv) = app.get_webview(LABEL) {
+        let _ = wv.eval("window.getSelection && window.getSelection().removeAllRanges()");
+    }
+    Ok(())
+}
+
+/// Page zoom for the dock webview — independent of the app-chrome UI zoom
+/// (that scales the *main* webview via the FE `setZoom` plugin call; this scales
+/// only the embedded child). Clamped to a sane range; 1.0 = 100%.
+pub fn set_zoom(app: &AppHandle, factor: f64) -> Result<(), String> {
+    let f = factor.clamp(0.25, 5.0);
+    if let Some(wv) = app.get_webview(LABEL) {
+        wv.set_zoom(f).map_err(|e| format!("zoom: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Injected at document-start on every navigation. Redirects new-window
+/// affordances to in-place navigation so a single-instance dock never spawns an
+/// invisible detached popup. Page-world JS — best-effort, wrapped in try/catch.
+const POPUP_INTERCEPT_JS: &str = r#"(function () {
+  if (window.__riftPopup) return;
+  window.__riftPopup = true;
+  try {
+    // window.open(url, ...) → navigate here instead of a detached popup.
+    window.open = function (url) {
+      if (url) { try { location.href = new URL(url, location.href).href; } catch (e) {} }
+      return null;
+    };
+  } catch (e) {}
+  // target="_blank" / "_new" anchors → in-place navigation. Capture phase so we
+  // beat the default before the popup is requested.
+  document.addEventListener("click", function (e) {
+    try {
+      var a = e.target && e.target.closest ? e.target.closest("a[target]") : null;
+      if (a && /^_(blank|new)$/i.test(a.target) && a.href) {
+        e.preventDefault();
+        location.href = a.href;
+      }
+    } catch (err) {}
+  }, true);
+})();"#;
 
 // ---- Console capture -------------------------------------------------------
 

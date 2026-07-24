@@ -8,7 +8,7 @@
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { onDestroy, onMount, untrack } from "svelte";
-  import { Globe, RotateCw, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Copy, ExternalLink, MoreHorizontal, Sparkles, CircleAlert } from "lucide-svelte";
+  import { Globe, RotateCw, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Copy, ExternalLink, MoreHorizontal, Sparkles, CircleAlert, Search, ChevronUp, ChevronDown, ZoomIn, ZoomOut } from "lucide-svelte";
   import { portal } from "$lib/actions/portal";
   import { workspace } from "../../state/workspace.svelte";
   import { browserDock } from "../../state/browserDock.svelte";
@@ -65,6 +65,18 @@
   let consoleBusy = $state(false);
   let consoleFlash = $state<"ok" | "fail" | null>(null);
   let consoleFlashTimer: ReturnType<typeof setTimeout> | null = null;
+  // Find-in-page bar (Ctrl+F). `window.find` scrolls to + highlights matches
+  // natively — no page cooperation needed.
+  let findOpen = $state(false);
+  let findQuery = $state("");
+  let findEl = $state<HTMLInputElement | null>(null);
+
+  // Page zoom for the dock webview — independent of the app-chrome UI zoom.
+  // 1 = 100%. Re-applied after each navigation (a fresh document resets it).
+  let zoom = $state(1);
+  const ZOOM_MIN = 0.5;
+  const ZOOM_MAX = 3;
+
   // "Read by assistant" chip — driven by browserDock.assistantRead (set from
   // the tool stream when a read_browser_* tool fires), auto-fades.
   let aiRead = $state<"page" | "console" | null>(null);
@@ -144,6 +156,31 @@
     // re-runs SPA state, unlike re-navigating to the current URL.
     try { await invoke("browser_reload"); } catch (e) { error = String(e); }
   }
+
+  // Find-in-page: window.find (native Chromium search) scrolls to the next/prev
+  // match, wrapping at the ends. Debounced on input via the keydown handler.
+  async function runFind(backwards = false) {
+    if (!opened || !findQuery.trim()) return;
+    try { await invoke("browser_find", { query: findQuery, backwards }); }
+    catch (e) { console.warn("browser_find:", e); }
+  }
+  function closeFind() {
+    findOpen = false;
+    findQuery = "";
+    void invoke("browser_clear_find").catch(() => { /* dock closed */ });
+  }
+
+  async function applyZoom(next: number) {
+    zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, Math.round(next * 100) / 100));
+    try { await invoke("browser_set_zoom", { factor: zoom }); }
+    catch (e) { console.warn("browser_set_zoom:", e); }
+  }
+  function zoomIn() { void applyZoom(zoom + 0.1); }
+  function zoomOut() { void applyZoom(zoom - 0.1); }
+  function zoomReset() { void applyZoom(1); }
+
+  // Focus the address bar from the empty-state quick action (opens the omnibox).
+  function focusAddressBar() { addressEl?.focus(); addressEl?.select(); }
 
   async function copyUrl() {
     menuOpen = false;
@@ -301,6 +338,17 @@
     queueMicrotask(() => { addressEl?.focus(); addressEl?.select(); });
   });
 
+  // Ctrl+F (via browserDock.requestFind) bumps findToken — open + focus the
+  // find bar so the user can immediately type a query.
+  let lastFindToken = 0;
+  $effect(() => {
+    const t = browserDock.findToken;
+    if (t === lastFindToken) return;
+    lastFindToken = t;
+    findOpen = true;
+    queueMicrotask(() => { findEl?.focus(); findEl?.select(); });
+  });
+
   // Escape closes the overflow menu (the scrim already handles click-outside).
   $effect(() => {
     if (!menuOpen) return;
@@ -341,6 +389,8 @@
         loading = false;
         if (loadWatchdog) { clearTimeout(loadWatchdog); loadWatchdog = null; }
         if (url) browserDock.setLastUrl(url);
+        // A fresh document resets the webview zoom — re-apply the user's factor.
+        if (zoom !== 1) void invoke("browser_set_zoom", { factor: zoom }).catch(() => {});
       }
       if (!inputFocused && url) address = url;
     });
@@ -449,9 +499,42 @@
     {#if loading}<span class="wb-progress" aria-hidden="true"></span>{/if}
   </div>
 
+  {#if findOpen}
+    <div class="wb-find">
+      <Search size={14} class="wb-find-ic" />
+      <input
+        bind:this={findEl}
+        class="wb-find-input"
+        type="text"
+        spellcheck="false"
+        placeholder="Find on page…"
+        bind:value={findQuery}
+        oninput={() => runFind(false)}
+        onkeydown={(e) => {
+          if (e.key === "Enter") { e.preventDefault(); runFind(e.shiftKey); }
+          else if (e.key === "Escape") { e.preventDefault(); closeFind(); }
+        }}
+      />
+      <button class="wb-find-btn" type="button" onclick={() => runFind(true)} title="Previous match (Shift+Enter)" aria-label="Previous match"><ChevronUp size={15} /></button>
+      <button class="wb-find-btn" type="button" onclick={() => runFind(false)} title="Next match (Enter)" aria-label="Next match"><ChevronDown size={15} /></button>
+      <button class="wb-find-btn" type="button" onclick={closeFind} title="Close find (Esc)" aria-label="Close find"><X size={14} /></button>
+    </div>
+  {/if}
+
   {#if menuOpen}
     <button type="button" class="wb-menu-scrim" use:portal aria-label="Close menu" onclick={() => (menuOpen = false)}></button>
     <div class="rift-menu wb-menu" use:portal role="menu" style="left: {menuPos.x}px; top: {menuPos.y}px;">
+      <button type="button" class="rift-menu-row" role="menuitem" onclick={() => { menuOpen = false; browserDock.requestFind(); }}>
+        <Search size={14} class="rift-menu-row-ic" />
+        <span class="rift-menu-row-t">Find on page</span>
+        <span class="wb-menu-kbd">Ctrl F</span>
+      </button>
+      <div class="wb-zoomrow" role="group" aria-label="Page zoom">
+        <button type="button" class="wb-zoom-btn" onclick={zoomOut} disabled={zoom <= ZOOM_MIN} title="Zoom out" aria-label="Zoom out"><ZoomOut size={14} /></button>
+        <button type="button" class="wb-zoom-pct" onclick={zoomReset} title="Reset to 100%">{Math.round(zoom * 100)}%</button>
+        <button type="button" class="wb-zoom-btn" onclick={zoomIn} disabled={zoom >= ZOOM_MAX} title="Zoom in" aria-label="Zoom in"><ZoomIn size={14} /></button>
+      </div>
+      <div class="wb-menu-sep" aria-hidden="true"></div>
       <button type="button" class="rift-menu-row" role="menuitem" onclick={copyUrl}>
         <Copy size={14} class="rift-menu-row-ic" />
         <span class="rift-menu-row-t">Copy URL</span>
@@ -469,19 +552,48 @@
       <div class="wb-empty wb-error">{error}</div>
     {:else if !opened}
       <div class="wb-empty">
-        <Globe size={40} />
-        <p>Browse inside Rift — the assistant can open pages here, read them, and check the console for errors. <strong>Add to chat</strong> shares the page you're on.</p>
-        {#if browserDock.lastUrl}
-          <button
-            class="wb-resume"
-            type="button"
-            onclick={() => { address = browserDock.lastUrl ?? ""; void go(); }}
-            title={browserDock.lastUrl}
-          >
-            <RotateCw size={13} />
-            <span>Reopen {hostLabel(browserDock.lastUrl)}</span>
+        <div class="wb-hero">
+          <span class="wb-hero-ic"><Globe size={30} /></span>
+          <h3>Browse inside Rift</h3>
+          <p>A real browser beside the chat — and the assistant can see what's on it.</p>
+        </div>
+
+        <ul class="wb-caps">
+          <li>
+            <MessageSquarePlus size={15} />
+            <span><strong>Add to chat</strong> shares this page's live text with the assistant — even behind a login, where a plain fetch can't reach.</span>
+          </li>
+          <li>
+            <CircleAlert size={15} />
+            <span>The <strong>console badge</strong> appears when a page logs errors — one click hands them to the chat.</span>
+          </li>
+          <li>
+            <Sparkles size={15} />
+            <span>Ask the assistant to <strong>open a page</strong> and it opens right here, ready to read.</span>
+          </li>
+        </ul>
+
+        <div class="wb-quick">
+          <button class="wb-quick-btn wb-quick-primary" type="button" onclick={focusAddressBar}>
+            <Search size={14} />
+            <span>Search or enter a URL</span>
           </button>
-        {/if}
+          {#if browserDock.lastUrl}
+            <button
+              class="wb-quick-btn"
+              type="button"
+              onclick={() => { address = browserDock.lastUrl ?? ""; void go(); }}
+              title={browserDock.lastUrl}
+            >
+              <RotateCw size={13} />
+              <span>Reopen {hostLabel(browserDock.lastUrl)}</span>
+            </button>
+          {/if}
+        </div>
+
+        <p class="wb-hint">
+          <kbd>Ctrl</kbd><kbd>L</kbd> address · <kbd>Ctrl</kbd><kbd>F</kbd> find · <kbd>Shift</kbd><kbd>B</kbd> toggle panel
+        </p>
       </div>
     {/if}
   </div>
@@ -651,6 +763,62 @@
     display: flex; flex-direction: column; gap: 1px;
   }
   .wb-menu :global(.rift-menu-row) { align-items: center; }
+  .wb-menu-kbd {
+    margin-left: auto;
+    font-size: 10px; font-weight: 600; letter-spacing: 0.02em;
+    color: var(--fg-faint);
+  }
+  .wb-menu-sep {
+    height: 1px; margin: 3px 6px;
+    background: color-mix(in oklch, var(--border) 70%, transparent);
+  }
+  /* Zoom stepper row inside the overflow menu. */
+  .wb-zoomrow {
+    display: flex; align-items: center; gap: 4px;
+    padding: 3px 6px;
+  }
+  .wb-zoom-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 26px;
+    border: 1px solid var(--border); border-radius: 7px;
+    background: var(--bg); color: var(--fg-muted);
+    cursor: pointer;
+  }
+  .wb-zoom-btn:hover:not(:disabled) { color: var(--fg); border-color: var(--accent); }
+  .wb-zoom-btn:disabled { opacity: 0.4; cursor: default; }
+  .wb-zoom-pct {
+    flex: 1; height: 26px;
+    border: 1px solid transparent; border-radius: 7px;
+    background: transparent; color: var(--fg);
+    font: inherit; font-size: 12px; font-variant-numeric: tabular-nums;
+    cursor: pointer;
+  }
+  .wb-zoom-pct:hover { background: var(--bg-elev-2); }
+
+  /* Find-in-page bar — sits under the toolbar; native window.find drives it. */
+  .wb-find {
+    display: flex; align-items: center; gap: 4px;
+    padding: 6px 10px;
+    border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
+    background: color-mix(in oklch, var(--surface) 80%, transparent);
+  }
+  .wb-find :global(.wb-find-ic) { color: var(--fg-muted); flex: none; margin-right: 2px; }
+  .wb-find-input {
+    flex: 1; min-width: 0;
+    height: 28px; padding: 0 8px;
+    border: 1px solid var(--border); border-radius: 7px;
+    background: var(--bg); color: var(--fg);
+    font: inherit; font-size: 13px;
+  }
+  .wb-find-input:focus { outline: none; border-color: var(--accent); }
+  .wb-find-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; flex: none;
+    border: 1px solid var(--border); border-radius: 7px;
+    background: var(--bg); color: var(--fg-muted);
+    cursor: pointer;
+  }
+  .wb-find-btn:hover { color: var(--fg); border-color: var(--accent); }
 
   .wb-stage {
     flex: 1; min-height: 0;
@@ -659,22 +827,65 @@
     background: transparent;
   }
   .wb-empty {
-    display: flex; flex-direction: column; align-items: center; gap: 12px;
+    display: flex; flex-direction: column; align-items: center; gap: 18px;
     color: var(--fg-muted);
     font-size: 13px;
-    padding: 24px;
+    padding: 28px 24px;
+    max-width: 440px;
     text-align: center;
   }
   .wb-error { color: var(--danger); max-width: 480px; word-break: break-word; }
-  .wb-resume {
-    display: inline-flex; align-items: center; gap: 6px;
-    height: 28px; padding: 0 12px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--bg);
-    color: var(--fg-muted);
-    font: inherit; font-size: 12px;
-    cursor: pointer;
+
+  /* Hero — icon chip + title + one-line pitch. */
+  .wb-hero { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .wb-hero-ic {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 56px; height: 56px; margin-bottom: 2px;
+    border: 1px solid color-mix(in oklab, var(--accent) 35%, var(--border));
+    border-radius: 16px;
+    background: color-mix(in oklab, var(--accent) 10%, transparent);
+    color: var(--accent);
   }
-  .wb-resume:hover { color: var(--fg); border-color: var(--accent); }
+  .wb-hero h3 { margin: 0; font-size: 15px; font-weight: 650; color: var(--fg); }
+  .wb-hero p { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--fg-muted); }
+
+  /* Capability list — what the browser (and the assistant) can do here. */
+  .wb-caps {
+    list-style: none; margin: 0; padding: 0;
+    display: flex; flex-direction: column; gap: 10px;
+    text-align: left; width: 100%;
+  }
+  .wb-caps li {
+    display: flex; align-items: flex-start; gap: 9px;
+    font-size: 12.5px; line-height: 1.4; color: var(--fg-muted);
+  }
+  .wb-caps li :global(svg) { flex: none; margin-top: 1px; color: var(--accent); }
+  .wb-caps strong { color: var(--fg); font-weight: 600; }
+
+  /* Quick actions — the two primary ways in. */
+  .wb-quick { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
+  .wb-quick-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 30px; padding: 0 14px;
+    border: 1px solid var(--border); border-radius: 999px;
+    background: var(--bg); color: var(--fg-muted);
+    font: inherit; font-size: 12px; cursor: pointer;
+    transition: border-color var(--dur-fast) ease, color var(--dur-fast) ease, background var(--dur-fast) ease;
+  }
+  .wb-quick-btn:hover { color: var(--fg); border-color: var(--accent); }
+  .wb-quick-primary {
+    border-color: color-mix(in oklab, var(--accent) 55%, var(--border));
+    background: color-mix(in oklab, var(--accent) 12%, transparent);
+    color: var(--fg);
+  }
+  .wb-quick-primary:hover { background: color-mix(in oklab, var(--accent) 22%, transparent); }
+
+  /* Keyboard hint strip. */
+  .wb-hint { margin: 0; font-size: 11px; color: var(--fg-faint); line-height: 1.6; }
+  .wb-hint kbd {
+    display: inline-block; padding: 1px 5px; margin: 0 1px;
+    border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px;
+    background: var(--bg-elev-2); color: var(--fg-muted);
+    font-family: inherit; font-size: 10px; font-weight: 600;
+  }
 </style>

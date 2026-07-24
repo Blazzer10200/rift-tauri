@@ -12,7 +12,7 @@
   // table first, then the alias→id map, then shortModel on the raw id.
   const ALIAS_ID: Record<string, string> = {
     sonnet: "claude-sonnet-5",
-    opus: "claude-opus-4-8",
+    opus: "claude-opus-5",
     haiku: "claude-haiku-4-5",
   };
   function label(id: string): string {

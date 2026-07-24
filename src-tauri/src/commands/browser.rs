@@ -81,3 +81,18 @@ pub async fn browser_read_console(app: AppHandle) -> Result<crate::browser::Cons
 pub async fn browser_console_counts(app: AppHandle) -> Result<crate::browser::ConsoleCounts, String> {
     crate::browser::console_counts(&app).await
 }
+
+#[tauri::command]
+pub async fn browser_find(app: AppHandle, query: String, backwards: bool) -> Result<bool, String> {
+    crate::browser::find_in_page(&app, &query, backwards)
+}
+
+#[tauri::command]
+pub async fn browser_clear_find(app: AppHandle) -> Result<(), String> {
+    crate::browser::clear_find(&app)
+}
+
+#[tauri::command]
+pub async fn browser_set_zoom(app: AppHandle, factor: f64) -> Result<(), String> {
+    crate::browser::set_zoom(&app, factor)
+}

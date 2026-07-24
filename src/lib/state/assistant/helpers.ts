@@ -5,7 +5,7 @@
 import type { ModelFamily, ModelSel, PermissionMode, RiftPlan, ThinkingEffort } from "./types";
 
 const MODEL_SELS: readonly ModelSel[] = [
-  "sonnet", "opus", "claude-opus-4-7", "haiku", "claude-fable-5",
+  "sonnet", "opus", "claude-opus-4-8", "claude-opus-4-7", "haiku", "claude-fable-5",
   "claude-opus-4-6", "claude-opus-4-5", "claude-sonnet-4-6", "claude-sonnet-4-5",
 ] as const;
 
@@ -397,7 +397,7 @@ export function modelNativeWindow(model: string | null): number {
   // Sonnet 4.5 is deliberately NOT here: the CLI gates it at 200K and the backend
   // never sends `[1m]` for it (config.rs SONNET_1M_GATED excludes it), so claiming
   // 1M here would over-report the window 5× for any resumed pre-rename session.
-  if (/sonnet-(4-6|5)/.test(id) || /opus-4-[678]/.test(id) || /fable-5/.test(id)) return 1_000_000;
+  if (/sonnet-(4-6|5)/.test(id) || /opus-(4-[678]|5)/.test(id) || /fable-5/.test(id)) return 1_000_000;
   return 200_000;
 }
 
@@ -489,6 +489,7 @@ export const EFFORT_ORDER: readonly ThinkingEffort[] = [
  *  the Sonnet ceiling in src-tauri/src/assistant/turn.rs (model_max_effort). */
 export const MODEL_MAX_EFFORT: Record<ModelSel, ThinkingEffort> = {
   opus: "ultra",
+  "claude-opus-4-8": "ultra",
   "claude-opus-4-7": "ultra",
   "claude-opus-4-6": "ultra",
   "claude-opus-4-5": "ultra",

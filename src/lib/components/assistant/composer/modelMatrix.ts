@@ -51,18 +51,19 @@ export type ModelOpt = {
   maxEffort: ThinkingEffort;
 };
 // Flat single-column list (Claude-Code-Desktop layout): current models first,
-// legacy generations grouped below. `opus` is the alias → newest Opus (4.8,
-// 1M-ctx beta); `claude-opus-4-7` pins the prior generation. The CLI takes
+// legacy generations grouped below. `opus` is the alias → newest Opus (5,
+// 1M-ctx); `claude-opus-4-8` pins the prior generation. The CLI takes
 // the alias / pinned id; name + suffix are display-only.
 // Fable 5 row exists while fableAvailable() (gated by FABLE_DISABLED + the
 // sunset date in helpers.ts). Owner call 2026-07-01: kept always-visible even
 // while the upstream access gate holds — hard-pull only (set FABLE_DISABLED).
 export const MODEL_OPTIONS: ModelOpt[] = [
   ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", tagline: "Anthropic's most capable model — limited run", blurb: "Most capable — limited run", ctx: "1M ctx", suffix: "1M context", legacy: false, limited: true, effort: true, maxEffort: MODEL_MAX_EFFORT["claude-fable-5"], icon: Sparkles }] : []),
-  { id: "opus",            label: "Opus",   version: "4.8", tagline: "Newest + most capable — complex reasoning & agentic coding", blurb: "Deep reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.opus, icon: Gem },
+  { id: "opus",            label: "Opus",   version: "5",   tagline: "Newest + most capable — complex reasoning & agentic coding", blurb: "Deep reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.opus, icon: Gem },
   { id: "sonnet",          label: "Sonnet", version: "5",   tagline: "Best speed + intelligence balance — the default",            blurb: "Everyday default — speed + smarts", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.sonnet, icon: Feather },
   ...(haikuAvailable() ? [{ id: "haiku" as ModelSel, label: "Haiku", version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups", blurb: "Fastest — quick edits & lookups", ctx: "200K ctx", suffix: "200K context", legacy: false, effort: false, maxEffort: MODEL_MAX_EFFORT.haiku, icon: Rabbit }] : []),
-  { id: "claude-opus-4-7", label: "Opus",   version: "4.7", tagline: "Previous-generation Opus — proven for complex reasoning",    blurb: "Previous-generation Opus", ctx: "1M ctx",   suffix: "1M context",   legacy: true,  effort: true,  maxEffort: MODEL_MAX_EFFORT["claude-opus-4-7"], icon: Gem },
+  { id: "claude-opus-4-8", label: "Opus",   version: "4.8", tagline: "Previous-generation Opus — proven for complex reasoning",    blurb: "Previous-generation Opus", ctx: "1M ctx",   suffix: "1M context",   legacy: true,  effort: true,  maxEffort: MODEL_MAX_EFFORT["claude-opus-4-8"], icon: Gem },
+  { id: "claude-opus-4-7", label: "Opus",   version: "4.7", tagline: "Earlier Opus generation — proven for complex reasoning",     blurb: "Earlier Opus generation", ctx: "1M ctx",   suffix: "1M context",   legacy: true,  effort: true,  maxEffort: MODEL_MAX_EFFORT["claude-opus-4-7"], icon: Gem },
   { id: "claude-opus-4-6", label: "Opus",   version: "4.6", tagline: "Earlier Opus generation — deep reasoning workhorse",         blurb: "Earlier Opus generation", ctx: "1M ctx",   suffix: "1M context",   legacy: true,  effort: true,  maxEffort: MODEL_MAX_EFFORT["claude-opus-4-6"], icon: Gem },
   { id: "claude-opus-4-5", label: "Opus",   version: "4.5", tagline: "Classic Opus — proven reasoning, 200K context",              blurb: "Classic Opus generation", ctx: "200K ctx", suffix: "200K context", legacy: true,  effort: true,  maxEffort: MODEL_MAX_EFFORT["claude-opus-4-5"], icon: Gem },
   { id: "claude-sonnet-4-6", label: "Sonnet", version: "4.6", tagline: "Previous-generation Sonnet — balanced speed + smarts",     blurb: "Previous-generation Sonnet", ctx: "1M ctx", suffix: "1M context",   legacy: true,  effort: true,  maxEffort: MODEL_MAX_EFFORT["claude-sonnet-4-6"], icon: Feather },
@@ -70,11 +71,6 @@ export const MODEL_OPTIONS: ModelOpt[] = [
 ];
 // 1-based number shortcut → model id (digit keys pick directly in the menu).
 export const modelShortcut = (id: ModelSel) => MODEL_OPTIONS.findIndex((m) => m.id === id) + 1;
-
-// Opus 5 — announced for 2026-07-23. Display-only teaser row in the picker
-// (deliberately NOT in MODEL_OPTIONS: unselectable, takes no hotkey slot,
-// nothing persistable). Release day: flip false + add the real row above.
-export const OPUS5_TEASER = true;
 
 /** The context-window tag shown beside a model in the picker, HONEST under the
  *  user's plan: a 1M-native model capped to 200K by a Free plan must read "200K
