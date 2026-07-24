@@ -32,6 +32,10 @@ pub fn open_in_vscode(path: String, line: Option<u32>) -> Result<(), String> {
     if target.bytes().any(|b| matches!(b, b'&' | b'|' | b'<' | b'>' | b'^' | b'%' | b'"') || b < 0x20) {
         return Err("path contains characters that can't be passed safely to the shell".into());
     }
+    // A leading `-` is parsed by `code` as a flag, not the path we mean to open.
+    if target.starts_with('-') {
+        return Err("path can't start with '-' (it would be read as a command-line flag)".into());
+    }
     #[cfg(windows)]
     let mut cmd = {
         let mut c = std::process::Command::new("cmd");

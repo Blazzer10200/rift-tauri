@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": ["main"],
+  "description": "Capability for the main window's OWN webview. Scoped by `webviews`, NOT `windows`: `main` is a multiwebview window since the browser dock (browser/mod.rs adds the `rift-browser` child, which loads arbitrary internet pages), and a `windows` match grants the capability to EVERY webview in that window. Remote origins are excluded today only because `remote` is unset — this keeps the browser child out of scope by construction.",
+  "webviews": ["main"],
   "permissions": [
     "core:event:default",
     "core:path:default",

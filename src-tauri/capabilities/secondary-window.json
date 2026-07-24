@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "secondary-window",
-  "description": "Capability for secondary windows spawned via open_new_window (#37 Route A). Mirrors the main window's grants for the window-* label glob.",
-  "windows": ["window-*"],
+  "description": "Capability for secondary windows spawned via open_new_window (#37 Route A). Mirrors the main window's grants. Scoped by `webviews`, NOT `windows` — WebviewWindowBuilder gives window and webview the same `window-<nonce>-<n>` label, so the glob still matches while any future child webview stays out of scope.",
+  "webviews": ["window-*"],
   "permissions": [
     "core:event:default",
     "core:path:default",

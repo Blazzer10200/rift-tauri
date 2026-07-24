@@ -169,15 +169,16 @@ impl PathFilter {
     }
 
     /// Compute the root-relative, `/`-normalized path of `p` under `root`, then
-    /// test visibility. A path outside the root (shouldn't happen post-resolve)
-    /// is allowed — the root-containment check is the real boundary.
+    /// test visibility. Fail-CLOSED: a path outside the root is denied. Callers
+    /// pass the containing root (`containing_root`), so a strip_prefix miss means
+    /// the path escaped the tree we scope against, not that it's unrestricted.
     fn allows_path(&self, p: &Path, root: &Path) -> bool {
         if self.is_empty() {
             return true;
         }
         match p.strip_prefix(root) {
             Ok(rel) => self.allows(&rel.to_string_lossy().replace('\\', "/")),
-            Err(_) => true,
+            Err(_) => false,
         }
     }
 
@@ -195,9 +196,18 @@ impl PathFilter {
                 let file_name = rel.rsplit('/').next().unwrap_or(&rel);
                 !Self::matches_any(&self.exclude, &rel, file_name)
             }
-            Err(_) => true,
+            Err(_) => false,
         }
     }
+}
+
+/// The workspace root that actually CONTAINS `p`. With multiple roots a path
+/// under `roots[1]` can't `strip_prefix` `roots[0]`, which silently fail-opened
+/// the include/exclude scoping for every root past the first. Falls back to the
+/// first root so an out-of-tree path is still filtered (and now denied) rather
+/// than passed through unfiltered.
+fn containing_root(p: &Path, roots: &[PathBuf]) -> Option<PathBuf> {
+    roots.iter().find(|r| p.starts_with(r)).or_else(|| roots.first()).cloned()
 }
 
 /// Resolve `path` (which may be absolute or relative) to an absolute path that
@@ -272,8 +282,8 @@ fn tool_read_file(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
     // Per-project file-pattern scoping — a file the project excludes (or that
     // falls outside a non-empty include set) is reported as out-of-scope.
     let filter = PathFilter::from_env();
-    if let Some(ws_root) = roots.first() {
-        if !filter.allows_path(&resolved, ws_root) {
+    if let Some(ws_root) = containing_root(&resolved, roots) {
+        if !filter.allows_path(&resolved, &ws_root) {
             return Err(format!(
                 "{} is outside this project's file patterns",
                 resolved.display()
@@ -322,7 +332,7 @@ fn tool_list_dir(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
     }
     // Per-project file-pattern scoping, relative to the workspace root.
     let filter = PathFilter::from_env();
-    let ws_root = roots.first().cloned().unwrap_or_else(|| resolved.clone());
+    let ws_root = containing_root(&resolved, roots).unwrap_or_else(|| resolved.clone());
     // (name, is_dir, is_symlink, size)
     let mut entries: Vec<(String, bool, bool, u64)> = Vec::new();
     let iter = std::fs::read_dir(&resolved).map_err(|e| format!("read_dir: {e}"))?;
@@ -422,10 +432,10 @@ fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
     reject_skipped(&search_root)?;
 
     // Per-project include/exclude scoping — relative to the WORKSPACE root
-    // (roots[0]), not the search subdir, so a project glob like `src/**` means
-    // the same thing regardless of where grep starts walking.
+    // containing the search, not the search subdir, so a project glob like
+    // `src/**` means the same thing regardless of where grep starts walking.
     let filter = PathFilter::from_env();
-    let ws_root = roots.first().cloned().unwrap_or_else(|| search_root.clone());
+    let ws_root = containing_root(&search_root, roots).unwrap_or_else(|| search_root.clone());
 
     let mut files_scanned = 0usize;
     let mut files_skipped = 0usize;
@@ -1625,6 +1635,38 @@ mod tests {
             "excluded dir must hide on a real canonicalized root"
         );
         std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    // Regression: with MULTIPLE roots the filter was tested against roots[0]
+    // only, so a file under roots[1] failed strip_prefix and hit the fail-OPEN
+    // arm — per-project scoping silently stopped applying past the first root.
+    #[test]
+    fn pathfilter_scopes_every_root_not_just_the_first() {
+        let base = std::env::temp_dir().join(format!("rift-pf-multi-{}", std::process::id()));
+        std::fs::create_dir_all(base.join("a").join("secrets")).unwrap();
+        std::fs::create_dir_all(base.join("b").join("secrets")).unwrap();
+        std::fs::write(base.join("b").join("secrets").join("key.env"), "x").unwrap();
+        let root_a = crate::assistant::strip_unc(&std::fs::canonicalize(base.join("a")).unwrap());
+        let root_b = crate::assistant::strip_unc(&std::fs::canonicalize(base.join("b")).unwrap());
+        let file_b = crate::assistant::strip_unc(
+            &std::fs::canonicalize(base.join("b").join("secrets").join("key.env")).unwrap(),
+        );
+        let roots = vec![root_a.clone(), root_b.clone()];
+        assert_eq!(
+            containing_root(&file_b, &roots).as_deref(),
+            Some(root_b.as_path()),
+            "must pick the root that actually contains the file"
+        );
+        let f = PathFilter::from_globs("", "secrets/**");
+        assert!(
+            !f.allows_path(&file_b, &containing_root(&file_b, &roots).unwrap()),
+            "exclude glob must apply under the SECOND root too"
+        );
+        assert!(
+            !f.allows_path(&file_b, &root_a),
+            "a strip_prefix miss must fail CLOSED, not allow the path"
+        );
+        std::fs::remove_dir_all(&base).ok();
     }
 
     // ─── trust_rank (pure, security-relevant ordering) ────────────────────────
