@@ -57,6 +57,27 @@ describe("fuzzy layer (edit-distance vs wordFreq)", () => {
     }
   });
 
+  it("never touches regular inflections missing from the frequency list", () => {
+    // The misfire class: the 50k list holds lemmas, not every inflection, so
+    // these all read as "unknown" and used to get rewritten to whatever common
+    // word sat one edit away. Their stems are known — that's what saves them.
+    for (const w of ["greps", "unstick", "prefetching", "rebased", "reranks", "misfires"]) {
+      expect(correctWord(w)).toBeNull();
+    }
+  });
+
+  it("never touches everyday dev-chat plurals and inflections", () => {
+    for (const w of ["workspaces", "runtimes", "endpoints", "webhooks", "debounced", "memoized", "linters", "commits", "renders", "caches"]) {
+      expect(correctWord(w)).toBeNull();
+    }
+  });
+
+  it("never touches Rift's own product vocabulary", () => {
+    for (const w of ["shiki", "velopack", "opus", "sonnet", "claude", "runes"]) {
+      expect(correctWord(w)).toBeNull();
+    }
+  });
+
   it("never touches identifiers, acronyms, or proper nouns mid-sentence", () => {
     expect(correctWord("myVar")).toBeNull();
     expect(correctWord("SvelteKit")).toBeNull();

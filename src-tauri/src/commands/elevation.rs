@@ -81,11 +81,10 @@ pub fn elevation_set_always(app: tauri::AppHandle, enabled: bool) -> Result<Elev
 
     // Not elevated — registering a HighestAvailable task needs admin. One-time
     // UAC relaunch; the elevated instance reconciles the task on boot.
-    crate::elevation::relaunch_as_admin().map_err(|e| {
+    crate::elevation::relaunch_as_admin().inspect_err(|_| {
         // Roll the preference back on cancel/failure — otherwise every launch
         // would keep re-attempting the relaunch with no task ever created.
         let _ = crate::assistant::set_always_elevated(false);
-        e
     })?;
     exit_after_handoff(app);
     Ok(ElevationApply { always_elevated: true, relaunching: true })

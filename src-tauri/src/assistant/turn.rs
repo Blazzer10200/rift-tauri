@@ -1816,7 +1816,12 @@ async fn dispatch_turn(
     if let Some(arc) = warm_pool::get(&session_id) {
         // M5/M7: lock the child only to read tx + key + in-progress, then RELEASE
         // before any await. Never hold the WarmChild mutex across the turn.
-        let reuse: Option<(mpsc::UnboundedSender<warm_pool::TurnCmd>, Arc<std::sync::atomic::AtomicBool>, Vec<Vec<u8>>)> = {
+        type WarmReuse = (
+            mpsc::UnboundedSender<warm_pool::TurnCmd>,
+            Arc<std::sync::atomic::AtomicBool>,
+            Vec<Vec<u8>>,
+        );
+        let reuse: Option<WarmReuse> = {
             let mut g = match arc.lock() { Ok(g) => g, Err(p) => p.into_inner() };
             if g.key != key {
                 if live_switch_ok

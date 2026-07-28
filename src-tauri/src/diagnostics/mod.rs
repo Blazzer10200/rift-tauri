@@ -76,9 +76,9 @@ pub struct DiagEvent {
     pub resource: Option<String>,
     /// Correlation id tying every event of one assistant turn together —
     /// `"<session_id>#<turn_epoch>"`. First-class (not buried in `fields`) so
-    /// `read_events` / the console can filter a whole turn by it. `serde(default)`
-    /// + skip-when-none keeps historical NDJSON lines readable and tool-less
-    /// events lean.
+    /// `read_events` / the console can filter a whole turn by it. Pairing
+    /// `serde(default)` with skip-when-none keeps historical NDJSON lines
+    /// readable and tool-less events lean.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<String>,
     pub file: Option<String>,

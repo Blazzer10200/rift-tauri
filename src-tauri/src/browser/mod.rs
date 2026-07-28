@@ -93,14 +93,13 @@ pub async fn open_probed(app: &AppHandle, url: &str, x: f64, y: f64, w: f64, h: 
     if let Some((host, port)) = loopback_target(&u) {
         let deadline = std::time::Instant::now() + Duration::from_secs(8);
         loop {
-            match tokio::time::timeout(
+            if let Ok(Ok(_)) = tokio::time::timeout(
                 Duration::from_millis(600),
                 tokio::net::TcpStream::connect((host.as_str(), port)),
             )
             .await
             {
-                Ok(Ok(_)) => break,
-                _ => {}
+                break;
             }
             if std::time::Instant::now() >= deadline {
                 crate::diagnostics::emit_with_fields(

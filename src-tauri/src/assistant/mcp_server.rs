@@ -507,6 +507,13 @@ fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
                 continue;
             }
         };
+        // Whole-buffer prefilter: equivalent to the loop below ONLY because the
+        // regex is built `multi_line(true)` (^/$ bind to line boundaries) — if
+        // that ever changes, drop this. Skips the split + per-line DFA restart
+        // on the majority of files, which have no match at all.
+        if !re.is_match(text) {
+            continue;
+        }
         for (lineno, line) in text.lines().enumerate() {
             if re.is_match(line) {
                 let rel = p.strip_prefix(&search_root).unwrap_or(p);
@@ -751,7 +758,7 @@ fn tool_crash_reports(args: &Value) -> Result<String, String> {
     if reports.is_empty() {
         return Ok("No crash reports — the app has not recorded any panics.".into());
     }
-    reports.sort_by(|a, b| b.2.cmp(&a.2)); // newest first
+    reports.sort_by_key(|r| std::cmp::Reverse(r.2)); // newest first
     let listing =
         reports.iter().map(|(n, sz, _)| format!("{n} ({sz} B)")).collect::<Vec<_>>().join("\n");
     // `name` must exactly match a listed report — names come from read_dir, so
@@ -1439,6 +1446,21 @@ mod tests {
         let (_td, root) = workspace();
         let out = tool_grep(&json!({ "pattern": "hello world" }), &[root]).unwrap();
         assert!(out.contains("a.txt"), "got: {out}");
+    }
+
+    #[test]
+    fn grep_anchored_pattern_matches_beyond_the_first_line() {
+        // Guards the whole-buffer prefilter in tool_grep: it agrees with the
+        // per-line scan ONLY while the regex stays `multi_line(true)`. Drop that
+        // flag and `^target` stops matching the buffer, so the prefilter skips
+        // the file outright and this goes red.
+        let (_td, root) = workspace();
+        std::fs::write(root.join("multi.txt"), "first line\ntarget here\nlast line\n").unwrap();
+        let roots = vec![root];
+        let out = tool_grep(&json!({ "pattern": "^target" }), &roots).unwrap();
+        assert!(out.contains("multi.txt:2"), "anchored match on line 2 lost: {out}");
+        let tail = tool_grep(&json!({ "pattern": "line$" }), &roots).unwrap();
+        assert!(tail.contains("multi.txt:1"), "$-anchored match lost: {tail}");
     }
 
     #[test]

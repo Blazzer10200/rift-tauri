@@ -2,6 +2,13 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.148.0 — Quicker, and it stops "fixing" words you spelled right
+
+- **Autocorrect leaves your real words alone.** It judged words against a 50k-word list that holds base words only — no regular plurals or endings — so anything it hadn't heard of got rewritten to the nearest common word. "greps" became "grips". It now recognises inflected and prefixed forms of words it already knows, only corrects toward genuinely common words, and treats Rift's own vocabulary (opus, sonnet, shiki, velopack) as real.
+- **Faster startup.** Syntax highlighting loaded all seventeen language grammars while the app was still painting its first screen. That now waits for the first idle moment instead of competing with the window you're waiting on.
+- **Faster workspace search.** The assistant's file search now checks whether a file matches at all before walking it line by line. Most files in a project don't match, and those now cost almost nothing.
+- **Smaller download on every update.** Release builds were being compiled as sixteen separate chunks with no optimization across them. They're now optimized as one unit and stripped of debug symbols — a faster backend and a smaller update to pull down.
+
 ## v0.147.1 — Tighter locks, honest labels
 
 - **First-run setup said "Opus 4.8" when the picker said "Opus 5".** Onboarding kept its own copy of the model list, and it had quietly drifted out of date. It now reads the same list the composer does, so the two can't disagree again.
@@ -12,16 +19,10 @@
 ## v0.147.0 — Opus 5 is here
 
 - **Claude Opus 5.** Anthropic's newest, most capable Opus is now the default Opus in the picker — same price as 4.8, stronger at checking its own work and pushing a hard task through to done. Opus 4.8 moves into "More models" so anything pinned to it keeps running exactly as before.
-- **Find on a page — `Ctrl+F`.** The in-app browser now has a real find bar: type to jump between matches, `Enter` / `Shift+Enter` to walk them, `Esc` to close. Native browser search, so it works on any page.
-- **Zoom a page.** A zoom stepper in the browser's ⋯ menu scales just the page you're viewing (separate from the app-wide UI zoom), and it sticks as you click around.
-- **Links stop vanishing.** Pages that open `target="_blank"` or `window.open` used to spawn an invisible popup that read as a dead click — those now just open in the dock you're looking at.
-- **A friendlier empty browser.** The blank browser panel now explains what it's for at a glance — share a page with the assistant, hand it console errors, or have it open a page for you — with a search box and the shortcuts worth knowing.
-
-## v0.146.0 — Fits your screen now
-
-- **Zoom the whole app.** New UI scale control in Settings → Appearance (80%–150%), plus the shortcuts you'd expect: `Ctrl+=` / `Ctrl+-` to step, `Ctrl+0` to reset. Everything scales together — text, chrome, spacing — on any monitor.
-- **The window remembers you.** Size, position, and maximized state persist across launches. If your saved spot is on a monitor that's no longer connected, Rift falls back to centered instead of restoring somewhere unreachable.
-- **No more off-screen window on small or high-DPI screens.** The default 1600×1000 window overflowed 1366×768 laptops *and* 1080p displays at 125% scaling, hanging past the screen edge. It now shrinks to fit the monitor's work area before centering.
+- **Find on a page — `Ctrl+F`.** A real find bar in the in-app browser: type to jump between matches, `Enter` / `Shift+Enter` to walk them, `Esc` to close.
+- **Zoom a page** from the browser's ⋯ menu, separately from the app-wide UI zoom, and it sticks as you click around.
+- **Links stop vanishing.** `target="_blank"` pages used to spawn an invisible popup that read as a dead click; they now open in the dock you're looking at.
+- **A friendlier empty browser** — the blank panel explains what it's for, with a search box and the key shortcuts.
 
 ## Known issues
 - **While elevated, dragging files from Explorer into the window doesn't work** (Windows blocks lower→higher integrity drag-drop); the attach button / file picker still works fine.

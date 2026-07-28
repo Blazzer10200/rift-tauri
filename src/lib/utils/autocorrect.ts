@@ -60,7 +60,12 @@ const EXTRA_WORDS = new Set(
     "params args stdin stdout stderr bool int str len src dist libs deps devtools hotfix refactor refactoring " +
     "memoize memoized debounce debounced throttled transpile minify polyfill sql db postgres sqlite redis docker " +
     "kubernetes powershell pwsh bash zsh vim neovim vscode figma ffmpeg endpoint endpoints subagent subagents " +
-    "screenshot screenshots autocorrect undo redo untick retry retries reranked lockfile gitignore dotfiles"
+    "screenshot screenshots autocorrect undo redo untick retry retries reranked lockfile gitignore dotfiles " +
+    // Rift's own surface + the vendor/model names that show up constantly in
+    // these chats — all real, none of them in a 50k English frequency list.
+    "rift shiki velopack anthropic claude opus sonnet haiku fable mcp stdio loopback keychain " +
+    "prewarm warmup dedupe transpiled bundler bundlers formatter formatters clippy rustfmt " +
+    "runes reactivity idempotent memoization telemetry observability composer dictation"
   ).split(" "),
 );
 
@@ -95,8 +100,11 @@ function edits1(w: string): Set<string> {
 
 // Rank ceilings — a correction must be a word this common to fire. Shorter
 // typed words get stricter caps (more real neighbors, higher misfire risk).
-function ed1Cap(len: number): number { return len <= 3 ? 2000 : len === 4 ? 10000 : 25000; }
-const ED2_CAP = 8000;
+// Tightened (was 2000/10000/25000 + ED2 8000): a 25k ceiling let half the
+// wordlist act as a correction target, so any rare-but-real word with a common
+// neighbour one edit away got rewritten. Real typos aim at common words anyway.
+function ed1Cap(len: number): number { return len <= 3 ? 1500 : len === 4 ? 6000 : 12000; }
+const ED2_CAP = 4000;
 
 function bestRanked(cands: Iterable<string>, cap: number): string | null {
   const ranks = rankMap();
@@ -112,11 +120,68 @@ function bestRanked(cands: Iterable<string>, cap: number): string | null {
 // must be a very common word to overrule that.
 const CAPITALIZED_CAP = 5000;
 
+// The frequency list holds ~50k lemmas — it does NOT enumerate regular
+// inflections. Treating an unlisted inflection as unknown was the biggest
+// source of wrong corrections: "greps" isn't in the list, so the fuzzy layer
+// rewrote it to whatever common word sat one edit away. Reduce a word to its
+// plausible stems and call it real if any stem is known.
+const PREFIXES = ["un", "re", "pre", "non", "de", "mis", "over", "under", "sub", "auto", "multi", "inter", "anti", "semi", "dis"];
+
+function morphStems(w: string): string[] {
+  const out: string[] = [];
+  const push = (s: string) => { if (s.length >= 3) out.push(s); };
+  const undouble = (s: string) => (s.length > 2 && s[s.length - 1] === s[s.length - 2] ? s.slice(0, -1) : null);
+  if (w.endsWith("ies") && w.length > 4) push(w.slice(0, -3) + "y");
+  if (w.endsWith("es") && w.length > 3) push(w.slice(0, -2));
+  if (w.endsWith("s") && !w.endsWith("ss")) push(w.slice(0, -1));
+  if (w.endsWith("ied") && w.length > 4) push(w.slice(0, -3) + "y");
+  if (w.endsWith("ed") && w.length > 3) {
+    push(w.slice(0, -2));
+    push(w.slice(0, -1));
+    const u = undouble(w.slice(0, -2));
+    if (u) push(u);
+  }
+  if (w.endsWith("ing") && w.length > 4) {
+    push(w.slice(0, -3));
+    push(w.slice(0, -3) + "e");
+    const u = undouble(w.slice(0, -3));
+    if (u) push(u);
+  }
+  if (w.endsWith("ily") && w.length > 4) push(w.slice(0, -3) + "y");
+  if (w.endsWith("ly") && w.length > 4) push(w.slice(0, -2));
+  if (w.endsWith("er") && w.length > 4) {
+    push(w.slice(0, -2));
+    push(w.slice(0, -1));
+    const u = undouble(w.slice(0, -2));
+    if (u) push(u);
+  }
+  if (w.endsWith("est") && w.length > 5) { push(w.slice(0, -3)); push(w.slice(0, -2)); }
+  for (const p of PREFIXES) {
+    if (w.startsWith(p) && w.length > p.length + 2) push(w.slice(p.length));
+  }
+  return out;
+}
+
+/** Real word? Exact hit in the frequency list / chat vocabulary, or a regular
+ *  inflected or prefixed form of one. */
+function isKnownWord(lower: string): boolean {
+  const ranks = rankMap();
+  const known = (s: string) => ranks.has(s) || EXTRA_WORDS.has(s);
+  if (known(lower)) return true;
+  // Two levels so a prefix AND a suffix can both come off — "prefetching" only
+  // reaches the known "fetch" after shedding both.
+  for (const stem of morphStems(lower)) {
+    if (known(stem)) return true;
+    for (const inner of morphStems(stem)) if (known(inner)) return true;
+  }
+  return false;
+}
+
 /** Edit-distance correction for a lowercase word the wordlist doesn't know.
  *  Null = leave it alone. `capitalized` tightens every rank ceiling. */
 function fuzzyCorrect(lower: string, capitalized = false): string | null {
   if (lower.length < 3 || lower.includes("'")) return null;
-  if (rankMap().has(lower) || EXTRA_WORDS.has(lower)) return null; // real word
+  if (isKnownWord(lower)) return null; // real word, or a regular form of one
   const clamp = (cap: number) => (capitalized ? Math.min(cap, CAPITALIZED_CAP) : cap);
   const e1 = edits1(lower);
   const hit1 = bestRanked(e1, clamp(ed1Cap(lower.length)));

@@ -329,7 +329,7 @@ fn body_first_line(text: &str) -> Option<String> {
     body.lines()
         .map(|l| l.trim().trim_start_matches('#').trim())
         .find(|l| !l.is_empty())
-        .map(|l| clip(&l.to_string(), DESC_MAX))
+        .map(|l| clip(l, DESC_MAX))
 }
 
 fn clip(s: &str, max: usize) -> String {

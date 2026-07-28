@@ -1,6 +1,6 @@
 [package]
 name = "rift-tauri"
-version = "0.147.1"
+version = "0.148.0"
 description = "Rift — local-workspace coding assistant powered by Claude"
 authors = ["Blazzer"]
 license = "MIT"
@@ -171,3 +171,19 @@ winreg = "0.55"
 #     downloaded from huggingface.co/ggerganov/whisper.cpp via `reqwest`
 #     streaming + `sha2` integrity. Heavy crates (whisper-rs/cpal/ort) added
 #     as their respective sub-modules land — Cargo deps stay minimal until then.
+
+# Release builds ran on Cargo defaults until now (`lto = false`,
+# `codegen-units = 16`) — the backend was compiled as 16 independently-optimized
+# units with no cross-crate inlining. Thin LTO + a single codegen unit let the
+# optimizer work across the whole graph; `strip` drops debug symbols the shipped
+# binary never uses. Smaller binary also means a smaller Velopack download on
+# every user update.
+#
+# Deliberately NOT set: `panic = "abort"` (Tauri's own docs suggest it, but the
+# app relies on unwinding — an aborting panic turns a recoverable command error
+# into a process kill) and `opt-level = "s"` (size-over-speed is the wrong trade
+# for a local coding assistant; keep the default 3).
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
