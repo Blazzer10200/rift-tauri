@@ -2,27 +2,20 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.149.0 — Autocorrect learns your words, and Rift cleans up after itself
+
+- **Autocorrect stops eating names like "FiveM".** Before "fixing" a word it doesn't recognise, it now asks Windows' own spellchecker, treats your open project's file names as real vocabulary, and ships knowing common gaming and dev terms (fivem, redm, obs, ryzen…). Real typos still get corrected exactly as before.
+- **Teach it once, it remembers.** Hit Ctrl+Z right after an unwanted correction and Rift learns the word permanently — or right-click any word and choose "Add to dictionary". Learned words are listed (and removable) in the composer's settings menu, under the autocorrect toggle.
+- **No more leftover background processes.** Closing Rift now sweeps everything an assistant turn started — including processes whose launching shell had already exited, which used to slip past the normal cleanup and keep running after the app was gone.
+- **The browser dock opens at its correct size.** It used to render at the wrong width until you nudged the splitter; it now sizes itself the moment it opens.
+- **The "Rift needs your input" card got smarter.** When Claude sends a question in a sloppy format, Rift now repairs it instead of showing an empty card with dead Submit/Dismiss buttons. And you can answer any single question by simply typing in the composer — autocorrect and dictation included — instead of being stuck with the card's bare "Other" box. The card and the composer placeholder both tell you when that's available.
+
 ## v0.148.0 — Quicker, and it stops "fixing" words you spelled right
 
 - **Autocorrect leaves your real words alone.** It judged words against a 50k-word list that holds base words only — no regular plurals or endings — so anything it hadn't heard of got rewritten to the nearest common word. "greps" became "grips". It now recognises inflected and prefixed forms of words it already knows, only corrects toward genuinely common words, and treats Rift's own vocabulary (opus, sonnet, shiki, velopack) as real.
 - **Faster startup.** Syntax highlighting loaded all seventeen language grammars while the app was still painting its first screen. That now waits for the first idle moment instead of competing with the window you're waiting on.
 - **Faster workspace search.** The assistant's file search now checks whether a file matches at all before walking it line by line. Most files in a project don't match, and those now cost almost nothing.
 - **Smaller download on every update.** Release builds were being compiled as sixteen separate chunks with no optimization across them. They're now optimized as one unit and stripped of debug symbols — a faster backend and a smaller update to pull down.
-
-## v0.147.1 — Tighter locks, honest labels
-
-- **First-run setup said "Opus 4.8" when the picker said "Opus 5".** Onboarding kept its own copy of the model list, and it had quietly drifted out of date. It now reads the same list the composer does, so the two can't disagree again.
-- **The in-app browser can no longer reach app-level permissions.** Permissions were granted per *window*, and the browser dock lives inside the main window — so a grant meant for Rift's own UI technically extended to whatever page you had open. They're now granted per *webview*, which leaves the browser out by construction. Nothing was exploitable in practice; this closes the door before it matters.
-- **Workspace file access is scoped correctly with more than one folder open.** The include/exclude rules the assistant's file tools respect only applied to your first workspace folder — anything under a second folder fell through unfiltered. Every folder is now checked against its own rules, and anything outside them is denied rather than allowed.
-- **"Open in VS Code" no longer misreads a path as a command flag.**
-
-## v0.147.0 — Opus 5 is here
-
-- **Claude Opus 5.** Anthropic's newest, most capable Opus is now the default Opus in the picker — same price as 4.8, stronger at checking its own work and pushing a hard task through to done. Opus 4.8 moves into "More models" so anything pinned to it keeps running exactly as before.
-- **Find on a page — `Ctrl+F`.** A real find bar in the in-app browser: type to jump between matches, `Enter` / `Shift+Enter` to walk them, `Esc` to close.
-- **Zoom a page** from the browser's ⋯ menu, separately from the app-wide UI zoom, and it sticks as you click around.
-- **Links stop vanishing.** `target="_blank"` pages used to spawn an invisible popup that read as a dead click; they now open in the dock you're looking at.
-- **A friendlier empty browser** — the blank panel explains what it's for, with a search box and the key shortcuts.
 
 ## Known issues
 - **While elevated, dragging files from Explorer into the window doesn't work** (Windows blocks lower→higher integrity drag-drop); the attach button / file picker still works fine.
