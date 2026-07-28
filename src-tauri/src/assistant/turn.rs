@@ -166,6 +166,13 @@ pub(crate) fn kill_all_session_children() {
     for pid in pids {
         kill_child_tree(pid);
     }
+    // Registry sweep: turn-spawned descendants (dev servers, watchers) whose
+    // parent shell already exited are invisible to the /T tree-kills above —
+    // the stamped PID registry in proc_tree still reaches them.
+    let swept = super::proc_tree::reap_tracked();
+    if swept > 0 {
+        log::info!("assistant: swept {swept} orphaned turn-spawned process(es)");
+    }
 }
 
 fn mark_session_stopped(session_id: &str) {

@@ -11,7 +11,19 @@
 //! pool (`spawn_blocking`); a snapshot is milliseconds, not free.
 
 use serde::Serialize;
+use std::sync::{Mutex, OnceLock};
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+
+/// Descendants seen alive under a CLI child, stamped (exe, start-secs) so a
+/// recycled PID can never be killed by mistake. The registry survives the
+/// parent chain's death — which is exactly the leak `taskkill /T` can't reach:
+/// a `npm run dev` whose launching shell already exited orphans out of the
+/// tree walk, but its stamped PID is still here at shutdown.
+static TRACKED: OnceLock<Mutex<std::collections::HashMap<u32, (String, u64)>>> = OnceLock::new();
+
+fn tracked() -> &'static Mutex<std::collections::HashMap<u32, (String, u64)>> {
+    TRACKED.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
 
 /// One live shell under the CLI child, as shown in the HUD.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -102,7 +114,55 @@ pub(crate) fn shell_rows(root_pid: u32) -> Vec<ShellRow> {
         }
     }
     rows.sort_by_key(|r| (r.started_at, r.pid));
+    // Track EVERY live descendant (full subtree, not just topmost shells) —
+    // the shutdown sweep's only way to reach processes whose intermediate
+    // parent exits before the app does. Prune-then-merge keeps the registry
+    // bounded: entries whose stamp no longer matches a live process drop out.
+    let mut all: Vec<u32> = snap.children.get(&root_pid).cloned().unwrap_or_default();
+    let mut seen: Vec<(u32, String, u64)> = Vec::new();
+    while let Some(pid) = all.pop() {
+        let Some((_, name, _, started_at)) = snap.procs.get(&pid) else { continue };
+        if is_rift_infra(name) {
+            continue; // MCP grandchild — the /T tree-kill owns it
+        }
+        seen.push((pid, name.clone(), *started_at));
+        if let Some(kids) = snap.children.get(&pid) {
+            all.extend(kids.iter().copied());
+        }
+    }
+    {
+        let mut t = tracked().lock().unwrap();
+        t.retain(|pid, (name, started)| {
+            snap.procs.get(pid).is_some_and(|(_, n, _, s)| n == name && s == started)
+        });
+        for (pid, name, started_at) in seen {
+            t.insert(pid, (name, started_at));
+        }
+    }
     rows
+}
+
+/// Shutdown sweep: kill every tracked descendant still alive AND still matching
+/// its (exe, start-time) stamp — PID-only and recycle-safe, never by image
+/// name. Drains the registry; returns how many were killed.
+pub(crate) fn reap_tracked() -> usize {
+    let stamped: Vec<(u32, (String, u64))> = tracked().lock().unwrap().drain().collect();
+    if stamped.is_empty() {
+        return 0;
+    }
+    let snap = snapshot();
+    let mut killed = 0usize;
+    for (pid, (name, started)) in stamped {
+        let alive = snap
+            .procs
+            .get(&pid)
+            .is_some_and(|(_, n, _, s)| *n == name && *s == started);
+        if alive {
+            super::warm_pool::kill_child_tree(pid);
+            killed += 1;
+        }
+    }
+    killed
 }
 
 /// Kill-gate: is `pid` anywhere in the live subtree under `root_pid`?
