@@ -139,6 +139,12 @@
     try {
       await invoke("browser_open", { url, ...b });
       opened = true;
+      // The dock's 220ms open transition is usually still animating when the
+      // bounds above were measured (t≈0 → near-zero width), and every
+      // ResizeObserver correction during the slide was dropped by syncBounds'
+      // `!opened` guard. Push one fresh sync now that the guard is lifted —
+      // without it the webview keeps the wrong size until a manual splitter drag.
+      syncBounds();
       // Don't clear `loading` here — `browser_open` resolves when navigation is
       // dispatched, not when the page finishes. The `browser://load` "finished"
       // event clears it (watchdog as a fallback if it never arrives).
