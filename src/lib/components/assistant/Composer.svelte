@@ -561,6 +561,10 @@
   // animation ends.
   let fireKey = $state(0);
 
+  // Live single-question ask_user card answerable from the composer — drives
+  // the placeholder hint and reroutes fire() from queueing to answering.
+  const askTarget = $derived(streaming ? assistant.composerAnswerTarget() : null);
+
   function fire() {
     // Enter never reaches oninput (keydown preventDefault) — the trailing
     // word gets its autocorrect pass here instead.
@@ -580,6 +584,21 @@
     const text = out.trim();
     // Allow attachments-only sends (paste-and-go); only block if both empty.
     if (!text && attachments.length === 0) return;
+    // A pending ask_user card blocks the turn — a typed send ANSWERS it
+    // instead of queueing for the next turn, so the answer gets the full
+    // composer path (autocorrect, dictation). Attachments fall through to
+    // the normal queue: they can't ride an ask_user answer.
+    if (text && attachments.length === 0 && askTarget) {
+      const { toolUseId, question } = askTarget;
+      setDraft("");
+      stt.consume();
+      fireKey++;
+      void assistant
+        .submitAskUserAnswer(toolUseId, { answers: [{ question, answer: text }] })
+        .catch(() => notify.danger("Couldn't deliver the answer — use the question card."));
+      void tick().then(autosize);
+      return;
+    }
     // Auth gate — the button's `disabled={!canFire}` covers clicks, but Enter
     // routes straight here, so without this a fresh/logged-out user can fire a
     // turn that's doomed to "claude exited with 1". Guard BEFORE clearing the
@@ -1441,6 +1460,8 @@
           {#key hintIdx}
             <span class="placeholder-ghost" aria-hidden="true">{IDLE_HINTS[hintIdx % IDLE_HINTS.length]}</span>
           {/key}
+        {:else if streaming && draft.length === 0 && askTarget}
+          <span class="placeholder-ghost static" aria-hidden="true">Rift asked a question — type here, <span class="ph-k">Enter</span> answers it</span>
         {:else if streaming && draft.length === 0}
           <span class="placeholder-ghost static" aria-hidden="true"><span class="ph-k">Enter</span> queues for the next turn · <span class="ph-k">/stop</span> halts</span>
         {:else if attachments.length > 0 && draft.length === 0}

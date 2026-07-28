@@ -1002,6 +1002,13 @@ export function recordTurnUsage(tab: TabState, u: Record<string, unknown>, accum
 }
 
 function fillToolResult(tab: TabState, toolUseId: string, content: string, isError: boolean) {
+  // An ask_user that errors before reaching the bridge (schema rejection) never
+  // gets a request_id — drop its queued toolUseId, or the NEXT ask_user's
+  // request_id FIFO-pairs with this dead block and the live card sticks at
+  // "Connecting…" with both buttons disabled (seen live 2026-07-28).
+  if (isError && tab.unboundAskUserToolUseIds.includes(toolUseId)) {
+    tab.unboundAskUserToolUseIds = tab.unboundAskUserToolUseIds.filter((id) => id !== toolUseId);
+  }
   if (tab.currentTurnRecord) {
     const rec = tab.currentTurnRecord.toolUses.find((t) => t.id === toolUseId);
     if (rec) {

@@ -179,6 +179,7 @@ import {
 // Post-turn health pass — bg-tab completion toasts + once-per-session
 // dead-wait / stale-cache / tool-error warnings.
 import { checkTurnHealth, askUserStaleNudge } from "./assistant/healthAlerts";
+import { parseAskQuestions } from "./assistant/askQuestions";
 
 /** Per-conversation streaming state. One TabState per open chat tab; the
  *  AssistantStore holds a Map keyed by Rift convoId and delegates all
@@ -1557,6 +1558,26 @@ class AssistantStore {
     const next = new Map(tab.askUserBindings);
     next.delete(toolUseId);
     tab.askUserBindings = next;
+  }
+
+  /** Composer hand-off: the ACTIVE tab's single pending ask_user question, if
+   *  one is awaiting an answer. The composer routes a typed send to it — the
+   *  answer gets the full composer path (autocorrect, dictation) instead of
+   *  the card's bare "Other" input. Multi-question cards stay card-only: one
+   *  text can't answer N questions unambiguously. */
+  composerAnswerTarget(): { toolUseId: string; question: string } | null {
+    const tab = this.activeTab;
+    if (!tab || tab.askUserBindings.size === 0) return null;
+    const toolUseId = [...tab.askUserBindings.keys()].at(-1);
+    if (!toolUseId) return null;
+    for (let i = tab.messages.length - 1; i >= 0; i--) {
+      const b = tab.messages[i].blocks.find((x) => x.type === "tool" && x.id === toolUseId);
+      if (!b || b.type !== "tool") continue;
+      if (b.status !== "pending") return null;
+      const qs = parseAskQuestions(b.input);
+      return qs.length === 1 ? { toolUseId, question: qs[0].question } : null;
+    }
+    return null;
   }
 
   /** `assistant://permission-request` arrived — the CLI wants to run a gated

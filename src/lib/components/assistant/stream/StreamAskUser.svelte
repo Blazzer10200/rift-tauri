@@ -6,31 +6,14 @@
   import { untrack } from "svelte";
   import { CheckCircle2, Circle, Square, Loader2, MessageCircleQuestion, Check } from "lucide-svelte";
   import { assistant } from "$lib/state/assistant.svelte";
+  import { parseAskQuestions } from "$lib/state/assistant/askQuestions";
   import { parseAskUserResult, type StreamTool } from "./streamModel";
 
   let { tool, live = false }: { tool: StreamTool; live?: boolean } = $props();
 
-  type AskQuestion = {
-    question: string;
-    header: string;
-    multiSelect?: boolean;
-    options: Array<{ label: string; description?: string }>;
-  };
-  const askQuestions = $derived.by<AskQuestion[]>(() => {
-    const raw = tool.input?.questions;
-    if (!Array.isArray(raw)) return [];
-    return (raw as Array<Record<string, unknown>>).map((q) => ({
-      question: typeof q.question === "string" ? q.question : "",
-      header: typeof q.header === "string" ? q.header : "",
-      multiSelect: q.multiSelect === true,
-      options: Array.isArray(q.options)
-        ? (q.options as Array<Record<string, unknown>>).map((o) => ({
-            label: typeof o.label === "string" ? o.label : "",
-            description: typeof o.description === "string" ? o.description : undefined,
-          })).filter((o) => o.label.length > 0)
-        : [],
-    }));
-  });
+  // Lenient shared parser — coerces sloppy model shapes (string options,
+  // JSON-string questions) instead of rendering an empty card.
+  const askQuestions = $derived(parseAskQuestions(tool.input));
 
   const OTHER_IDX = -1;
   let askSingleIdx = $state<number[]>([]);
@@ -299,6 +282,8 @@
       <div class="sask-hint" style="color:var(--danger)">{askError}</div>
     {:else if !askRequestId}
       <div class="sask-hint">Connecting to the chat session…</div>
+    {:else if askQuestions.length === 1}
+      <div class="sask-hint">Or just type in the composer below — your message becomes the answer.</div>
     {/if}
   {/if}
 </div>

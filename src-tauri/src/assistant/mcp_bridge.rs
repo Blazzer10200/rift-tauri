@@ -135,20 +135,11 @@ fn bridge_call_inner(
 /// answer (or 10-min timeout). 11-min read timeout here — 1 min headroom over
 /// the parent's 10-min await so the parent times out first with a clean error.
 pub(super) fn tool_ask_user(args: &Value) -> Result<String, String> {
-    let questions = args
-        .get("questions")
-        .and_then(|v| v.as_array())
-        .ok_or("missing `questions` array")?;
-    if questions.is_empty() {
-        return Err("`questions` must contain at least one question".into());
-    }
+    let questions = normalize_questions(args)?;
     // RR10: bound the model-supplied payload before it crosses the loopback
     // bridge (the parent's read path buffers a whole line). The schema says
     // maxItems:4 but MCP does not enforce JSON Schema, so cap here.
-    if questions.len() > 4 {
-        return Err("too many questions (max 4)".into());
-    }
-    if serde_json::to_string(questions).map(|s| s.len()).unwrap_or(usize::MAX) > 16 * 1024 {
+    if serde_json::to_string(&questions).map(|s| s.len()).unwrap_or(usize::MAX) > 16 * 1024 {
         return Err("questions payload too large (max 16 KiB)".into());
     }
 
@@ -164,6 +155,94 @@ pub(super) fn tool_ask_user(args: &Value) -> Result<String, String> {
         Duration::from_secs(660),
     )?;
     Ok(format_ask_user_result(&data))
+}
+
+/// Schema-teaching error for an ask_user shape too broken to coerce.
+const ASK_SCHEMA_HINT: &str = "ask_user needs `questions`: an array of \
+    {question, header, options:[{label, description?}, …]} objects (2-4 options each). \
+    Example: {\"questions\":[{\"question\":\"Which approach?\",\"header\":\"Approach\",\
+    \"options\":[{\"label\":\"A\"},{\"label\":\"B\"}]}]}";
+
+/// Coerce the model-supplied ask_user args into the canonical questions array.
+/// MCP doesn't enforce JSON Schema and models drift: seen live 2026-07-28 —
+/// `questions` sent as a JSON-encoded STRING with plain-string options sailed
+/// through the old array-only check's caller and rendered a card with ZERO
+/// options and dead buttons. Accepted (and normalized) here: questions as
+/// array / JSON string / bare object, a flat top-level {question, options}
+/// call, and options as plain strings. Anything still unusable errors with a
+/// schema-teaching message so the model can retry correctly.
+fn normalize_questions(args: &Value) -> Result<Vec<Value>, String> {
+    let raw: Vec<Value> = match args.get("questions") {
+        Some(Value::Array(a)) => a.clone(),
+        Some(Value::String(s)) => match serde_json::from_str::<Value>(s) {
+            Ok(Value::Array(a)) => a,
+            Ok(o @ Value::Object(_)) => vec![o],
+            _ => return Err(ASK_SCHEMA_HINT.into()),
+        },
+        Some(Value::Object(o)) => vec![Value::Object(o.clone())],
+        None if args.get("question").is_some() || args.get("options").is_some() => {
+            vec![args.clone()]
+        }
+        _ => return Err(ASK_SCHEMA_HINT.into()),
+    };
+    if raw.is_empty() {
+        return Err("`questions` must contain at least one question".into());
+    }
+    if raw.len() > 4 {
+        return Err("too many questions (max 4)".into());
+    }
+    let mut out = Vec::with_capacity(raw.len());
+    for q in raw {
+        let Value::Object(mut obj) = q else {
+            return Err(ASK_SCHEMA_HINT.into());
+        };
+        let qtext = obj
+            .get("question")
+            .and_then(|v| v.as_str())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+        if qtext.is_empty() {
+            return Err(format!("each question needs non-empty `question` text. {ASK_SCHEMA_HINT}"));
+        }
+        obj.insert("question".into(), Value::from(qtext.clone()));
+        if obj.get("header").and_then(|v| v.as_str()).is_none() {
+            obj.insert("header".into(), Value::from(""));
+        }
+        let mut opts = Vec::new();
+        if let Some(Value::Array(items)) = obj.get("options") {
+            for it in items {
+                match it {
+                    Value::String(s) if !s.trim().is_empty() => {
+                        opts.push(json!({ "label": s.trim() }));
+                    }
+                    Value::Object(o) => {
+                        let label = o
+                            .get("label")
+                            .and_then(|v| v.as_str())
+                            .map(str::trim)
+                            .filter(|l| !l.is_empty());
+                        if let Some(label) = label {
+                            let mut oo = json!({ "label": label });
+                            if let Some(d) = o.get("description").and_then(|v| v.as_str()) {
+                                oo["description"] = Value::from(d);
+                            }
+                            opts.push(oo);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        if opts.is_empty() {
+            return Err(format!(
+                "`options` for \"{qtext}\" has no usable entries — each option must be \
+                 {{\"label\": \"…\"}} (plain strings are also accepted). {ASK_SCHEMA_HINT}"
+            ));
+        }
+        obj.insert("options".into(), Value::Array(opts));
+        out.push(Value::Object(obj));
+    }
+    Ok(out)
 }
 
 /// Turn the answer envelope from the frontend into a plain-text tool_result
@@ -386,6 +465,47 @@ pub(super) fn tool_notify(args: &Value) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalize_questions_coerces_sloppy_shapes() {
+        // The live 2026-07-28 shape: questions as a JSON-encoded string with
+        // plain-string options — used to reach the card as zero options.
+        let s = json!({ "questions": "[{\"question\":\"Pick?\",\"options\":[\"A\",\"B\"]}]" });
+        let out = normalize_questions(&s).unwrap();
+        assert_eq!(out[0]["question"], "Pick?");
+        assert_eq!(out[0]["options"][0]["label"], "A");
+        assert_eq!(out[0]["options"][1]["label"], "B");
+        assert_eq!(out[0]["header"], "");
+
+        // Flat legacy call: {question, options} at the top level, mixed options.
+        let flat = json!({ "question": "Ship it?", "options": [{"label": "Yes", "description": "now"}, "No"] });
+        let out = normalize_questions(&flat).unwrap();
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0]["options"][0]["description"], "now");
+        assert_eq!(out[0]["options"][1]["label"], "No");
+
+        // Canonical shape passes through untouched (multiSelect preserved).
+        let ok = json!({ "questions": [{ "question": "Q?", "header": "H", "multiSelect": true,
+            "options": [{"label": "A"}, {"label": "B"}] }] });
+        let out = normalize_questions(&ok).unwrap();
+        assert_eq!(out[0]["multiSelect"], true);
+        assert_eq!(out[0]["header"], "H");
+    }
+
+    #[test]
+    fn normalize_questions_rejects_unusable_shapes_with_teaching_errors() {
+        assert!(normalize_questions(&json!({})).unwrap_err().contains("questions"));
+        assert!(normalize_questions(&json!({ "questions": [] })).is_err());
+        assert!(normalize_questions(&json!({ "questions": "not json" })).is_err());
+        // Empty question text and option-less questions both teach the schema.
+        let e = normalize_questions(&json!({ "questions": [{ "options": ["A", "B"] }] })).unwrap_err();
+        assert!(e.contains("`question` text"));
+        let e = normalize_questions(&json!({ "questions": [{ "question": "Q?", "options": [42] }] })).unwrap_err();
+        assert!(e.contains("no usable entries"));
+        // Cap survives coercion.
+        let five: Vec<_> = (0..5).map(|i| json!({ "question": format!("Q{i}?"), "options": ["A", "B"] })).collect();
+        assert!(normalize_questions(&json!({ "questions": five })).unwrap_err().contains("max 4"));
+    }
 
     #[test]
     fn neutralize_sentinels_breaks_exact_delimiters_case_insensitively() {

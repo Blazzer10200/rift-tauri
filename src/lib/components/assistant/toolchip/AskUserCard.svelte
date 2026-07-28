@@ -5,33 +5,16 @@
   // max-width, pending pulse) lives in ToolChip — this renders the head + body.
   import { Loader2, CheckCircle2, AlertCircle, HelpCircle, Square, Circle } from "lucide-svelte";
   import { assistant, type ToolBlock } from "../../../state/assistant.svelte";
+  import { parseAskQuestions } from "../../../state/assistant/askQuestions";
   import { parseAskUserResult } from "../stream/streamModel";
 
   let { tool, expanded = true }: { tool: ToolBlock; expanded?: boolean } = $props();
 
   // ── AskUser state — single-select index OR multi-select set per question.
   //    `otherText` holds the freeform input when the user picks "Other".
-  type AskQuestion = {
-    question: string;
-    header: string;
-    multiSelect?: boolean;
-    options: Array<{ label: string; description?: string }>;
-  };
-  const askQuestions = $derived.by<AskQuestion[]>(() => {
-    const raw = tool.input?.questions;
-    if (!Array.isArray(raw)) return [];
-    return (raw as Array<Record<string, unknown>>).map((q) => ({
-      question: typeof q.question === "string" ? q.question : "",
-      header: typeof q.header === "string" ? q.header : "",
-      multiSelect: q.multiSelect === true,
-      options: Array.isArray(q.options)
-        ? (q.options as Array<Record<string, unknown>>).map((o) => ({
-            label: typeof o.label === "string" ? o.label : "",
-            description: typeof o.description === "string" ? o.description : undefined,
-          })).filter((o) => o.label.length > 0)
-        : [],
-    }));
-  });
+  //    Lenient shared parser — coerces sloppy model shapes (string options,
+  //    JSON-string questions) instead of rendering an empty card.
+  const askQuestions = $derived(parseAskQuestions(tool.input));
   // Per-question UI state — index by position. "Other" is a sentinel value
   // outside the option indices; selecting it reveals the freeform input.
   const OTHER_IDX = -1;
@@ -295,6 +278,8 @@
         <div class="ask-hint" style="color:var(--danger)">{askError}</div>
       {:else if !askRequestId}
         <div class="ask-hint">Connecting to the chat session…</div>
+      {:else if askQuestions.length === 1}
+        <div class="ask-hint">Or just type in the composer below — your message becomes the answer.</div>
       {/if}
     {/if}
   </div>
