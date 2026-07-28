@@ -1,5 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { boundaryAutocorrect, correctText, correctWord, finalWordAutocorrect, isBoundaryChar } from "./autocorrect";
+import {
+  addPersonalWord,
+  boundaryAutocorrect,
+  cachedOracleKnown,
+  correctText,
+  correctWord,
+  finalWordAutocorrect,
+  isBoundaryChar,
+  oracleKnows,
+  removePersonalWord,
+  setSpellOracle,
+  setWorkspaceVocab,
+  setWorkspaceVocabFromPaths,
+} from "./autocorrect";
 
 const apply = (value: string, caret: number): string | null => {
   const fix = boundaryAutocorrect(value, caret);
@@ -182,6 +195,52 @@ describe("finalWordAutocorrect", () => {
     expect(applyFinal("")).toBeNull();
     expect(applyFinal("src/teh")).toBeNull();
     expect(applyFinal("/diag im")).toBeNull();
+  });
+});
+
+describe("brand names + learned vocabulary (the FiveM bug class)", () => {
+  it("leaves gaming/platform names alone", () => {
+    // Pre-fix these got eaten by the fuzzy layer ("fivem"→"five", "redm"→"red").
+    for (const w of ["fivem", "redm", "gta", "twitch", "nvidia"]) {
+      expect(correctWord(w)).toBeNull();
+    }
+    expect(correctWord("Fivem", true)).toBeNull(); // sentence-start variant
+  });
+
+  it("personal dictionary beats even the exact typo map", () => {
+    expect(correctWord("teh")).toBe("the");
+    addPersonalWord("teh");
+    expect(correctWord("teh")).toBeNull();
+    removePersonalWord("teh");
+    expect(correctWord("teh")).toBe("the");
+  });
+
+  it("workspace vocabulary from file paths suppresses corrections", () => {
+    expect(correctWord("quixel")).not.toBeNull(); // fuzzy layer wants this one
+    setWorkspaceVocabFromPaths(["scripts/QuixelLoader/quixel-map.lua"]);
+    expect(correctWord("quixel")).toBeNull();
+    expect(correctWord("loader")).toBeNull();
+    setWorkspaceVocab([]);
+    expect(correctWord("quixel")).not.toBeNull();
+  });
+
+  it("boundary fixes carry layer + typed word for the oracle gate", () => {
+    const exact = boundaryAutocorrect("fix teh ", 8);
+    expect(exact).toMatchObject({ fuzzy: false, word: "teh" });
+    // "wrok" sits in the generated exact map — use a word only the fuzzy
+    // layer can reach so the flag is exercised.
+    const fuzzy = boundaryAutocorrect("responsibilty ", 14);
+    expect(fuzzy).toMatchObject({ fuzzy: true, word: "responsibilty", replacement: "responsibility" });
+  });
+
+  it("a cached OS-oracle verdict marks a word known", async () => {
+    expect(cachedOracleKnown("responsibilty")).toBeUndefined();
+    setSpellOracle(async () => true);
+    expect(correctWord("responsibilty")).toBe("responsibility"); // unchecked → still corrected
+    await oracleKnows("responsibilty");
+    expect(cachedOracleKnown("responsibilty")).toBe(true);
+    expect(correctWord("responsibilty")).toBeNull(); // OS vouched for it
+    setSpellOracle(null);
   });
 });
 

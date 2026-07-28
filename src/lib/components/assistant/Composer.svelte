@@ -9,7 +9,8 @@
   import { cliCommands } from "../../state/assistant/cliCommands.svelte";
   import { requestPrewarm, resetPrewarmDedup } from "../../state/assistant/prewarm";
   import { fuzzyScore, slashScore, isFileDrag, attachImageFiles, summarizeAttach, attachTextFiles, summarizeTextAttach } from "./composer/helpers";
-  import { boundaryAutocorrect, finalWordAutocorrect, isBoundaryChar } from "$lib/utils/autocorrect";
+  import { boundaryAutocorrect, finalWordAutocorrect, isBoundaryChar, oracleKnows, cachedOracleKnown, setSpellOracle, addPersonalWord, type BoundaryFix } from "$lib/utils/autocorrect";
+  import { invoke } from "@tauri-apps/api/core";
   import AttachmentsRow from "./composer/AttachmentsRow.svelte";
   import QueueRail from "./composer/QueueRail.svelte";
   import LivePills from "./composer/LivePills.svelte";
@@ -34,7 +35,12 @@
   // Mic-button visibility binds to stt.config.enabled, so load the backend
   // stt config eagerly — otherwise users with STT enabled wouldn't see the
   // mic until they opened Settings → Speech once.
-  onMount(() => { void stt.init(); });
+  onMount(() => {
+    void stt.init();
+    // OS spell-check oracle: fuzzy autocorrect guesses get double-checked
+    // against the Windows dictionary (ISpellChecker) before touching the draft.
+    setSpellOracle(async (w) => (await invoke<boolean[]>("spell_check_words", { words: [w] }))[0] ?? false);
+  });
 
   // RR2 unmount hygiene — the Composer is destroyed when its tab/split-pane
   // closes (parent gates rendering on tab presence). Without this, pending
@@ -538,6 +544,18 @@
     void tick().then(() => ta?.focus());
   }
 
+  // Learn-from-undo: the last autocorrect applied to the textarea. Ctrl+Z
+  // restoring the original word within 30s = "I meant that" → learn it.
+  let lastAutoFix: { word: string; start: number; at: number } | null = null;
+
+  async function applyFuzzyFix(el: HTMLTextAreaElement, fix: BoundaryFix) {
+    if (await oracleKnows(fix.word)) return; // OS dictionary vouches for it
+    if (el.value.slice(fix.start, fix.end) !== fix.word) return; // draft moved on
+    el.setRangeText(fix.replacement, fix.start, fix.end, "preserve");
+    setDraft(el.value);
+    lastAutoFix = { word: fix.word, start: fix.start, at: Date.now() };
+  }
+
   // Bumps on every fire() — drives the send-button ripple keyed off `{#key}`.
   // A pure-CSS one-shot, mounted by the key flip and self-removed after its
   // animation ends.
@@ -553,8 +571,11 @@
     const ghost = dictating ? stt.ghostTail.trim() : "";
     if (ghost) out = out ? (/\s$/.test(out) ? out + ghost : `${out} ${ghost}`) : ghost;
     if (assistant.autocorrect) {
+      // Fuzzy guesses only land here when the OS dictionary already said (via a
+      // cached boundary-time check) the word is NOT real — send can't await.
       const fix = finalWordAutocorrect(out);
-      if (fix) out = out.slice(0, fix.start) + fix.replacement + out.slice(fix.end);
+      if (fix && (!fix.fuzzy || cachedOracleKnown(fix.word) === false))
+        out = out.slice(0, fix.start) + fix.replacement + out.slice(fix.end);
     }
     const text = out.trim();
     // Allow attachments-only sends (paste-and-go); only block if both empty.
@@ -1376,7 +1397,22 @@
               (typeof typed === "string" && isBoundaryChar(typed)) || ie.inputType === "insertLineBreak";
             if (assistant.autocorrect && atBoundary) {
               const fix = boundaryAutocorrect(el.value, el.selectionStart ?? el.value.length);
-              if (fix) el.setRangeText(fix.replacement, fix.start, fix.end, "preserve");
+              if (fix && !fix.fuzzy) {
+                el.setRangeText(fix.replacement, fix.start, fix.end, "preserve");
+                lastAutoFix = { word: fix.word, start: fix.start, at: Date.now() };
+              } else if (fix) {
+                // Edit-distance guess — only lands if the OS dictionary also
+                // doesn't know the word (async; re-validates the region first).
+                void applyFuzzyFix(el, fix);
+              }
+            }
+            if (ie.inputType === "historyUndo" && lastAutoFix && Date.now() - lastAutoFix.at < 30_000) {
+              const { word, start } = lastAutoFix;
+              lastAutoFix = null;
+              if (el.value.slice(start, start + word.length) === word) {
+                addPersonalWord(word);
+                notify.ok(`Learned "${word}" — won't autocorrect it again`);
+              }
             }
             setDraft(el.value);
             undoDraft = null;

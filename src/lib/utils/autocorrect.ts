@@ -65,9 +65,113 @@ const EXTRA_WORDS = new Set(
     // these chats — all real, none of them in a 50k English frequency list.
     "rift shiki velopack anthropic claude opus sonnet haiku fable mcp stdio loopback keychain " +
     "prewarm warmup dedupe transpiled bundler bundlers formatter formatters clippy rustfmt " +
-    "runes reactivity idempotent memoization telemetry observability composer dictation"
+    "runes reactivity idempotent memoization telemetry observability composer dictation " +
+    // Gaming/platform/hardware names people type in lowercase — each sits one
+    // edit away from a common English word ("fivem"→"five", "redm"→"red") so
+    // the fuzzy layer would otherwise eat them.
+    "fivem redm cfx gta gmod rockstar minecraft roblox fortnite valorant skyrim bannerlord " +
+    "steam discord twitch obs nvidia geforce rtx radeon ryzen vram nvme proxmox homelab " +
+    "modded modpack speedrun respawn hitbox loadout minimap"
   ).split(" "),
 );
+
+// ---- Personal dictionary (persisted) + workspace vocabulary (per-project) ----
+// Both feed isKnownWord: a word the user taught Rift, or one that appears in
+// the open project's file/manifest names, is never "corrected".
+
+const PERSONAL_KEY = "rift.autocorrect.personal";
+
+let PERSONAL: Set<string> | null = null;
+function personal(): Set<string> {
+  if (!PERSONAL) {
+    PERSONAL = new Set();
+    try {
+      if (typeof localStorage !== "undefined") {
+        const raw = localStorage.getItem(PERSONAL_KEY);
+        if (raw) for (const w of JSON.parse(raw) as string[]) PERSONAL.add(w);
+      }
+    } catch {
+      /* SSR or storage disabled */
+    }
+  }
+  return PERSONAL;
+}
+
+function savePersonal() {
+  try {
+    if (typeof localStorage !== "undefined") localStorage.setItem(PERSONAL_KEY, JSON.stringify([...personal()]));
+  } catch {
+    /* storage disabled */
+  }
+}
+
+export function personalWords(): string[] {
+  return [...personal()].sort();
+}
+
+export function addPersonalWord(word: string) {
+  const w = word.toLowerCase().trim();
+  if (!w || !/^[a-z][a-z']*$/.test(w)) return;
+  personal().add(w);
+  savePersonal();
+}
+
+export function removePersonalWord(word: string) {
+  personal().delete(word.toLowerCase());
+  savePersonal();
+}
+
+let WS_VOCAB = new Set<string>();
+/** Tokens harvested from the open workspace (file names, manifest names/deps). */
+export function setWorkspaceVocab(words: string[]) {
+  WS_VOCAB = new Set(words.map((w) => w.toLowerCase()));
+}
+
+/** Harvest vocabulary from workspace file paths: camel/kebab/snake segments of
+ *  every path component. A project full of `fivem-loader/` files teaches the
+ *  autocorrect that "fivem" is a real word here. */
+export function setWorkspaceVocabFromPaths(paths: string[]) {
+  const vocab = new Set<string>();
+  for (const p of paths) {
+    const tokens = p.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase().match(/[a-z]{3,24}/g);
+    if (tokens) for (const t of tokens) vocab.add(t);
+    if (vocab.size >= 20_000) break;
+  }
+  WS_VOCAB = vocab;
+}
+
+// ---- OS spellchecker oracle (Windows ISpellChecker via the backend) ----
+// The fuzzy layer only gets to rewrite a word if the OS dictionary ALSO
+// doesn't know it. Async (IPC) — the composer awaits the verdict before
+// applying a fuzzy fix; verdicts are cached per word for the session.
+
+type SpellOracle = (word: string) => Promise<boolean>;
+let ORACLE: SpellOracle | null = null;
+const ORACLE_CACHE = new Map<string, boolean>();
+
+export function setSpellOracle(fn: SpellOracle | null) {
+  ORACLE = fn;
+}
+
+/** Cached OS verdict only — undefined when the word was never checked. */
+export function cachedOracleKnown(word: string): boolean | undefined {
+  return ORACLE_CACHE.get(word.toLowerCase());
+}
+
+/** True when the OS dictionary knows the word. No oracle wired → false. */
+export async function oracleKnows(word: string): Promise<boolean> {
+  const w = word.toLowerCase();
+  const hit = ORACLE_CACHE.get(w);
+  if (hit !== undefined) return hit;
+  if (!ORACLE) return false;
+  try {
+    const v = await ORACLE(w);
+    ORACLE_CACHE.set(w, v);
+    return v;
+  } catch {
+    return false; // oracle down → fall back to list-only behavior
+  }
+}
 
 // word → frequency rank (line index). Built lazily — 50k-line split only on
 // the first autocorrect that actually needs the fuzzy layer.
@@ -166,7 +270,8 @@ function morphStems(w: string): string[] {
  *  inflected or prefixed form of one. */
 function isKnownWord(lower: string): boolean {
   const ranks = rankMap();
-  const known = (s: string) => ranks.has(s) || EXTRA_WORDS.has(s);
+  const known = (s: string) =>
+    ranks.has(s) || EXTRA_WORDS.has(s) || personal().has(s) || WS_VOCAB.has(s) || ORACLE_CACHE.get(s) === true;
   if (known(lower)) return true;
   // Two levels so a prefix AND a suffix can both come off — "prefetching" only
   // reaches the known "fetch" after shedding both.
@@ -206,21 +311,35 @@ function reshape(typed: string, rep: string): string | null {
   return fixed === typed ? null : fixed;
 }
 
-/** Correct a single word, preserving the typed capitalization shape.
+export type WordFix = { rep: string; fuzzy: boolean };
+
+/** Correct a single word, preserving the typed capitalization shape. `fuzzy`
+ *  marks an edit-distance guess (vs an exact dictionary hit) — those the
+ *  composer double-checks against the OS spellchecker before applying.
  *  Returns null when the word needs no change. `sentenceStart` lets the fuzzy
  *  layer touch a Capitalized word (otherwise treated as a proper noun). */
-export function correctWord(word: string, sentenceStart = false): string | null {
-  if (word === "i") return "I";
+export function correctWordDetailed(word: string, sentenceStart = false): WordFix | null {
+  if (word === "i") return { rep: "I", fuzzy: false };
   const lower = word.toLowerCase();
+  if (personal().has(lower) || WS_VOCAB.has(lower)) return null; // user taught us this word
   const rep = DICT.get(lower);
-  if (rep) return reshape(word, rep);
+  if (rep) {
+    const shaped = reshape(word, rep);
+    return shaped ? { rep: shaped, fuzzy: false } : null;
+  }
   // Fuzzy layer — never on identifiers (inner caps), acronyms (all caps), or
   // mid-sentence Capitalized words (proper nouns).
   if (/[A-Z]/.test(word.slice(1))) return null;
   const capitalized = word[0] !== word[0].toLowerCase();
   if (capitalized && !sentenceStart) return null;
   const fuzzy = fuzzyCorrect(lower, capitalized);
-  return fuzzy ? reshape(word, fuzzy) : null;
+  if (!fuzzy) return null;
+  const shaped = reshape(word, fuzzy);
+  return shaped ? { rep: shaped, fuzzy: true } : null;
+}
+
+export function correctWord(word: string, sentenceStart = false): string | null {
+  return correctWordDetailed(word, sentenceStart)?.rep ?? null;
 }
 
 /** Chars that finish a word as you type. */
@@ -229,7 +348,15 @@ export function isBoundaryChar(ch: string): boolean {
   return ch.length === 1 && BOUNDARY.has(ch);
 }
 
-export type BoundaryFix = { start: number; end: number; replacement: string };
+export type BoundaryFix = {
+  start: number;
+  end: number;
+  replacement: string;
+  /** Edit-distance guess (not an exact dictionary hit) — gate on the OS oracle. */
+  fuzzy: boolean;
+  /** The word as typed, for oracle lookup + learn-from-undo. */
+  word: string;
+};
 
 /** Fix the prose word ending exactly at `end`. Guards: never inside slash
  *  commands, and never when the word is glued to path/flag/code punctuation
@@ -244,9 +371,9 @@ function fixWordEndingAt(value: string, end: number): BoundaryFix | null {
   const before = start === 0 ? "" : value[start - 1];
   if (before !== "" && !/[\s("'‘“[]/.test(before)) return null;
   const sentenceStart = /(?:^|[.!?\n])[\s("'‘“[]*$/.test(value.slice(0, start));
-  const replacement = correctWord(m[1], sentenceStart);
-  if (replacement === null) return null;
-  return { start, end, replacement };
+  const fix = correctWordDetailed(m[1], sentenceStart);
+  if (fix === null) return null;
+  return { start, end, replacement: fix.rep, fuzzy: fix.fuzzy, word: m[1] };
 }
 
 /** Word-finish autocorrect: the char at caret-1 is the boundary just typed —

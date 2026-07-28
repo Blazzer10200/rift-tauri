@@ -154,6 +154,7 @@ parakeet-rs = { version = "0.3.6", features = ["directml"], optional = true }
 sysinfo = { version = "0.33", default-features = false, features = ["system"] }
 
 [target.'cfg(windows)'.dependencies]
+windows = { version = "0.62.2", features = ["Win32_Globalization", "Win32_System_Com"] }
 # #61 GUI stale-PATH: CLI discovery reads the registry PATH (HKCU\Environment +
 # HKLM Session Manager\Environment) at resolve time — the GUI process inherits
 # explorer's login-frozen PATH, so a post-login `npm i -g` is invisible to

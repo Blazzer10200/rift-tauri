@@ -12,6 +12,7 @@ import type { ModelSel, WorkspaceState } from "./types";
 import { loadModel } from "./helpers";
 import { notify } from "../toast.svelte";
 import { prettyPath } from "../../components/shell/tabsbar/helpers";
+import { setWorkspaceVocabFromPaths } from "$lib/utils/autocorrect";
 
 /** Shape of the bits of AssistantStore the workspace fns mutate. Structural
  *  type (no class import) — matches AssistantStore's declared $state fields. */
@@ -169,12 +170,17 @@ export async function removeRecentRoot(host: WorkspaceHost, path: string): Promi
  *  `workspaceFilesLoadingFor` guard. */
 export async function loadWorkspaceFiles(host: WorkspaceHost): Promise<void> {
   const root = host.activeRoot;
-  if (!root) { host.workspaceFiles = []; return; }
+  if (!root) { host.workspaceFiles = []; setWorkspaceVocabFromPaths([]); return; }
   if (host.workspaceFilesLoadingFor === root) return;
   host.workspaceFilesLoadingFor = root;
   try {
     const files = await invoke<string[]>("assistant_list_workspace_files", { root });
-    if (host.activeRoot === root) host.workspaceFiles = files;
+    if (host.activeRoot === root) {
+      host.workspaceFiles = files;
+      // Project vocabulary for the composer autocorrect — words that appear in
+      // this workspace's file names are never "corrected".
+      setWorkspaceVocabFromPaths(files);
+    }
   } catch (e) {
     console.warn("assistant_list_workspace_files failed", e);
   } finally {

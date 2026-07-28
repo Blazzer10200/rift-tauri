@@ -3,6 +3,7 @@
 // suppresses the stock WebView2 menu everywhere and builds default items
 // for edit fields, text selections, links, and code blocks.
 import {
+  BookPlus,
   ClipboardPaste,
   Copy,
   ExternalLink,
@@ -12,7 +13,7 @@ import {
   SquareCode,
   TextSelect,
 } from "lucide-svelte";
-import { correctText } from "$lib/utils/autocorrect";
+import { addPersonalWord, correctText, correctWord } from "$lib/utils/autocorrect";
 
 export type CtxIcon = typeof Copy;
 
@@ -111,9 +112,23 @@ async function pasteField(el: EditField) {
   replaceFieldSelection(el, text);
 }
 
+/** The word under the caret (or the selection, when it's exactly one word). */
+function wordAtCaret(el: EditField): string | null {
+  const sel = fieldSelection(el).trim();
+  if (sel) return /^[A-Za-z][A-Za-z']*$/.test(sel) ? sel : null;
+  const pos = el.selectionStart ?? 0;
+  const left = /[A-Za-z']*$/.exec(el.value.slice(0, pos))?.[0] ?? "";
+  const right = /^[A-Za-z']*/.exec(el.value.slice(pos))?.[0] ?? "";
+  const w = left + right;
+  return /^[A-Za-z][A-Za-z']*$/.test(w) ? w : null;
+}
+
 function editFieldItems(el: EditField): CtxMenuItem[] {
   const sel = fieldSelection(el);
   const ro = el.readOnly || el.disabled;
+  // Offer "Add to dictionary" only for a word autocorrect would actually touch.
+  const dictWord = wordAtCaret(el);
+  const teachable = dictWord && dictWord.length >= 3 && correctWord(dictWord) !== null ? dictWord : null;
   return [
     { label: "Cut", icon: Scissors, disabled: !sel || ro, action: () => cutField(el) },
     { label: "Copy", icon: Copy, disabled: !sel, action: () => copyText(sel) },
@@ -135,6 +150,15 @@ function editFieldItems(el: EditField): CtxMenuItem[] {
       disabled: !el.value || ro,
       action: () => autoCorrectField(el),
     },
+    ...(teachable
+      ? [
+          {
+            label: `Add "${teachable}" to dictionary`,
+            icon: BookPlus,
+            action: () => addPersonalWord(teachable),
+          } satisfies CtxMenuItem,
+        ]
+      : []),
   ];
 }
 

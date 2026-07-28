@@ -12,6 +12,7 @@
   import { usage, limitZone, type ScopedLimit } from "../../../state/usage.svelte";
   import { portal } from "$lib/actions/portal";
   import { tooltip } from "$lib/actions/tooltip";
+  import { personalWords, removePersonalWord } from "$lib/utils/autocorrect";
   import {
     MODEL_OPTIONS, currentModels, legacyModels, modelShortcut, modelWindowSuffix,
     dialStopsFor, dialIdxFor, clampEffortIdx,
@@ -33,6 +34,9 @@
     onPickModel: (m: ModelOpt) => void;
     onRequestClose: () => void;
   } = $props();
+
+  // Personal-dictionary snapshot — fresh on every open (menu is {#if}-mounted).
+  let learned = $state(personalWords());
 
   // Portal to <body> + position against the trigger pill (same pattern as
   // PermMenu) — escapes the composer's overflow/backdrop-filter containing
@@ -324,6 +328,23 @@
     </span>
     <span class="fast-switch ac-switch" class:on={assistant.autocorrect} aria-hidden="true"><i></i></span>
   </button>
+  {#if assistant.autocorrect && learned.length}
+    <!-- Personal dictionary — words learned from undo / right-click "Add to
+         dictionary". Click a chip to forget it. -->
+    <div class="ac-dict">
+      <span class="ac-dict-k">Learned words</span>
+      <div class="ac-dict-list">
+        {#each learned as w (w)}
+          <button
+            type="button"
+            class="ac-chip"
+            use:tooltip={"Remove — autocorrect may change this word again"}
+            onmousedown={(e) => { e.preventDefault(); removePersonalWord(w); learned = personalWords(); }}
+          >{w}<span class="ac-chip-x" aria-hidden="true">×</span></button>
+        {/each}
+      </div>
+    </div>
+  {/if}
 
   {#if dialApplies}
     <div class="rift-menu-divider"></div>
@@ -634,6 +655,22 @@
     border-color: color-mix(in oklab, var(--accent) 45%, transparent);
   }
   :global(.settings-menu .ac-switch.on i) { background: var(--accent); }
+  /* Learned-words chips — the personal dictionary, removable in place. */
+  :global(.settings-menu .ac-dict) { padding: 2px 12px 8px; display: flex; flex-direction: column; gap: 4px; }
+  :global(.settings-menu .ac-dict-k) { font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--fg-faint); }
+  :global(.settings-menu .ac-dict-list) { display: flex; flex-wrap: wrap; gap: 4px; }
+  :global(.settings-menu .ac-chip) {
+    display: inline-flex; align-items: center; gap: 4px;
+    font: inherit; font-size: 11px; line-height: 1.5; color: var(--fg-muted);
+    background: color-mix(in oklab, var(--fg-muted) 8%, transparent);
+    border: 1px solid color-mix(in oklab, var(--fg-muted) 18%, transparent);
+    border-radius: 999px; padding: 0 8px; cursor: pointer;
+  }
+  :global(.settings-menu .ac-chip:hover) {
+    color: var(--fg);
+    border-color: color-mix(in oklab, var(--fg-muted) 40%, transparent);
+  }
+  :global(.settings-menu .ac-chip-x) { opacity: 0.6; }
 
   /* Effort — Faster↔Smarter stop-rail (Claude-Desktop flow). One tick per
      dialStopsFor rung; the active stop is the accent thumb; the current label

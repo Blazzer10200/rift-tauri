@@ -339,6 +339,7 @@ pub fn run() {
             commands::browser_clear_find,
             commands::browser_set_zoom,
             commands::resolve_workspace_path,
+            commands::spell_check_words,
             commands::elevation_status,
             commands::elevation_relaunch_as_admin,
             commands::elevation_set_always,
