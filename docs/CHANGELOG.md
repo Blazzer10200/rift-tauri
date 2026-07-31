@@ -2,7 +2,7 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
-## Unreleased — Claude + OpenAI, one workspace
+## v0.149.1 — Claude + OpenAI, one workspace
 
 - **OpenAI is a first-class provider.** Connect an OpenAI API key in Settings, discover models available to that API account, choose GPT per conversation, and stream Responses API output beside the existing Claude CLI route. ChatGPT subscriptions remain separate from API billing and are labeled clearly in-product.
 - **Shared tools and safety.** GPT turns support image input, reasoning effort, cancellation, usage reporting, and the same workspace-scoped file/search/git tools and permission prompts as Claude. OpenAI requests use `store: false`; conversation history stays in Rift's local records and API keys stay in the OS keychain.
