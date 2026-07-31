@@ -13,6 +13,7 @@
   import { FileText, ChevronRight, CornerDownLeft, Copy, Check } from "lucide-svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { notify } from "../../state/toast.svelte";
+  import { leafName } from "../../utils/path";
   import { highlightSync, whenReady } from "../../state/highlighter.svelte";
   import FilePathMenu from "./FilePathMenu.svelte";
   import { emphasisIntervals, emphasizeHtml, type CharInterval } from "./diffEmphasis";
@@ -145,11 +146,7 @@
   // Breadcrumb header — dir/name split + language badge. Long dirs collapse to
   // their last two segments so the filename stays visible; full path goes in
   // the tooltip.
-  const baseName = $derived.by(() => {
-    if (!filePath) return "";
-    const norm = filePath.replace(/\\/g, "/").replace(/\/$/, "");
-    return norm.split("/").pop() ?? norm;
-  });
+  const baseName = $derived(filePath ? leafName(filePath) : "");
   const dirLabel = $derived.by(() => {
     if (!filePath) return "";
     const norm = filePath.replace(/\\/g, "/");

@@ -105,32 +105,50 @@ export function asModelSel(v: unknown): ModelSel | null {
   return v as ModelSel;
 }
 
-export function loadModel(ws?: string | null): ModelSel {
+/** Read a raw string from localStorage, swallowing SSR / storage-disabled
+ *  exceptions (returns null). The single guarded read the pref loaders share. */
+function readLS(key: string): string | null {
   try {
-    if (typeof localStorage !== "undefined") {
-      const k = wsKey(MODEL_KEY, ws);
-      const v = (k ? localStorage.getItem(k) : null) ?? localStorage.getItem(MODEL_KEY);
-      if (v && (MODEL_SELS as readonly string[]).includes(v)) {
-        if (v === "claude-fable-5" && !fableAvailable()) return "opus"; // matches backend FABLE_FALLBACK_MODEL (turn.rs)
-        if (v === "haiku" && !haikuAvailable()) return "sonnet"; // Haiku pulled → fast-tier fallback (mirror config.rs)
-        return v as ModelSel;
-      }
-    }
+    return typeof localStorage !== "undefined" ? localStorage.getItem(key) : null;
   } catch {
-    /* SSR or storage disabled */
+    return null; /* SSR or storage disabled */
+  }
+}
+
+/** Write a raw string to localStorage, swallowing storage-disabled exceptions. */
+function writeLS(key: string, val: string): void {
+  try {
+    if (typeof localStorage !== "undefined") localStorage.setItem(key, val);
+  } catch {
+    /* storage disabled */
+  }
+}
+
+/** Read a per-workspace preference: the `base::<root>` pin if one is set for
+ *  `ws`, else the global baseline. Returns null on miss / SSR. */
+function readWsPref(baseKey: string, ws?: string | null): string | null {
+  const k = wsKey(baseKey, ws);
+  return (k ? readLS(k) : null) ?? readLS(baseKey);
+}
+
+/** Write a per-workspace preference. With a workspace → a `base::<root>` pin
+ *  that never touches the global baseline; without → the baseline default. */
+function writeWsPref(baseKey: string, ws: string | null | undefined, val: string): void {
+  writeLS(wsKey(baseKey, ws) ?? baseKey, val);
+}
+
+export function loadModel(ws?: string | null): ModelSel {
+  const v = readWsPref(MODEL_KEY, ws);
+  if (v && (MODEL_SELS as readonly string[]).includes(v)) {
+    if (v === "claude-fable-5" && !fableAvailable()) return "opus"; // matches backend FABLE_FALLBACK_MODEL (turn.rs)
+    if (v === "haiku" && !haikuAvailable()) return "sonnet"; // Haiku pulled → fast-tier fallback (mirror config.rs)
+    return v as ModelSel;
   }
   return "sonnet";
 }
 
 export function saveModel(v: ModelSel, ws?: string | null) {
-  try {
-    if (typeof localStorage === "undefined") return;
-    const k = wsKey(MODEL_KEY, ws);
-    if (k) localStorage.setItem(k, v); // per-workspace pin — never touches the global baseline
-    else localStorage.setItem(MODEL_KEY, v); // no workspace → set the baseline default
-  } catch {
-    /* storage disabled */
-  }
+  writeWsPref(MODEL_KEY, ws, v);
 }
 
 /** Map a selected model to its visual family for the aurora hue. */
@@ -146,46 +164,25 @@ export function isOpenAIModel(model: string | null | undefined): boolean {
 }
 
 export function loadEffort(ws?: string | null): ThinkingEffort {
-  try {
-    if (typeof localStorage !== "undefined") {
-      const k = wsKey(EFFORT_KEY, ws);
-      const v = (k ? localStorage.getItem(k) : null) ?? localStorage.getItem(EFFORT_KEY);
-      // Legacy "quick" (retired — also sent the medium flag) folds into "smart"
-      // read-side so old pins keep their wire behavior. Mirrors the backend's
-      // normalize_effort_tier (config.rs).
-      if (v === "quick") return "smart";
-      if (v === "none" || v === "smart" || v === "deep" || v === "ultra") return v;
-    }
-  } catch {
-    /* SSR or storage disabled */
-  }
+  const v = readWsPref(EFFORT_KEY, ws);
+  // Legacy "quick" (retired — also sent the medium flag) folds into "smart"
+  // read-side so old pins keep their wire behavior. Mirrors the backend's
+  // normalize_effort_tier (config.rs).
+  if (v === "quick") return "smart";
+  if (v === "none" || v === "smart" || v === "deep" || v === "ultra") return v;
   return "smart";
 }
 
 export function saveEffort(v: ThinkingEffort, ws?: string | null) {
-  try {
-    if (typeof localStorage === "undefined") return;
-    const k = wsKey(EFFORT_KEY, ws);
-    if (k) localStorage.setItem(k, v); // per-workspace pin — never touches the global baseline
-    else localStorage.setItem(EFFORT_KEY, v); // no workspace → set the baseline default
-  } catch {
-    /* storage disabled */
-  }
+  writeWsPref(EFFORT_KEY, ws, v);
 }
 
 /** Extended-thinking master switch. Default on (current behavior). Per-workspace
  *  like effort — a `base::<root>` pin overrides the global baseline. */
 export function loadThinkingEnabled(ws?: string | null): boolean {
-  try {
-    if (typeof localStorage !== "undefined") {
-      const k = wsKey(THINKING_KEY, ws);
-      const v = (k ? localStorage.getItem(k) : null) ?? localStorage.getItem(THINKING_KEY);
-      if (v === "off") return false;
-      if (v === "on") return true;
-    }
-  } catch {
-    /* SSR or storage disabled */
-  }
+  const v = readWsPref(THINKING_KEY, ws);
+  if (v === "off") return false;
+  if (v === "on") return true;
   // Thinking OFF by default — mirrors Claude Code's own behavior (extended
   // thinking is opt-in, not every-turn), so a casual "hello" answers in ~1-2s
   // instead of burning ~3s on a hidden thinking block first. Any user who set a
@@ -195,23 +192,12 @@ export function loadThinkingEnabled(ws?: string | null): boolean {
 }
 
 export function saveThinkingEnabled(v: boolean, ws?: string | null) {
-  try {
-    if (typeof localStorage === "undefined") return;
-    const k = wsKey(THINKING_KEY, ws);
-    if (k) localStorage.setItem(k, v ? "on" : "off"); // per-workspace pin — never touches the global baseline
-    else localStorage.setItem(THINKING_KEY, v ? "on" : "off"); // no workspace → set the baseline default
-  } catch {
-    /* storage disabled */
-  }
+  writeWsPref(THINKING_KEY, ws, v ? "on" : "off");
 }
 
 export function loadPermissionMode(): PermissionMode {
-  try {
-    const v = typeof localStorage !== "undefined" ? localStorage.getItem(PERMISSION_KEY) : null;
-    if (v && (PERMISSION_MODES as readonly string[]).includes(v)) return v as PermissionMode;
-  } catch {
-    /* SSR or storage disabled */
-  }
+  const v = readLS(PERMISSION_KEY);
+  if (v && (PERMISSION_MODES as readonly string[]).includes(v)) return v as PermissionMode;
   // Fresh installs (no stored key) get bypassPermissions — Rift is an embedded
   // coding partner whose system prompt explicitly says "don't ask for permission
   // on routine work"; the user expects tools to just run and reverts via git.
@@ -223,11 +209,7 @@ export function loadPermissionMode(): PermissionMode {
 }
 
 export function savePermissionMode(v: PermissionMode) {
-  try {
-    if (typeof localStorage !== "undefined") localStorage.setItem(PERMISSION_KEY, v);
-  } catch {
-    /* storage disabled */
-  }
+  writeLS(PERMISSION_KEY, v);
 }
 
 /** Plan-card action → the `assistant_answer_permission` decision payload.
@@ -280,12 +262,7 @@ export function fastEligible(model: string): boolean {
  *  surfaces on fast-eligible (Opus) rows and the backend re-gates by model +
  *  CLI version, so a stale `on` can never reach an ineligible spawn. */
 export function loadFastMode(): boolean {
-  try {
-    if (typeof localStorage !== "undefined") return localStorage.getItem(FAST_MODE_KEY) === "on";
-  } catch {
-    /* SSR or storage disabled */
-  }
-  return false;
+  return readLS(FAST_MODE_KEY) === "on";
 }
 
 export function loadAutocorrect(): boolean {
@@ -306,11 +283,7 @@ export function saveAutocorrect(v: boolean) {
 }
 
 export function saveFastMode(v: boolean) {
-  try {
-    if (typeof localStorage !== "undefined") localStorage.setItem(FAST_MODE_KEY, v ? "on" : "off");
-  } catch {
-    /* storage disabled */
-  }
+  writeLS(FAST_MODE_KEY, v ? "on" : "off");
 }
 
 const RIFT_PLANS: readonly RiftPlan[] = ["free", "pro", "max"] as const;
@@ -321,21 +294,13 @@ const RIFT_PLANS: readonly RiftPlan[] = ["free", "pro", "max"] as const;
  *  majority of paying users. Free / uncredited-Pro users set their tier once in
  *  Settings, capping the gauge honestly at 200K. */
 export function loadPlan(): RiftPlan {
-  try {
-    const v = typeof localStorage !== "undefined" ? localStorage.getItem(PLAN_KEY) : null;
-    if (v && (RIFT_PLANS as readonly string[]).includes(v)) return v as RiftPlan;
-  } catch {
-    /* SSR or storage disabled */
-  }
+  const v = readLS(PLAN_KEY);
+  if (v && (RIFT_PLANS as readonly string[]).includes(v)) return v as RiftPlan;
   return "max";
 }
 
 export function savePlan(v: RiftPlan) {
-  try {
-    if (typeof localStorage !== "undefined") localStorage.setItem(PLAN_KEY, v);
-  } catch {
-    /* storage disabled */
-  }
+  writeLS(PLAN_KEY, v);
 }
 
 /** Context-window ceiling the user's plan grants, regardless of the model's
