@@ -14,6 +14,7 @@
   import AssistantWelcome from "./AssistantWelcome.svelte";
   import Composer from "./Composer.svelte";
   import { leafName } from "$lib/utils/path";
+  import { isOpenAIModel } from "$lib/state/assistant/helpers";
 
   import { tooltip } from "$lib/actions/tooltip";
   let {
@@ -42,7 +43,10 @@
   const streaming = $derived(tab?.streaming ?? false);
   const lastError = $derived(tab?.lastError ?? null);
   const showEmpty = $derived(messages.length === 0);
-  const needsAuth = $derived(assistant.auth?.pill === "red");
+  const openAiTab = $derived(isOpenAIModel(assistant.modelFor(tab)));
+  const needsAuth = $derived(
+    openAiTab ? assistant.openAiStatus?.ready !== true : assistant.auth?.pill === "red",
+  );
   // Notices are session-global; only show on the focused pane to avoid dup banners.
   const showNotice = $derived(focused && !!assistant.lastNotice);
   // Per-tab error renders in whichever pane owns the erroring tab, focused or
@@ -1530,4 +1534,3 @@
     .drop-zone { animation: none; }
   }
 </style>
-

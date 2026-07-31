@@ -7,14 +7,16 @@
   import "$lib/styles/onboarding.css";
   import ObStage from "./ObStage.svelte";
   import ClaudeConnect from "./ClaudeConnect.svelte";
+  import OpenAiConnect from "./OpenAiConnect.svelte";
   import RiftLogo from "$lib/components/shell/RiftLogo.svelte";
   import { uiPrefs, ACCENTS } from "$lib/state/ui-prefs.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { MODE_OPTIONS, currentModels, type ModelOpt } from "$lib/components/assistant/composer/modelMatrix";
   import type { ThinkingEffort } from "$lib/state/assistant/types";
+  import { isOpenAIModel } from "$lib/state/assistant/helpers";
   import {
     Check, ChevronLeft, ChevronRight, FolderGit2, FolderOpen,
-    History, Loader2, TriangleAlert,
+    History, Loader2, Orbit, Terminal, TriangleAlert,
   } from "lucide-svelte";
 
   type Props = { onDone: () => void };
@@ -22,7 +24,7 @@
 
   const steps = [
     { t: "Welcome", s: "What Rift is" },
-    { t: "Connect Claude", s: "Install & sign in" },
+    { t: "Connect AI", s: "Claude or OpenAI" },
     { t: "Open a project", s: "Choose a folder" },
     { t: "Defaults", s: "Model & working style" },
   ];
@@ -30,11 +32,22 @@
   let step = $state(1);
   const last = steps.length;
 
-  // Soft-block: if the user tries to leave the Connect step (2) without Claude
-  // connected, warn ONCE — a model pick is inert without auth — then let them
+  // Soft-block: if the user tries to leave the Connect step (2) without the
+  // selected provider connected, warn ONCE, then let them
   // proceed on the next press (we don't hard-block; some users connect later).
   let connectConnected = $state(false);
   let warnSkipConnect = $state(false);
+  let provider = $state<"claude" | "openai">(isOpenAIModel(assistant.model) ? "openai" : "claude");
+
+  function selectProvider(next: "claude" | "openai") {
+    provider = next;
+    connectConnected = next === "openai"
+      ? assistant.openAiStatus?.ready === true
+      : assistant.auth?.pill === "green" || assistant.auth?.pill === "yellow";
+    if (next === "openai" && !isOpenAIModel(assistant.model)) assistant.setModel("gpt-5.6");
+    if (next === "claude" && isOpenAIModel(assistant.model)) assistant.setModel("sonnet");
+    warnSkipConnect = false;
+  }
 
   function goto(n: number) {
     if (n < step) {
@@ -184,7 +197,7 @@
             <header class="ob-head">
               <span class="ob-eyebrow">Step 1 · Welcome</span>
               <h1 class="ob-title">Meet Rift</h1>
-              <p class="ob-sub">Rift is a coding assistant that runs entirely on your computer. It reads, searches, and edits code in the folder you choose — nothing is uploaded and nothing leaves your machine. It's powered by Claude, through your own Claude account.</p>
+              <p class="ob-sub">Rift is a local coding workspace for Claude and OpenAI models. It reads, searches, and edits only inside the folder you choose; prompts and relevant context go directly to the provider you connect.</p>
             </header>
             <div class="ob-vlist">
               <div class="ob-vrow">
@@ -221,10 +234,22 @@
               </div>
             </div>
           {:else if step === 2}
-            <ObStage kind="claude" caption="embedded assistant" />
-            <ClaudeConnect onConnectedChange={(c) => { connectConnected = c; if (c) warnSkipConnect = false; }} />
+            <ObStage kind={provider} caption={provider === "claude" ? "local CLI connection" : "secure API connection"} />
+            <div class="ob-seg ob-provider-seg" role="radiogroup" aria-label="AI provider">
+              <button type="button" class="ob-seg-btn ob-provider-btn" class:on={provider === "claude"} role="radio" aria-checked={provider === "claude"} onclick={() => selectProvider("claude")}>
+                <Terminal size={15} /><span><b>Claude</b><small>CLI or API key</small></span>
+              </button>
+              <button type="button" class="ob-seg-btn ob-provider-btn" class:on={provider === "openai"} role="radio" aria-checked={provider === "openai"} onclick={() => selectProvider("openai")}>
+                <Orbit size={15} /><span><b>OpenAI</b><small>API key</small></span>
+              </button>
+            </div>
+            {#if provider === "claude"}
+              <ClaudeConnect onConnectedChange={(c) => { connectConnected = c; if (c) warnSkipConnect = false; }} />
+            {:else}
+              <OpenAiConnect onConnectedChange={(c) => { connectConnected = c; if (c) warnSkipConnect = false; }} />
+            {/if}
             {#if warnSkipConnect}
-              <p class="ob-hint ob-hint--warn"><TriangleAlert size={14} /><span>Claude isn't connected yet, so Rift won't be able to reply until it is. Press Next again to continue anyway, or finish connecting first.</span></p>
+              <p class="ob-hint ob-hint--warn"><TriangleAlert size={14} /><span>{provider === "claude" ? "Claude" : "OpenAI"} isn't connected yet, so that provider can't reply. Press Next again to continue anyway, or finish connecting first.</span></p>
             {/if}
           {:else if step === 3}
             <ObStage kind="project" caption="your workspace" />
@@ -278,15 +303,17 @@
                 <span class="ob-flabel">Model</span>
                 <div class="ob-seg" role="radiogroup" aria-label="Default model">
                   {#each currentModels as m (m.id)}
+                    {@const available = assistant.openAiModelAvailable(m.id)}
                     <button
                       type="button"
                       class="ob-seg-btn"
                       class:on={assistant.model === m.id}
                       role="radio"
                       aria-checked={assistant.model === m.id}
+                      disabled={!available}
                       onclick={() => pickModel(m)}
                     >
-                      {m.label} <span class="ob-seg-ver">{m.version}</span>
+                      {m.label} <span class="ob-seg-ver">{available ? m.version : "unavailable"}</span>
                     </button>
                   {/each}
                 </div>

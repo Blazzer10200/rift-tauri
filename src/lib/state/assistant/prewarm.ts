@@ -25,7 +25,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import type { AssistantStore } from "../assistant.svelte";
-import { effortToFlag, fastEligible } from "./helpers";
+import { effortToFlag, fastEligible, isOpenAIModel } from "./helpers";
 
 // Debounce so a burst of reactive ticks (focus + picker hydrate + draft) coalesce
 // into one spawn. ~600ms: long enough to skip the mount thrash, short enough that
@@ -81,6 +81,7 @@ function signatureOf(
 export function requestPrewarm(store: AssistantStore): void {
   const tab = store.activeTab;
   if (!tab) return;
+  if (isOpenAIModel(store.modelFor(tab))) return;
   // Never pre-warm a tab mid-turn — its warm child is busy.
   if (tab.streaming) return;
   // Pre-warm BOTH a fresh tab (no convo yet → `--session-id` spare) AND a STARTED

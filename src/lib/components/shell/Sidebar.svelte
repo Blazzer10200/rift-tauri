@@ -20,7 +20,10 @@
   // Excludes legacy/disabled ids.
   const footNav = $derived(
     workspace.order.filter(
-      (id) => id !== "settings" && id !== "projects" && !WORKSPACES[id].disabled,
+      // Diagnostics is a support surface, not a daily destination. It remains
+      // one keystroke away through the command palette and Settings → About,
+      // while this dock stays legible as Workspace · Chat · AI Health.
+      (id) => id !== "settings" && id !== "projects" && id !== "diagnostics" && !WORKSPACES[id].disabled,
     ),
   );
 
@@ -106,6 +109,18 @@
     shell.resizing = false;
     shell.commitWidth();
     (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+  }
+  function onResizeKey(e: KeyboardEvent) {
+    const step = e.shiftKey ? 24 : 8;
+    let next: number | null = null;
+    if (e.key === "ArrowLeft") next = shell.width - step;
+    else if (e.key === "ArrowRight") next = shell.width + step;
+    else if (e.key === "Home") next = shell.minWidth;
+    else if (e.key === "End") next = shell.maxWidth;
+    if (next == null) return;
+    e.preventDefault();
+    shell.setWidth(next);
+    shell.commitWidth();
   }
 </script>
 
@@ -218,15 +233,21 @@
     </nav>
   </aside>
 
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
   <div
     class="side-resize"
     role="separator"
     aria-orientation="vertical"
     aria-label="Resize sidebar"
+    aria-valuemin={shell.minWidth}
+    aria-valuemax={shell.maxWidth}
+    aria-valuenow={shell.width}
+    tabindex="0"
     onpointerdown={startResize}
     onpointermove={moveResize}
     onpointerup={endResize}
     onpointercancel={endResize}
+    onkeydown={onResizeKey}
   ></div>
 </div>
 
@@ -264,6 +285,7 @@
   .side-resize { position: absolute; top: 48px; right: 4px; width: 8px; height: calc(100% - 64px); z-index: 6; cursor: col-resize; -webkit-app-region: no-drag; }
   .side-resize::after { content: ""; position: absolute; top: 0; right: 3px; width: 2px; height: 100%; border-radius: 2px; background: transparent; transition: background var(--dur-fast); }
   .side-resize:hover::after { background: color-mix(in oklab, var(--fg) 22%, transparent); }
+  .side-resize:focus-visible::after { background: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
   .side-rail.resizing .side-resize::after { background: color-mix(in oklab, var(--accent) 55%, transparent); }
 
   /* The island card — inset from the window edges, rounded, hairline-bordered.

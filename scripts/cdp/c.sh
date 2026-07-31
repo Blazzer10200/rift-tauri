@@ -5,6 +5,8 @@
 #   bash scripts/cdp/c.sh look                           # VERIFY PRIMITIVE: state+errors+shot in ONE call
 #   bash scripts/cdp/c.sh look ".chat"                   # same, screenshot clipped to a selector
 #   bash scripts/cdp/c.sh peek                           # look WITHOUT the shot (state+errors, 0 img tokens)
+#   bash scripts/cdp/c.sh inspect                        # state+errors+AX tree in ONE image-free call
+#   bash scripts/cdp/c.sh map                            # every visible actionable control + verified selector
 #   bash scripts/cdp/c.sh find "Send"                    # locate elements by TEXT/aria — returns robust selectors
 #   bash scripts/cdp/c.sh text ".chat"                   # rendered text content, exact (no shot, no ax caps)
 #   bash scripts/cdp/c.sh errors                         # console errors, CURRENT page-gen only (--all incl. stale)
@@ -184,6 +186,27 @@ case "$cmd" in
       (.logs[]? | "  ✗ [" + (.kind // "?") + (if .gen != null then "/g" + (.gen|tostring) else "" end) + "] " + ((.text // "?")|.[0:300])
         + (if .url then "  (" + (.url|split("/")|last) + (if .line then ":" + (.line|tostring) else "" end) + ")" else "" end))'
     ;;
+  map)
+    # map [selector] [limit=80] [--all] — list the current actionable surface
+    # in DOM order, with robust selectors ready for `act click`. Unlike find,
+    # this needs no guessed label; unlike ax, it returns selectors.
+    sel="${1:-}"; lim="${2:-80}"; hidden="${3:-}"
+    body="$(jq -nc --arg s "$sel" --argjson l "$lim" --arg h "$hidden" \
+      '{limit:$l,includeHidden:($h=="--all")} + (if $s=="" then {} else {selector:$s} end)')"
+    resp="$(post controls "$body")"
+    printf '%s' "$resp" | jq -r '
+      if .error then "[map] ERROR: " + .error,
+        (if (.suggestions // []) | length > 0 then "  did you mean:", (.suggestions[] | "    " + .selector + "   ← " + (.text // "")) else empty end)
+      else "[map] " + (.count|tostring) + "/" + (.total|tostring) + " actionable control(s)"
+        + (if .truncated then " (capped — raise limit)" else "" end),
+        (.controls[]? | "  " + .selector
+          + "   ← " + .role + " \"" + ((.label // "")|.[0:60]) + "\""
+          + (if .state then "  [" + .state + "]" else "" end)
+          + (if .shortcut then "  key=" + .shortcut else "" end)
+          + (if .visible then "" else "  [HIDDEN]" end)
+          + "  @" + (.rect.x|tostring) + "," + (.rect.y|tostring) + " " + (.rect.w|tostring) + "×" + (.rect.h|tostring))
+      end'
+    ;;
   find)
     # find <query> [limit=12] — locate elements by what they SAY (aria-label /
     # visible text / title / placeholder), returns ROBUST selectors + rects.
@@ -232,6 +255,28 @@ case "$cmd" in
     body="$(jq -nc --arg s "$sel" '{noShot:true} + (if $s=="" then {} else {selector:$s} end)')"
     resp="$(post look "$body")"
     printf '%s' "$resp" | jq -r "$LOOK_JQ"'looksum(.)'
+    ;;
+  inspect)
+    # inspect [selector] [limit=80] — Codex-first structural probe. Combines
+    # store-backed state, current console errors, and the accessibility tree in
+    # ONE parallel request with no screenshot/image tokens.
+    sel="${1:-}"; lim="${2:-80}"
+    look_params="$(jq -nc --arg s "$sel" '{noShot:true} + (if $s=="" then {} else {selector:$s} end)')"
+    ax_params="$(jq -nc --arg s "$sel" --argjson l "$lim" '{limit:$l} + (if $s=="" then {} else {selector:$s} end)')"
+    body="$(jq -nc --argjson lp "$look_params" --argjson ap "$ax_params" \
+      '{parallel:true,ops:[{op:"look",params:$lp},{op:"ax",params:$ap}]}')"
+    resp="$(post batch "$body")"
+    printf '%s' "$resp" | jq -r "$LOOK_JQ"'
+      . as $root | .results as $r |
+      "[inspect] state + errors + accessibility · " + (($root.elapsedMs // 0)|tostring) + "ms · no screenshot",
+      looksum($r[0]),
+      (if $r[1].error then "[ax] ERROR: " + ($r[1].error|tostring)
+       else "[ax] " + (($r[1].count // 0)|tostring) + " nodes"
+         + (if $r[1].truncated then " (capped — raise limit)" else "" end),
+         ($r[1].nodes[]? | "  " + .role + ": " + (.name // "")
+           + (if .value then " = " + .value else "" end)
+           + (if .state then "  [" + .state + "]" else "" end))
+       end)'
     ;;
   act)
     # act <click|key> <arg> [lookSel] [maxSettleMs=1500] — action + settle + look
@@ -616,7 +661,7 @@ case "$cmd" in
     curl -sS -X POST "$API/shutdown" 2>/dev/null || true
     ;;
   *)
-    echo "usage: $0 [-t main|browser] {health|doctor|reap|targets|look|peek|act|nav|tour|ready|state|page|ax|find|text|errors|measure|console|eval|type|click|wait|shot|shot-sel|baseline|diff|batch|key|reload|reset-viewport|diag|shutdown} ..." >&2
+    echo "usage: $0 [-t main|browser] {health|doctor|reap|targets|inspect|map|look|peek|act|nav|tour|ready|state|page|ax|find|text|errors|measure|console|eval|type|click|wait|shot|shot-sel|baseline|diff|batch|key|reload|reset-viewport|diag|shutdown} ..." >&2
     exit 2
     ;;
 esac

@@ -17,7 +17,7 @@ issue. Reports get a response within a few days.
 
 Rift is a **single-user local desktop app**. It is not multi-tenant and exposes
 no network service to other hosts. The realistic adversaries are therefore:
-1. **The model / the workspace** — Claude (or a malicious file in the open
+1. **The model / the workspace** — a selected provider (or a malicious file in the open
    folder) attempting to read or write *outside* the chosen workspace, inject
    shell commands through tool arguments, or exfiltrate via a tool side effect.
 2. **A co-resident process** under the same user account touching Rift's
@@ -54,17 +54,33 @@ there. (Verified by a full backend review 2026-06-15: 0 critical, 0 high.)
   can point the tools at an arbitrary repository. `GH_REPO`/`GH_HOST`/`GH_DEBUG`
   are stripped from the child env. The single write tool (`gh_pr_create`) is
   trust-gated like `git_push` and validates title/body length + shape.
-- **CLI spawn isolation** (`turn.rs`). `session_id` (UUID), `model`,
+- **Claude CLI spawn isolation** (`turn.rs`). `session_id` (UUID), `model`,
   `permission_mode`, and the provider/local-LLM `ANTHROPIC_BASE_URL` (http/https + host)
   are all format-validated before they reach an argv/env. The prompt is sent on
   stdin as stream-json, never as an argument. The child cwd defaults to
   `temp_dir()` (overridden to the workspace root) so it can never inherit the
   install dir. The API key flows only via `cmd.env` and is never logged.
+- **OpenAI transport** (`assistant/openai.rs`). Rift calls only the fixed HTTPS
+  OpenAI Models and Responses endpoints through the shared certificate-aware
+  client. Requests stream with `store: false`; canonical Responses items are
+  persisted locally and supplied again by Rift. Those items can include opaque
+  encrypted reasoning, tool, and compaction state; they are not exported through
+  diagnostics or reconstructed from displayed conversation text. Model IDs, history size, attachments, SSE
+  frames, error bodies, tool rounds, and tool output are bounded. Server errors
+  are sanitized so credentials or secret-shaped response text are not surfaced.
+  OpenAI function calls reuse Rift's workspace containment, trust level, and
+  permission prompts instead of receiving a broader tool surface.
+- **Codex connection** (`assistant/codex.rs`). Rift discovers only a runnable
+  standalone Codex CLI, runs public `--version` / `login status` commands, and
+  can launch the CLI's own interactive browser sign-in. It never reads or copies
+  Codex credentials, and it rejects the Windows Desktop package helper rather
+  than attempting to bypass WindowsApps execution restrictions.
 - **UI bridge** (`bridge.rs`). Bound to `127.0.0.1:0` (loopback, ephemeral
   port) and gated by a 192-bit CSPRNG token checked on every request;
   mismatches are shut immediately.
-- **Secrets** (`secrets.rs`). API keys live in the OS keychain (`keyring`),
-  never serialized to disk or logged.
+- **Secrets** (`secrets.rs`). Anthropic and OpenAI API keys occupy separate OS
+  keychain (`keyring`) slots, never serialize to disk, and never enter the
+  WebView. Environment keys are not silently adopted.
 - **Tauri capability surface.** Window/dialog/opener grants are explicit in
   `src-tauri/capabilities/`; `opener:allow-open-url` is restricted to `https://**`
   and `mailto:*`.
@@ -74,7 +90,16 @@ there. (Verified by a full backend review 2026-06-15: 0 critical, 0 high.)
   release build has no code path to a local/attacker feed. (A build explicitly
   packed with the `update-test-feed` feature is the deliberate test-only
   exception.) No binary signing — transport-integrity only; documented
-  trade-off, see DEVELOPING §4.
+  trade-off, see DEVELOPING §5.
+
+### Data that leaves the device
+
+Rift has no account server, analytics collector, or prompt proxy. A turn sends
+its prompt, relevant conversation context, attachments, and tool results to the
+provider selected for that conversation. Claude traffic is owned by the Claude
+Code CLI; OpenAI traffic is sent directly from the Rust backend. External git or
+GitHub operations happen only through explicit tools. Local diagnostics redact
+credential values and do not record prompt bodies.
 
 ### Residual / accepted (low, same-user or by-design)
 

@@ -1,10 +1,7 @@
 //! Assistant — JetBrains-style AI partner page (beta).
 //!
-//! Architecture (locked 2026-05-14, see `docs/design/assistant-page.md`):
-//! Rift's Rust side spawns the user's installed `claude` CLI in headless
-//! streaming-JSON mode, parses NDJSON line-by-line, re-emits each event to the
-//! frontend via Tauri events. The Agent SDK npm package is Node-only and cannot
-//! run in the Tauri webview, so we drive the same CLI it would wrap.
+//! Provider runtime: Claude remains backed by the installed CLI; OpenAI uses
+//! the Responses API from native Rust. Both feed Rift's Tauri event stream.
 //!
 //! Auth model: piggyback on the user's existing `claude login` session by
 //! default (CLI reads its own keychain). API-key fallback: when configured,
@@ -16,6 +13,7 @@ pub mod autocompact;
 pub mod bridge;
 pub mod cli_caps;
 pub mod cli_install;
+pub mod codex;
 pub mod config;
 pub mod convo_store;
 pub mod env_checks;
@@ -27,6 +25,7 @@ pub mod mcp_server;
 pub mod news;
 pub mod nothink;
 pub mod oneshot;
+pub mod openai;
 pub mod permission;
 pub mod proc_tree;
 pub mod projects;
@@ -61,6 +60,8 @@ pub use env_checks::*;
 // R6 split (2026-06-09): one-shot headless spawns (enhance / title) in
 // `oneshot.rs`. Glob re-export for the __cmd__ items.
 pub use oneshot::*;
+pub use openai::*;
+pub use codex::*;
 // "What's new in AI" feed (Workspace page): deterministic changelog+npm fetch +
 // opt-in AI digest in `news.rs`. Glob re-export for the __cmd__ items.
 pub use news::*;

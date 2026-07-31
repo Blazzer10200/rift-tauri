@@ -26,6 +26,9 @@ export type {
 import type {
   WorkspaceState,
   AuthStatus,
+  OpenAiStatus,
+  OpenAiModel,
+  CodexStatus,
   AgentSpawn,
   ChatMessage,
   ConversationMeta,
@@ -68,6 +71,7 @@ import {
   ctxWindowForModelId,
   isStaleTurnEpoch,
   autoCompactTriggerTokens,
+  isOpenAIModel,
   type AutoCompactCfg,
 } from "./assistant/helpers";
 
@@ -221,6 +225,10 @@ export class TabState {
   saveFirstQueuedAt: number | null = null;
 
   messages = $state<ChatMessage[]>([]);
+  /** Canonical OpenAI Responses items for the next stateless request. This is
+   * deliberately separate from display messages: the API requires opaque
+   * reasoning/tool/compaction output that must never be reconstructed from UI. */
+  openAiHistory = $state<unknown[]>([]);
   streaming = $state(false);
   /** True while the in-flight turn is a manual /compact — the CLI compacts
    *  natively with no tools/text until the boundary lands, so without this the
@@ -483,6 +491,13 @@ export class TabState {
 
 class AssistantStore {
   auth = $state<AuthStatus | null>(null);
+  openAiStatus = $state<OpenAiStatus | null>(null);
+  openAiModels = $state<OpenAiModel[] | null>(null);
+  openAiChecking = $state(false);
+  openAiModelsError = $state<string | null>(null);
+  codexStatus = $state<CodexStatus | null>(null);
+  codexChecking = $state(false);
+  codexError = $state<string | null>(null);
   authChecking = $state(false);
   authError = $state<string | null>(null);
   /** Auth is usable for a turn — green (signed in) or yellow (API key / degraded
@@ -490,7 +505,15 @@ class AssistantStore {
    *  which was copy-pasted as `pill === "green" || pill === "yellow"` across the
    *  composer, send orchestrator, and pre-warm. */
   get authReady(): boolean {
-    return this.auth?.pill === "green" || this.auth?.pill === "yellow";
+    return this.authReadyFor(this.activeTab);
+  }
+  authReadyFor(tab: TabState | null): boolean {
+    return this.authReadyForModel(this.modelFor(tab));
+  }
+  authReadyForModel(model: ModelSel): boolean {
+    if (isOpenAIModel(model)) return this.openAiModelAvailable(model);
+    return this.auth?.cliPresent === true
+      && (this.auth.pill === "green" || this.auth.pill === "yellow");
   }
   /** True while an in-app `claude auth login` is running + being polled. Drives
    *  the recovery banner's "Signing in…" state. */
@@ -572,7 +595,10 @@ class AssistantStore {
   }
   ctxTokensFor(tab: TabState | null): number {
     const u = tab?.lastTurnUsage ?? null;
-    return u ? u.input + u.cacheRead + u.cacheCreate : 0;
+    // Responses reports cached input as part of input_tokens. Claude reports
+    // cache fields separately, so only add them on the Claude route.
+    const model = tab?.lastModelId ?? tab?.modelOverride ?? this.model;
+    return u ? u.input + (isOpenAIModel(model) ? 0 : u.cacheRead + u.cacheCreate) : 0;
   }
   ctxPctFor(tab: TabState | null): number {
     const w = this.ctxWindowFor(tab);
@@ -789,6 +815,7 @@ class AssistantStore {
 
   /** Phase 6 (#37): the value never crosses IPC — only whether one is set. */
   hasApiKey = $state<boolean>(false);
+  hasOpenAiApiKey = $state<boolean>(false);
   /** True once the api-key presence probe has resolved. Gates the first-run
    *  onboarding so it never flashes before we know whether a key is set. */
   configLoaded = $state<boolean>(false);
@@ -1041,6 +1068,28 @@ class AssistantStore {
     if (midConvo && prev !== v) this.cacheBustHint("model");
   }
 
+  /** Provider sessions use different wire histories and tool protocols. A
+   * cross-provider pick therefore starts a fresh chat instead of pretending a
+   * Claude session can be resumed by OpenAI (or vice versa). */
+  async selectModel(v: ModelSel, tab: TabState | null = this.activeTab) {
+    const previous = this.modelFor(tab);
+    const crossesProvider = isOpenAIModel(previous) !== isOpenAIModel(v);
+    if (crossesProvider && (tab?.messages.length ?? 0) > 0) {
+      await this.newChatWithModel(v);
+      notify.info("Started a fresh provider session", {
+        detail: "Claude and OpenAI chats keep separate histories so tool state stays correct.",
+      });
+      return;
+    }
+    this.setModel(v, tab);
+  }
+
+  openAiModelAvailable(id: ModelSel): boolean {
+    if (!isOpenAIModel(id)) return true;
+    if (this.openAiStatus?.ready !== true || this.openAiModels === null || this.openAiModelsError) return false;
+    return this.openAiModels.find((model) => model.id === id)?.available === true;
+  }
+
   setThinkingEffort(v: ThinkingEffort, tab: TabState | null = this.activeTab) {
     const prev = this.effortFor(tab);
     if (prev === v) return;
@@ -1267,7 +1316,7 @@ class AssistantStore {
         (e) => handleShellRowsEvent(listenerHost, e.payload),
       ),
     );
-    await this.refreshAuth();
+    await Promise.all([this.refreshAuth(), this.refreshOpenAiStatus(), this.refreshCodexStatus()]);
     try {
       this.hasApiKey = await invoke<boolean>("assistant_get_api_key_present");
     } catch (e) {
@@ -1859,6 +1908,60 @@ class AssistantStore {
     }
   }
 
+  async refreshOpenAiStatus() {
+    this.openAiChecking = true;
+    this.openAiModelsError = null;
+    try {
+      this.openAiStatus = await invoke<OpenAiStatus>("assistant_openai_status");
+      this.hasOpenAiApiKey = this.openAiStatus.apiKeyConfigured;
+      if (this.openAiStatus.ready) {
+        try {
+          this.openAiModels = await invoke<OpenAiModel[]>("assistant_openai_list_models");
+        } catch (e) {
+          console.warn("assistant_openai_list_models failed", e);
+          this.openAiModels = null;
+          this.openAiModelsError = humanizeError(e);
+        }
+      } else {
+        this.openAiModels = null;
+      }
+    } catch (e) {
+      console.warn("assistant_openai_status failed", e);
+      this.openAiStatus = null;
+      this.openAiModels = null;
+      this.openAiModelsError = humanizeError(e);
+      this.hasOpenAiApiKey = false;
+    } finally {
+      this.openAiChecking = false;
+    }
+  }
+
+  async refreshCodexStatus() {
+    this.codexChecking = true;
+    this.codexError = null;
+    try {
+      this.codexStatus = await invoke<CodexStatus>("assistant_codex_status");
+    } catch (e) {
+      console.warn("assistant_codex_status failed", e);
+      this.codexStatus = null;
+      this.codexError = humanizeError(e);
+    } finally {
+      this.codexChecking = false;
+    }
+  }
+
+  /** Opens only the official Codex CLI sign-in flow; credentials stay with
+   * Codex and this app simply polls its public status command afterwards. */
+  async startCodexLogin() {
+    try {
+      await invoke("assistant_codex_open_login");
+    } catch (e) {
+      this.lastError = `Couldn't start Codex sign-in: ${String(e)}`;
+      return;
+    }
+    window.setTimeout(() => void this.refreshCodexStatus(), 2_000);
+  }
+
   /** In-app sign-in recovery. Opens the Claude CLI's `auth login` in its own
    *  console (browser OAuth), then polls the auth probe until the session flips
    *  green — at which point the auth error is cleared and the user is told they
@@ -1925,6 +2028,17 @@ class AssistantStore {
       await this.refreshAuth();
     } catch (e) {
       notify.danger("Couldn't save API key", { detail: humanizeError(e) });
+      throw e;
+    }
+  }
+
+  async setOpenAiApiKey(key: string | null) {
+    const v = key && key.trim().length > 0 ? key.trim() : null;
+    try {
+      await invoke("assistant_set_openai_api_key", { apiKey: v });
+      await this.refreshOpenAiStatus();
+    } catch (e) {
+      notify.danger("Couldn't save OpenAI API key", { detail: humanizeError(e) });
       throw e;
     }
   }

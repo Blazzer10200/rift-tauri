@@ -28,11 +28,11 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::assistant::{gh_remote, git_local};
 use super::mcp_bridge::{
     bridge_enabled, tool_ask_user, tool_notify, tool_open_browser, tool_read_browser_console,
     tool_read_browser_page,
 };
+use crate::assistant::{gh_remote, git_local};
 
 const PROTOCOL_VERSION: &str = "2025-03-26";
 const MAX_READ_BYTES: u64 = 500 * 1024;
@@ -45,8 +45,17 @@ const MAX_GREP_FILES: usize = 5000;
 const MAX_GREP_FILE_BYTES: u64 = 4 * 1024 * 1024;
 /// Shared with `workspace::assistant_list_workspace_files` — keep one copy.
 pub(crate) const SKIP_DIRS: &[&str] = &[
-    "node_modules", ".git", ".svelte-kit", "build", "dist", "target",
-    ".rift-trail", ".rift-tmp", "__pycache__", ".venv", ".next",
+    "node_modules",
+    ".git",
+    ".svelte-kit",
+    "build",
+    "dist",
+    "target",
+    ".rift-trail",
+    ".rift-tmp",
+    "__pycache__",
+    ".venv",
+    ".next",
 ];
 
 #[derive(Debug, Deserialize)]
@@ -151,7 +160,8 @@ impl PathFilter {
 
     /// Match a (filename_only, relpath) glob pair against a relative path.
     fn matches_any(set: &[(regex::Regex, bool)], rel: &str, file_name: &str) -> bool {
-        set.iter().any(|(re, fname_only)| re.is_match(if *fname_only { file_name } else { rel }))
+        set.iter()
+            .any(|(re, fname_only)| re.is_match(if *fname_only { file_name } else { rel }))
     }
 
     /// Whether a file at `rel` (root-relative, `/`-normalized) is visible:
@@ -207,7 +217,11 @@ impl PathFilter {
 /// first root so an out-of-tree path is still filtered (and now denied) rather
 /// than passed through unfiltered.
 fn containing_root(p: &Path, roots: &[PathBuf]) -> Option<PathBuf> {
-    roots.iter().find(|r| p.starts_with(r)).or_else(|| roots.first()).cloned()
+    roots
+        .iter()
+        .find(|r| p.starts_with(r))
+        .or_else(|| roots.first())
+        .cloned()
 }
 
 /// Resolve `path` (which may be absolute or relative) to an absolute path that
@@ -215,7 +229,9 @@ fn containing_root(p: &Path, roots: &[PathBuf]) -> Option<PathBuf> {
 /// `PathBuf` on success, error string otherwise.
 fn resolve_under_roots(path: &str, roots: &[PathBuf]) -> Result<PathBuf, String> {
     if roots.is_empty() {
-        return Err("no workspace root configured (start a server connection in Rift first)".into());
+        return Err(
+            "no workspace root configured (start a server connection in Rift first)".into(),
+        );
     }
     let raw = PathBuf::from(path);
     // For relative paths, anchor to the first root.
@@ -276,7 +292,10 @@ fn reject_skipped(resolved: &std::path::Path) -> Result<(), String> {
 }
 
 fn tool_read_file(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
-    let path = args.get("path").and_then(|v| v.as_str()).ok_or("missing `path`")?;
+    let path = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .ok_or("missing `path`")?;
     let resolved = resolve_under_roots(path, roots)?;
     reject_skipped(&resolved)?;
     // Per-project file-pattern scoping — a file the project excludes (or that
@@ -323,7 +342,10 @@ fn tool_read_file(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
 }
 
 fn tool_list_dir(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
-    let path = args.get("path").and_then(|v| v.as_str()).ok_or("missing `path`")?;
+    let path = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .ok_or("missing `path`")?;
     let resolved = resolve_under_roots(path, roots)?;
     reject_skipped(&resolved)?;
     let meta = std::fs::metadata(&resolved).map_err(|e| format!("stat: {e}"))?;
@@ -388,7 +410,10 @@ fn tool_list_dir(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
 }
 
 fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
-    let pattern = args.get("pattern").and_then(|v| v.as_str()).ok_or("missing `pattern`")?;
+    let pattern = args
+        .get("pattern")
+        .and_then(|v| v.as_str())
+        .ok_or("missing `pattern`")?;
     if pattern.len() > 4096 {
         return Err("grep pattern too long (max 4096 bytes)".into());
     }
@@ -396,7 +421,11 @@ fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
     let glob_arg = args.get("glob").and_then(|v| v.as_str());
 
     let re = regex::RegexBuilder::new(pattern)
-        .case_insensitive(args.get("case_insensitive").and_then(|v| v.as_bool()).unwrap_or(false))
+        .case_insensitive(
+            args.get("case_insensitive")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+        )
         .multi_line(true)
         .size_limit(1 << 20)
         .dfa_size_limit(1 << 20)
@@ -491,7 +520,9 @@ fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
         // the head of that same buffer. Bounds memory at MAX_GREP_FILE_BYTES even
         // for a pathologically large text file.
         use std::io::Read;
-        let Ok(f) = std::fs::File::open(p) else { continue };
+        let Ok(f) = std::fs::File::open(p) else {
+            continue;
+        };
         let mut bytes = Vec::new();
         if f.take(MAX_GREP_FILE_BYTES).read_to_end(&mut bytes).is_err() {
             continue;
@@ -544,7 +575,13 @@ fn tool_grep(args: &Value, roots: &[PathBuf]) -> Result<String, String> {
         } else {
             String::new()
         };
-        Ok(format!("(no matches for `{}` in {} files{} under {})", pattern, searched, skipped_note, search_root.display()))
+        Ok(format!(
+            "(no matches for `{}` in {} files{} under {})",
+            pattern,
+            searched,
+            skipped_note,
+            search_root.display()
+        ))
     } else {
         Ok(matches.join("\n"))
     }
@@ -570,12 +607,6 @@ fn trust_rank(level: &str) -> u8 {
         "standard" => 1,
         _ => 0,
     }
-}
-
-/// True when the current trust level is at least `min`. Gates both the
-/// git-tool listing AND dispatch.
-fn trust_at_least(min: &str) -> bool {
-    trust_rank(trust_level()) >= trust_rank(min)
 }
 
 /// Tiny glob → regex. `*`=one segment, `?`=one non-`/`, `**`=any depth. `**`
@@ -625,10 +656,19 @@ pub(super) fn glob_to_regex(glob: &str) -> Result<regex::Regex, String> {
 // already scrubbed at the write boundary (`diagnostics::scrub_log_message`).
 
 fn tool_read_diagnostics(args: &Value) -> Result<String, String> {
-    let lines_n =
-        args.get("lines").and_then(|v| v.as_u64()).unwrap_or(100).clamp(1, 1000) as usize;
-    let min_level = args.get("level").and_then(|v| v.as_str()).map(|s| s.to_lowercase());
-    let filter = args.get("filter").and_then(|v| v.as_str()).map(|s| s.to_lowercase());
+    let lines_n = args
+        .get("lines")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(100)
+        .clamp(1, 1000) as usize;
+    let min_level = args
+        .get("level")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_lowercase());
+    let filter = args
+        .get("filter")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_lowercase());
     let rank = |l: &str| match l {
         "trace" => 0u8,
         "debug" => 1,
@@ -652,7 +692,11 @@ fn tool_read_diagnostics(args: &Value) -> Result<String, String> {
                 .map(|s| rank(&s.trim().to_lowercase()) >= rank(min))
                 .unwrap_or(true),
         };
-        lvl_ok && filter.as_deref().map(|f| line.to_lowercase().contains(f)).unwrap_or(true)
+        lvl_ok
+            && filter
+                .as_deref()
+                .map(|f| line.to_lowercase().contains(f))
+                .unwrap_or(true)
     };
     let matched: Vec<&str> = content.lines().filter(|l| keep(l)).collect();
     let total = matched.len();
@@ -686,7 +730,9 @@ fn filter_event_lines<'a>(
     let matched: Vec<&str> = content
         .lines()
         .filter(|line| {
-            let Ok(v) = serde_json::from_str::<Value>(line) else { return false };
+            let Ok(v) = serde_json::from_str::<Value>(line) else {
+                return false;
+            };
             if let Some(min) = min_level {
                 let lvl = v.get("level").and_then(Value::as_str).unwrap_or("info");
                 if rank(lvl) < rank(min) {
@@ -713,10 +759,23 @@ fn filter_event_lines<'a>(
 }
 
 fn tool_read_events(args: &Value) -> Result<String, String> {
-    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(50).clamp(1, 500) as usize;
-    let min_level = args.get("level").and_then(|v| v.as_str()).map(|s| s.to_lowercase());
-    let resource = args.get("resource").and_then(|v| v.as_str()).map(|s| s.to_lowercase());
-    let filter = args.get("filter").and_then(|v| v.as_str()).map(|s| s.to_lowercase());
+    let limit = args
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(50)
+        .clamp(1, 500) as usize;
+    let min_level = args
+        .get("level")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_lowercase());
+    let resource = args
+        .get("resource")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_lowercase());
+    let filter = args
+        .get("filter")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_lowercase());
     let path = crate::diagnostics::events_log_path().ok_or("events.ndjson path unavailable")?;
     let content = std::fs::read_to_string(&path).map_err(|e| {
         format!(
@@ -759,14 +818,19 @@ fn tool_crash_reports(args: &Value) -> Result<String, String> {
         return Ok("No crash reports — the app has not recorded any panics.".into());
     }
     reports.sort_by_key(|r| std::cmp::Reverse(r.2)); // newest first
-    let listing =
-        reports.iter().map(|(n, sz, _)| format!("{n} ({sz} B)")).collect::<Vec<_>>().join("\n");
+    let listing = reports
+        .iter()
+        .map(|(n, sz, _)| format!("{n} ({sz} B)"))
+        .collect::<Vec<_>>()
+        .join("\n");
     // `name` must exactly match a listed report — names come from read_dir, so
     // an arbitrary path can never be smuggled in.
     let picked = match name {
         Some(n) => {
             if !reports.iter().any(|(f, ..)| f == n) {
-                return Err(format!("no crash report named `{n}` — available:\n{listing}"));
+                return Err(format!(
+                    "no crash report named `{n}` — available:\n{listing}"
+                ));
             }
             n.to_string()
         }
@@ -780,18 +844,28 @@ fn tool_crash_reports(args: &Value) -> Result<String, String> {
         while start < body.len() && !body.is_char_boundary(start) {
             start += 1;
         }
-        format!("…(truncated — showing the last {} KB)\n{}", CAP / 1024, &body[start..])
+        format!(
+            "…(truncated — showing the last {} KB)\n{}",
+            CAP / 1024,
+            &body[start..]
+        )
     } else {
         body
     };
-    Ok(format!("{} crash report(s), newest first:\n{listing}\n\n--- {picked} ---\n{shown}", reports.len()))
+    Ok(format!(
+        "{} crash report(s), newest first:\n{listing}\n\n--- {picked} ---\n{shown}",
+        reports.len()
+    ))
 }
 
 fn tool_turn_trace(args: &Value) -> Result<String, String> {
-    let n = args.get("turns").and_then(|v| v.as_u64()).unwrap_or(10).clamp(1, 50) as usize;
+    let n = args
+        .get("turns")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(10)
+        .clamp(1, 50) as usize;
     let session = args.get("session_id").and_then(|v| v.as_str());
-    let path =
-        crate::diagnostics::perf::turns_log_path().ok_or("turns.ndjson path unavailable")?;
+    let path = crate::diagnostics::perf::turns_log_path().ok_or("turns.ndjson path unavailable")?;
     let content =
         std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
     let mut recs: Vec<Value> = content
@@ -817,7 +891,7 @@ fn tool_turn_trace(args: &Value) -> Result<String, String> {
 
 // ─── JSON-RPC dispatch ─────────────────────────────────────────────────────
 
-fn tools_list_payload() -> Value {
+fn tools_list_payload_for(level: &str, include_bridge: bool) -> Value {
     let mut tools = vec![
         json!({
             "name": "read_file",
@@ -998,7 +1072,7 @@ fn tools_list_payload() -> Value {
             "required": ["number"]
         }
     }));
-    if trust_at_least("standard") {
+    if trust_rank(level) >= trust_rank("standard") {
         tools.push(json!({
             "name": "gh_pr_create",
             "description": "Open a pull request on this workspace's GitHub repo from the CURRENT branch (it must already be pushed). Uses the user's `gh` CLI auth. Provide a clear `title` and a `body` that summarizes the changes; `base` defaults to the repo's default branch. Set `draft: true` for a draft PR.",
@@ -1052,7 +1126,7 @@ fn tools_list_payload() -> Value {
     }
     // UI-bridge tools: only listed when the parent's loopback bridge env is
     // present (env-stripped MCP launchers degrade to the file/git set).
-    if bridge_enabled() {
+    if include_bridge {
         tools.push(json!({
             "name": "ask_user",
             "description": "Ask the user a multiple-choice question and wait for their answer. Use this when you need to make a decision the user should weigh in on — picking between approaches, confirming a destructive action, clarifying an ambiguous request, narrowing scope. The standard Anthropic `AskUserQuestion` tool is unavailable in this environment; this is the Rift-native replacement and renders as an interactive card in the chat. Each question gets a list of options the user clicks to answer. IMPORTANT: set `multiSelect: true` whenever the options are NOT mutually exclusive — i.e. any 'select all that apply', 'which of these', 'pick the features/files/items you want' question where the user could reasonably want more than one. Default single-select is only correct for genuinely either/or choices. Keep questions short (≤120 chars) and labels concise (≤5 words). Returns the user's selections as the tool result; if they dismiss without picking, returns a `cancelled` marker so you can fall back to asking in plain text.",
@@ -1138,6 +1212,75 @@ fn tools_list_payload() -> Value {
     json!({ "tools": tools })
 }
 
+fn tools_list_payload() -> Value {
+    tools_list_payload_for(trust_level(), bridge_enabled())
+}
+
+/// Provider-neutral function definitions for native model integrations. Rift's
+/// MCP child and OpenAI must advertise the same workspace/git capabilities,
+/// while browser bridge tools remain Claude-process-only for now.
+pub(super) fn openai_tool_definitions(level: &str) -> Vec<Value> {
+    tools_list_payload_for(level, false)
+        .get("tools")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|tool| {
+            Some(json!({
+                "type": "function",
+                "name": tool.get("name")?.clone(),
+                "description": tool.get("description").cloned().unwrap_or_else(|| json!("")),
+                "parameters": tool.get("inputSchema").cloned().unwrap_or_else(|| json!({ "type": "object" })),
+                // Existing MCP schemas intentionally leave optional properties
+                // open. Strict mode would reject them; validation still occurs
+                // in each Rust tool implementation.
+                "strict": false,
+            }))
+        })
+        .collect()
+}
+
+/// Invoke the shared non-UI workspace tool set from an in-process provider.
+/// The caller supplies the effective trust level instead of mutating process
+/// environment, which would be unsafe with concurrent provider turns.
+pub(super) fn invoke_workspace_tool(
+    name: &str,
+    args: &Value,
+    roots: &[PathBuf],
+    level: &str,
+) -> Result<String, String> {
+    match name {
+        "read_file" => tool_read_file(args, roots),
+        "list_dir" => tool_list_dir(args, roots),
+        "grep" => tool_grep(args, roots),
+        "read_diagnostics" => tool_read_diagnostics(args),
+        "read_events" => tool_read_events(args),
+        "crash_reports" => tool_crash_reports(args),
+        "turn_trace" => tool_turn_trace(args),
+        "git_status" => git_local::tool_git_status(args, roots),
+        "git_diff" => git_local::tool_git_diff(args, roots),
+        "git_log" => git_local::tool_git_log(args, roots),
+        "git_pull" if trust_rank(level) >= trust_rank("standard") => {
+            git_local::tool_git_pull(args, roots)
+        }
+        "git_commit" if trust_rank(level) >= trust_rank("standard") => {
+            git_local::tool_git_commit(args, roots)
+        }
+        "git_push" if trust_rank(level) >= trust_rank("standard") => {
+            git_local::tool_git_push(args, roots)
+        }
+        "gh_checks" => gh_remote::tool_gh_checks(args, roots),
+        "gh_run_view" => gh_remote::tool_gh_run_view(args, roots),
+        "gh_pr_list" => gh_remote::tool_gh_pr_list(args, roots),
+        "gh_pr_view" => gh_remote::tool_gh_pr_view(args, roots),
+        "gh_pr_diff" => gh_remote::tool_gh_pr_diff(args, roots),
+        "gh_pr_create" if trust_rank(level) >= trust_rank("standard") => {
+            gh_remote::tool_gh_pr_create(args, roots)
+        }
+        other => Err(format!("unknown tool: {other}")),
+    }
+}
+
 fn handle_request(req: RpcRequest, roots: &[PathBuf]) -> Option<RpcResponse> {
     // Notifications (no id) get no response.
     let id = req.id?;
@@ -1150,44 +1293,33 @@ fn handle_request(req: RpcRequest, roots: &[PathBuf]) -> Option<RpcResponse> {
         })),
         "tools/list" => Ok(tools_list_payload()),
         "tools/call" => {
-            let name = req.params.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let name = req
+                .params
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
             let args = req.params.get("arguments").cloned().unwrap_or(Value::Null);
             let tool_t0 = std::time::Instant::now();
             let res = match name {
-                "read_file" => tool_read_file(&args, roots),
-                "list_dir" => tool_list_dir(&args, roots),
-                "grep" => tool_grep(&args, roots),
-                "read_diagnostics" => tool_read_diagnostics(&args),
-                "read_events" => tool_read_events(&args),
-                "crash_reports" => tool_crash_reports(&args),
-                "turn_trace" => tool_turn_trace(&args),
-                "git_status" => git_local::tool_git_status(&args, roots),
-                "git_diff" => git_local::tool_git_diff(&args, roots),
-                "git_log" => git_local::tool_git_log(&args, roots),
-                "git_pull" if trust_at_least("standard") => git_local::tool_git_pull(&args, roots),
-                "git_commit" if trust_at_least("standard") => git_local::tool_git_commit(&args, roots),
-                "git_push" if trust_at_least("standard") => git_local::tool_git_push(&args, roots),
-                "gh_checks" => gh_remote::tool_gh_checks(&args, roots),
-                "gh_run_view" => gh_remote::tool_gh_run_view(&args, roots),
-                "gh_pr_list" => gh_remote::tool_gh_pr_list(&args, roots),
-                "gh_pr_view" => gh_remote::tool_gh_pr_view(&args, roots),
-                "gh_pr_diff" => gh_remote::tool_gh_pr_diff(&args, roots),
-                "gh_pr_create" if trust_at_least("standard") => gh_remote::tool_gh_pr_create(&args, roots),
                 "ask_user" if bridge_enabled() => tool_ask_user(&args),
                 "open_browser" if bridge_enabled() => tool_open_browser(&args),
                 "read_browser_page" if bridge_enabled() => tool_read_browser_page(&args),
                 "read_browser_console" if bridge_enabled() => tool_read_browser_console(&args),
                 "notify" if bridge_enabled() => tool_notify(&args),
+                other => invoke_workspace_tool(other, &args, roots, trust_level()),
                 // #72: gate call-path the same way the list-path gates the
                 // tool declaration. Env-stripped MCP launchers see "unknown
                 // tool" instead of a silent ignore + no response.
-                other => Err(format!("unknown tool: {other}")),
             };
             let tool_dur_ms = tool_t0.elapsed().as_millis() as u64;
             let tool_ok = res.is_ok();
             {
                 use crate::diagnostics::{DiagLevel, DiagStage};
-                let level = if tool_ok { DiagLevel::Info } else { DiagLevel::Warn };
+                let level = if tool_ok {
+                    DiagLevel::Info
+                } else {
+                    DiagLevel::Warn
+                };
                 // Stamp the driving session (write_mcp_config injects RIFT_SESSION_ID
                 // into this subprocess's env) + a proc marker so a tool call made in
                 // the MCP child correlates back across the process boundary —
@@ -1195,7 +1327,10 @@ fn handle_request(req: RpcRequest, roots: &[PathBuf]) -> Option<RpcResponse> {
                 // tool a session's subprocess ran.
                 let session = std::env::var("RIFT_SESSION_ID").unwrap_or_default();
                 crate::diagnostics::emit_with_fields(
-                    DiagStage::Log, level, Some("mcp"), Some(file!()),
+                    DiagStage::Log,
+                    level,
+                    Some("mcp"),
+                    Some(file!()),
                     "mcp tool call",
                     serde_json::json!({
                         "tool": name, "dur_ms": tool_dur_ms, "ok": tool_ok,
@@ -1227,12 +1362,20 @@ fn handle_request(req: RpcRequest, roots: &[PathBuf]) -> Option<RpcResponse> {
     };
 
     match result {
-        Ok(v) => Some(RpcResponse { jsonrpc: "2.0", id, result: Some(v), error: None }),
+        Ok(v) => Some(RpcResponse {
+            jsonrpc: "2.0",
+            id,
+            result: Some(v),
+            error: None,
+        }),
         Err(msg) => Some(RpcResponse {
             jsonrpc: "2.0",
             id,
             result: None,
-            error: Some(RpcError { code: -32601, message: msg }),
+            error: Some(RpcError {
+                code: -32601,
+                message: msg,
+            }),
         }),
     }
 }
@@ -1254,8 +1397,8 @@ pub fn run_stdio() {
         // MAX_LINE_BYTES+1 per line so a runaway/hostile producer can't OOM the
         // child; an over-cap line is detected + skipped without buffering it
         // whole. (RR3)
-        let read = io::Read::take(&mut reader, MAX_LINE_BYTES as u64 + 1)
-            .read_until(b'\n', &mut buf);
+        let read =
+            io::Read::take(&mut reader, MAX_LINE_BYTES as u64 + 1).read_until(b'\n', &mut buf);
         match read {
             Ok(0) => return,
             Ok(_) => {}
@@ -1304,18 +1447,27 @@ pub fn run_stdio() {
             // minimal `{id: ...}` parse before discarding.
             Err(_) => {
                 #[derive(Deserialize)]
-                struct IdOnly { id: Option<Value> }
+                struct IdOnly {
+                    id: Option<Value>,
+                }
                 if let Ok(probe) = serde_json::from_str::<IdOnly>(line) {
                     if let Some(id) = probe.id {
                         let err_resp = RpcResponse {
                             jsonrpc: "2.0",
                             id,
                             result: None,
-                            error: Some(RpcError { code: -32700, message: "parse error".into() }),
+                            error: Some(RpcError {
+                                code: -32700,
+                                message: "parse error".into(),
+                            }),
                         };
                         if let Ok(s) = serde_json::to_string(&err_resp) {
-                            if writeln!(out, "{}", s).is_err() { return; }
-                            if out.flush().is_err() { return; }
+                            if writeln!(out, "{}", s).is_err() {
+                                return;
+                            }
+                            if out.flush().is_err() {
+                                return;
+                            }
                         }
                     }
                 }
@@ -1409,9 +1561,15 @@ mod tests {
     fn read_file_rejects_directory_and_oversize() {
         let (_td, root) = workspace();
         let roots = vec![root.clone()];
-        assert!(tool_read_file(&json!({ "path": "sub" }), &roots).unwrap_err().contains("not a regular file"));
+        assert!(tool_read_file(&json!({ "path": "sub" }), &roots)
+            .unwrap_err()
+            .contains("not a regular file"));
         // > 500 KB → rejected with a size message.
-        std::fs::write(root.join("big.bin"), vec![b'x'; (MAX_READ_BYTES as usize) + 10]).unwrap();
+        std::fs::write(
+            root.join("big.bin"),
+            vec![b'x'; (MAX_READ_BYTES as usize) + 10],
+        )
+        .unwrap();
         let err = tool_read_file(&json!({ "path": "big.bin" }), &roots).unwrap_err();
         assert!(err.contains("limit"), "got: {err}");
     }
@@ -1429,7 +1587,10 @@ mod tests {
         let (_td, root) = workspace();
         let out = tool_list_dir(&json!({ "path": "." }), &[root]).unwrap();
         assert!(out.contains("a.txt"), "got: {out}");
-        assert!(out.contains("sub/"), "dirs should carry a trailing slash: {out}");
+        assert!(
+            out.contains("sub/"),
+            "dirs should carry a trailing slash: {out}"
+        );
     }
 
     #[test]
@@ -1455,12 +1616,22 @@ mod tests {
         // flag and `^target` stops matching the buffer, so the prefilter skips
         // the file outright and this goes red.
         let (_td, root) = workspace();
-        std::fs::write(root.join("multi.txt"), "first line\ntarget here\nlast line\n").unwrap();
+        std::fs::write(
+            root.join("multi.txt"),
+            "first line\ntarget here\nlast line\n",
+        )
+        .unwrap();
         let roots = vec![root];
         let out = tool_grep(&json!({ "pattern": "^target" }), &roots).unwrap();
-        assert!(out.contains("multi.txt:2"), "anchored match on line 2 lost: {out}");
+        assert!(
+            out.contains("multi.txt:2"),
+            "anchored match on line 2 lost: {out}"
+        );
         let tail = tool_grep(&json!({ "pattern": "line$" }), &roots).unwrap();
-        assert!(tail.contains("multi.txt:1"), "$-anchored match lost: {tail}");
+        assert!(
+            tail.contains("multi.txt:1"),
+            "$-anchored match lost: {tail}"
+        );
     }
 
     #[test]
@@ -1479,7 +1650,11 @@ mod tests {
         let (_td, root) = workspace();
         let roots = vec![root];
         // `*.txt` keeps a.txt; `*.rs` matches nothing in the fixture.
-        assert!(tool_grep(&json!({ "pattern": "hello", "glob": "*.txt" }), &roots).unwrap().contains("a.txt"));
+        assert!(
+            tool_grep(&json!({ "pattern": "hello", "glob": "*.txt" }), &roots)
+                .unwrap()
+                .contains("a.txt")
+        );
         let none = tool_grep(&json!({ "pattern": "hello", "glob": "*.rs" }), &roots).unwrap();
         assert!(none.contains("no matches"), "got: {none}");
     }
@@ -1490,7 +1665,9 @@ mod tests {
         let roots = vec![root];
         assert!(tool_grep(&json!({ "pattern": "(" }), &roots).is_err());
         let long = "a".repeat(4097);
-        assert!(tool_grep(&json!({ "pattern": long }), &roots).unwrap_err().contains("too long"));
+        assert!(tool_grep(&json!({ "pattern": long }), &roots)
+            .unwrap_err()
+            .contains("too long"));
     }
 
     #[test]
@@ -1508,7 +1685,11 @@ mod tests {
         // the search_root itself stops grep(path:"node_modules") from reading an
         // excluded tree wholesale. Without it, .git/config etc. would be greppable.
         let (_td, root) = workspace();
-        let err = tool_grep(&json!({ "pattern": "hello", "path": "node_modules" }), &[root]).unwrap_err();
+        let err = tool_grep(
+            &json!({ "pattern": "hello", "path": "node_modules" }),
+            &[root],
+        )
+        .unwrap_err();
         assert!(err.contains("excluded directory"), "got: {err}");
     }
 
@@ -1517,10 +1698,13 @@ mod tests {
     #[test]
     fn filter_event_lines_levels_resources_and_tail() {
         let content = concat!(
-            r#"{"at":"t1","seq":1,"stage":"log","level":"info","resource":"turn","message":"ok","fields":null}"#, "\n",
-            r#"{"at":"t2","seq":2,"stage":"system","level":"error","resource":"frontend","message":"boom","fields":{"stack":"x"}}"#, "\n",
+            r#"{"at":"t1","seq":1,"stage":"log","level":"info","resource":"turn","message":"ok","fields":null}"#,
+            "\n",
+            r#"{"at":"t2","seq":2,"stage":"system","level":"error","resource":"frontend","message":"boom","fields":{"stack":"x"}}"#,
+            "\n",
             "not-json torn tail line\n",
-            r#"{"at":"t3","seq":3,"stage":"log","level":"warn","resource":"warm_pool","message":"lagged","fields":null}"#, "\n",
+            r#"{"at":"t3","seq":3,"stage":"log","level":"warn","resource":"warm_pool","message":"lagged","fields":null}"#,
+            "\n",
         );
         // No filters → every JSON line kept, the torn non-JSON line dropped.
         let (total, tail) = filter_event_lines(content, None, None, None, 10);
@@ -1550,10 +1734,17 @@ mod tests {
         // are never legitimate read targets and can hide secrets/large blobs.
         let (_td, root) = workspace();
         let roots = vec![root];
-        let read_err = tool_read_file(&json!({ "path": "node_modules/skip.txt" }), &roots).unwrap_err();
-        assert!(read_err.contains("excluded directory"), "read got: {read_err}");
+        let read_err =
+            tool_read_file(&json!({ "path": "node_modules/skip.txt" }), &roots).unwrap_err();
+        assert!(
+            read_err.contains("excluded directory"),
+            "read got: {read_err}"
+        );
         let list_err = tool_list_dir(&json!({ "path": "node_modules" }), &roots).unwrap_err();
-        assert!(list_err.contains("excluded directory"), "list got: {list_err}");
+        assert!(
+            list_err.contains("excluded directory"),
+            "list got: {list_err}"
+        );
     }
 
     // ─── symlink escape — canonicalize must follow the link OUT of root ─────────
@@ -1607,11 +1798,20 @@ mod tests {
     fn pathfilter_exclude_hides_matching() {
         let f = PathFilter::from_globs("", "*.log\nvendor/**");
         assert!(f.allows("src/main.rs"));
-        assert!(!f.allows("app.log"), "filename-only glob matches basename anywhere");
+        assert!(
+            !f.allows("app.log"),
+            "filename-only glob matches basename anywhere"
+        );
         assert!(!f.allows("logs/app.log"));
-        assert!(!f.allows("vendor/dep/x.js"), "relpath glob matches under dir");
+        assert!(
+            !f.allows("vendor/dep/x.js"),
+            "relpath glob matches under dir"
+        );
         // exclude hides the dir itself too
-        assert!(!f.allows_dir(std::path::Path::new("/ws/vendor"), std::path::Path::new("/ws")));
+        assert!(!f.allows_dir(
+            std::path::Path::new("/ws/vendor"),
+            std::path::Path::new("/ws")
+        ));
         assert!(f.allows_dir(std::path::Path::new("/ws/src"), std::path::Path::new("/ws")));
     }
 
@@ -1620,16 +1820,25 @@ mod tests {
         let f = PathFilter::from_globs("src/**\n*.md", "");
         assert!(f.allows("src/lib/x.rs"));
         assert!(f.allows("README.md"), "*.md basename match");
-        assert!(!f.allows("scripts/build.sh"), "outside include set → hidden");
+        assert!(
+            !f.allows("scripts/build.sh"),
+            "outside include set → hidden"
+        );
         // a non-excluded directory stays navigable even with includes set
-        assert!(f.allows_dir(std::path::Path::new("/ws/scripts"), std::path::Path::new("/ws")));
+        assert!(f.allows_dir(
+            std::path::Path::new("/ws/scripts"),
+            std::path::Path::new("/ws")
+        ));
     }
 
     #[test]
     fn pathfilter_exclude_wins_over_include() {
         let f = PathFilter::from_globs("src/**", "src/**/*.test.rs");
         assert!(f.allows("src/main.rs"));
-        assert!(!f.allows("src/foo.test.rs"), "exclude takes precedence over include");
+        assert!(
+            !f.allows("src/foo.test.rs"),
+            "exclude takes precedence over include"
+        );
     }
 
     // Regression: on Windows `std::fs::canonicalize` returns the verbatim

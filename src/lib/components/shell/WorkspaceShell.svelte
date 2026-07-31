@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { WORKSPACES } from "../workspaces";
+  import { WORKSPACES, type WorkspaceComponent } from "../workspaces";
   import { workspace, WORKSPACE_IDS, type WorkspaceId } from "$lib/state/workspace.svelte";
   import { onMount, untrack } from "svelte";
 
@@ -7,6 +7,42 @@
   // currently in the transient .rising state. Added on active-id change,
   // removed after the longest block settles (dur-rise + 4*stagger = 460+248).
   let risingIds = $state(new Set<string>());
+  let components = $state<Partial<Record<WorkspaceId, WorkspaceComponent>>>({});
+  let loadErrors = $state<Partial<Record<WorkspaceId, string>>>({});
+  const loading = new Set<WorkspaceId>();
+
+  async function ensureLoaded(id: WorkspaceId) {
+    if (components[id] || loading.has(id)) return;
+    loading.add(id);
+    try {
+      const loaded = await WORKSPACES[id].load();
+      components = { ...components, [id]: loaded.default };
+      if (loadErrors[id]) {
+        const next = { ...loadErrors };
+        delete next[id];
+        loadErrors = next;
+      }
+    } catch (error) {
+      console.error(`workspace ${id} failed to load`, error);
+      loadErrors = {
+        ...loadErrors,
+        [id]: "Rift couldn't load this screen. Try again, or restart the dev app if it keeps happening.",
+      };
+    } finally {
+      loading.delete(id);
+    }
+  }
+
+  function retryLoad(id: WorkspaceId) {
+    const next = { ...loadErrors };
+    delete next[id];
+    loadErrors = next;
+    void ensureLoaded(id);
+  }
+
+  $effect(() => {
+    for (const id of workspace.everOpened) void ensureLoaded(id);
+  });
 
   // dur-rise(460) + max-stagger*stagger(5*62=310) + 40ms buffer
   const SETTLE_MS = 810;
@@ -43,7 +79,7 @@
   {#each WORKSPACE_IDS as id (id)}
     {#if workspace.everOpened.has(id as WorkspaceId)}
       {@const def = WORKSPACES[id]}
-      {@const Comp = def.component}
+      {@const Comp = components[id]}
       {@const active = workspace.activeId === id}
       <div
         class="ws-page"
@@ -53,10 +89,21 @@
         aria-hidden={!active}
         inert={!active}
       >
-        {#if def.disabled}
+        {#if Comp && def.disabled}
           <Comp title={def.title} icon={def.icon}/>
-        {:else}
+        {:else if Comp}
           <Comp />
+        {:else if loadErrors[id]}
+          <div class="ws-load-state ws-load-error" role="alert">
+            <strong>{def.title} did not load</strong>
+            <span>{loadErrors[id]}</span>
+            <button type="button" onclick={() => retryLoad(id)}>Try again</button>
+          </div>
+        {:else}
+          <div class="ws-load-state" aria-busy="true" aria-label={`Loading ${def.title}`}>
+            <span class="ws-load-mark"></span>
+            <span>Loading {def.title}</span>
+          </div>
         {/if}
       </div>
     {/if}
@@ -98,8 +145,39 @@
       opacity var(--dur-page) var(--ease-page),
       transform var(--dur-page) var(--ease-page);
   }
+  .ws-load-state {
+    width: min(360px, calc(100% - 48px));
+    margin: auto;
+    display: grid;
+    justify-items: center;
+    gap: 10px;
+    color: var(--text-muted);
+    font-size: 12px;
+    text-align: center;
+  }
+  .ws-load-mark {
+    width: 24px;
+    height: 24px;
+    border: 2px solid color-mix(in srgb, var(--accent) 22%, transparent);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: ws-load-spin 700ms linear infinite;
+  }
+  .ws-load-error strong { color: var(--text-primary); font-size: 13px; }
+  .ws-load-error span { overflow-wrap: anywhere; }
+  .ws-load-error button {
+    border: 1px solid var(--border-subtle);
+    border-radius: 7px;
+    padding: 6px 10px;
+    color: var(--text-secondary);
+    background: var(--bg-raised);
+    cursor: pointer;
+  }
+  .ws-load-error button:hover { color: var(--text-primary); border-color: var(--border-strong); }
+  @keyframes ws-load-spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) {
     .ws-page { transition: none; transform: none; }
+    .ws-load-mark { animation: none; }
   }
 
   /* Staggered-rise: direct children of a .rising page animate upward + fade

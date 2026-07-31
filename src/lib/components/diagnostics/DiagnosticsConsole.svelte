@@ -246,7 +246,7 @@
       {/if}
     </div>
 
-    <div class="dc-body" bind:this={scrollEl} onscroll={onScroll}>
+    <div class="dc-body" role="list" aria-label="Diagnostic events" bind:this={scrollEl} onscroll={onScroll}>
       {#if total === 0}
         <div class="dc-empty">
           {diagnostics.events.length === 0 ? "Waiting for events… trigger a turn or action." : "No events match the current filters."}
@@ -255,21 +255,31 @@
         <div style="height:{padTop}px"></div>
         {#each slice as e (e.seq)}
           <div class="dc-rowwrap">
-            <button type="button" class="dc-row lvl-{e.level}" class:sys={e.stage === "system"}
-              class:open={expanded.has(e.seq)}
-              onclick={() => expandable(e) && toggleRow(e.seq)} class:has-fields={expandable(e)}>
-              <span class="dc-t">{fmtTime(e.at)}</span>
-              <span class="dc-lvl">{e.level}</span>
-              {#if e.resource}<span class="dc-res-tag">{e.resource}</span>{/if}
-              <span class="dc-msg">{e.message}</span>
-              {#if expandable(e)}<span class="dc-chev">{expanded.has(e.seq) ? "▾" : "▸"}</span>{/if}
-              {#if e.file}<span class="dc-file">{e.file}</span>{/if}
-            </button>
+            {#if expandable(e)}
+              <button type="button" class="dc-row lvl-{e.level} has-fields" class:sys={e.stage === "system"}
+                class:open={expanded.has(e.seq)} onclick={() => toggleRow(e.seq)}
+                aria-expanded={expanded.has(e.seq)} aria-controls={`diag-detail-${e.seq}`}>
+                <span class="dc-t">{fmtTime(e.at)}</span>
+                <span class="dc-lvl">{e.level}</span>
+                {#if e.resource}<span class="dc-res-tag">{e.resource}</span>{/if}
+                <span class="dc-msg">{e.message}</span>
+                <span class="dc-chev">{expanded.has(e.seq) ? "▾" : "▸"}</span>
+                {#if e.file}<span class="dc-file">{e.file}</span>{/if}
+              </button>
+            {:else}
+              <div class="dc-row lvl-{e.level}" class:sys={e.stage === "system"} role="listitem">
+                <span class="dc-t">{fmtTime(e.at)}</span>
+                <span class="dc-lvl">{e.level}</span>
+                {#if e.resource}<span class="dc-res-tag">{e.resource}</span>{/if}
+                <span class="dc-msg">{e.message}</span>
+                {#if e.file}<span class="dc-file">{e.file}</span>{/if}
+              </div>
+            {/if}
             {#if expanded.has(e.seq) && expandable(e)}
               {#if hasFields(e)}
-                <pre class="dc-fields">{fieldsStr(e.fields)}</pre>
+                <pre class="dc-fields" id={`diag-detail-${e.seq}`}>{fieldsStr(e.fields)}</pre>
               {:else}
-                <pre class="dc-fields dc-fields-msg">{e.message}</pre>
+                <pre class="dc-fields dc-fields-msg" id={`diag-detail-${e.seq}`}>{e.message}</pre>
               {/if}
             {/if}
           </div>

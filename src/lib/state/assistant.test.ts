@@ -16,6 +16,40 @@ import { restoreTabs } from "./assistant/tabs.js";
 import { tabsStorageKey } from "./assistant/persistence.js";
 import { shell } from "./shell.svelte.js";
 
+describe("provider readiness", () => {
+  afterEach(() => {
+    assistant.auth = null;
+    assistant.openAiStatus = null;
+    assistant.openAiModels = null;
+    assistant.openAiModelsError = null;
+  });
+
+  it("requires the Claude CLI even when an API key is configured", () => {
+    assistant.auth = { cliPresent: false, pill: "yellow" } as any;
+    expect(assistant.authReadyForModel("sonnet")).toBe(false);
+    assistant.auth = { cliPresent: true, pill: "yellow" } as any;
+    expect(assistant.authReadyForModel("sonnet")).toBe(true);
+  });
+
+  it("requires confirmed model access for OpenAI", () => {
+    assistant.openAiStatus = { ready: true, apiKeyConfigured: true } as any;
+    expect(assistant.authReadyForModel("gpt-5.6")).toBe(false);
+    assistant.openAiModels = [{ id: "gpt-5.6", available: false }] as any;
+    expect(assistant.authReadyForModel("gpt-5.6")).toBe(false);
+    assistant.openAiModels = [{ id: "gpt-5.6", available: true }] as any;
+    expect(assistant.authReadyForModel("gpt-5.6")).toBe(true);
+  });
+
+  it("reads each split pane's provider instead of the focused pane", () => {
+    assistant.auth = { cliPresent: true, pill: "green" } as any;
+    assistant.openAiStatus = { ready: false, apiKeyConfigured: false } as any;
+    const claudePane = { modelOverride: "sonnet" } as any;
+    const openAiPane = { modelOverride: "gpt-5.6" } as any;
+    expect(assistant.authReadyFor(claudePane)).toBe(true);
+    expect(assistant.authReadyFor(openAiPane)).toBe(false);
+  });
+});
+
 // Minimal turn record. TurnRecord is a private type so we build a structural
 // stand-in and cast — the accumulator only reads the fields below.
 type StubTurn = {

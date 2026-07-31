@@ -30,6 +30,7 @@
   import { workspace } from "../../state/workspace.svelte";
   import Select from "../Select.svelte";
   import PageHero from "../shared/PageHero.svelte";
+  import { MODEL_OPTIONS } from "../assistant/composer/modelMatrix";
 
   const DENSITIES = ["compact", "regular", "comfy"] as const;
   const NARRATIONS = [
@@ -48,13 +49,14 @@
   const ST_SECTIONS: { id: Section; label: string; icon: typeof Cog; sub: string; dot?: "ok" | "warn" }[] = [
     { id: "appearance", label: "Appearance", icon: Palette,       sub: "Accent color, density, and code rendering — every change applies instantly." },
     { id: "chat",       label: "Chat",       icon: MessageSquare, sub: "How conversations read — stream layout, detail level, and reading comfort." },
-    { id: "claude",     label: "Claude",     icon: Sparkles,      sub: "Your Claude session, plan, and API-key fallback." },
+    { id: "claude",     label: "Providers",  icon: Sparkles,      sub: "Connect Claude, OpenAI, and Codex, then choose models per conversation." },
     { id: "speech",     label: "Speech",     icon: Mic,           sub: "Voice-to-text input — Web Speech (online), Parakeet (on-device, fast) or Whisper (on-device, multilingual)." },
     { id: "about",      label: "About",      icon: Info,          sub: "Build info, keyboard shortcuts, local tools, and support diagnostics." },
   ];
 
   let activeSec = $state<Section>("appearance");
   let scrollEl = $state<HTMLDivElement>();
+  let tabEls = $state<Partial<Record<Section, HTMLButtonElement>>>({});
 
   // ── Settings search — every control indexed, jump-and-flash on pick ──
   // `anchor` is the card's DOM id inside the scroll surface; control-level
@@ -84,6 +86,8 @@
     { tab: "claude",     anchor: "card-admin",     card: "Administrator access", title: "Always run as administrator", kw: "admin elevated elevation uac no prompt scheduled task startup" },
     { tab: "claude",     anchor: "card-api",       card: "API key & spending", title: "API-key fallback",   kw: "anthropic console token sk-ant billing keychain" },
     { tab: "claude",     anchor: "card-api",       card: "API key & spending", title: "Per-turn cost cap",  kw: "budget dollar limit spend guard" },
+    { tab: "claude",     anchor: "card-openai",    card: "OpenAI API", title: "OpenAI API key", kw: "openai chatgpt gpt api key billing responses" },
+    { tab: "claude",     anchor: "card-codex",     card: "Codex account", title: "Codex ChatGPT sign-in", kw: "codex chatgpt account cli app server subscription login" },
     { tab: "speech",     anchor: "card-engine",    card: "Engine",             title: "Speech-to-text",     kw: "voice mic dictation stt enable" },
     { tab: "speech",     anchor: "card-engine",    card: "Engine",             title: "Recognition engine", kw: "web speech whisper parakeet on-device azure" },
     { tab: "speech",     anchor: "card-engine",    card: "Web Speech",         title: "Language",           kw: "english spanish french german locale bcp-47" },
@@ -106,6 +110,8 @@
   let searchIdx = $state(0);
   let searchFocused = $state(false);
   let searchEl = $state<HTMLInputElement>();
+  let searchFlashTimer: ReturnType<typeof setTimeout> | null = null;
+  let searchFlashEl: HTMLElement | null = null;
   // "/" or Ctrl+F anywhere on the page focuses the settings search.
   function onGlobalKey(ev: KeyboardEvent) {
     const t = ev.target as HTMLElement | null;
@@ -133,6 +139,7 @@
     return scored.slice(0, 8).map((x) => x.e);
   });
   $effect(() => { void searchResults.length; searchIdx = 0; });
+  const prefersReducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
   function jumpTo(e: SearchEntry) {
     searchQ = "";
     activeSec = e.tab;
@@ -140,9 +147,20 @@
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const el = scrollEl?.querySelector<HTMLElement>(`#${e.anchor}`);
       if (!el) return;
-      el.scrollIntoView({ block: "start", behavior: "smooth" });
+      const reduceMotion = prefersReducedMotion();
+      el.scrollIntoView({ block: "start", behavior: reduceMotion ? "auto" : "smooth" });
+      el.tabIndex = -1;
+      el.focus({ preventScroll: true });
+      if (reduceMotion) return;
+      if (searchFlashTimer) clearTimeout(searchFlashTimer);
+      searchFlashEl?.classList.remove("sflash");
+      searchFlashEl = el;
       el.classList.add("sflash");
-      setTimeout(() => el.classList.remove("sflash"), 1700);
+      searchFlashTimer = setTimeout(() => {
+        el.classList.remove("sflash");
+        searchFlashTimer = null;
+        searchFlashEl = null;
+      }, 1700);
     }));
   }
   function onSearchKey(ev: KeyboardEvent) {
@@ -161,6 +179,37 @@
   function selectSec(id: Section) {
     activeSec = id;
     scrollEl?.scrollTo({ top: 0 });
+  }
+  function focusTab(id: Section) {
+    selectSec(id);
+    requestAnimationFrame(() => tabEls[id]?.focus());
+  }
+  function onTabKey(ev: KeyboardEvent, id: Section) {
+    const current = ST_SECTIONS.findIndex((s) => s.id === id);
+    let next = current;
+    if (ev.key === "ArrowRight" || ev.key === "ArrowDown") next = (current + 1) % ST_SECTIONS.length;
+    else if (ev.key === "ArrowLeft" || ev.key === "ArrowUp") next = (current - 1 + ST_SECTIONS.length) % ST_SECTIONS.length;
+    else if (ev.key === "Home") next = 0;
+    else if (ev.key === "End") next = ST_SECTIONS.length - 1;
+    else return;
+    ev.preventDefault();
+    focusTab(ST_SECTIONS[next].id);
+  }
+  function onRadioKey(ev: KeyboardEvent) {
+    const group = (ev.currentTarget as HTMLElement).closest<HTMLElement>('[role="radiogroup"]');
+    if (!group) return;
+    const radios = Array.from(group.querySelectorAll<HTMLButtonElement>('button[role="radio"]:not(:disabled)'));
+    const current = radios.indexOf(ev.currentTarget as HTMLButtonElement);
+    if (current < 0 || radios.length === 0) return;
+    let next = current;
+    if (ev.key === "ArrowRight" || ev.key === "ArrowDown") next = (current + 1) % radios.length;
+    else if (ev.key === "ArrowLeft" || ev.key === "ArrowUp") next = (current - 1 + radios.length) % radios.length;
+    else if (ev.key === "Home") next = 0;
+    else if (ev.key === "End") next = radios.length - 1;
+    else return;
+    ev.preventDefault();
+    radios[next].focus();
+    radios[next].click();
   }
 
   const vivPct = $derived(Math.round(((uiPrefs.vividness - VIVIDNESS_MIN) / (VIVIDNESS_MAX - VIVIDNESS_MIN)) * 100));
@@ -308,12 +357,18 @@
   let asstApiKeySaving = $state(false);
   let asstApiKeyMsg = $state<string | null>(null);
   let asstApiKeyVisible = $state(false);
+  let openAiApiKeyDraft = $state("");
+  let openAiApiKeySaving = $state(false);
+  let openAiApiKeyMsg = $state<string | null>(null);
+  let openAiApiKeyVisible = $state(false);
   let asstMaxBudgetDraft = $state<number | null>(null);
   let asstMaxBudgetSaving = $state(false);
   let asstMaxBudgetMsg = $state<string | null>(null);
   const asstMaxBudgetDirty = $derived(asstMaxBudgetDraft !== assistantStore.maxBudgetUsd);
   const asstApiKeyDirty = $derived(asstApiKeyDraft.trim().length > 0);
+  const openAiApiKeyDirty = $derived(openAiApiKeyDraft.trim().length > 0);
   $effect(() => { if (!asstApiKeyDraft) asstApiKeyVisible = false; });
+  $effect(() => { if (!openAiApiKeyDraft) openAiApiKeyVisible = false; });
 
   let asstNowTick = $state(Date.now());
   // Claude Code CLI version state — `isNewer` (not `available`) so Settings
@@ -345,7 +400,28 @@
   }
   function reprobeAll() {
     void assistantStore.refreshAuth();
+    void assistantStore.refreshOpenAiStatus();
+    void assistantStore.refreshCodexStatus();
     void cliUpdate.maybeCheck(true);
+  }
+  const supportedOpenAiIds = new Set<string>(MODEL_OPTIONS.filter((model) => model.provider === "openai").map((model) => model.id));
+  const openAiSupportedCount = $derived(
+    assistantStore.openAiModels?.filter((model) => model.available && supportedOpenAiIds.has(model.id)).length ?? 0,
+  );
+  const openAiOtherCount = $derived(
+    assistantStore.openAiModels?.filter((model) => model.available && !supportedOpenAiIds.has(model.id)).length ?? 0,
+  );
+  const openAiConnected = $derived(
+    assistantStore.hasOpenAiApiKey && !assistantStore.openAiChecking
+      && !assistantStore.openAiModelsError && openAiSupportedCount > 0,
+  );
+  const codexConnected = $derived(assistantStore.codexStatus?.ready === true && !assistantStore.codexChecking);
+  const claudeConnected = $derived(
+    assistantStore.auth?.cliPresent === true
+      && (assistantStore.auth.pill === "green" || assistantStore.auth.pill === "yellow"),
+  );
+  function focusProvider(id: "claude" | "openai" | "codex") {
+    document.getElementById(`card-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
   function fmtAgo(ts: number, now: number): string {
     const s = Math.max(0, Math.round((now - ts) / 1000));
@@ -369,6 +445,21 @@
       asstApiKeyMsg = "Couldn't save the API key. See logs for details.";
     } finally {
       asstApiKeySaving = false;
+    }
+  }
+  async function saveOpenAiApiKey() {
+    openAiApiKeySaving = true;
+    openAiApiKeyMsg = null;
+    try {
+      await assistantStore.setOpenAiApiKey(openAiApiKeyDraft);
+      openAiApiKeyMsg = openAiApiKeyDraft.trim() ? "Saved securely." : "Cleared.";
+      openAiApiKeyDraft = "";
+      openAiApiKeyVisible = false;
+    } catch (e) {
+      console.error("setOpenAiApiKey failed", e);
+      openAiApiKeyMsg = "Couldn't save the OpenAI API key. See logs for details.";
+    } finally {
+      openAiApiKeySaving = false;
     }
   }
   async function saveAsstMaxBudget() {
@@ -457,6 +548,9 @@
     return () => {
       clearInterval(iv);
       if (diagCopiedTimer) { clearTimeout(diagCopiedTimer); diagCopiedTimer = null; }
+      if (searchFlashTimer) { clearTimeout(searchFlashTimer); searchFlashTimer = null; }
+      searchFlashEl?.classList.remove("sflash");
+      searchFlashEl = null;
     };
   });
 </script>
@@ -498,7 +592,20 @@
                  to "Claude" read as noise, so it only renders when the session
                  needs attention. -->
             {@const dot = s.id === "claude" ? (assistantDot === "warn" ? "warn" as const : undefined) : s.dot}
-            <button class="snav" class:on={activeSec === s.id} role="tab" aria-selected={activeSec === s.id} onclick={() => selectSec(s.id)} type="button" title={dot === "warn" ? "Claude session needs attention" : dot === "ok" ? "Claude session connected" : undefined}>
+            <button
+              class="snav"
+              class:on={activeSec === s.id}
+              role="tab"
+              id={`settings-tab-${s.id}`}
+              aria-controls={`settings-panel-${s.id}`}
+              aria-selected={activeSec === s.id}
+              tabindex={activeSec === s.id ? 0 : -1}
+              bind:this={tabEls[s.id]}
+              onkeydown={(ev) => onTabKey(ev, s.id)}
+              onclick={() => selectSec(s.id)}
+              type="button"
+              title={dot === "warn" ? "Claude session needs attention" : dot === "ok" ? "Claude session connected" : undefined}
+            >
               <Icon size={15} strokeWidth={1.75} />
               <span>{s.label}</span>
               {#if dot}<span class="snav-dot" class:warn={dot === "warn"}></span>{/if}
@@ -516,14 +623,30 @@
             onkeydown={onSearchKey}
             onfocus={() => (searchFocused = true)}
             onblur={() => (searchFocused = false)}
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={searchFocused && searchResults.length > 0}
+            aria-controls={searchResults.length > 0 ? "settings-search-results" : undefined}
+            aria-activedescendant={searchFocused && searchResults.length > 0 ? `settings-search-result-${searchIdx}` : undefined}
             aria-label="Search settings"
             spellcheck="false"
           />
           <span class="sset-search-kbd mono" aria-hidden="true">/</span>
           {#if searchFocused && searchResults.length > 0}
-            <div class="sset-results" role="listbox" aria-label="Matching settings">
+            <div class="sset-results" id="settings-search-results" role="listbox" aria-label="Matching settings">
               {#each searchResults as r, i (r.tab + r.anchor + r.title)}
-                <button type="button" class="sset-result" role="option" aria-selected={i === searchIdx} data-active={i === searchIdx} onmousedown={(ev) => { ev.preventDefault(); jumpTo(r); }} onpointerenter={() => (searchIdx = i)}>
+                <button
+                  type="button"
+                  class="sset-result"
+                  role="option"
+                  id={`settings-search-result-${i}`}
+                  tabindex="-1"
+                  aria-selected={i === searchIdx}
+                  data-active={i === searchIdx}
+                  onpointerdown={(ev) => ev.preventDefault()}
+                  onclick={() => jumpTo(r)}
+                  onpointerenter={() => (searchIdx = i)}
+                >
                   <span class="sset-result-body">
                     <span class="sset-result-t">{r.title}</span>
                     <span class="sset-result-s">{r.card}</span>
@@ -539,7 +662,13 @@
     {/snippet}
   </PageHero>
 
-  <div class="surface-body" bind:this={scrollEl}>
+  <div
+    class="surface-body"
+    bind:this={scrollEl}
+    role="tabpanel"
+    id={`settings-panel-${activeSec}`}
+    aria-labelledby={`settings-tab-${activeSec}`}
+  >
 
     {#if activeSec === "appearance"}
       <div class="set-surface"><div class="set-col">
@@ -585,7 +714,7 @@
 
           <div class="card" id="card-interface">
             <div class="card-tt">Interface &amp; code</div>
-            <div class="card-sub">Spacing across the app, and how code renders in Claude's replies.</div>
+            <div class="card-sub">Spacing across the app, and how code renders in AI replies.</div>
             <div class="ctl-row tight">
               <div><div class="ctl-t">UI scale</div><div class="ctl-s">Zoom the whole app — <kbd>Ctrl</kbd>+<kbd>=</kbd> / <kbd>Ctrl</kbd>+<kbd>-</kbd>, <kbd>Ctrl</kbd>+<kbd>0</kbd> resets.</div></div>
               <div class="range-wrap grow">
@@ -595,22 +724,22 @@
             </div>
             <div class="ctl-row tight">
               <div><div class="ctl-t">Interface density</div><div class="ctl-s">Compact fits more on screen; comfy breathes.</div></div>
-              <div class="seg">
+              <div class="seg" role="radiogroup" aria-label="Interface density">
                 {#each DENSITIES as d (d)}
-                  <button class:on={uiPrefs.density === d} type="button" onclick={() => uiPrefs.setDensity(d)}>{d[0].toUpperCase() + d.slice(1)}</button>
+                  <button class:on={uiPrefs.density === d} role="radio" aria-checked={uiPrefs.density === d} tabindex={uiPrefs.density === d ? 0 : -1} type="button" onkeydown={onRadioKey} onclick={() => uiPrefs.setDensity(d)}>{d[0].toUpperCase() + d.slice(1)}</button>
                 {/each}
               </div>
             </div>
               <div class="ctl-row tight">
-                <div><div class="ctl-t">Font size</div><div class="ctl-s">Size of code in Claude's replies.</div></div>
+                <div><div class="ctl-t">Font size</div><div class="ctl-s">Size of code in AI replies.</div></div>
                 <div class="seg" role="radiogroup" aria-label="Code font size">
-                  {#each [11, 12, 13, 14] as n (n)}<button class:on={uiPrefs.code.fontSize === n} role="radio" aria-checked={uiPrefs.code.fontSize === n} type="button" onclick={() => uiPrefs.setCode({ fontSize: n })}>{n}px</button>{/each}
+                  {#each [11, 12, 13, 14] as n (n)}<button class:on={uiPrefs.code.fontSize === n} role="radio" aria-checked={uiPrefs.code.fontSize === n} tabindex={uiPrefs.code.fontSize === n ? 0 : -1} type="button" onkeydown={onRadioKey} onclick={() => uiPrefs.setCode({ fontSize: n })}>{n}px</button>{/each}
                 </div>
               </div>
               <div class="ctl-row tight">
                 <div><div class="ctl-t">Tab width</div><div class="ctl-s">Spaces per indentation level.</div></div>
-                <div class="seg">
-                  {#each [2, 4] as w (w)}<button class:on={uiPrefs.code.tabWidth === w} type="button" onclick={() => uiPrefs.setCode({ tabWidth: w })}>{w}</button>{/each}
+                <div class="seg" role="radiogroup" aria-label="Code tab width">
+                  {#each [2, 4] as w (w)}<button class:on={uiPrefs.code.tabWidth === w} role="radio" aria-checked={uiPrefs.code.tabWidth === w} tabindex={uiPrefs.code.tabWidth === w ? 0 : -1} type="button" onkeydown={onRadioKey} onclick={() => uiPrefs.setCode({ tabWidth: w })}>{w}</button>{/each}
                 </div>
               </div>
               <div class="ctl-row tight">
@@ -645,7 +774,7 @@
              display prefs, not session config — they live with Chat now. -->
         <div class="card" id="card-rendering">
           <div class="card-tt">Chat rendering</div>
-          <div class="card-sub">How Claude's activity and replies are laid out.</div>
+          <div class="card-sub">How model activity and replies are laid out.</div>
           <div class="ctl-row tight">
             <div><div class="ctl-t">Stream view</div><div class="ctl-s">A boxless, text-first activity stream instead of classic bubbles.</div></div>
             <button class="rift-toggle" class:on={uiPrefs.streamMode} role="switch" aria-checked={uiPrefs.streamMode} aria-label="Stream view" type="button" onclick={() => uiPrefs.toggleStreamMode()}><span class="rift-toggle-knob"></span></button>
@@ -655,7 +784,7 @@
               <div><div class="ctl-t">Density preset{#if uiPrefs.activePreset === null}<span class="preset-custom">Custom mix</span>{/if}</div><div class="ctl-s">Sets the three dials below together — fine-tune any of them after.</div></div>
               <div class="seg" role="radiogroup" aria-label="Density preset">
                 {#each DENSITY_PRESETS as p (p.id)}
-                  <button class:on={uiPrefs.activePreset === p.id} role="radio" aria-checked={uiPrefs.activePreset === p.id} type="button" onclick={() => uiPrefs.applyPreset(p.id)}>{p.label}</button>
+                  <button class:on={uiPrefs.activePreset === p.id} role="radio" aria-checked={uiPrefs.activePreset === p.id} tabindex={uiPrefs.activePreset === p.id || (uiPrefs.activePreset === null && p.id === DENSITY_PRESETS[0].id) ? 0 : -1} type="button" onkeydown={onRadioKey} onclick={() => uiPrefs.applyPreset(p.id)}>{p.label}</button>
                 {/each}
               </div>
             </div>
@@ -663,15 +792,15 @@
               <div><div class="ctl-t">Tool detail</div><div class="ctl-s">How much each tool and file action shows.</div></div>
               <div class="seg" role="radiogroup" aria-label="Tool detail density">
                 {#each TOOL_DETAILS as d (d.id)}
-                  <button class:on={uiPrefs.toolDetail === d.id} role="radio" aria-checked={uiPrefs.toolDetail === d.id} type="button" onclick={() => uiPrefs.setToolDetail(d.id)}>{d.label}</button>
+                  <button class:on={uiPrefs.toolDetail === d.id} role="radio" aria-checked={uiPrefs.toolDetail === d.id} tabindex={uiPrefs.toolDetail === d.id ? 0 : -1} type="button" onkeydown={onRadioKey} onclick={() => uiPrefs.setToolDetail(d.id)}>{d.label}</button>
                 {/each}
               </div>
             </div>
             <div class="ctl-row tight">
-              <div><div class="ctl-t">Narration</div><div class="ctl-s">How much of Claude's between-step commentary shows.</div></div>
+              <div><div class="ctl-t">Narration</div><div class="ctl-s">How much between-step commentary shows.</div></div>
               <div class="seg" role="radiogroup" aria-label="Narration density">
                 {#each NARRATIONS as n (n.id)}
-                  <button class:on={uiPrefs.narration === n.id} role="radio" aria-checked={uiPrefs.narration === n.id} type="button" onclick={() => uiPrefs.setNarration(n.id)}>{n.label}</button>
+                  <button class:on={uiPrefs.narration === n.id} role="radio" aria-checked={uiPrefs.narration === n.id} tabindex={uiPrefs.narration === n.id ? 0 : -1} type="button" onkeydown={onRadioKey} onclick={() => uiPrefs.setNarration(n.id)}>{n.label}</button>
                 {/each}
               </div>
             </div>
@@ -679,7 +808,7 @@
               <div><div class="ctl-t">Command output {#if uiPrefs.toolDetail === "detailed"}<span class="ctl-note">· set by Detailed</span>{/if}</div><div class="ctl-s">How much of a shell command's terminal output shows.</div></div>
               <div class="seg" role="radiogroup" aria-label="Command output detail" aria-disabled={uiPrefs.toolDetail === "detailed"}>
                 {#each COMMAND_OUTPUTS as c (c.id)}
-                  <button class:on={uiPrefs.commandOutput === c.id} role="radio" aria-checked={uiPrefs.commandOutput === c.id} type="button" disabled={uiPrefs.toolDetail === "detailed"} onclick={() => uiPrefs.setCommandOutput(c.id)}>{c.label}</button>
+                  <button class:on={uiPrefs.commandOutput === c.id} role="radio" aria-checked={uiPrefs.commandOutput === c.id} tabindex={uiPrefs.commandOutput === c.id ? 0 : -1} type="button" disabled={uiPrefs.toolDetail === "detailed"} onkeydown={onRadioKey} onclick={() => uiPrefs.setCommandOutput(c.id)}>{c.label}</button>
                 {/each}
               </div>
             </div>
@@ -728,7 +857,7 @@
 
         <div class="card" id="card-comfort">
           <div class="card-tt">Reading comfort</div>
-          <div class="card-sub">Make Claude's replies easier to read. These affect the chat only — the rest of Rift keeps the dark theme.</div>
+          <div class="card-sub">Make AI replies easier to read. These affect the chat only — the rest of Rift keeps the dark theme.</div>
           <div class="ctl-row tight">
             <div><div class="ctl-t">Dyslexia-friendly mode</div><div class="ctl-s">Lexend font, wider spacing, and charitable reading of phonetic typos.</div></div>
             <button class="rift-toggle" class:on={accessibility.dyslexiaMode} role="switch" aria-checked={accessibility.dyslexiaMode} aria-label="Dyslexia-friendly mode" type="button" onclick={() => accessibility.setDyslexiaMode(!accessibility.dyslexiaMode)}><span class="rift-toggle-knob"></span></button>
@@ -736,8 +865,8 @@
           <div class="ctl-row tight sub-row" data-disabled={!accessibility.dyslexiaMode}>
             <div><div class="ctl-t">Font</div><div class="ctl-s">Lexend has the strongest research backing for dyslexic reading speed.</div></div>
             <div class="seg" role="radiogroup" aria-label="UI font">
-              <button class:on={accessibility.font === "system"} role="radio" aria-checked={accessibility.font === "system"} disabled={!accessibility.dyslexiaMode} type="button" onclick={() => accessibility.setFont("system")}>Inter</button>
-              <button class:on={accessibility.font === "lexend"} role="radio" aria-checked={accessibility.font === "lexend"} disabled={!accessibility.dyslexiaMode} type="button" onclick={() => accessibility.setFont("lexend")}>Lexend</button>
+              <button class:on={accessibility.font === "system"} role="radio" aria-checked={accessibility.font === "system"} tabindex={accessibility.font === "system" ? 0 : -1} disabled={!accessibility.dyslexiaMode} type="button" onkeydown={onRadioKey} onclick={() => accessibility.setFont("system")}>Inter</button>
+              <button class:on={accessibility.font === "lexend"} role="radio" aria-checked={accessibility.font === "lexend"} tabindex={accessibility.font === "lexend" ? 0 : -1} disabled={!accessibility.dyslexiaMode} type="button" onkeydown={onRadioKey} onclick={() => accessibility.setFont("lexend")}>Lexend</button>
             </div>
           </div>
           <div class="ctl-row tight sub-row" data-disabled={!accessibility.dyslexiaMode}>
@@ -767,8 +896,29 @@
 
     {#if activeSec === "claude"}
       <div class="set-surface"><div class="set-col">
+        <div class="provider-section-head">
+          <span>AI connections</span>
+          <p>Choose the route that fits the task. Each provider keeps its own sign-in, model access, and billing boundary.</p>
+        </div>
+        <div class="provider-overview" aria-label="Provider connection summary">
+          <button class="provider-overview-item" class:ready={claudeConnected} type="button" onclick={() => focusProvider("claude")}>
+            <span class="provider-overview-icon"><Terminal size={15} /></span>
+            <span class="provider-overview-copy"><b>Claude</b><small>CLI session</small></span>
+            <span class="provider-overview-state">{assistantStore.authChecking ? "Checking" : claudeConnected ? "Ready" : "Action needed"}</span>
+          </button>
+          <button class="provider-overview-item" class:ready={openAiConnected} type="button" onclick={() => focusProvider("openai")}>
+            <span class="provider-overview-icon"><Sparkles size={15} /></span>
+            <span class="provider-overview-copy"><b>OpenAI</b><small>Responses API</small></span>
+            <span class="provider-overview-state">{assistantStore.openAiChecking ? "Checking" : openAiConnected ? "Ready" : assistantStore.hasOpenAiApiKey ? "Verify access" : "Add key"}</span>
+          </button>
+          <button class="provider-overview-item" class:ready={codexConnected} type="button" onclick={() => focusProvider("codex")}>
+            <span class="provider-overview-icon"><Terminal size={15} /></span>
+            <span class="provider-overview-copy"><b>Codex</b><small>ChatGPT CLI</small></span>
+            <span class="provider-overview-state">{assistantStore.codexChecking ? "Checking" : codexConnected ? "Ready" : assistantStore.codexStatus?.cliPresent ? "Sign in" : "Install CLI"}</span>
+          </button>
+        </div>
         <!-- session status promoted to a hero banner — auth + CLI version share one surface -->
-        <div class="sb-status {assistantDot ?? 'ok'}">
+        <div class="sb-status {assistantDot ?? 'ok'}" id="card-claude">
           <div class="sb-status-l">
             <div class="sb-status-ic">
               {#if assistantStore.auth}<CircleCheck size={18} />{:else}<Loader2 size={18} class="spin" />{/if}
@@ -799,7 +949,7 @@
             {#if assistantStore.authLastProbed && !assistantStore.authChecking}
               <span class="st-stamp" use:tooltip={"Time since the last CLI session probe"}>checked {fmtAgo(assistantStore.authLastProbed, asstNowTick)}</span>
             {/if}
-            <button class="st-btn" type="button" onclick={reprobeAll} disabled={assistantStore.authChecking}><RefreshCw size={14} /> Re-probe</button>
+            <button class="st-btn" type="button" onclick={reprobeAll} disabled={assistantStore.authChecking || assistantStore.openAiChecking || assistantStore.codexChecking}><RefreshCw size={14} /> Re-probe</button>
           </div>
           {#if cliInstalls.length > 1}
             <div class="st-cli-installs" use:tooltip={"Multiple Claude CLIs found — Rift runs the newest and updates them all so their versions can't drift apart."}>
@@ -845,6 +995,73 @@
           {/if}
         </div>
 
+        <div class="card provider-card" id="card-openai">
+          <div class="card-tt">OpenAI</div>
+          <div class="card-sub">GPT models through OpenAI's Responses API. Your key is stored in the OS keychain and never enters the WebView.</div>
+          <div class="route" aria-hidden="true">
+            <span class="route-node" class:on={assistantStore.hasOpenAiApiKey}>OpenAI API</span>
+            <span class="route-arrow">→</span>
+            <span class="route-note">{assistantStore.openAiChecking ? "Checking account model access…" : assistantStore.openAiModelsError ? "Model access check failed" : assistantStore.openAiStatus?.summary ?? "API key required"}</span>
+            {#if assistantStore.openAiModels}
+              <span class="provider-model-count">{openAiSupportedCount} Rift models available</span>
+            {/if}
+          </div>
+          <div class="ctl-row tight">
+            <div>
+              <label class="ctl-t" for="openai-apikey">OpenAI API key</label>
+              <div class="ctl-s">API usage is billed separately from ChatGPT. Responses use stateless mode; Rift keeps the conversation history locally.</div>
+            </div>
+            <div class="ctl-actions">
+              {#if assistantStore.hasOpenAiApiKey}
+                <span class="st-pill" class:ok={openAiConnected} class:warn={!openAiConnected}><span class="dot"></span>{assistantStore.openAiChecking ? "Checking" : assistantStore.openAiModelsError ? "Needs attention" : openAiConnected ? "Connected" : "Configured"}</span>
+                <button class="st-btn danger-btn" type="button" disabled={openAiApiKeySaving} onclick={() => { openAiApiKeyDraft = ""; void saveOpenAiApiKey(); }}>Clear</button>
+              {:else}
+                <span class="st-secret">
+                  <input id="openai-apikey" class="st-input mono" type={openAiApiKeyVisible ? "text" : "password"} placeholder="sk-…" style="width:100%; max-width:188px;" bind:value={openAiApiKeyDraft} autocomplete="off" spellcheck="false" />
+                  <button class="st-eye" type="button" onclick={() => (openAiApiKeyVisible = !openAiApiKeyVisible)} aria-label={openAiApiKeyVisible ? "Hide API key" : "Show API key"}>{#if openAiApiKeyVisible}<EyeOff size={14} />{:else}<Eye size={14} />{/if}</button>
+                </span>
+                <button class="st-btn primary" type="button" onclick={saveOpenAiApiKey} disabled={openAiApiKeySaving || !openAiApiKeyDirty}>{openAiApiKeySaving ? "Saving…" : "Connect"}</button>
+              {/if}
+            </div>
+          </div>
+          {#if openAiApiKeyMsg}<div class="st-note">{openAiApiKeyMsg}</div>{/if}
+          {#if assistantStore.openAiModelsError}<div class="st-note warn">Rift couldn't verify model access: {assistantStore.openAiModelsError}. Use Re-probe above to try again.</div>{/if}
+          {#if openAiOtherCount > 0}<div class="st-note">{openAiOtherCount} additional account model{openAiOtherCount === 1 ? " is" : "s are"} visible to the API but not yet supported by Rift.</div>{/if}
+          {#if assistantStore.openAiStatus?.envApiKeyPresent && !assistantStore.hasOpenAiApiKey}
+            <div class="st-note">A system <code>OPENAI_API_KEY</code> exists, but Rift deliberately ignores environment keys. Paste it above to opt in explicitly.</div>
+          {/if}
+        </div>
+
+        <div class="card provider-card" id="card-codex">
+          <div class="card-tt">Codex account</div>
+          <div class="card-sub">ChatGPT subscription sign-in through the local Codex CLI. Rift never reads or copies your Codex credentials.</div>
+          <div class="route" aria-hidden="true">
+            <span class="route-node" class:on={assistantStore.codexStatus?.cliPresent}>Codex CLI</span>
+            <span class="route-arrow">→</span>
+            <span class="route-note">{assistantStore.codexChecking ? "Checking Codex…" : assistantStore.codexError ?? assistantStore.codexStatus?.summary ?? "Checking Codex…"}</span>
+          </div>
+          <div class="ctl-row tight no-line">
+            <div>
+              <div class="ctl-t">ChatGPT sign-in</div>
+              <div class="ctl-s">Uses the CLI’s own browser flow and local App Server. This is separate from OpenAI API-key billing.</div>
+            </div>
+            <div class="ctl-actions">
+              <span class="st-pill" class:ok={codexConnected} class:warn={!codexConnected}><span class="dot"></span>{assistantStore.codexChecking ? "Checking" : codexConnected ? "Connected" : assistantStore.codexStatus?.cliPresent ? "Sign in needed" : "CLI needed"}</span>
+              {#if assistantStore.codexStatus?.cliPresent}
+                <button class="st-btn primary" type="button" disabled={assistantStore.codexChecking || codexConnected} onclick={() => void assistantStore.startCodexLogin()}>{codexConnected ? "Connected" : "Connect"}</button>
+              {/if}
+              <button class="st-btn" type="button" disabled={assistantStore.codexChecking} onclick={() => void assistantStore.refreshCodexStatus()}>Re-probe</button>
+            </div>
+          </div>
+          {#if assistantStore.codexStatus?.cliVersion}<div class="st-note">Codex CLI {assistantStore.codexStatus.cliVersion}</div>{/if}
+          {#if assistantStore.codexError}<div class="st-note warn">Rift couldn't inspect Codex: {assistantStore.codexError}</div>{/if}
+        </div>
+
+        <div class="provider-section-head provider-section-head--runtime">
+          <span>Claude runtime</span>
+          <p>Claude-specific session behavior, system access, and optional API billing.</p>
+        </div>
+
         <div class="card" id="card-session">
           <div class="card-tt">Claude session</div>
           <div class="card-sub">How each turn runs — config, git access, and plan.</div>
@@ -855,16 +1072,16 @@
           <div class="ctl-row tight">
             <div><div class="ctl-t">Git tools</div><div class="ctl-s">Read-only = status, diff, log. Standard adds commit, pull, and push.</div></div>
             <div class="seg" role="radiogroup" aria-label="Git tools trust level">
-              <button class:on={assistantStore.trustLevel === "readonly"} role="radio" aria-checked={assistantStore.trustLevel === "readonly"} type="button" onclick={() => void assistantStore.setTrustLevel("readonly")}>Read-only</button>
-              <button class:on={assistantStore.trustLevel !== "readonly"} role="radio" aria-checked={assistantStore.trustLevel !== "readonly"} type="button" onclick={() => void assistantStore.setTrustLevel("standard")}>Standard</button>
+              <button class:on={assistantStore.trustLevel === "readonly"} role="radio" aria-checked={assistantStore.trustLevel === "readonly"} tabindex={assistantStore.trustLevel === "readonly" ? 0 : -1} type="button" onkeydown={onRadioKey} onclick={() => void assistantStore.setTrustLevel("readonly")}>Read-only</button>
+              <button class:on={assistantStore.trustLevel !== "readonly"} role="radio" aria-checked={assistantStore.trustLevel !== "readonly"} tabindex={assistantStore.trustLevel !== "readonly" ? 0 : -1} type="button" onkeydown={onRadioKey} onclick={() => void assistantStore.setTrustLevel("standard")}>Standard</button>
             </div>
           </div>
           <div class="ctl-row tight no-line">
             <div><div class="ctl-t">Plan</div><div class="ctl-s">Sets the context-window gauge — Anthropic doesn't expose your plan, so pick it here. Free caps at 200K; Pro and Max unlock 1M.</div></div>
             <div class="seg" role="radiogroup" aria-label="Subscription plan">
-              <button class:on={assistantStore.plan === "free"} role="radio" aria-checked={assistantStore.plan === "free"} type="button" onclick={() => assistantStore.setPlan("free")}>Free</button>
-              <button class:on={assistantStore.plan === "pro"} role="radio" aria-checked={assistantStore.plan === "pro"} type="button" onclick={() => assistantStore.setPlan("pro")}>Pro</button>
-              <button class:on={assistantStore.plan === "max"} role="radio" aria-checked={assistantStore.plan === "max"} type="button" onclick={() => assistantStore.setPlan("max")}>Max</button>
+              <button class:on={assistantStore.plan === "free"} role="radio" aria-checked={assistantStore.plan === "free"} tabindex={assistantStore.plan === "free" ? 0 : -1} type="button" onkeydown={onRadioKey} onclick={() => assistantStore.setPlan("free")}>Free</button>
+              <button class:on={assistantStore.plan === "pro"} role="radio" aria-checked={assistantStore.plan === "pro"} tabindex={assistantStore.plan === "pro" ? 0 : -1} type="button" onkeydown={onRadioKey} onclick={() => assistantStore.setPlan("pro")}>Pro</button>
+              <button class:on={assistantStore.plan === "max"} role="radio" aria-checked={assistantStore.plan === "max"} tabindex={assistantStore.plan === "max" ? 0 : -1} type="button" onkeydown={onRadioKey} onclick={() => assistantStore.setPlan("max")}>Max</button>
             </div>
           </div>
           <!-- What the picker actually drives: the context gauge, live. -->
@@ -980,9 +1197,9 @@
             </div>
             <div class="ctl-row stack">
               <div><div class="ctl-t">Recognition engine</div><div class="ctl-s">Web Speech is zero-install via Edge / Azure. Parakeet runs on-device — fast, private, works offline. Whisper is the on-device multilingual option with vocabulary priming.</div></div>
-              <div class="set-pick-grid set-pick-grid-3">
+              <div class="set-pick-grid set-pick-grid-3" role="radiogroup" aria-label="Speech recognition engine">
                 {#each STT_ENGINES as eng (eng.id)}
-                  <button type="button" class="set-pick" data-active={stt.config.engine === eng.id} disabled={!stt.config.enabled || (eng.id === "whisper" && !stt.backends.whisper) || (eng.id === "parakeet" && !stt.backends.parakeet)} onclick={() => void stt.setConfig({ engine: eng.id })}>
+                  <button type="button" class="set-pick" role="radio" aria-checked={stt.config.engine === eng.id} tabindex={stt.config.engine === eng.id ? 0 : -1} data-active={stt.config.engine === eng.id} disabled={!stt.config.enabled || (eng.id === "whisper" && !stt.backends.whisper) || (eng.id === "parakeet" && !stt.backends.parakeet)} onkeydown={onRadioKey} onclick={() => void stt.setConfig({ engine: eng.id })}>
                     <span class="set-pick-label">{eng.label}</span>
                     <span class="set-pick-sub mono">{eng.sub}</span>
                   </button>
@@ -1015,7 +1232,7 @@
                 <div><div class="ctl-t">Language</div><div class="ctl-s">BCP-47 tag passed to the recognizer. Pick another language if you speak something other than English.</div></div>
                 <div class="set-pick-grid" role="radiogroup" aria-label="Speech recognition language">
                   {#each langsShown as l, ti (l.id)}
-                    <button type="button" role="radio" aria-checked={stt.config.language === l.id} class="set-pick anim-reveal" style="--ti: {ti}" data-active={stt.config.language === l.id} onclick={() => void stt.setConfig({ language: l.id })}>
+                    <button type="button" role="radio" aria-checked={stt.config.language === l.id} tabindex={stt.config.language === l.id ? 0 : -1} class="set-pick anim-reveal" style="--ti: {ti}" data-active={stt.config.language === l.id} onkeydown={onRadioKey} onclick={() => void stt.setConfig({ language: l.id })}>
                       <span class="set-pick-label">{l.label}</span>
                       <span class="set-pick-sub mono">{l.id}</span>
                     </button>
@@ -1160,9 +1377,9 @@
             </div>
             <div class="ctl-row tight">
               <div><div class="ctl-t">Auto-stop on silence</div><div class="ctl-s">Ends the recording by itself after a pause — hands-free dictation. Needs live partials on the Web Speech engine.</div></div>
-              <div class="set-pick-grid">
+              <div class="set-pick-grid" role="radiogroup" aria-label="Auto-stop on silence">
                 {#each [{ v: 0, label: "Off" }, { v: 3, label: "3s" }, { v: 5, label: "5s" }, { v: 10, label: "10s" }] as opt (opt.v)}
-                  <button type="button" class="set-pick" data-active={stt.config.auto_stop_secs === opt.v} disabled={!stt.config.enabled} onclick={() => void stt.setConfig({ auto_stop_secs: opt.v })}>{opt.label}</button>
+                  <button type="button" class="set-pick" role="radio" aria-checked={stt.config.auto_stop_secs === opt.v} tabindex={stt.config.auto_stop_secs === opt.v ? 0 : -1} data-active={stt.config.auto_stop_secs === opt.v} disabled={!stt.config.enabled} onkeydown={onRadioKey} onclick={() => void stt.setConfig({ auto_stop_secs: opt.v })}>{opt.label}</button>
                 {/each}
               </div>
             </div>
@@ -1349,10 +1566,36 @@
   }
 
   .surface-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+  @media (prefers-reduced-motion: reduce) {
+    .sset-search { transition: none; }
+    :global(.card.sflash) { animation: none; }
+    .surface-body { scroll-behavior: auto; }
+  }
 
   /* shared rail layout */
   .set-surface { max-width: 820px; margin: 0 auto; padding: 26px 40px 48px; }
   .set-col { min-width: 0; }
+  .provider-section-head { margin: 0 2px 10px; }
+  .provider-section-head > span { display: block; color: var(--fg); font-size: 11px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; }
+  .provider-section-head > p { margin: 5px 0 0; color: var(--fg-subtle); font-size: 11.5px; line-height: 1.5; }
+  /* Connection overview is the scan layer: provider details stay in their
+     existing cards below, while this compact row answers "what is ready?". */
+  .provider-overview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .provider-overview-item { min-width: 0; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 9px 10px; border-radius: var(--radius-lg); border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 2.5%, transparent); color: var(--fg-muted); font: inherit; text-align: left; cursor: pointer; transition: border-color var(--dur-fast), background var(--dur-fast), transform var(--dur-fast); }
+  .provider-overview-item:hover { border-color: var(--border-strong); background: var(--surface-hover); transform: translateY(-1px); }
+  .provider-overview-item:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+  .provider-overview-item.ready { border-color: color-mix(in oklab, var(--ok) 30%, var(--border)); background: linear-gradient(180deg, color-mix(in oklab, var(--ok) 7%, transparent), transparent); }
+  .provider-overview-icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--fg-subtle); background: var(--bg-elev-2); }
+  .provider-overview-item.ready .provider-overview-icon { color: var(--ok); background: var(--ok-soft); }
+  .provider-overview-copy { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .provider-overview-copy b { color: var(--fg-2); font-size: 11.5px; font-weight: 650; }
+  .provider-overview-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-faint); font-size: 10px; }
+  .provider-overview-state { font-size: 9.5px; font-weight: 650; color: var(--fg-faint); white-space: nowrap; }
+  .provider-overview-item.ready .provider-overview-state { color: var(--ok); }
+  @media (max-width: 760px) { .provider-overview { grid-template-columns: 1fr; } }
+  .provider-section-head--runtime { margin-top: 26px; }
+  .provider-card { border-color: color-mix(in oklab, var(--accent) 22%, var(--island-border)); }
+  .provider-model-count { margin-left: auto; color: var(--ok); font-size: 10px; font-weight: 650; }
   .set-col > .card { margin-bottom: 16px; animation: blockIn var(--dur-base) var(--ease-page) both; }
   .set-col > .card:last-child { margin-bottom: 0; }
   /* Gentle top-down stagger so a section's cards assemble in order rather than
@@ -1581,6 +1824,7 @@
   /* CLI install list + update CTA live inside the hero banner — span its full width. */
   .sb-status > .st-cli-installs, .sb-status > .st-cli-act, .sb-status > .st-cli-err, .sb-status > .st-cli-ok, .sb-status > .st-cli-warn { flex: 1 1 100%; margin-top: 0; }
   .st-note { padding: 10px 0 0; margin-top: 8px; font-size: var(--fs-xs); color: var(--fg-muted); border-top: 1px solid var(--border); }
+  .st-note.warn { color: var(--warn); }
   .st-note code { font-family: var(--font-mono); background: var(--code-bg); border: 1px solid var(--code-border); padding: 1px 5px; border-radius: 4px; color: var(--code-fg); }
   .st-warn { display: block; font-size: var(--fs-xs); color: var(--warn); line-height: 1.5; padding: 10px 13px; background: var(--warn-soft); border: 1px solid color-mix(in oklab, var(--warn) 32%, transparent); border-radius: var(--r-card); }
   .st-warn code { background: color-mix(in oklab, var(--warn) 16%, transparent); border: 1px solid color-mix(in oklab, var(--warn) 30%, transparent); padding: 1px 5px; border-radius: 4px; color: var(--warn); font-family: var(--font-mono); }

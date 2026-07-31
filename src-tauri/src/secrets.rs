@@ -1,6 +1,6 @@
 //! OS-keychain wrapper for at-rest secrets.
 //!
-//! Stores the Anthropic `api_key` outside `~/.rift/*.json`. Backends per the
+//! Stores provider API keys outside `~/.rift/*.json`. Backends per the
 //! `keyring` crate: Windows Credential Manager, macOS Keychain, Linux Secret
 //! Service.
 
@@ -54,8 +54,13 @@ pub fn delete(key: &str) -> Result<(), String> {
     }
 }
 
-/// Single-tenant key for the Anthropic API key.
+/// Legacy slot for the Anthropic API key. Keep the key name stable so existing
+/// installs retain their configured credential.
 pub const ASSISTANT_API_KEY: &str = "assistant.api_key";
+
+/// OpenAI API key. Separate from the Anthropic slot so enabling one provider
+/// can never overwrite or silently reroute the other.
+pub const OPENAI_API_KEY: &str = "openai.api_key";
 
 #[cfg(test)]
 mod tests {

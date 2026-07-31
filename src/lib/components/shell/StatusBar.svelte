@@ -12,8 +12,13 @@
   import { onMount } from "svelte";
   import Skeleton from "./Skeleton.svelte";
   import { bootLoad } from "$lib/state/bootLoad.svelte";
+  import { isOpenAIModel } from "$lib/state/assistant/helpers";
 
-  const connected = $derived(!!(assistant.auth?.loggedIn || assistant.hasApiKey));
+  const openAi = $derived(isOpenAIModel(assistant.effectiveModel));
+  const connected = $derived(
+    openAi ? assistant.openAiStatus?.ready === true : !!(assistant.auth?.loggedIn || assistant.hasApiKey),
+  );
+  const providerLabel = $derived(openAi ? "OpenAI" : "Claude");
   const repoName = $derived.by(() => {
     const leaf = (assistant.activeRoot ?? "").replace(/[/\\]+$/, "").split(/[/\\]/).pop();
     if (leaf) return leaf;
@@ -63,7 +68,7 @@
     return ` · resets ${d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}`;
   }
 
-  function openClaudeSettings() {
+  function openProviderSettings() {
     commandPalette.requestSettingsSection("claude");
     workspace.setActive("settings");
   }
@@ -92,11 +97,11 @@
   <button
     class="sb-item sb-btn sb-conn"
     type="button"
-    onclick={openClaudeSettings}
-    use:tooltip={connected ? "Claude session — open settings" : "Not connected — open Claude settings"}
+    onclick={openProviderSettings}
+    use:tooltip={connected ? `${providerLabel} connection — open settings` : `${providerLabel} isn't connected — open provider settings`}
   >
     <span class="sb-dot" class:off={!connected}></span>
-    {connected ? "Claude" : "Not connected"}
+    {connected ? providerLabel : `${providerLabel} offline`}
   </button>
   <span class="sb-sep"></span>
   <span class="sb-group">
@@ -121,7 +126,7 @@
     <GhPopover anchor={ghAnchor} onClose={() => (ghOpen = false)} />
   {/if}
 
-  <span class="sb-note">Claude can make mistakes — double-check important work.</span>
+  <span class="sb-note">AI can make mistakes — double-check important work.</span>
 
   <!-- RIGHT ZONE — controls + ambient info: split, admin, date, usage. Gap-
        separated (no hairlines) so the bar reads as two calm clusters. -->
@@ -148,7 +153,7 @@
       </button>
     {/if}
     <span class="sb-item sb-date">{today}</span>
-    {#if limits.length}
+    {#if !openAi && limits.length}
       <span class="sb-usage">
         {#each limits as l (l.t)}
           <button

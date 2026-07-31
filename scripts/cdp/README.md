@@ -1,14 +1,14 @@
-# CDP — autonomous UI introspection for Rift dev
+# CDP — agent-native UI introspection for Rift dev
 
-WebView2's DevTools Protocol on `localhost:9222` lets Claude verify the Rift UI without you screenshotting and pasting. Set up 2026-05-16, S69 lock-down.
+WebView2's DevTools Protocol on `localhost:9222` lets Codex or Claude verify the Rift UI without the user screenshotting and pasting. Set up 2026-05-16, S69 lock-down.
 
 ## Architecture (two layers)
 
 ```
-Claude (bash)  ->  curl http://127.0.0.1:9223  ->  serve.cjs (persistent ws)  ->  WebView2 CDP :9222
+Coding agent (bash)  ->  curl http://127.0.0.1:9223  ->  serve.cjs (persistent ws)  ->  WebView2 CDP :9222
 ```
 
-`serve.cjs` is a persistent Node HTTP wrapper. It holds ONE websocket to WebView2 open for the session, so each Claude command is ~40-60ms total instead of ~700-900ms (PowerShell cold-start path).
+`serve.cjs` is a persistent Node HTTP wrapper. It holds ONE websocket to WebView2 open for the session, so each agent command is ~40-60ms total instead of ~700-900ms (PowerShell cold-start path).
 
 ## Enable — the one-command path (2026-07-08)
 
@@ -48,7 +48,7 @@ Under the hood:
 
 **Root cause:** WebView2 **Runtime 150.0.4078.48** added a "trusted origin check" that **refuses to open the DevTools remote-debugging port when the host process runs ELEVATED** (admin / High Integrity Level). Confirmed v150 regression — [WebView2Feedback#5640](https://github.com/MicrosoftEdge/WebView2Feedback/issues/5640) (worked on Runtime 149). The env var propagates fine; the runtime just won't bind the socket for a High-IL process.
 
-**Who hits it:** a normal double-click of `run-dev.bat` from Explorer runs at **medium IL** → works. But launching dev from an **elevated** shell (admin terminal, or **Claude Code running elevated**) inherits High IL → CDP silently never binds. This is NOT flaky — it fails deterministically when elevated, works deterministically when not. (`--remote-allow-origins=*` is unrelated belt-and-suspenders, NOT the fix.)
+**Who hits it:** a normal double-click of `run-dev.bat` from Explorer runs at **medium IL** → works. But launching dev from an **elevated** shell (admin terminal or an elevated coding-agent session) inherits High IL → CDP silently never binds. This is NOT flaky — it fails deterministically when elevated, works deterministically when not. (`--remote-allow-origins=*` is unrelated belt-and-suspenders, NOT the fix.)
 
 **Fix:** launch dev at **medium IL**. Use `pwsh -NoProfile -File scripts/run-dev-deelevated.ps1` — it detects elevation and, if elevated, de-elevates via a one-shot scheduled task (`/RL LIMITED`) so the dev server + WebView2 run at the user's normal level and CDP binds normally. From a non-elevated shell it just launches directly. Verified: 9222 binds in ~6s at medium IL, `c.sh look` returns a live screenshot. (Other options, heavier: pin WebView2 Fixed Version 149 via `BrowserExecutableFolder`; or wait for MS to ship the runtime fix.)
 
@@ -60,6 +60,8 @@ Under the hood:
 bash scripts/cdp/c.sh look                                     # VERIFY PRIMITIVE: state+errors+shot, path on last line
 bash scripts/cdp/c.sh look ".chat"                             # same, screenshot clipped to a selector
 bash scripts/cdp/c.sh peek                                     # look WITHOUT the shot — state+errors for 0 image tokens
+bash scripts/cdp/c.sh inspect                                  # state+errors+AX tree, one image-free request
+bash scripts/cdp/c.sh map                                     # all visible actionable controls + robust selectors
 bash scripts/cdp/c.sh find "Send"                              # locate elements by TEXT/aria → robust selectors + rects
 bash scripts/cdp/c.sh text ".chat"                             # exact rendered text (transcript/errors) — no shot, no ax caps
 bash scripts/cdp/c.sh errors                                   # console errors, CURRENT page-gen only (--all incl. stale)
@@ -101,6 +103,17 @@ A dedicated pass fixed every known "the tool said X, reality was Y" class:
 - **App-dead is readable.** `look`/`peek` against a dead/restarting app print `✗ app unreachable → run doctor` instead of a null-riddled jq render.
 
 New content primitives: **`find <text>`** (locate elements by what they SAY — aria/text/title/placeholder → unique selectors + rects; kills selector guessing), **`text [sel]`** (exact rendered text, no ax node caps), **`peek`** (look minus the screenshot — the right first call before paying image tokens).
+
+**`map [selector] [limit] [--all]`** removes the remaining navigation guesswork.
+It enumerates visible actionable controls in DOM order and returns a verified,
+document-unique selector for each one, ready to pass to `act click`. Use `map`
+when entering an unfamiliar surface; use `find` when the desired label is known.
+
+For Codex, **`inspect [selector] [limit]`** is the default first probe. It runs
+`look` with `noShot:true` and `ax` in parallel through one `/batch` request, so a
+single call returns store-backed state, current console errors, and named UI
+controls without consuming image tokens. Follow with `look` only when the claim
+depends on pixels.
 
 ## /look — the verify primitive (2026-06-09, the fast path)
 
@@ -225,7 +238,7 @@ Real timings on a warm session: `health`/`state`/`page` ~80ms · `ax` ~290ms · 
 
 Per-screenshot ~$0.07 + image input tokens. **`ax` first when the question is structural** — it's free of image tokens and often settles "did it render / what's on screen" without a shot.
 
-1. **`peek`/`state`/`find`/`text` first.** Read state + content for free. Covers most "did it render / what does it say?" questions.
+1. **`inspect`/`map`/`find`/`text` first.** Read state, controls, and content for free. Covers most "did it render / what can I operate / what does it say?" questions.
 2. **Screenshot only when pixels matter** — layout bugs, animations, contrast, drag region.
 3. **JPEG q50-70** when you DO screenshot. Half the tokens of PNG.
 4. **Whole-page shots target the model's vision envelope** (rebuilt 2026-06-25, see below) — on a 16:10 window they emit **2419×1512 ≈ 4698 visual tokens, ~95KB q72**, the largest size Opus 4.7/4.8 ingests with *zero* server-side resize. This replaces the old `1280×800 @ DSF=1` clamp (1334 tokens), which predated the Opus-4.7 high-res bump and shipped soft, ~3.5×-under-resolution shots. Cost is ~4698 img-tokens/shot (~$0.024 at Opus-4.8 rates) — pay it only when pixels matter; `ax`/`state` first for structure.
@@ -236,7 +249,7 @@ Per-screenshot ~$0.07 + image input tokens. **`ax` first when the question is st
 - **Auto-reconnect** — `connect()` retries the CDP `/json` lookup 3× w/ 500ms gap before throwing, so a cold Tauri boot races cleanly.
 - **In-flight cleanup** — when the WebView2 socket closes, all pending requests reject immediately w/ `ws closed before response` (no 30s timeout hangs).
 - **`/health`** — fires a real `Runtime.evaluate('1')` ping; reports `pingMs`. Half-broken socket (port open, no response) surfaces as `ok:false`.
-- **`/batch`** — body `{ ops: [{op, params}, ...], parallel? }`. CDP is fully multiplexed by id, so `parallel:true` is safe for read/action commands. Default sequential preserves type→wait dependencies. Ops: `eval`, `type`, `click`, `wait`, `sleep`, `key`, `screenshot`, `state`, `page`, `console`, `ax`, `look`.
+- **`/batch`** — body `{ ops: [{op, params}, ...], parallel? }`. CDP is fully multiplexed by id, so `parallel:true` is safe for read/action commands. Default sequential preserves type→wait dependencies. Ops: `eval`, `type`, `click`, `wait`, `sleep`, `key`, `screenshot`, `state`, `page`, `console`, `ax`, `controls`, `look`.
 - **Clicks are real pointer events** — `click` (and therefore `act click`) drives the CDP Input domain (`mouseMoved`→`mousePressed`→`mouseReleased`) at the element's center, firing the full `pointerdown`/`mousedown`/`focus`/`mouseup`/`click` sequence + real hover/active states. The old `el.click()` fired ONLY a synthetic `click` event, so any UI bound to `mousedown`/`pointerdown` (model picker, permission menu, dropdowns, sliders, drag handles) silently no-op'd and nothing was observable. Response carries `{via:"input", x, y, covered}`; `covered:true` means another element overlays the hit-point. Off-viewport targets fall back to `el.click()` (`via:"js-fallback"`). Verified 2026-06-16: the model picker (mousedown-bound) opens via `click` now, didn't before.
 - **Screenshots** pass `optimizeForSpeed:true` + `fromSurface:true`. **Selector shots auto-scroll the target into view** (`scrollIntoView({block:'center'})` + a 120ms compositor settle) then clip in **viewport space** with `captureBeyondViewport` **OFF** — fixed 2026-06-25. The old path set `captureBeyondViewport:true` on a viewport-space `getBoundingClientRect` clip, which silently mismatched and produced **blank captures for any below-the-fold component**, because Rift's pages scroll inside nested `overflow:auto` containers (the inner scroll never moves the document origin, so `captureBeyondViewport`'s document-space clip landed in empty space). The whole-page origin clip still uses `captureBeyondViewport:true` (it IS document-space). Net: `shot-sel`/`look "<sel>"` now work on any component regardless of scroll position — no manual scroll dance.
 - **Vision-aware whole-page capture (rebuilt 2026-06-25)** — Claude's vision model is **patch-based**: it tiles an image into 28×28-px patches (one "visual token" each), costing `⌈w/28⌉×⌈h/28⌉` tokens, and resizes server-side above a per-model ceiling (**Opus 4.7/4.8/Fable: 2576px long edge AND 4784 tokens**; older models 1568/1568). The capture computes `envelopeSize()` — the largest aspect-preserving size that fits both limits — then renders at `RIFT_CDP_SS_FACTOR`× CSS density (default **2**, supersampling for crisp text) and clips with `scale` so the emitted pixels land EXACTLY on that target. For a 16:10 window that's **2419×1512 = 4698 tokens** — verbatim-ingested (no server resize), ~3.5× the detail of the retired `1280×800 @ DSF=1` clamp, which both under-shot the envelope *and* re-rasterized the HiDPI surface at 1× (soft text). Knobs: `RIFT_CDP_MAX_EDGE` / `RIFT_CDP_MAX_TOKENS` (lower both for an older target model), `RIFT_CDP_SS_FACTOR` (1 = no supersample, faster/softer). Selector/explicit-`clip`/`vw,vh` shots are exempt — those callers framed it.

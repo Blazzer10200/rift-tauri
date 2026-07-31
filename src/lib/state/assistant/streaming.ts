@@ -1372,6 +1372,11 @@ export function onStreamLine(tab: TabState, raw: string) {
       break;
     }
     case "result": {
+      // The native OpenAI backend sends the canonical stateless continuation
+      // separately from display text. Preserve it before `done` triggers the
+      // conversation save; opaque reasoning/compaction items must survive reload.
+      const openAiHistory = (env as { openai_history?: unknown }).openai_history;
+      if (Array.isArray(openAiHistory)) tab.openAiHistory = openAiHistory;
       // GitHub chip: the turn is over — if it pushed / opened a PR, the remote
       // state changed; refresh the branch status once.
       github.flushRemoteMutation();

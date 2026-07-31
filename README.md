@@ -5,14 +5,14 @@
 <h1 align="center">Rift</h1>
 
 <p align="center">
-  Claude Code as a native Windows desktop app.<br/>
-  Point it at a folder and chat — Claude reads, edits, searches, and runs git in place.<br/>
+  Claude Code and OpenAI models in one native Windows workspace.<br/>
+  Point Rift at a folder and chat — your chosen model can read, edit, search, and run git in place.<br/>
   <strong>No server, no telemetry — everything runs on your machine.</strong>
 </p>
 
 <p align="center">
   <a href="https://github.com/Blazzer10200/rift-tauri/releases"><img src="https://img.shields.io/github/v/release/Blazzer10200/rift-tauri?label=download&color=10b981" alt="Latest release" /></a>
-  <a href="https://claude.com/claude-code"><img src="https://img.shields.io/badge/powered%20by-Claude%20Code-d97757" alt="Powered by Claude Code" /></a>
+  <img src="https://img.shields.io/badge/providers-Claude%20%2B%20OpenAI-8b5cf6" alt="Claude and OpenAI providers" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%2011-0078d4" alt="Windows 11" />
   <img src="https://img.shields.io/badge/Tauri%202-Rust%20%2B%20Svelte%205-f74c00" alt="Tauri 2" />
@@ -36,38 +36,43 @@
 
 1. Download the latest `Rift-win-Setup.exe` from the **[releases page](https://github.com/Blazzer10200/rift-tauri/releases)** and run it.
 2. Per-user install, no admin needed. Rift self-updates from then on (background download, apply on restart, one-click consent).
-3. On first launch, connect your Claude account (the CLI's own sign-in, or an API key stored in the Windows Credential Manager — never on disk).
+3. On first launch, connect Claude and/or OpenAI. Keys entered in Rift are stored in Windows Credential Manager—never in app files or the WebView. The Providers page can also inspect and sign in to a local Codex CLI without importing its credentials.
 
-**Requirements:** Windows 11 x64 · the [Claude Code CLI](https://claude.com/claude-code) (Rift checks for it on first launch and guides setup) · a [Claude](https://claude.com) subscription or API key. macOS / Linux build from source but aren't packaged or tested yet.
+**Requirements:** Windows 11 x64 and at least one provider: the [Claude Code CLI](https://claude.com/claude-code) with a Claude login/API key, or an [OpenAI API key](https://platform.openai.com/api-keys). A ChatGPT subscription does not include API usage. macOS/Linux build from source but are not packaged or tested yet.
 
 ## What it does
 
-- **Workspace chat** — pick a folder; Claude works scoped to it through a local MCP (Model Context Protocol) server (`read_file` / `list_dir` / `grep`). Nothing outside the workspace is reachable.
+- **Workspace chat** — pick a folder and choose Claude or GPT per conversation. File/search/git tools remain scoped to that folder.
 - **Local git built in** — `status` / `diff` / `log` / `commit` / `push` / `pull` exposed as assistant tools.
 - **Live streaming UI** — watch tool calls form in real time: shell commands render as terminal IN/OUT blocks, edits as diffs, plans as task cards, sub-agents as live inline cards with a floating overview bar.
 - **Per-tab sessions** — multiple concurrent chats, each with its own model, permission mode, and thinking-effort dial. Mid-chat model switching included.
 - **Permission modes** — ask-before-edits, auto-edit, plan-first, or bypass — switchable per turn.
 - **Voice dictation** — push-to-talk speech-to-text plus a prompt-enhance wand.
 - **Browser dock** — the assistant can open docs or your local dev server in an in-app pane beside the chat.
-- **Local LLM (experimental)** — point Rift at an Ollama / LiteLLM endpoint instead of the cloud.
+- **Native OpenAI support** — Responses API streaming, reasoning effort, image input, account-visible model discovery, permission-gated function calls, cancellation, and locally persisted conversation history.
+- **Provider-aware workspace** — at-a-glance Claude, OpenAI, and Codex connection status; Workspace news names its exact official source, and optional AI summaries stay gated behind their required connection.
+- **Compatible endpoints (experimental)** — connect supported Anthropic-compatible or local endpoints from Settings.
 - **Self-update** — Velopack checks on launch and every 6 hours; updates apply on restart.
 
 ## How it works
 
-Tauri 2 (Rust) shell around a SvelteKit 2 / Svelte 5 frontend. The backend spawns the Claude Code CLI as a per-turn subprocess (a warm child stays ready so turns start fast) and hosts a local stdio MCP server that exposes the workspace-scoped file, search, and git tools plus a small UI bridge (`ask_user` / `open_browser` / `notify`) over a loopback socket. There is no remote component: your code, your prompts, and your keys never leave the machine except for the model API call itself. Auth belongs to the CLI — Rift spawns the official `claude` binary, which handles its own sign-in; Rift never reads, stores, or proxies your Claude credentials.
+Tauri 2 (Rust) shell around a SvelteKit 2 / Svelte 5 frontend. Claude turns run through the official Claude Code CLI with a warm child process. OpenAI turns use the native Responses API with `store: false`; Rift sends the locally saved canonical Responses items on each turn. Both routes share workspace-scoped file, search, git, permission, and UI tools. The Codex connection uses only the official standalone CLI’s public status/login commands; its App Server turn route is not exposed until authenticated contract coverage exists. There is no Rift server or telemetry service: data leaves the machine only for the provider call or a tool action you authorize.
 
 Full picture in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## FAQ
 
 **Do I need Claude Code installed?**
-Yes — Rift drives the official CLI rather than reimplementing it. First launch checks for it and guides setup; sign-in and credentials stay inside the CLI.
+Only for Claude models. OpenAI models use Rift's native API route and require an OpenAI API key instead.
 
 **Does my Claude Pro / Max subscription work?**
 Yes. Sign in to the CLI as usual — Rift turns are ordinary Claude Code usage on your plan. Your own API key works too.
 
+**Does my ChatGPT Plus / Pro subscription work?**
+ChatGPT and the OpenAI API are billed separately. Rift's GPT integration needs a key from the OpenAI API platform and uses the models available to that API account. Settings can sign a standalone Codex CLI into ChatGPT without copying its credentials; Codex App Server turns remain a tracked, authenticated-test-gated route.
+
 **Where does my code go?**
-Nowhere except the model call the official CLI makes. No server, no telemetry, no analytics — Rift is a local shell around a local process. Details in [`docs/SECURITY.md`](docs/SECURITY.md).
+Only to the provider selected for that turn and to any external tool action you approve. Rift has no intermediary server, telemetry, or analytics. Details in [`docs/SECURITY.md`](docs/SECURITY.md).
 
 **Windows only?**
 Packaged and tested for Windows 11 today. macOS / Linux build from source; packaging them is on the roadmap.
@@ -98,6 +103,4 @@ Pre-1.0, moving fast — releases ship continuously via tag-driven CI straight t
 
 [MIT](LICENSE) © 2026 Braison Swilling (Blazzer10200)
 
-Rift is an independent open-source project — not affiliated with, sponsored by, or endorsed by Anthropic. "Claude" and "Claude Code" are trademarks of Anthropic, PBC, used here only to describe what Rift integrates with. Licenses for third-party software bundled in the installer are collected in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
-
-<sub>Rift is an independent open-source project — not affiliated with, sponsored, or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic, PBC.</sub>
+Rift is an independent open-source project—not affiliated with, sponsored by, or endorsed by Anthropic or OpenAI. Claude and Claude Code are trademarks of Anthropic, PBC. ChatGPT, GPT, and OpenAI are trademarks of OpenAI. Names are used only to identify compatible services. Licenses for bundled third-party software are collected in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

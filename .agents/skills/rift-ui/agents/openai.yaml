@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rift UI"
+  short_description: "Inspect and verify the Rift desktop UI"
+  default_prompt: "Use $rift-ui to inspect and verify the Rift UI efficiently."

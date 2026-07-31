@@ -11,6 +11,8 @@
   import { workspace } from "../../state/workspace.svelte";
   import RiftLogo from "$lib/components/shell/RiftLogo.svelte";
   import ClaudeConnect from "$lib/components/onboarding/ClaudeConnect.svelte";
+  import OpenAiConnect from "$lib/components/onboarding/OpenAiConnect.svelte";
+  import { isOpenAIModel } from "$lib/state/assistant/helpers";
   import { leafName, shortPath } from "$lib/components/shell/tabsbar/helpers";
   import { greeting, fmtAgo } from "$lib/components/workspace/welcomeShared";
   import Skeleton from "$lib/components/shell/Skeleton.svelte";
@@ -22,15 +24,16 @@
   // when omitted (single-pane / pre-pane callers).
   let { needsAuth = false, tabId = null }: { needsAuth?: boolean; tabId?: string | null } = $props();
   const targetTab = $derived(tabId ? assistant.tabFor(tabId) : assistant.activeTab);
+  const openAiTab = $derived(isOpenAIModel(assistant.modelFor(targetTab)));
 
   // ── Cold-state orientation copy (mirrors comp app/data.jsx) ──────────────
   const RIFT_TAGLINE =
-    "A native desktop shell around the Claude CLI. Everything runs on your machine — your code never leaves the device.";
+    "A native coding workspace for Claude and OpenAI models, with project-scoped tools and visible permission controls.";
   const RIFT_STEPS = [
     {
       icon: Folder,
       title: "Open a project folder",
-      body: "Pick the repo you want to work in. Claude is scoped to that folder — it reads, searches, edits, and runs git there, and nowhere else.",
+      body: "Pick the repo you want to work in. Rift scopes the connected model's file and git tools to that folder.",
     },
     {
       icon: MessageSquare,
@@ -40,7 +43,7 @@
     {
       icon: Zap,
       title: "Watch it work — queue or stop anytime",
-      body: "Claude plans, edits files, and runs checks live in the thread. Queue your next message while it works, or stop with a single click.",
+      body: "Your selected model plans, edits files, and runs checks live in the thread. Queue your next message while it works, or stop with a single click.",
     },
   ];
 
@@ -138,7 +141,7 @@
            sign-in, API-key paste, auto-poll, Re-check) — the same component the
            onboarding flow uses, so a user who skipped setup isn't dead-ended on
            a weaker screen. -->
-      <ClaudeConnect standalone />
+      {#if openAiTab}<OpenAiConnect standalone />{:else}<ClaudeConnect standalone />{/if}
     </div>
   {:else if hasRoot}
     <div class="wel-inner home-launchpad">
@@ -652,4 +655,3 @@
   }
   .auth-connect .wel-mark { margin: 0 auto; }
 </style>
-

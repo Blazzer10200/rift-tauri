@@ -27,7 +27,7 @@ const UI_SCALE_STEP = 0.05;
 //    beats to a muted inline note hugging the work rows, so the turn reads as
 //    work-with-commentary, not chat-between-tools.
 //  - "chatty": every narration line as a full prose block (the original behavior).
-export type Narration = "focused" | "balanced" | "chatty";
+type Narration = "focused" | "balanced" | "chatty";
 const NARRATION_IDS = new Set<string>(["focused", "balanced", "chatty"]);
 
 // How much of a shell command's output (stdout/stderr + exit) to surface in the
@@ -37,7 +37,7 @@ const NARRATION_IDS = new Set<string>(["focused", "balanced", "chatty"]);
 //    full output — calm stream, detail one click away.
 //  - "full": stream the whole stdout/stderr in a terminal body as it runs
 //    (VS Code-style in-and-out), exit code on finish.
-export type CommandOutput = "minimal" | "peek" | "full";
+type CommandOutput = "minimal" | "peek" | "full";
 const COMMAND_OUTPUT_IDS = new Set<string>(["minimal", "peek", "full"]);
 
 // How much of each tool/file ACTION (Read/Grep/Edit/…) shows in the work stream.

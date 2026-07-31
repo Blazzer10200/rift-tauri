@@ -40,15 +40,15 @@
   let closeConfirmOpen = $state(false);
 
   // First-run gate: show the onboarding flow until it's been completed/skipped
-  // once. Triggers when the assistant has no usable auth (no API key AND the
-  // claude CLI isn't logged in) OR the beta notice hasn't been acknowledged —
+  // once. Triggers when neither provider has usable auth OR the beta notice
+  // hasn't been acknowledged —
   // the final onboarding step captures that ack, so every fresh tester sees it
   // before they start, regardless of auth. Gated on configLoaded so it never
   // flashes pre-probe. Dismissible + persisted.
   const showOnboarding = $derived(
     !onboarding.dismissed &&
     assistant.configLoaded &&
-    ((!assistant.hasApiKey && !assistant.auth?.loggedIn) || !betaNotice.acknowledged),
+    ((!assistant.hasApiKey && !assistant.auth?.loggedIn && !assistant.hasOpenAiApiKey) || !betaNotice.acknowledged),
   );
 
   // Finishing or skipping onboarding records both the dismissal and the beta

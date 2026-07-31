@@ -5,7 +5,7 @@
   import { github } from "../../state/github.svelte";
   import GhPopover from "./GhPopover.svelte";
   import { notify } from "../../state/toast.svelte";
-  import { clampEffort, modelFamily } from "../../state/assistant/helpers";
+  import { clampEffort, isOpenAIModel, modelFamily } from "../../state/assistant/helpers";
   import { cliCommands } from "../../state/assistant/cliCommands.svelte";
   import { requestPrewarm, resetPrewarmDedup } from "../../state/assistant/prewarm";
   import { fuzzyScore, slashScore, isFileDrag, attachImageFiles, summarizeAttach, attachTextFiles, summarizeTextAttach } from "./composer/helpers";
@@ -24,7 +24,7 @@
   import PermMenu from "./composer/PermMenu.svelte";
   import {
     MODEL_OPTIONS, MODE_OPTIONS,
-    dialStopsFor, dialIdxFor, clampEffortIdx, permToneFor,
+    dialStopsFor, dialIdxFor, clampEffortIdx, effortCapsFor, modelAccessFor, permToneFor,
     settingsRowsFor, type SettingsRow,
     type ModelOpt, type ModeOpt,
   } from "./composer/modelMatrix";
@@ -178,8 +178,9 @@
   // shared placeholder-fade rise; frozen on the first hint under
   // reduced-motion.
   const IDLE_HINTS = $derived.by(() => {
+    const provider = isOpenAIModel(assistant.modelFor(tab)) ? "GPT" : "Claude";
     const hints = [
-      "Ask Claude anything",
+      `Ask ${provider} anything`,
       "Type / for a command",
       "Mention a file with @",
     ];
@@ -433,14 +434,26 @@
   });
   // Current model row — drives the composer's bottom-right pill label.
   const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === paneEffectiveModel));
+  const providerAccess = $derived({
+    claudeReady: assistant.auth?.cliPresent === true
+      && (assistant.auth.pill === "green" || assistant.auth.pill === "yellow"),
+    claudeChecking: assistant.authChecking,
+    claudeError: assistant.authError,
+    openAiConfigured: assistant.openAiStatus?.ready === true,
+    openAiChecking: assistant.openAiChecking,
+    openAiModels: assistant.openAiModels,
+    openAiError: assistant.openAiModelsError,
+  });
+  const currentModelAccess = $derived(currentModel ? modelAccessFor(currentModel, providerAccess) : null);
+  const selectableModels = $derived(MODEL_OPTIONS.filter((m) => modelAccessFor(m, providerAccess).enabled));
 
   // Reasoning-ladder derives the parent still needs (pill label, settingsRows,
   // onKey ←/→) — same matrix helpers SettingsMenu uses, so they can't drift.
   // ONE ladder over the store pair (thinkingEnabled, thinkingEffort): rung 0 =
   // fastest (thinking off → wire `--effort low`), higher rungs reason at their
   // tier. See modelMatrix DIAL_STOPS for the wire-truth rationale.
-  const effortStops = $derived(dialStopsFor(currentModel));
-  const dialApplies = $derived(effortStops.length > 0);
+  const effortStops = $derived(dialStopsFor(effortCapsFor(currentModel, assistant.openAiModels)));
+  const dialApplies = $derived(currentModelAccess?.enabled === true && effortStops.length > 0);
   const effortIdx = $derived(dialIdxFor(effortStops, assistant.thinkingOnFor(tab), assistant.effortFor(tab)));
   const currentEffort = $derived(effortStops[effortIdx] ?? effortStops[0]);
   function setEffortByIdx(i: number) {
@@ -483,7 +496,8 @@
   // the SAME settingsRowsFor helper SettingsMenu renders from, so keyboard
   // cursor and rendered order can never disagree. Effort is dropped on Haiku.
   // Drives ArrowUp/Down + the active highlight; mouse clicks call the pick fns.
-  const settingsRows = $derived(settingsRowsFor({ dialApplies }));
+  const settingsRows = $derived(settingsRowsFor({ dialApplies, models: selectableModels }));
+  const activeSettingsRow = $derived(settingsRows[settingsIdx]);
   // Re-seed the cursor to the current model row whenever the panel opens.
   $effect(() => {
     if (settingsOpen) {
@@ -539,7 +553,8 @@
   }
 
   function pickModel(m: ModelOpt) {
-    assistant.setModel(m.id, tab);
+    if (!modelAccessFor(m, providerAccess).enabled) return;
+    void assistant.selectModel(m.id, tab);
     settingsOpen = false;
     void tick().then(() => ta?.focus());
   }
@@ -604,11 +619,14 @@
     // turn that's doomed to "claude exited with 1". Guard BEFORE clearing the
     // draft so their text survives; re-probe (state may be stale) and surface
     // the actionable reason via the notice banner.
-    if (!assistant.authReady) {
-      notify.danger("Claude isn't set up", {
-        detail: assistant.auth?.summary ?? "Open Settings to sign in or add an API key.",
+    if (currentModelAccess?.enabled !== true) {
+      const openai = currentModel?.provider === "openai";
+      notify.danger(openai ? "OpenAI isn't ready" : "Claude isn't ready", {
+        detail: currentModelAccess?.detail
+          ?? (openai ? "Open Settings → Providers and connect an OpenAI API key." : "Open Settings → Providers and connect Claude Code."),
       });
-      void assistant.refreshAuth();
+      if (openai) void assistant.refreshOpenAiStatus();
+      else void assistant.refreshAuth();
       return;
     }
     setDraft("");
@@ -1096,6 +1114,7 @@
     if (settingsOpen) {
       const n = settingsRows.length;
       const cur = settingsRows[settingsIdx];
+      if (n === 0 && e.key !== "Escape") return;
       if (e.key === "ArrowDown") {
         e.preventDefault();
         settingsIdx = (settingsIdx + 1) % n;
@@ -1115,7 +1134,7 @@
       // Digit 1–N jumps straight to that model row — same positional
       // mapping the menu's kbd hints show.
       if (/^[1-9]$/.test(e.key)) {
-        const m = MODEL_OPTIONS[Number(e.key) - 1];
+        const m = selectableModels[Number(e.key) - 1];
         if (m) { e.preventDefault(); pickModel(m); return; }
       }
       if (e.key === "Enter" || e.key === "Tab") {
@@ -1190,7 +1209,7 @@
   });
   const canFire = $derived(
     mode === "stop" ||
-      ((hasDraft || attachments.length > 0) && assistant.authReady),
+      ((hasDraft || attachments.length > 0) && currentModelAccess?.enabled === true),
   );
 
   // ── Drag-over highlight ────────────────────────────────────────────────
@@ -1625,15 +1644,20 @@
             class="model-pill"
             class:open={settingsOpen}
             class:ultra={dialApplies && currentEffort?.id === "xhigh"}
+            class:provider-locked={currentModelAccess?.enabled !== true}
+            class:provider-checking={currentModelAccess?.state === "checking"}
             data-model={currentModel ? modelFamily(currentModel.id) : ""}
             bind:this={modelWrap}
             onclick={() => { settingsOpen = !settingsOpen; permOpen = false; void tick().then(() => ta?.focus()); }}
-            aria-haspopup="listbox"
+            aria-haspopup="menu"
             aria-expanded={settingsOpen}
+            aria-controls={settingsOpen ? "model-effort-menu" : undefined}
             aria-label="Model & effort"
-            use:tooltip={dialApplies
+            use:tooltip={currentModelAccess?.enabled !== true
+              ? `${currentModel ? `${currentModel.label} ${currentModel.version}` : paneEffectiveModel} · ${currentModelAccess?.tag ?? "Unavailable"}\n${currentModelAccess?.detail ?? "Connect this provider in Settings → Providers."}`
+              : dialApplies
               ? `Model · effort\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel} · ${currentEffort?.label} effort — ${effortIdx === 0 ? "replies immediately" : "reasons before replying"}`
-              : `Model\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel} · no extended thinking`}
+              : `Model\n${currentModel ? `${currentModel.label} ${currentModel.version}` : paneEffectiveModel} · no extended thinking`}
           >
             <span class="model-dot" aria-hidden="true"></span>
             <span class="pill-label">{currentModel ? `${currentModel.label} ${currentModel.version}` : paneEffectiveModel}</span>
@@ -1649,8 +1673,8 @@
           {#if settingsOpen}
             <SettingsMenu
               {tab}
-              {settingsIdx}
-              activeKind={settingsRows[settingsIdx]?.kind ?? null}
+              activeKind={activeSettingsRow?.kind ?? null}
+              activeModelId={activeSettingsRow?.kind === "model" ? activeSettingsRow.model.id : null}
               anchor={modelWrap}
               onPickModel={pickModel}
               onRequestClose={() => (settingsOpen = false)}
@@ -2433,6 +2457,13 @@
     background: var(--accent);
     transition: background var(--dur-fast) ease-out;
   }
+  .model-pill.provider-locked {
+    border-color: color-mix(in oklab, var(--warn) 32%, var(--border));
+    color: var(--fg-muted);
+  }
+  .model-pill.provider-locked .model-dot { background: var(--warn); }
+  .model-pill.provider-checking .model-dot { animation: provider-pulse 1.2s ease-in-out infinite; }
+  @keyframes provider-pulse { 50% { opacity: 0.35; } }
   /* Chevron-up caret on the model pill; rotates 180° when its menu opens. */
   :global(.model-pill .pill-chev) {
     color: var(--fg-faint); opacity: 0;

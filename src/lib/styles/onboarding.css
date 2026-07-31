@@ -217,10 +217,20 @@
   transition: background var(--dur-fast) ease, color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
 }
 .ob-seg-btn:hover { color: var(--fg); }
+.ob-seg-btn:disabled { cursor: not-allowed; opacity: 0.45; }
+.ob-seg-btn:disabled:hover { color: var(--fg-muted); }
 .ob-seg-btn.on {
   background: var(--bg-elev-2); color: var(--fg); font-weight: 600;
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 38%, transparent), 0 1px 4px -1px oklch(0 0 0 / 0.3);
 }
+.ob-provider-seg { align-self: stretch; width: 100%; }
+.ob-provider-btn { flex: 1; height: 46px; justify-content: flex-start; padding: 0 14px; }
+.ob-provider-btn > span { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; min-width: 0; }
+.ob-provider-btn b { color: inherit; font-size: 12px; font-weight: 650; line-height: 1.15; }
+.ob-provider-btn small { color: var(--fg-faint); font-size: 9.5px; font-weight: 500; line-height: 1.15; }
+.ob-provider-btn.on small { color: color-mix(in oklab, var(--accent) 70%, var(--fg-muted)); }
+.ob-provider-btn :where(.lucide) { flex: none; color: var(--fg-subtle); }
+.ob-provider-btn.on :where(.lucide) { color: var(--accent); }
 .ob-seg-ver { font-size: 10px; font-weight: 600; color: var(--fg-faint); }
 .ob-seg-btn.on .ob-seg-ver { color: var(--accent); }
 
@@ -323,6 +333,21 @@
    not a key/value pair — left-aligned, muted, normal weight. */
 .ob-statrow--summary { justify-content: flex-start; }
 .ob-statrow--summary .v { color: var(--fg-muted); font-weight: 400; line-height: 1.5; }
+
+/* OpenAI connection miniature — a deliberately different scene from the CLI route. */
+.ob-mini-api { display: flex; flex-direction: column; align-items: center; gap: 13px; width: min(390px, 88%); }
+.ob-ma-route { width: 100%; display: flex; align-items: center; gap: 10px; }
+.ob-ma-route > span {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px; flex: 1;
+  min-width: 0; height: 34px; padding: 0 12px; border-radius: 9px;
+  color: var(--fg-2); background: var(--bg-elev-2); border: 1px solid var(--border-strong);
+  font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+}
+.ob-ma-route > i { width: 28px; height: 1px; flex: none; background: linear-gradient(90deg, var(--border-strong), var(--accent)); position: relative; }
+.ob-ma-route > i::after { content: ""; position: absolute; right: -1px; top: -2px; width: 5px; height: 5px; border-top: 1px solid var(--accent); border-right: 1px solid var(--accent); transform: rotate(45deg); }
+.ob-ma-route :where(.lucide) { color: var(--accent); }
+.ob-ma-pill { display: inline-flex; align-items: center; gap: 7px; color: var(--ok); font-size: 11px; font-weight: 600; }
+.ob-ma-pill > i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 4px var(--ok-soft); }
 
 :where(.ob-overlay) .spin { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -496,4 +521,18 @@
 /* ── Narrow window ────────────────────────────────────────────────────────── */
 @media (max-width: 720px) {
   .ob-rail { display: none; }
+  .ob-overlay { padding: 12px; place-items: stretch; }
+  .ob-card { height: calc(100vh - 24px); border-radius: var(--radius-xl); }
+  .ob-body { padding: 0 22px; }
+  .ob-step-wrap { gap: 20px; padding: 28px 0 24px; margin: 0; }
+  .ob-stage { min-height: 140px; }
+  .ob-foot { padding: 13px 18px; }
+}
+
+@media (max-width: 440px) {
+  .ob-provider-seg { flex-direction: column; }
+  .ob-provider-btn { width: 100%; }
+  .ob-title { font-size: 25px; }
+  .ob-input-row { align-items: stretch; flex-direction: column; }
+  .ob-input-row .ob-btn { align-self: stretch; }
 }

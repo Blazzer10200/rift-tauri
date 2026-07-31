@@ -3,10 +3,10 @@
   // abstract icon. Pure markup — all styling + keyframes live in
   // $lib/styles/onboarding.css (loaded globally by OnboardingFlow).
   import {
-    FolderOpen, FileCode2, FileJson2, BookText, ShieldCheck, Sparkles,
+    FolderOpen, FileCode2, FileJson2, BookText, KeyRound, ShieldCheck, Sparkles,
   } from "lucide-svelte";
 
-  type Kind = "welcome" | "claude" | "project" | "defaults";
+  type Kind = "welcome" | "claude" | "openai" | "project" | "defaults";
   let { kind, caption }: { kind: Kind; caption?: string } = $props();
 </script>
 
@@ -32,6 +32,16 @@
         <span class="caret"></span>
       </div>
       <div class="ob-mcl-pill"><i></i>Connected — your auth, your billing</div>
+    </div>
+  {:else if kind === "openai"}
+    <!-- secure API route: keychain → GPT model → Responses API ready -->
+    <div class="ob-mini ob-mini-api">
+      <div class="ob-ma-route">
+        <span><KeyRound size={13} /> Keychain</span>
+        <i></i>
+        <span><Sparkles size={13} /> GPT 5.6</span>
+      </div>
+      <div class="ob-ma-pill"><i></i>Stateless Responses API</div>
     </div>
   {:else if kind === "project"}
     <!-- workspace scope: a real folder, scanned -->

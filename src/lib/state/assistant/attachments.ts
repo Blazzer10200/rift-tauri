@@ -4,7 +4,7 @@
 // moves. Re-assignment to `tab.attachments` mutates the Svelte 5 $state field
 // directly — reactivity is preserved.
 
-export type Attachment = {
+type Attachment = {
   id: string;
   mime: string;
   dataBase64: string;

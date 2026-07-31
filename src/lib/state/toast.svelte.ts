@@ -5,9 +5,9 @@
 // everything that's happened. Severity drives timeout; sticky entries
 // (e.g. update available) never auto-dismiss.
 
-export type ToastSeverity = "ok" | "warn" | "danger" | "info" | "muted";
+type ToastSeverity = "ok" | "warn" | "danger" | "info" | "muted";
 
-export type ToastItem = {
+type ToastItem = {
   id: number;
   severity: ToastSeverity;
   /** Lucide-svelte icon constructor (legacy Svelte 4 component shape;
@@ -31,7 +31,7 @@ export type ToastItem = {
   onDismiss?: () => void;
 };
 
-export type ToastPushOptions = Omit<ToastItem, "id">;
+type ToastPushOptions = Omit<ToastItem, "id">;
 
 /** A persisted, serializable record of a notification. The live `action`
  *  closure can't survive a reload, so history keeps only what's re-renderable;

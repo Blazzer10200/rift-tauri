@@ -18,8 +18,9 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { scrubUser } from "$lib/utils/redact";
 import { rollUpHealth, overallHealth } from "./diagnosticsHealth";
+import { mergeDiagEvents } from "./diagnosticsEvents";
 
-export type DiagStage = "log" | "system";
+type DiagStage = "log" | "system";
 export type DiagLevel = "trace" | "debug" | "info" | "warn" | "error";
 
 /** Wire shape — mirrors `diagnostics::DiagEvent` (serde snake_case/lowercase). */
@@ -218,14 +219,11 @@ class DiagnosticsStore {
 
   #appendMany(evs: DiagEvent[]) {
     if (evs.length === 0) return;
-    // Reassign (not mutate) so Svelte 5 tracks the change — one rebuild per batch.
-    let next = this.events.slice();
-    for (const ev of evs) next.push(ev);
-    if (next.length > RING_CAP) {
-      this.dropped += next.length - RING_CAP;   // count everything rolled off the head
-      next = next.slice(next.length - RING_CAP);
-    }
-    this.events = next;
+    // Backfill and the live bus can contain the same event when init races an
+    // animation-frame flush. Deduplicate here, at the common ring boundary.
+    const merged = mergeDiagEvents(this.events, evs, RING_CAP);
+    this.dropped += merged.dropped;
+    this.events = merged.events;
   }
 
   /** Send a frontend error to the backend bus — it echoes back over

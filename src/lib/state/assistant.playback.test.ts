@@ -161,6 +161,21 @@ const resultEnv = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+describe("OpenAI stateless continuation state", () => {
+  it("keeps opaque Responses items instead of reconstructing history from display text", () => {
+    const tab = assistant.ensureTab(`openai-state-${++seq}`, `openai-state-${seq}`);
+    beginTurn(tab, { model: "gpt-5.6" });
+    const history = [
+      { role: "user", content: [{ type: "input_text", text: "inspect this" }] },
+      { type: "reasoning", encrypted_content: "opaque" },
+      { type: "function_call_output", call_id: "call-1", output: "ok" },
+      { type: "compaction", encrypted_content: "compact-opaque" },
+    ];
+    feed(tab, [resultEnv({ provider: "openai", openai_history: history })]);
+    expect(tab.openAiHistory).toEqual(history);
+  });
+});
+
 let tabSeq = 0;
 function freshTab(): Tab {
   const id = `pb-${++tabSeq}`;
@@ -929,7 +944,7 @@ describe("playback — full recorded turn", () => {
 let convoSeq = 0;
 function readyStore(): { tab: Tab; convoId: string } {
   const convoId = `send-${++convoSeq}`;
-  assistant.auth = { pill: "green" } as never; // pass the send() auth chokepoint
+  assistant.auth = { cliPresent: true, pill: "green" } as never; // pass the send() auth chokepoint
   assistant.lastNotice = null;
   assistant.currentConvoId = convoId; // activeTab keys off this
   const tab = assistant.ensureTab(convoId, convoId);
@@ -1194,7 +1209,7 @@ describe("split-pane — background-pane isolation", () => {
   function twoPaneStore() {
     const a = `pane-a-${++convoSeq}`;
     const b = `pane-b-${++convoSeq}`;
-    assistant.auth = { pill: "green" } as never;
+    assistant.auth = { cliPresent: true, pill: "green" } as never;
     const tabA = assistant.ensureTab(a, a);
     const tabB = assistant.ensureTab(b, b);
     assistant.openTabs = [a, b];

@@ -10,7 +10,7 @@
 import { TYPO_DATA } from "./typoData";
 import { WORD_FREQ } from "./wordFreq";
 
-export const TYPO_MAP: Record<string, string> = {
+const TYPO_MAP: Record<string, string> = {
   teh: "the", thier: "their", recieve: "receive", recieved: "received",
   seperate: "separate", definately: "definitely", occured: "occurred",
   untill: "until", wich: "which", becuase: "because", alot: "a lot",
@@ -311,14 +311,14 @@ function reshape(typed: string, rep: string): string | null {
   return fixed === typed ? null : fixed;
 }
 
-export type WordFix = { rep: string; fuzzy: boolean };
+type WordFix = { rep: string; fuzzy: boolean };
 
 /** Correct a single word, preserving the typed capitalization shape. `fuzzy`
  *  marks an edit-distance guess (vs an exact dictionary hit) — those the
  *  composer double-checks against the OS spellchecker before applying.
  *  Returns null when the word needs no change. `sentenceStart` lets the fuzzy
  *  layer touch a Capitalized word (otherwise treated as a proper noun). */
-export function correctWordDetailed(word: string, sentenceStart = false): WordFix | null {
+function correctWordDetailed(word: string, sentenceStart = false): WordFix | null {
   if (word === "i") return { rep: "I", fuzzy: false };
   const lower = word.toLowerCase();
   if (personal().has(lower) || WS_VOCAB.has(lower)) return null; // user taught us this word

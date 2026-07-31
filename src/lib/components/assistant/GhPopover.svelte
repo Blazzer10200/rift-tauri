@@ -202,25 +202,25 @@
       {#if runFailed && run}
         <button class="rift-menu-row" type="button" onclick={() => inject(ghFixPrompt(run))}>
           <span class="rift-menu-row-ic"><Sparkles size={13} /></span>
-          <span class="rift-menu-row-t">Ask Claude to fix the failing run</span>
+          <span class="rift-menu-row-t">Ask Rift to fix the failing run</span>
         </button>
       {/if}
       {#if behindN > 0}
         <button class="rift-menu-row" type="button" onclick={() => inject(ghPullPrompt(behindN))}>
           <span class="rift-menu-row-ic"><ArrowDownToLine size={13} /></span>
-          <span class="rift-menu-row-t">Pull {behindN} {behindN === 1 ? "commit" : "commits"} with Claude</span>
+          <span class="rift-menu-row-t">Pull {behindN} {behindN === 1 ? "commit" : "commits"} with Rift</span>
         </button>
       {/if}
       {#if aheadN > 0}
         <button class="rift-menu-row" type="button" onclick={() => inject(ghPushPrompt(aheadN))}>
           <span class="rift-menu-row-ic"><ArrowUpFromLine size={13} /></span>
-          <span class="rift-menu-row-t">Push {aheadN} {aheadN === 1 ? "commit" : "commits"} with Claude</span>
+          <span class="rift-menu-row-t">Push {aheadN} {aheadN === 1 ? "commit" : "commits"} with Rift</span>
         </button>
       {/if}
       {#if canDraftPr}
         <button class="rift-menu-row" type="button" onclick={() => inject(ghPrPrompt())}>
           <span class="rift-menu-row-ic"><GitPullRequest size={13} /></span>
-          <span class="rift-menu-row-t">Draft a pull request with Claude</span>
+          <span class="rift-menu-row-t">Draft a pull request with Rift</span>
         </button>
       {/if}
     {/if}

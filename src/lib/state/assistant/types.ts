@@ -30,7 +30,7 @@ export type Project = {
 /** One detected Claude Code CLI install. A machine can have several at once
  *  (npm-global + native), which silently drift to different versions — Rift
  *  enumerates all, runs on the newest, and updates every one. */
-export type ClaudeInstall = {
+type ClaudeInstall = {
   path: string;
   method: string; // "npm" | "native" | "unknown"
   version: string | null;
@@ -60,6 +60,33 @@ export type AuthStatus = {
   installs: ClaudeInstall[];
 };
 
+export type OpenAiStatus = {
+  apiKeyConfigured: boolean;
+  envApiKeyPresent: boolean;
+  ready: boolean;
+  summary: string;
+};
+
+/** Status from the local Codex CLI. Authentication remains inside the official
+ * CLI; Rift never reads, copies, or exports its ChatGPT credential cache. */
+export type CodexStatus = {
+  cliPresent: boolean;
+  cliVersion: string | null;
+  loggedIn: boolean;
+  ready: boolean;
+  summary: string;
+};
+
+export type OpenAiModel = {
+  id: string;
+  label: string;
+  family: string;
+  contextWindow: number | null;
+  reasoning: boolean;
+  imageInput: boolean;
+  available: boolean;
+};
+
 export type ToolBlock = {
   type: "tool";
   id: string;
@@ -85,7 +112,7 @@ export type ToolBlock = {
   lastProgressAt?: number;
 };
 
-export type TextBlock = {
+type TextBlock = {
   type: "text";
   text: string;
 };
@@ -108,7 +135,7 @@ export type ThinkingBlock = {
 
 /** Compaction Phase C: synthetic block that marks the boundary where a
  *  CLI session was retired in favor of a summary. */
-export type BoundaryBlock = {
+type BoundaryBlock = {
   type: "boundary";
   summary: string;
   at: number;
@@ -134,7 +161,7 @@ export type BoundaryBlock = {
 
 /** User-attached image — pasted/dropped into the composer, persisted on the
  *  outgoing user message. */
-export type ImageBlock = {
+type ImageBlock = {
   type: "image";
   mime: string;
   dataBase64: string;
@@ -144,7 +171,7 @@ export type ImageBlock = {
 /** Inline transcript marker for a mid-chat model switch — appended by send()
  *  when a turn goes out under a different model than the chat was running on.
  *  The backend honors the switch and re-pins the session (turn.rs). */
-export type ModelSwitchBlock = {
+type ModelSwitchBlock = {
   type: "modelSwitch";
   /** ModelSel (or legacy full id) the chat ran on before the switch. */
   from: string;
@@ -160,7 +187,7 @@ export type ModelSwitchBlock = {
  *  Image attachments keep a copy here (same persistence deal as the user
  *  bubble's ImageBlock) so the marker can show what rode along; text files
  *  stay count-only. */
-export type SteerBlock = {
+type SteerBlock = {
   type: "steer";
   id: string;
   text: string;
@@ -174,7 +201,7 @@ export type SteerBlock = {
  *  streaming something Rift predates). Rendered as a muted marker so the
  *  transcript is honest about skipped content instead of silently dropping it.
  *  One per (message, blockType) — repeats of the same type don't stack. */
-export type UnknownBlock = {
+type UnknownBlock = {
   type: "unknown";
   /** The wire `type` string we couldn't handle (e.g. a future "citation"). */
   blockType: string;
@@ -291,6 +318,9 @@ export type ConversationRecord = {
   lastActivityAt?: number;
   /** Final turn's ctx usage — hydrates the ctx meter on restore (ISSUES #32). */
   lastTurnUsage?: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
+  /** Canonical OpenAI Responses input items. Includes opaque encrypted
+   * reasoning, tool and compaction items required by `store:false` replay. */
+  openAiHistory?: unknown[];
   /** Per-project scope: workspace folder active when this convo's turns run.
    *  Stamped on save so the sidebar can filter to the open project. */
   workspaceRoot?: string | null;
@@ -306,13 +336,13 @@ export type ConversationRecord = {
 };
 
 // Minimal stream-json envelope shape we care about.
-export type ContentBlock =
+type ContentBlock =
   | { type: "text"; text: string }
   | { type: "thinking"; thinking?: string; signature?: string }
   | { type: "tool_use"; id: string; name: string; input?: Record<string, unknown> }
   | { type: "tool_result"; tool_use_id: string; content?: unknown; is_error?: boolean };
 
-export type StreamDelta = {
+type StreamDelta = {
   type?: string;
   text?: string;
   thinking?: string;
@@ -325,7 +355,7 @@ export type StreamDelta = {
   stop_reason?: string | null;
 };
 
-export type StreamEvent = {
+type StreamEvent = {
   type?: string;
   index?: number;
   content_block?: ContentBlock;
@@ -368,11 +398,12 @@ export type ThinkingEffort = "none" | "smart" | "deep" | "ultra";
 export type ModelSel =
   | "sonnet" | "opus" | "haiku" | "claude-fable-5"
   | "claude-opus-4-8" | "claude-opus-4-7" | "claude-opus-4-6" | "claude-opus-4-5"
-  | "claude-sonnet-4-6" | "claude-sonnet-4-5";
+  | "claude-sonnet-4-6" | "claude-sonnet-4-5"
+  | "gpt-5.6" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" | "gpt-5.3-codex";
 
 /** Visual family for the per-model aurora hue (sonnet=blue, opus=purple,
  *  haiku=teal). Both Opus versions collapse to "opus". */
-export type ModelFamily = "sonnet" | "opus" | "haiku";
+export type ModelFamily = "sonnet" | "opus" | "haiku" | "openai";
 
 /** Permission mode handed to the CLI's `--permission-mode`. Mirrors the
  *  modes Claude Code exposes. Must stay in sync with the validator in

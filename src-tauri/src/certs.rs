@@ -81,6 +81,7 @@ fn extract_corporate_roots() -> Option<PathBuf> {
 
 static USAGE_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 static DOWNLOAD_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+static API_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
 /// Shared client for usage/limits.rs (15 s timeout).
 pub fn usage_client() -> &'static reqwest::Client {
@@ -92,6 +93,13 @@ pub fn download_client() -> &'static reqwest::Client {
     DOWNLOAD_CLIENT.get_or_init(|| {
         build_client(Duration::from_secs(600), Some(Duration::from_secs(30)))
     })
+}
+
+/// Shared client for long-lived provider response streams. A response may
+/// legitimately spend several minutes reasoning or running tools, while the
+/// connect timeout still fails a dead network promptly.
+pub fn api_client() -> &'static reqwest::Client {
+    API_CLIENT.get_or_init(|| build_client(Duration::from_secs(600), Some(Duration::from_secs(30))))
 }
 
 fn build_client(timeout: Duration, connect_timeout: Option<Duration>) -> reqwest::Client {

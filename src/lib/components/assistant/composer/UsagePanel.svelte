@@ -8,7 +8,7 @@
   import { tooltip } from "$lib/actions/tooltip";
   import { usage, limitZone, type LimitWindow, type ScopedLimit } from "../../../state/usage.svelte";
   import { assistant, type TabState } from "../../../state/assistant.svelte";
-  import { fmtTokens } from "../../../state/assistant/helpers";
+  import { fmtTokens, isOpenAIModel } from "../../../state/assistant/helpers";
   import { MODEL_OPTIONS } from "./modelMatrix";
 
   let { onClose, tab = null, anchor = "composer", ignoreSel = ".ctxring", mode = "full" }: {
@@ -35,6 +35,7 @@
   // Tabs are keyed by convoId, not stored on TabState — reverse-look-up so the
   // compact turn targets THIS pane's tab, not whichever pane holds focus.
   const convoKey = $derived(assistant.liveTabs.find((e) => e.tab === tab)?.convoId ?? null);
+  const openAiConversation = $derived(isOpenAIModel(tab?.lastModelId ?? tab?.modelOverride ?? assistant.model));
   function ctxZone(u: number): string {
     return u < 75 ? "ok" : u < 90 ? "warn" : "hot";
   }
@@ -156,7 +157,7 @@
       </div>
       <div class="up-reset">{fmtTokens(ctxTokens)} / {fmtTokens(ctxWindow)} tokens{#if mode === "ctx" && modelName} · on {modelName}{/if}</div>
     </div>
-    {#if mode === "ctx"}
+    {#if mode === "ctx" && !openAiConversation}
       <button
         class="up-compact"
         type="button"
@@ -166,6 +167,8 @@
       >
         <FoldVertical size={12} /> Compact conversation
       </button>
+    {:else if mode === "ctx"}
+      <div class="up-empty">OpenAI compacts this conversation automatically before its context limit.</div>
     {/if}
     {#if mode === "full"}<div class="up-sep" aria-hidden="true"></div>{/if}
   {:else if mode === "ctx"}

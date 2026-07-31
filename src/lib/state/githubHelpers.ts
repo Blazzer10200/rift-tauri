@@ -17,7 +17,7 @@ export type GhRunInfo = {
   failedStep?: string;
 };
 
-export type GhPrInfo = {
+type GhPrInfo = {
   number?: number;
   title?: string;
   isDraft?: boolean;

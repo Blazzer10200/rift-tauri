@@ -4,7 +4,7 @@
 
 ## 1. One sentence
 
-Rift is a Tauri 2 desktop app that wraps the **Claude Code CLI** (`claude`) as a per-turn subprocess and feeds it a **local stdio MCP server** scoped to a chosen workspace folder, so Claude can read / search / edit / run-git against that folder — entirely on-device, no remote connections.
+Rift is a Tauri 2 desktop app with two assistant engines—Claude through the official **Claude Code CLI** and OpenAI through the native **Responses API**—sharing one workspace-scoped tool, permission, streaming, and conversation UI.
 
 ## 2. The stack
 
@@ -12,39 +12,30 @@ Rift is a Tauri 2 desktop app that wraps the **Claude Code CLI** (`claude`) as a
 |---|---|---|
 | Shell | Tauri 2 (Rust) | `src-tauri/` |
 | Frontend | SvelteKit 2 SPA · Svelte 5 runes · Tailwind 4 | `src/` |
-| Assistant engine | Claude CLI subprocess + stdio MCP server | `src-tauri/src/assistant/` |
+| Assistant engines | Claude CLI + stdio MCP; OpenAI Responses API + native function loop | `src-tauri/src/assistant/` |
 | Distribution | NSIS first-install → Velopack self-update | `update_service.rs` · `scripts/release.ps1` |
 
-The frontend is a single-window SPA (no SSR at runtime — SvelteKit is the build tool). The workspace registry (`src/lib/components/workspaces/index.ts`) has six IDs, keyboard-switchable: **Workspace** (`home`, ⌨1) · **Chat** (`chat`, ⌨2) · a legacy **`projects`** alias (⌨3, folded to `home` on load) · **Settings** (⌨4) · **Models** (`local-llm` id kept for persisted state, ⌨5) · **AI Health** (⌨6). The `home` id mounts `WorkspacePage.svelte` — the merged Home+Projects surface (greeting, current-folder context, resume-a-chat cards, project manager, "adopt an existing folder"). `init()` migrates a stored `projects` active-id to `home` (one-time, for users who had Projects active); a fresh install with no stored value defaults to `chat` (`workspace.svelte.ts`). The empty-Chat warm/cold welcome is `AssistantWelcome.svelte` (under `assistant/`). `goHome()` is still "Home is a verb" — it floats to an empty Chat tab and is what opening a project / resuming a chat calls after picking context.
+The frontend is a single-window SPA (no SSR at runtime—SvelteKit is the build tool). The workspace registry (`src/lib/components/workspaces/index.ts`) has six IDs: **Workspace** (`home`, ⌨1), **Chat** (`chat`, ⌨2), legacy **`projects`** (folded to `home`), **Settings** (⌨4), **Diagnostics** (⌨5), and **AI Health** (⌨6). Each workspace is a dynamic import: only the active screen loads at startup, while every opened screen stays mounted afterward to preserve scroll, focus, and in-flight state. A fresh install defaults to `chat` (`workspace.svelte.ts`).
 
 ## 3. Request lifecycle — a turn, end to end
 
 ```
-Composer (Svelte)
-  └─ assistant.send(prompt, tabId?)            src/lib/state/assistant/send.ts
-       └─ invoke("assistant_send", …)          → Tauri IPC
-            └─ commands/assistant.rs → assistant::turn::assistant_send
-                 └─ spawn `claude` subprocess   turn.rs
-                      • --mcp-config <rift mcp>  (Rift's own stdio MCP server)
-                      • --allowed-tools <CLI builtins + mcp__rift__*> (see the allowlists in turn.rs)
-                      • --session-id (1st) / --resume (subsequent)
-                      • --model / --permission-mode / effort flag
-                      • prompt delivered on STDIN as a stream-json envelope
-                      • cwd = workspace root (else LOCALAPPDATA — never the install dir)
-                 ⇅ stdio JSON-RPC
-            ┌─ Claude calls tools → Rift's MCP server (mcp_server.rs)
-            │    read_file / list_dir / grep / git_* / ask_user / open_browser / notify
-            └─ Claude streams assistant/tool/result frames back
-                 └─ turn.rs re-emits as app-wide Tauri events (carry cliSessionId):
-                      assistant://stream · assistant://done · assistant://error
-                      assistant://permission-request
-       ◄─ streaming.ts listens, FILTERS by session id, drives the store
-  MessageBubble / ToolChip / EditDiff render the live transcript
+Composer (Svelte) → assistant.send(prompt, tabId?)
+  ├─ Claude model → invoke("assistant_send")
+  │    └─ turn.rs → warm `claude` subprocess + local stdio MCP server
+  │         └─ CLI owns session history through --session-id / --resume
+  └─ GPT model → invoke("assistant_openai_send")
+       └─ openai.rs → POST /v1/responses (stream=true, store=false)
+            ├─ frontend supplies locally persisted opaque Responses items
+            └─ native function-call loop uses the shared tool definitions/executor
+
+Both routes → assistant://stream · assistant://done · assistant://error
+  └─ streaming.ts filters by session id and drives MessageBubble / ToolChip / EditDiff
 ```
 
 Key properties:
 - **Events are scoped to the originating window** (`app.emit_to(window_label, …)`, `turn.rs`) so a second window never sees another window's turn events. Within a window, frames carry the `cliSessionId`; `streaming.ts` applies them to the matching tab. This is what makes multi-tab / multi-pane / multi-window work — the backend partitions per-window, the store routes per-session.
-- **The CLI owns conversation state.** Rift passes `--session-id` on turn 1 and `--resume` after; it never reconstructs history server-side. Session loss auto-recovers as a fresh start (`assistant://session-lost`).
+- **History ownership is provider-specific.** Claude history belongs to the CLI (`--session-id` / `--resume`). OpenAI responses use `store: false`; Rift persists the canonical Responses input/output items locally, including opaque encrypted reasoning, tool, and compaction items. It never reconstructs that continuation state from rendered chat bubbles.
 - **The prompt is never an argv.** It goes in on stdin as a stream-json user envelope — no argument-injection surface.
 
 ## 4. Backend (`src-tauri/src/`)
@@ -54,7 +45,9 @@ Key properties:
 ### `assistant/` — the engine
 | File | Role |
 |---|---|
-| `turn.rs` | Live-turn nervous system: session registry, CLI spawn, stream/permission/error event emit, stop, per-turn env snapshot. The hot file. |
+| `turn.rs` | Claude live-turn nervous system: session registry, CLI spawn, stream/permission/error event emit, stop, per-turn env snapshot. |
+| `openai.rs` | Native OpenAI Responses API: key/model checks, SSE decoding, usage events, cancellation, reasoning configuration, image inputs, and the bounded function-call loop. |
+| `codex.rs` | Local Codex CLI discovery and official ChatGPT browser-login bridge. It intentionally does not read Codex credential files; an App Server turn adapter remains tracked separately. |
 | `mcp_server.rs` | stdio JSON-RPC MCP server: `read_file` / `list_dir` / `grep` + `git_*` + `gh_*` + the bridge-gated UI tools (dispatched from here, implemented in `mcp_bridge.rs`). Workspace-scoped, trust-gated. |
 | `mcp_bridge.rs` | The bridge-gated UI MCP tools — `ask_user` / `open_browser` / `notify` + the loopback `bridge_call` round-trip. Split out of `mcp_server.rs` (v0.60.0). |
 | `git_local.rs` | Hardened `run_git` (no shell, args pre-split, env stripped, non-interactive) + path/message validators. Backs the `git_*` MCP tools in `mcp_server.rs` (there is no `commands/git.rs`). |
@@ -75,7 +68,7 @@ Key properties:
 - `usage/limits.rs` — OAuth `/usage` rate-limit fetch (the only usage module; read-only on the CLI token).
 - `stt/` — speech-to-text (Web Speech bridge + local Whisper), events on `stt://*`.
 - `browser/` — in-app browser dock control.
-- `secrets.rs` — OS keychain wrapper (`keyring`) for the API key. `update_service.rs` — Velopack `UpdateManager` over an `HttpSource` (Cloudflare R2 feed).
+- `secrets.rs` — OS keychain wrapper (`keyring`) with separate Anthropic and OpenAI slots. `update_service.rs` — Velopack `UpdateManager` over an `HttpSource` (Cloudflare R2 feed).
 
 ## 5. Frontend (`src/`)
 
@@ -94,7 +87,7 @@ Other stores: `environment.svelte.ts` (host-tool presence — git/node/npm/cargo
 
 ### Components (`src/lib/components/`)
 - `assistant/` — the Chat surface: `MessageBubble`, `ToolChip`, `EditDiff`, `Markdown`, `Composer` (split into `composer/*`), `AssistantPane`, `AssistantPage`, `AssistantWelcome` (warm/cold welcome), `PermissionBar`. Sub-agent dispatches render **inline** as cards (`stream/StreamAgent` live · `toolchip/AgentCard` persisted) — no floating dock.
-- `workspace/` — `WorkspacePage.svelte`, the merged Workspace (home) surface; `globPreview.ts` + `welcomeShared.ts` back its glob validation and shared greeting.
+- `workspace/` — `WorkspacePage.svelte`, the merged Workspace (home) surface; its provider pulse deep-links to Settings → Providers, while `NewsFeed.svelte` labels its independently verified source coverage rather than implying every connected provider supplies a feed. `globPreview.ts` + `welcomeShared.ts` back its glob validation and shared greeting.
 - `shell/` — `Titlebar` (custom drag region — needs `core:window:allow-start-dragging`), `WorkspaceShell`, `Sidebar`, `Topbar`, `StatusBar`, `ConversationList`, `ProjectRail`, `ContextMenuHost`, `RiftLogo`. (`tabsbar/` holds only pure helpers now — `ChatTabsBar` was folded in.)
 - `home/` (`statsHelpers.ts` — the pure usage-stat aggregation WorkspacePage + AiHealth both read) · `settings/` · `local-llm/` · `ai-health/` · `webview/` · `onboarding/` — the other workspaces, onboarding, and browser pane.
 
@@ -126,4 +119,4 @@ Four hot files were split into module dirs; step detail in `git log`. Forward-lo
 
 ## 10. What was removed (so you don't go looking)
 
-The pure-assistant conversion (2026-06-03) + minimal-core strip (2026-06-12) deleted the entire SFTP / sync / server / RCON / tunnel / transport stack, the Swarm + cost-cockpit + compaction subsystems, the old multi-SDK provider abstraction, and the SQLite usage DB. Rift today runs everything through the Claude CLI — five active workspaces (Workspace · Chat · Settings · Models · AI Health), no remote anything. (The Models workspace, 2026-07-16, re-introduced *endpoints* — Anthropic-compatible provider profiles riding the same CLI — not a second engine or SDK.) History is in `git log`.
+The pure-assistant conversion (2026-06-03) + minimal-core strip (2026-06-12) deleted the SFTP / sync / server / RCON / tunnel / transport stack, Swarm + cost-cockpit + compaction subsystems, the old multi-SDK abstraction, and the SQLite usage DB. Do not look for those systems. The current two-engine design is intentionally narrow: Claude CLI plus one native OpenAI Responses implementation, both behind the same Rift event and tool contracts. Compatible endpoint profiles remain a Claude-CLI route, not a third assistant engine. History is in `git log`.

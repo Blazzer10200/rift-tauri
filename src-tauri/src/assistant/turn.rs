@@ -22,15 +22,13 @@ use super::auth_update::assistant_auth_probe;
 use super::cli_install::{claude_command, resolve_claude_exe};
 use super::config::{
     canonical_model_alias, clamp_effort, cli_model_arg, current_api_key, current_api_key_with,
-    effective_trust_level, effort_tier_to_flag,
-    fable_unavailable, haiku_unavailable, HAIKU_FALLBACK_MODEL, HAIKU_MODEL,
-    is_valid_effort_tier,
-    is_valid_model_name, is_valid_permission_mode, load_config,
-    model_fast_eligible, normalize_effort_tier, send_effort_flag, DEFAULT_MODEL, FABLE_FALLBACK_MODEL, FABLE_MODEL,
+    effective_trust_level, effort_tier_to_flag, fable_unavailable, haiku_unavailable,
+    is_valid_effort_tier, is_valid_model_name, is_valid_permission_mode, load_config,
+    model_fast_eligible, normalize_effort_tier, send_effort_flag, DEFAULT_MODEL,
+    FABLE_FALLBACK_MODEL, FABLE_MODEL, HAIKU_FALLBACK_MODEL, HAIKU_MODEL,
 };
 use super::convo_store::{
-    is_valid_session_id, load_session_cwd, load_session_model, save_session_cwd,
-    save_session_model,
+    is_valid_session_id, load_session_cwd, load_session_model, save_session_cwd, save_session_model,
 };
 use super::{write_mcp_config, AskUserRegistry, McpConfigGuard, PermissionRegistry};
 
@@ -103,7 +101,9 @@ fn with_session_allowed<R>(f: impl FnOnce(&mut HashMap<String, String>) -> R) ->
 }
 
 fn stash_session_allowlist(session_id: &str, allowed: &str) {
-    with_session_allowed(|m| { m.insert(session_id.to_string(), allowed.to_string()); });
+    with_session_allowed(|m| {
+        m.insert(session_id.to_string(), allowed.to_string());
+    });
 }
 
 fn take_session_allowlist(session_id: &str) -> Option<String> {
@@ -125,11 +125,15 @@ fn allowlist_missing_from_init(allowed: &str, init_tools: &[&str]) -> Vec<String
 }
 
 fn set_session_pid(session_id: &str, pid: u32) {
-    with_session_pids(|m| { m.insert(session_id.to_string(), pid); });
+    with_session_pids(|m| {
+        m.insert(session_id.to_string(), pid);
+    });
 }
 
 fn clear_session_pid(session_id: &str) {
-    with_session_pids(|m| { m.remove(session_id); });
+    with_session_pids(|m| {
+        m.remove(session_id);
+    });
 }
 
 /// Overlapping-turn guard: only remove the entry when the stored PID is this
@@ -176,7 +180,9 @@ pub(crate) fn kill_all_session_children() {
 }
 
 fn mark_session_stopped(session_id: &str) {
-    with_session_stopped(|s| { s.insert(session_id.to_string()); });
+    with_session_stopped(|s| {
+        s.insert(session_id.to_string());
+    });
 }
 
 /// Returns `true` and removes the entry if the session was marked stopped;
@@ -208,7 +214,8 @@ fn stash_interrupted_tools(session_id: &str, inflight: &HashMap<String, String>)
         Ok(g) => g,
         Err(p) => p.into_inner(),
     };
-    g.get_or_insert_with(HashMap::new).insert(session_id.to_string(), descs);
+    g.get_or_insert_with(HashMap::new)
+        .insert(session_id.to_string(), descs);
 }
 
 fn take_interrupted_tools(session_id: &str) -> Option<Vec<String>> {
@@ -279,8 +286,12 @@ fn inject_interrupted_note(line: Vec<u8>, session_id: &str) -> Vec<u8> {
     else {
         return line;
     };
-    let Some(orig) = text_slot.as_str().map(String::from) else { return line };
-    let Some(tools) = take_interrupted_tools(session_id) else { return line };
+    let Some(orig) = text_slot.as_str().map(String::from) else {
+        return line;
+    };
+    let Some(tools) = take_interrupted_tools(session_id) else {
+        return line;
+    };
     *text_slot = Value::String(format!(
         "<system-reminder>\nYour previous attempt at this exact turn was interrupted (the app lost the Claude process mid-turn) while the following tool call(s) were still executing: {}. They may have FULLY COMPLETED even though no result was recorded. Before re-running anything non-idempotent (deploys, writes, pushes), verify their actual outcome first.\n</system-reminder>\n\n{orig}",
         tools.join("; ")
@@ -304,7 +315,7 @@ const ALLOWED_IMAGE_MIMES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", 
 
 /// Validate inline image attachments: cumulative decoded size ≤ cap, mime in
 /// the strict allowlist (#49).
-fn validate_attachments(attachments: &[AssistantAttachment]) -> Result<(), String> {
+pub(super) fn validate_attachments(attachments: &[AssistantAttachment]) -> Result<(), String> {
     if attachments.is_empty() {
         return Ok(());
     }
@@ -358,12 +369,11 @@ fn build_user_envelope(text: &str, attachments: &[AssistantAttachment]) -> Resul
         "parent_tool_use_id": null,
         "message": { "role": "user", "content": content }
     });
-    let mut line = serde_json::to_vec(&envelope)
-        .map_err(|e| format!("serialize input envelope: {e}"))?;
+    let mut line =
+        serde_json::to_vec(&envelope).map_err(|e| format!("serialize input envelope: {e}"))?;
     line.push(b'\n');
     Ok(line)
 }
-
 
 const STREAM_EVENT: &str = "assistant://stream";
 const DONE_EVENT: &str = "assistant://done";
@@ -407,7 +417,10 @@ pub async fn assistant_steer(
     attachments: Option<Vec<AssistantAttachment>>,
 ) -> Result<(), String> {
     if !is_valid_session_id(&session_id) {
-        return Err(format!("invalid session_id: must be a UUID (got {} chars)", session_id.len()));
+        return Err(format!(
+            "invalid session_id: must be a UUID (got {} chars)",
+            session_id.len()
+        ));
     }
     let attachments = attachments.unwrap_or_default();
     validate_attachments(&attachments)?;
@@ -421,7 +434,10 @@ pub async fn assistant_steer(
     // Clone what we need under the lock, then release before any await
     // (std Mutex must not be held across awaits; mirrors dispatch_turn M5/M7).
     let (steer_tx, in_progress) = {
-        let g = match arc.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+        let g = match arc.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        };
         (g.steer_tx.clone(), g.turn_in_progress.clone())
     };
     if !in_progress.load(std::sync::atomic::Ordering::Acquire) {
@@ -429,7 +445,10 @@ pub async fn assistant_steer(
     }
     let (done_tx, done_rx) = oneshot::channel();
     steer_tx
-        .send(warm_pool::SteerCmd { line, done: done_tx })
+        .send(warm_pool::SteerCmd {
+            line,
+            done: done_tx,
+        })
         .map_err(|_| "reader loop gone — no live turn".to_string())?;
     // No timeout here on purpose: the ack is a fast stdin write, but the reader
     // can legitimately be parked on a can_use_tool round-trip (human time)
@@ -454,7 +473,11 @@ pub async fn assistant_answer_ask_user(
     request_id: String,
     answer: serde_json::Value,
 ) -> Result<(), String> {
-    if serde_json::to_string(&answer).map(|s| s.len()).unwrap_or(usize::MAX) > 64 * 1024 {
+    if serde_json::to_string(&answer)
+        .map(|s| s.len())
+        .unwrap_or(usize::MAX)
+        > 64 * 1024
+    {
         return Err("answer payload too large".into());
     }
     if !registry.resolve(&request_id, answer) {
@@ -483,7 +506,6 @@ pub async fn assistant_answer_permission(
     }
     Ok(())
 }
-
 
 /// Rift's system-prompt addendum. Appended to the CLI's default system prompt
 /// via `--append-system-prompt`. Two variants — one for read-only mode (MCP
@@ -592,21 +614,37 @@ async fn handle_permission_request(
     stdin: &mut tokio::process::ChildStdin,
     msg: &Value,
 ) -> std::io::Result<()> {
-    let request_id = msg.get("request_id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+    let request_id = msg
+        .get("request_id")
+        .and_then(|x| x.as_str())
+        .unwrap_or_default()
+        .to_string();
     // RR11: reject a missing/empty request_id (mirrors ask_user_op) — an empty key
     // collides in the PermissionRegistry, so two malformed messages would corrupt
     // both pending grants. Deny immediately rather than register the "" slot.
     if request_id.is_empty() {
-        write_control_response(stdin, "", serde_json::json!({
-            "behavior": "deny",
-            "message": "permission request missing request_id"
-        })).await?;
+        write_control_response(
+            stdin,
+            "",
+            serde_json::json!({
+                "behavior": "deny",
+                "message": "permission request missing request_id"
+            }),
+        )
+        .await?;
         return Ok(());
     }
     let req = msg.get("request").cloned().unwrap_or(Value::Null);
-    let tool_use_id = req.get("tool_use_id").and_then(|x| x.as_str()).unwrap_or_default().to_string();
+    let tool_use_id = req
+        .get("tool_use_id")
+        .and_then(|x| x.as_str())
+        .unwrap_or_default()
+        .to_string();
     let original_input = req.get("input").cloned().unwrap_or(Value::Null);
-    let tool_name = req.get("tool_name").and_then(|x| x.as_str()).unwrap_or_default();
+    let tool_name = req
+        .get("tool_name")
+        .and_then(|x| x.as_str())
+        .unwrap_or_default();
 
     // Builtin AskUserQuestion has no headless surface (it stalls in `-p` mode)
     // and only reaches here because it's off the allowlist. Auto-deny with a
@@ -633,9 +671,14 @@ async fn handle_permission_request(
         Some(r) => r.inner().clone(),
         None => {
             // Init bug — deny so the CLI doesn't hang forever.
-            write_control_response(stdin, &request_id, serde_json::json!({
-                "behavior": "deny", "message": "permission registry unavailable",
-            })).await?;
+            write_control_response(
+                stdin,
+                &request_id,
+                serde_json::json!({
+                    "behavior": "deny", "message": "permission registry unavailable",
+                }),
+            )
+            .await?;
             return Ok(());
         }
     };
@@ -649,31 +692,47 @@ async fn handle_permission_request(
     // label (zero webviews matched), so the error path below can't detect a gone
     // window — check existence explicitly first.
     if app.get_webview_window(window_label).is_none() {
-        log::warn!("permission emit skipped for {session_id} — window `{window_label}` gone, denying");
+        log::warn!(
+            "permission emit skipped for {session_id} — window `{window_label}` gone, denying"
+        );
         registry.cancel(&request_id);
-        write_control_response(stdin, &request_id, serde_json::json!({
-            "behavior": "deny", "message": "permission UI unreachable",
-        })).await?;
+        write_control_response(
+            stdin,
+            &request_id,
+            serde_json::json!({
+                "behavior": "deny", "message": "permission UI unreachable",
+            }),
+        )
+        .await?;
         return Ok(());
     }
     log::info!(
         "permission ask: tool={tool_name} session={session_id} request_id={request_id} \
          tool_use_id={tool_use_id} — emitting card, awaiting user decision"
     );
-    if let Err(e) = app.emit_to(window_label, PERMISSION_EVENT, serde_json::json!({
-        "session_id": session_id,
-        "request_id": request_id,
-        "tool_use_id": tool_use_id,
-        "tool_name": req.get("tool_name").cloned().unwrap_or(Value::Null),
-        "input": req.get("input").cloned().unwrap_or(Value::Null),
-        "suggestions": req.get("permission_suggestions").cloned().unwrap_or(Value::Null),
-        "kind": if is_plan { "plan" } else { "tool" },
-    })) {
+    if let Err(e) = app.emit_to(
+        window_label,
+        PERMISSION_EVENT,
+        serde_json::json!({
+            "session_id": session_id,
+            "request_id": request_id,
+            "tool_use_id": tool_use_id,
+            "tool_name": req.get("tool_name").cloned().unwrap_or(Value::Null),
+            "input": req.get("input").cloned().unwrap_or(Value::Null),
+            "suggestions": req.get("permission_suggestions").cloned().unwrap_or(Value::Null),
+            "kind": if is_plan { "plan" } else { "tool" },
+        }),
+    ) {
         log::warn!("permission emit failed for {session_id} ({e}) — denying (UI unreachable)");
         registry.cancel(&request_id);
-        write_control_response(stdin, &request_id, serde_json::json!({
-            "behavior": "deny", "message": "permission UI unreachable",
-        })).await?;
+        write_control_response(
+            stdin,
+            &request_id,
+            serde_json::json!({
+                "behavior": "deny", "message": "permission UI unreachable",
+            }),
+        )
+        .await?;
         return Ok(());
     }
 
@@ -685,10 +744,14 @@ async fn handle_permission_request(
     // with an actionable message lets the user recover instead of staring at a
     // frozen "Working…". The model sees the deny and can ask in plain text.
     let wait_secs = if is_plan { PLAN_DECISION_SECS } else { 120 };
-    let mut decision = match tokio::time::timeout(std::time::Duration::from_secs(wait_secs), rx).await {
+    let mut decision = match tokio::time::timeout(std::time::Duration::from_secs(wait_secs), rx)
+        .await
+    {
         Ok(Ok(v)) => {
-            log::info!("permission decision: tool={tool_name} session={session_id} → {}",
-                v.get("behavior").and_then(|b| b.as_str()).unwrap_or("?"));
+            log::info!(
+                "permission decision: tool={tool_name} session={session_id} → {}",
+                v.get("behavior").and_then(|b| b.as_str()).unwrap_or("?")
+            );
             v
         }
         _ => {
@@ -737,7 +800,10 @@ async fn handle_permission_request(
         stdin.write_all(&line).await?;
         stdin.flush().await?;
         if let Some(arc) = warm_pool::get(session_id) {
-            let mut g = match arc.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+            let mut g = match arc.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
             g.key.permission_mode = mode.clone();
         }
         log::info!("plan approved: pushed set_permission_mode={mode} session={session_id}");
@@ -793,10 +859,24 @@ pub async fn assistant_send(
     turn_epoch: Option<u64>,
 ) -> Result<(), String> {
     run_or_prewarm(
-        app, window, prompt, session_id, is_first_turn, model, attachments,
-        dyslexia_mode, thinking_effort, thinking_enabled, permission_mode, fast_mode,
-        prior_context_summary, root, turn_epoch.unwrap_or(0), false,
-    ).await
+        app,
+        window,
+        prompt,
+        session_id,
+        is_first_turn,
+        model,
+        attachments,
+        dyslexia_mode,
+        thinking_effort,
+        thinking_enabled,
+        permission_mode,
+        fast_mode,
+        prior_context_summary,
+        root,
+        turn_epoch.unwrap_or(0),
+        false,
+    )
+    .await
 }
 
 /// #67 pre-warming: spawn a warm `claude` child for a chat tab BEFORE the user
@@ -843,18 +923,42 @@ pub async fn assistant_prewarm(
     // unknown (API-key users, no fetch yet) → allow; only skip on a KNOWN-hot
     // window so the common case never loses pre-warm to missing data.
     if let Some(snap) = crate::usage::limits::cached_snapshot() {
-        let hot = snap.five_hour.as_ref().map(|w| w.utilization).unwrap_or(0.0) >= 90.0
-            || snap.seven_day.as_ref().map(|w| w.utilization).unwrap_or(0.0) >= 95.0;
+        let hot = snap
+            .five_hour
+            .as_ref()
+            .map(|w| w.utilization)
+            .unwrap_or(0.0)
+            >= 90.0
+            || snap
+                .seven_day
+                .as_ref()
+                .map(|w| w.utilization)
+                .unwrap_or(0.0)
+                >= 95.0;
         if hot {
             log::debug!("assistant_prewarm: skipped for {session_id} — plan usage hot");
             return Ok(());
         }
     }
     run_or_prewarm(
-        app, window, String::new(), session_id, is_first_turn.unwrap_or(true), model,
-        /*attachments*/ None, /*dyslexia*/ None, thinking_effort, thinking_enabled,
-        permission_mode, fast_mode, /*prior_context_summary*/ None, root, /*turn_epoch*/ 0, true,
-    ).await
+        app,
+        window,
+        String::new(),
+        session_id,
+        is_first_turn.unwrap_or(true),
+        model,
+        /*attachments*/ None,
+        /*dyslexia*/ None,
+        thinking_effort,
+        thinking_enabled,
+        permission_mode,
+        fast_mode,
+        /*prior_context_summary*/ None,
+        root,
+        /*turn_epoch*/ 0,
+        true,
+    )
+    .await
 }
 
 /// Everything `resolve_spawn` produces that the spawn/stream phase needs: a
@@ -907,13 +1011,20 @@ async fn run_or_prewarm(
     // real prompt or compaction summary.
     const PROMPT_BYTES_CAP: usize = 2 * 1024 * 1024;
     if prompt.len() > PROMPT_BYTES_CAP {
-        return Err(format!("prompt too large ({} bytes, max {})", prompt.len(), PROMPT_BYTES_CAP));
+        return Err(format!(
+            "prompt too large ({} bytes, max {})",
+            prompt.len(),
+            PROMPT_BYTES_CAP
+        ));
     }
     if prior_context_summary.as_deref().map(str::len).unwrap_or(0) > PROMPT_BYTES_CAP {
         return Err("prior_context_summary too large (max 2 MiB)".into());
     }
     if !is_valid_session_id(&session_id) {
-        return Err(format!("invalid session_id: must be a UUID (got {} chars)", session_id.len()));
+        return Err(format!(
+            "invalid session_id: must be a UUID (got {} chars)",
+            session_id.len()
+        ));
     }
     // #37: the window that fired this turn — all turn events (stream/done/error/
     // permission) emit_to this label so a second window never sees another's turn.
@@ -922,10 +1033,29 @@ async fn run_or_prewarm(
     // Resolve model/effort/thinking/perm/roots/caps + build the `claude` command
     // and per-turn envelope. Extracted so this orchestrator stays readable; the
     // body is behavior-identical to the former inline prologue.
-    let ResolvedSpawn { cmd, key, user_line, mcp_guard, model, live_switch_ok } = resolve_spawn(
-        &app, &window_label, &prompt, &session_id, is_first_turn, model, attachments,
-        dyslexia_mode, thinking_effort, thinking_enabled, permission_mode, fast_mode,
-        prior_context_summary, root, prewarm,
+    let ResolvedSpawn {
+        cmd,
+        key,
+        user_line,
+        mcp_guard,
+        model,
+        live_switch_ok,
+    } = resolve_spawn(
+        &app,
+        &window_label,
+        &prompt,
+        &session_id,
+        is_first_turn,
+        model,
+        attachments,
+        dyslexia_mode,
+        thinking_effort,
+        thinking_enabled,
+        permission_mode,
+        fast_mode,
+        prior_context_summary,
+        root,
+        prewarm,
     )
     .await?;
 
@@ -943,10 +1073,14 @@ async fn run_or_prewarm(
         // below still settles ownership through insert_if_absent.
         if let Some(arc) = warm_pool::get(&session_id) {
             let (matches, busy, switchable) = {
-                let g = match arc.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+                let g = match arc.lock() {
+                    Ok(g) => g,
+                    Err(p) => p.into_inner(),
+                };
                 (
                     g.key == key,
-                    g.turn_in_progress.load(std::sync::atomic::Ordering::Acquire),
+                    g.turn_in_progress
+                        .load(std::sync::atomic::Ordering::Acquire),
                     warm_pool::live_switchable(&g.key, &key),
                 )
             };
@@ -1137,8 +1271,7 @@ async fn resolve_spawn(
     // the full-config OAuth path: API-key / local-LLM / (later) sandboxed branches
     // keep the empty roots → no-tools fallback intact (mirrors the `use_full_config`
     // computation below; recomputed here because that binding is resolved later).
-    let scratch_eligible =
-        cfg.use_full_config.unwrap_or(true) && !use_api_key;
+    let scratch_eligible = cfg.use_full_config.unwrap_or(true) && !use_api_key;
     let roots: Vec<PathBuf> = if let Some(p) = pinned_cwd.clone() {
         vec![p]
     } else if let Some(r) = tab_root {
@@ -1149,7 +1282,9 @@ async fn resolve_spawn(
         match super::workspace::local_scratch_dir() {
             Ok(scratch) => vec![scratch],
             Err(e) => {
-                log::warn!("assistant: local scratch dir unavailable, falling back to no-tools: {e}");
+                log::warn!(
+                    "assistant: local scratch dir unavailable, falling back to no-tools: {e}"
+                );
                 Vec::new()
             }
         }
@@ -1193,13 +1328,22 @@ async fn resolve_spawn(
     let (mcp_config_path, _mcp_guard, addendum) = if roots.is_empty() {
         (None, None, RIFT_SYSTEM_ADDENDUM_NO_WS)
     } else {
-        match write_mcp_config(session_id, &roots, &trust_level, window_label, &proj_include, &proj_exclude) {
+        match write_mcp_config(
+            session_id,
+            &roots,
+            &trust_level,
+            window_label,
+            &proj_include,
+            &proj_exclude,
+        ) {
             Ok(p) => {
                 let guard = McpConfigGuard(p.clone());
                 (Some(p), Some(guard), RIFT_SYSTEM_ADDENDUM_TOOLS)
             }
             Err(e) => {
-                log::warn!("assistant: failed to provision MCP config, falling back to no-tools: {e}");
+                log::warn!(
+                    "assistant: failed to provision MCP config, falling back to no-tools: {e}"
+                );
                 (None, None, RIFT_SYSTEM_ADDENDUM_NO_WS)
             }
         }
@@ -1221,8 +1365,7 @@ async fn resolve_spawn(
     // setting-sources branch below.)
     // API-key mode forces `--bare`, which suppresses user config wholesale,
     // so we runtime-disable piggyback in that path.
-    let use_full_config =
-        cfg.use_full_config.unwrap_or(true) && !use_api_key;
+    let use_full_config = cfg.use_full_config.unwrap_or(true) && !use_api_key;
 
     let attachments = attachments.unwrap_or_default();
     validate_attachments(&attachments)?;
@@ -1254,7 +1397,9 @@ async fn resolve_spawn(
                 "This Claude Code CLI (v{}.{}.{}) is too old for Rift, which needs ≥ v{}.{}.{}. \
                  Update with `npm i -g @anthropic-ai/claude-code@latest` (or `claude update` for a \
                  native install), then reopen Rift.",
-                v.0, v.1, v.2,
+                v.0,
+                v.1,
+                v.2,
                 super::cli_caps::MIN_SUPPORTED.0,
                 super::cli_caps::MIN_SUPPORTED.1,
                 super::cli_caps::MIN_SUPPORTED.2,
@@ -1275,19 +1420,24 @@ async fn resolve_spawn(
         .unwrap_or_else(std::env::temp_dir);
     cmd.current_dir(cwd_fallback);
     cmd.arg("-p")
-        .arg("--append-system-prompt").arg(addendum)
-        .arg("--output-format").arg("stream-json")
+        .arg("--append-system-prompt")
+        .arg(addendum)
+        .arg("--output-format")
+        .arg("stream-json")
         // Always stream-json input: we now always write a `{type:"user"}`
         // envelope (so the control channel and image attachments share one
         // path), and the `initialize` handshake below requires it.
-        .arg("--input-format").arg("stream-json")
+        .arg("--input-format")
+        .arg("stream-json")
         .arg("--verbose")
         // `cli_model_arg` appends the `[1m]` window-selector for the Sonnet ids the
         // CLI otherwise gates at 200K (see config.rs). Built off the fully-resolved
         // `model` AFTER save_session_model (line ~834) already pinned the BARE id —
         // the suffix must never reach the pin (is_valid_model_name rejects `[`/`]`).
-        .arg("--model").arg(cli_model_arg(&model))
-        .arg("--permission-mode").arg(&permission_mode);
+        .arg("--model")
+        .arg(cli_model_arg(&model))
+        .arg("--permission-mode")
+        .arg(&permission_mode);
     // The `user` setting source carries the global ~/.claude CLAUDE.md +
     // settings.json + hooks. `use_full_config` on = inherit them (full reskin);
     // off = sandbox (Rift MCP only). OAuth auth is a separate source, kept
@@ -1470,8 +1620,10 @@ async fn resolve_spawn(
             format!("{BUILTINS},{SAFE_MCP},{GIT_READ_MCP}{git_write}")
         };
         stash_session_allowlist(session_id, &allowed);
-        cmd.arg("--mcp-config").arg(p)
-            .arg("--allowed-tools").arg(allowed);
+        cmd.arg("--mcp-config")
+            .arg(p)
+            .arg("--allowed-tools")
+            .arg(allowed);
         // Spawn cwd = workspace root so Bash + relative paths resolve correctly.
         // `roots[0]` is always non-empty when mcp_config_path is Some (see the
         // write_mcp_config branch above).
@@ -1599,9 +1751,7 @@ async fn resolve_spawn(
     // Fast mode (Opus fast output) — the flag actually SENT: requested AND the
     // model is Opus-family AND the headless settings-key path is confirmed on
     // this CLI (caps.fast_mode).
-    let fast_on = fast_mode.unwrap_or(false)
-        && model_fast_eligible(&model)
-        && caps.fast_mode;
+    let fast_on = fast_mode.unwrap_or(false) && model_fast_eligible(&model) && caps.fast_mode;
     // `--settings` merges additively over user/project/local settings. Two keys
     // ride it: `ultracode` — xhigh effort + autonomous workflow orchestration,
     // gated server-side by plan entitlement (unentitled → ignored, the session
@@ -1621,7 +1771,8 @@ async fn resolve_spawn(
             settings.insert("fastMode".into(), serde_json::Value::Bool(true));
         }
         if !settings.is_empty() {
-            cmd.arg("--settings").arg(serde_json::Value::Object(settings).to_string());
+            cmd.arg("--settings")
+                .arg(serde_json::Value::Object(settings).to_string());
         }
     }
 
@@ -1632,7 +1783,8 @@ async fn resolve_spawn(
     );
     log::debug!(
         "assistant_send: caps(cont) strict_mcp={} disable_slash={}",
-        caps.strict_mcp_config, caps.disable_slash_commands
+        caps.strict_mcp_config,
+        caps.disable_slash_commands
     );
 
     // Build the per-turn user-message text BEFORE spawning so the child
@@ -1699,7 +1851,10 @@ async fn resolve_spawn(
                     gauges.push(format!("weekly {:.0}% used", w.utilization));
                 }
                 if !gauges.is_empty() {
-                    bits.push(format!("Claude plan usage is running high: {}", gauges.join(", ")));
+                    bits.push(format!(
+                        "Claude plan usage is running high: {}",
+                        gauges.join(", ")
+                    ));
                 }
             }
         }
@@ -1725,7 +1880,11 @@ async fn resolve_spawn(
     // carries context across turns, so Rift never needs to re-inject it. This
     // block stays as a validated, capped hook in case a future Rift-driven remint
     // path wants it; until a caller passes a non-empty summary it's a no-op.
-    if let Some(s) = prior_context_summary.as_deref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+    if let Some(s) = prior_context_summary
+        .as_deref()
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
         reminder_parts.push(format!(
             "Prior conversation summary (compacted; the CLI session this turn runs against is fresh — this summary IS your context for what came before):\n{s}"
         ));
@@ -1829,7 +1988,10 @@ async fn dispatch_turn(
             Vec<Vec<u8>>,
         );
         let reuse: Option<WarmReuse> = {
-            let mut g = match arc.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+            let mut g = match arc.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
             if g.key != key {
                 if live_switch_ok
                     && !g.turn_in_progress.load(Ordering::Acquire)
@@ -1871,7 +2033,9 @@ async fn dispatch_turn(
                     // Signature changed (effort/root/trust/… — or an old CLI
                     // without live-switch) → can't reuse. Drain the old child +
                     // fall through to cold respawn (--resume).
-                    log::info!("warm_pool: signature changed for {session_id} — draining + cold respawn");
+                    log::info!(
+                        "warm_pool: signature changed for {session_id} — draining + cold respawn"
+                    );
                     None
                 }
             } else if g.turn_in_progress.load(Ordering::Acquire) {
@@ -1893,7 +2057,17 @@ async fn dispatch_turn(
         // lock order the rest of the pool uses (registry → child) — a deadlock
         // hazard + extra contention on the hottest path. `reuse.is_some()` ⇒ hit.
         if let Some((_, _, ctls)) = reuse.as_ref() {
-            emit_dispatch(&session_id, if ctls.is_empty() { "hit" } else { "live_switch" }, &model, &key, turn_epoch);
+            emit_dispatch(
+                &session_id,
+                if ctls.is_empty() {
+                    "hit"
+                } else {
+                    "live_switch"
+                },
+                &model,
+                &key,
+                turn_epoch,
+            );
         }
         // `user_line` is moved into the TurnCmd only on the reuse path; on every
         // fall-through (mismatch / dead-on-send) it's recovered so the cold path
@@ -1924,7 +2098,13 @@ async fn dispatch_turn(
                             // respawn with the preserved user_line — no UI error.
                             Ok(Err(ref s)) if s == RETRY_COLD_SENTINEL => {
                                 in_progress.store(false, Ordering::Release);
-                                emit_dispatch(&session_id, "dead_on_send", &model, &key, turn_epoch);
+                                emit_dispatch(
+                                    &session_id,
+                                    "dead_on_send",
+                                    &model,
+                                    &key,
+                                    turn_epoch,
+                                );
                                 // #88: if the dead attempt stashed in-flight tools,
                                 // this retry must carry the reconciliation note —
                                 // it re-sends the same prompt the interrupted tool
@@ -1951,7 +2131,9 @@ async fn dispatch_turn(
                         // from the rejected message, fall through to cold respawn.
                         in_progress.store(false, Ordering::Release);
                         warm_pool::remove_if(&session_id, &arc);
-                        log::info!("warm_pool: warm child for {session_id} dead on send — cold respawn");
+                        log::info!(
+                            "warm_pool: warm child for {session_id} dead on send — cold respawn"
+                        );
                         emit_dispatch(&session_id, "dead_on_send", &model, &key, turn_epoch);
                         send_err.0.user_line
                     }
@@ -1976,19 +2158,49 @@ async fn dispatch_turn(
         };
 
         // 2) Cold path (warm child existed but couldn't be reused).
-        return cold_spawn_and_run(app, window_label, session_id, key, cmd, user_line, mcp_guard, is_first_turn, model, turn_epoch).await;
+        return cold_spawn_and_run(
+            app,
+            window_label,
+            session_id,
+            key,
+            cmd,
+            user_line,
+            mcp_guard,
+            is_first_turn,
+            model,
+            turn_epoch,
+        )
+        .await;
     }
 
     // 2) Cold path: no warm child at all — spawn one, register it, run turn 1.
     emit_dispatch(&session_id, "cold", &model, &key, turn_epoch);
-    cold_spawn_and_run(app, window_label, session_id, key, cmd, user_line, mcp_guard, is_first_turn, model, turn_epoch).await
+    cold_spawn_and_run(
+        app,
+        window_label,
+        session_id,
+        key,
+        cmd,
+        user_line,
+        mcp_guard,
+        is_first_turn,
+        model,
+        turn_epoch,
+    )
+    .await
 }
 
 /// Emit a structured warm-pool dispatch event (Phase 2a). `outcome` ∈
 /// "hit" | "signature_drain" | "cold" | "dead_on_send". Fire-and-forget; the bus
 /// scrubs + rate-limits. Resource "warm_pool" so the console can isolate the
 /// latency-critical path the cont.219 hunt had to hand-probe.
-fn emit_dispatch(session_id: &str, outcome: &str, model: &str, key: &warm_pool::SpawnKey, turn_epoch: u64) {
+fn emit_dispatch(
+    session_id: &str,
+    outcome: &str,
+    model: &str,
+    key: &warm_pool::SpawnKey,
+    turn_epoch: u64,
+) {
     // Phase 5: also bump a per-outcome counter via the metric! primitive — gives
     // the health panel a running warm-hit total without re-scanning the ring.
     match outcome {
@@ -2054,7 +2266,9 @@ async fn cold_spawn_and_run(
         // #67: `child.id()` returns None when the process already exited by the
         // time we ask (immediate-exit on bad args). Surface it so a later
         // assistant_stop's "no PID, return Ok" isn't mistaken for a real stop.
-        log::warn!("cold_spawn: child PID unavailable for session {session_id} (process already exited?)");
+        log::warn!(
+            "cold_spawn: child PID unavailable for session {session_id} (process already exited?)"
+        );
     }
 
     // #39: a concurrent stop arriving in the spawn window would find no PID and
@@ -2064,10 +2278,16 @@ async fn cold_spawn_and_run(
         if let Err(e) = child.start_kill() {
             log::warn!("cold_spawn: start_kill failed for {session_id} during stop-on-spawn: {e}");
         }
-        if let Some(p) = turn_pid { clear_session_pid_if(&session_id, p); }
-        let _ = app.emit_to(&window_label, DONE_EVENT, serde_json::json!({
-            "session_id": session_id, "exit_code": -1, "turn_epoch": turn_epoch,
-        }));
+        if let Some(p) = turn_pid {
+            clear_session_pid_if(&session_id, p);
+        }
+        let _ = app.emit_to(
+            &window_label,
+            DONE_EVENT,
+            serde_json::json!({
+                "session_id": session_id, "exit_code": -1, "turn_epoch": turn_epoch,
+            }),
+        );
         return Ok(());
     }
 
@@ -2115,19 +2335,30 @@ async fn cold_spawn_and_run(
     let mut take_tries = 0u8;
     while !warm_pool::insert_if_absent(&session_id, warm.clone()) {
         if let Some(racer) = warm_pool::get(&session_id) {
-            let racer_pid = match racer.lock() { Ok(g) => g.pid, Err(p) => p.into_inner().pid };
+            let racer_pid = match racer.lock() {
+                Ok(g) => g.pid,
+                Err(p) => p.into_inner().pid,
+            };
             warm_pool::remove_if(&session_id, &racer);
-            if let Some(p) = racer_pid { kill_child_tree_async(p).await; }
+            if let Some(p) = racer_pid {
+                kill_child_tree_async(p).await;
+            }
             log::info!("cold_spawn: reaped racing warm child pid={racer_pid:?} for {session_id} — live send takes the slot");
             // The racer's set_session_pid may have overwritten ours — re-assert
             // so stop/velopack sweeps see the child that actually survives.
-            if let Some(p) = turn_pid { set_session_pid(&session_id, p); }
+            if let Some(p) = turn_pid {
+                set_session_pid(&session_id, p);
+            }
         }
         take_tries += 1;
         if take_tries >= 4 {
-            log::warn!("cold_spawn: slot for {session_id} kept losing the take race — forcing insert");
+            log::warn!(
+                "cold_spawn: slot for {session_id} kept losing the take race — forcing insert"
+            );
             warm_pool::insert(&session_id, warm.clone());
-            if let Some(p) = turn_pid { set_session_pid(&session_id, p); }
+            if let Some(p) = turn_pid {
+                set_session_pid(&session_id, p);
+            }
             break;
         }
     }
@@ -2175,11 +2406,15 @@ async fn cold_spawn_and_run(
         Ok(r) => r,
         Err(_) => {
             turn_in_progress.store(false, Ordering::Release);
-            let _ = app.emit_to(&window_label, ERROR_EVENT, serde_json::json!({
-                "session_id": session_id,
-                "message": "the CLI process ended before producing a result — retry the turn",
-                "turn_epoch": turn_epoch,
-            }));
+            let _ = app.emit_to(
+                &window_label,
+                ERROR_EVENT,
+                serde_json::json!({
+                    "session_id": session_id,
+                    "message": "the CLI process ended before producing a result — retry the turn",
+                    "turn_epoch": turn_epoch,
+                }),
+            );
             Err("warm child reader ended before first result".into())
         }
     }
@@ -2212,7 +2447,9 @@ fn prewarm_spawn(
     let thinking_on = key.thinking_on;
     let model_log = model.clone();
     let turn_start = std::time::Instant::now();
-    let mut child = cmd.spawn().map_err(|e| format!("prewarm spawn `claude`: {e}"))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("prewarm spawn `claude`: {e}"))?;
     let turn_pid = child.id();
     if let Some(pid) = turn_pid {
         set_session_pid(&session_id, pid);
@@ -2228,9 +2465,13 @@ fn prewarm_spawn(
     if take_session_stopped(&session_id) {
         log::info!("prewarm_spawn: stop arrived during spawn for {session_id} — killing spare");
         if let Err(e) = child.start_kill() {
-            log::warn!("prewarm_spawn: start_kill failed for {session_id} during stop-on-spawn: {e}");
+            log::warn!(
+                "prewarm_spawn: start_kill failed for {session_id} during stop-on-spawn: {e}"
+            );
         }
-        if let Some(p) = turn_pid { clear_session_pid_if(&session_id, p); }
+        if let Some(p) = turn_pid {
+            clear_session_pid_if(&session_id, p);
+        }
         return Ok(());
     }
 
@@ -2351,8 +2592,8 @@ struct RunCtx {
 /// the turn channel closes (evict / signature drain — all senders dropped), a
 /// turn requested bg-evict (M3), or a fatal stdin write error.
 async fn run_turn_loop(mut ctx: RunCtx) {
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use std::sync::atomic::Ordering;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
     let mut stdin = ctx.stdin;
     // NOTE: intentionally UNBOUNDED (no `.take(N)` cap). Unlike bridge.rs's
@@ -2377,7 +2618,10 @@ async fn run_turn_loop(mut ctx: RunCtx) {
         const STDERR_TRIM: usize = 32 * 1024;
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(l)) = lines.next_line().await {
-            let mut buf = match stderr_tail_task.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+            let mut buf = match stderr_tail_task.lock() {
+                Ok(g) => g,
+                Err(p) => p.into_inner(),
+            };
             buf.push_str(&l);
             buf.push('\n');
             if buf.len() > STDERR_CAP {
@@ -2387,7 +2631,9 @@ async fn run_turn_loop(mut ctx: RunCtx) {
                     .map(|n| STDERR_TRIM + n + 1)
                     .unwrap_or_else(|| {
                         let mut c = STDERR_TRIM;
-                        while c < buf.len() && !buf.is_char_boundary(c) { c += 1; }
+                        while c < buf.len() && !buf.is_char_boundary(c) {
+                            c += 1;
+                        }
                         c
                     });
                 buf.drain(..cut);
@@ -2409,7 +2655,10 @@ async fn run_turn_loop(mut ctx: RunCtx) {
     //    cold-respawns cleanly — a dead spare is invisible to the user).
     const INIT: &[u8] = b"{\"type\":\"control_request\",\"request_id\":\"rift-init\",\"request\":{\"subtype\":\"initialize\",\"hooks\":{}}}\n";
     let init_result = match stdin.write_all(INIT).await {
-        Ok(()) => stdin.flush().await.map_err(|e| format!("flush initialize: {e}")),
+        Ok(()) => stdin
+            .flush()
+            .await
+            .map_err(|e| format!("flush initialize: {e}")),
         Err(e) => Err(format!("write initialize: {e}")),
     };
     if let Err(msg) = init_result {
@@ -2417,10 +2666,14 @@ async fn run_turn_loop(mut ctx: RunCtx) {
             Some(t) => (&t.app, t.window_label.as_str()),
             None => (&ctx.app, ctx.window_label.as_str()),
         };
-        let _ = app_err.emit_to(win_err, ERROR_EVENT, serde_json::json!({
-            "session_id": ctx.session_id, "message": msg.clone(),
-            "turn_epoch": current.as_ref().map(|t| t.turn_epoch).unwrap_or(0),
-        }));
+        let _ = app_err.emit_to(
+            win_err,
+            ERROR_EVENT,
+            serde_json::json!({
+                "session_id": ctx.session_id, "message": msg.clone(),
+                "turn_epoch": current.as_ref().map(|t| t.turn_epoch).unwrap_or(0),
+            }),
+        );
         if let Some(t) = current.take() {
             let _ = t.done.send(Err(msg));
         }
@@ -2551,7 +2804,11 @@ async fn run_turn_loop(mut ctx: RunCtx) {
         // turn to the same window/epoch (see the idle-drain park above).
         last_turn_ctx = Some((app_out.clone(), win_label.clone(), turn_epoch));
 
-        let turn_start = if first_turn_flag { ctx.turn_start } else { std::time::Instant::now() };
+        let turn_start = if first_turn_flag {
+            ctx.turn_start
+        } else {
+            std::time::Instant::now()
+        };
 
         // #67: a pre-warm spare started with NO in-hand first turn; the FIRST
         // turn it ever runs is the adopted real send. If that adopted turn hits
@@ -2583,7 +2840,8 @@ async fn run_turn_loop(mut ctx: RunCtx) {
             bg_evict: &bg_evict,
             turn_start,
             turn_epoch,
-        }).await;
+        })
+        .await;
 
         // Clear in-progress the instant the turn ends (M6: reader-side).
         ctx.turn_in_progress.store(false, Ordering::Release);
@@ -2591,7 +2849,11 @@ async fn run_turn_loop(mut ctx: RunCtx) {
 
         match outcome {
             TurnOutcome::Result => {
-                log::info!("warm_pool: turn result {} ms session={}", turn_start.elapsed().as_millis(), stream_sid);
+                log::info!(
+                    "warm_pool: turn result {} ms session={}",
+                    turn_start.elapsed().as_millis(),
+                    stream_sid
+                );
                 let _ = done.send(Ok(()));
                 // M3: a turn that spawned a background child taints the inherited
                 // stdout pipe — don't keep it warm. Exit the loop (→ stdin drops).
@@ -2602,9 +2864,13 @@ async fn run_turn_loop(mut ctx: RunCtx) {
                 continue 'turns; // reuse: park for the next turn
             }
             TurnOutcome::Fatal(msg) => {
-                let _ = app_out.emit_to(&win_label, ERROR_EVENT, serde_json::json!({
-                    "session_id": stream_sid, "message": msg.clone(), "turn_epoch": turn_epoch,
-                }));
+                let _ = app_out.emit_to(
+                    &win_label,
+                    ERROR_EVENT,
+                    serde_json::json!({
+                        "session_id": stream_sid, "message": msg.clone(), "turn_epoch": turn_epoch,
+                    }),
+                );
                 let _ = done.send(Err(msg));
                 break 'turns;
             }
@@ -2612,7 +2878,9 @@ async fn run_turn_loop(mut ctx: RunCtx) {
                 // Warm child died while parked; this reused turn produced no
                 // output. Drop the dead child + registry entry and tell the
                 // dispatcher to retry cold (fresh spawn + --resume). NO UI error.
-                log::info!("warm_pool: reused turn found dead child {stream_sid} — signalling cold retry");
+                log::info!(
+                    "warm_pool: reused turn found dead child {stream_sid} — signalling cold retry"
+                );
                 warm_pool::remove_if(&ctx.session_id, &ctx.warm);
                 let _ = done.send(Err(RETRY_COLD_SENTINEL.into()));
                 break 'turns;
@@ -2635,7 +2903,9 @@ async fn run_turn_loop(mut ctx: RunCtx) {
                 // tool children) survives that. Force a tree-kill by PID HERE so the
                 // wedged process and all descendants are reaped, not orphaned.
                 if let Some(pid) = warm_pool::pid_of(&ctx.session_id) {
-                    log::warn!("warm_pool: tree-killing wedged child pid={pid} session={stream_sid}");
+                    log::warn!(
+                        "warm_pool: tree-killing wedged child pid={pid} session={stream_sid}"
+                    );
                     kill_child_tree_async(pid).await;
                 }
                 warm_pool::remove_if(&ctx.session_id, &ctx.warm);
@@ -2648,9 +2918,13 @@ async fn run_turn_loop(mut ctx: RunCtx) {
                 if let Some(reg) = ctx.app.try_state::<std::sync::Arc<PermissionRegistry>>() {
                     reg.cancel_all_for_session(&ctx.session_id);
                 }
-                let _ = app_out.emit_to(&win_label, ERROR_EVENT, serde_json::json!({
-                    "session_id": stream_sid, "message": msg.clone(), "turn_epoch": turn_epoch,
-                }));
+                let _ = app_out.emit_to(
+                    &win_label,
+                    ERROR_EVENT,
+                    serde_json::json!({
+                        "session_id": stream_sid, "message": msg.clone(), "turn_epoch": turn_epoch,
+                    }),
+                );
                 let _ = done.send(Err(msg));
                 break 'turns;
             }
@@ -2664,7 +2938,10 @@ async fn run_turn_loop(mut ctx: RunCtx) {
                 // user-actionable error the cold respawn would just repeat), retry
                 // it cold like DeadOnReuse — the user never sees the dead spare.
                 let stderr_buf = {
-                    let g = match stderr_tail.lock() { Ok(g) => g, Err(p) => p.into_inner() };
+                    let g = match stderr_tail.lock() {
+                        Ok(g) => g,
+                        Err(p) => p.into_inner(),
+                    };
                     g.clone()
                 };
                 if spare_first_adopt
@@ -2678,8 +2955,16 @@ async fn run_turn_loop(mut ctx: RunCtx) {
                 }
                 let status = ctx.child.wait().await.ok();
                 emit_turn_end_error(
-                    &app_out, &win_label, &stream_sid, cold_first, status, &stderr_buf, done, turn_epoch,
-                ).await;
+                    &app_out,
+                    &win_label,
+                    &stream_sid,
+                    cold_first,
+                    status,
+                    &stderr_buf,
+                    done,
+                    turn_epoch,
+                )
+                .await;
                 break 'turns;
             }
         }
@@ -2689,7 +2974,11 @@ async fn run_turn_loop(mut ctx: RunCtx) {
     loop_cleanup(&ctx.session_id, ctx.turn_pid, &ctx.warm, &mut ctx.child).await;
     stderr_handle.abort();
     drop(ctx.mcp_guard); // delete the per-session MCP config file now (not per-turn)
-    log::debug!("warm_pool: reader loop exited for {} (model={})", ctx.session_id, ctx.model);
+    log::debug!(
+        "warm_pool: reader loop exited for {} (model={})",
+        ctx.session_id,
+        ctx.model
+    );
 }
 
 /// Common loop-exit teardown: drop the warm registry entry if it's still ours,
@@ -2711,9 +3000,13 @@ async fn loop_cleanup(
     child: &mut tokio::process::Child,
 ) {
     warm_pool::remove_if(session_id, warm);
-    if let Some(p) = turn_pid { clear_session_pid_if(session_id, p); }
+    if let Some(p) = turn_pid {
+        clear_session_pid_if(session_id, p);
+    }
     forget_cumulative_cli_api(session_id);
-    if let Some(p) = turn_pid { kill_child_tree_async(p).await; }
+    if let Some(p) = turn_pid {
+        kill_child_tree_async(p).await;
+    }
     let _ = child.start_kill();
     let _ = child.wait().await;
 }
@@ -2874,7 +3167,8 @@ async fn drain_stale_buffered_lines<R>(lines: &mut tokio::io::Lines<R>) -> usize
 where
     R: tokio::io::AsyncBufRead + Unpin,
 {
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(REUSE_DRAIN_BUDGET_MS);
+    let deadline =
+        tokio::time::Instant::now() + std::time::Duration::from_millis(REUSE_DRAIN_BUDGET_MS);
     let mut dropped = 0usize;
     loop {
         let now = tokio::time::Instant::now();
@@ -2931,7 +3225,11 @@ fn continuation_frame_kind(line: &str) -> Option<&'static str> {
                 .and_then(|p| p.as_str())
                 .map(|s| !s.is_empty())
                 .unwrap_or(false);
-            if nested { None } else { Some("assistant frame") }
+            if nested {
+                None
+            } else {
+                Some("assistant frame")
+            }
         }
         Some("system") if v.get("subtype").and_then(|s| s.as_str()) == Some("init") => {
             Some("turn init")
@@ -2959,8 +3257,21 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
     use tokio::io::AsyncWriteExt;
 
     let StreamCtx {
-        stdin, lines, steer_rx, app_out, win_label, stream_sid, model, effort, thinking_on,
-        user_line, preread, handshake_done, bg_evict, turn_start, turn_epoch,
+        stdin,
+        lines,
+        steer_rx,
+        app_out,
+        win_label,
+        stream_sid,
+        model,
+        effort,
+        thinking_on,
+        user_line,
+        preread,
+        handshake_done,
+        bg_evict,
+        turn_start,
+        turn_epoch,
     } = ctx;
     let mut preread = preread;
 
@@ -2980,7 +3291,9 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 tick.tick().await;
-                let Some(pid) = get_session_pid(&sid) else { continue };
+                let Some(pid) = get_session_pid(&sid) else {
+                    continue;
+                };
                 let Ok(rows) =
                     tokio::task::spawn_blocking(move || super::proc_tree::shell_rows(pid)).await
                 else {
@@ -2989,9 +3302,13 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
                 if last.as_ref() == Some(&rows) {
                     continue;
                 }
-                let _ = app.emit_to(&win, SHELL_ROWS_EVENT, serde_json::json!({
-                    "session_id": sid, "rows": rows, "turn_epoch": turn_epoch,
-                }));
+                let _ = app.emit_to(
+                    &win,
+                    SHELL_ROWS_EVENT,
+                    serde_json::json!({
+                        "session_id": sid, "rows": rows, "turn_epoch": turn_epoch,
+                    }),
+                );
                 last = Some(rows);
             }
         }))
@@ -3012,26 +3329,26 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
             // to write, and NO stale-drain — the buffered lines ARE the turn.
             true
         } else {
-        // Drop any stdout the child buffered after the PREVIOUS turn's `result`
-        // (post-result dribble, late ask_user/MCP-bridge control frames). Left in
-        // the pipe, that stale frame would be read as THIS turn's first output at
-        // ~0ms and render a prior turn's content as an instant, off-topic reply.
-        let dropped = drain_stale_buffered_lines(lines).await;
-        if dropped > 0 {
-            log::debug!("warm_pool: drained {dropped} stale buffered line(s) before reused turn, session={stream_sid}");
-        }
-        // Reused turn: a write failure here means the warm child died while
-        // parked. No output has been produced, so this is silently retryable —
-        // signal the loop to drop the child and let the dispatcher respawn cold.
-        if stdin.write_all(user_line).await.is_err() {
-            return TurnOutcome::DeadOnReuse;
-        }
-        // Flush failure here = the warm child's pipe broke (died while parked);
-        // no output produced yet, so it's retryable — drop + respawn cold. (#31)
-        if stdin.flush().await.is_err() {
-            return TurnOutcome::DeadOnReuse;
-        }
-        true
+            // Drop any stdout the child buffered after the PREVIOUS turn's `result`
+            // (post-result dribble, late ask_user/MCP-bridge control frames). Left in
+            // the pipe, that stale frame would be read as THIS turn's first output at
+            // ~0ms and render a prior turn's content as an instant, off-topic reply.
+            let dropped = drain_stale_buffered_lines(lines).await;
+            if dropped > 0 {
+                log::debug!("warm_pool: drained {dropped} stale buffered line(s) before reused turn, session={stream_sid}");
+            }
+            // Reused turn: a write failure here means the warm child died while
+            // parked. No output has been produced, so this is silently retryable —
+            // signal the loop to drop the child and let the dispatcher respawn cold.
+            if stdin.write_all(user_line).await.is_err() {
+                return TurnOutcome::DeadOnReuse;
+            }
+            // Flush failure here = the warm child's pipe broke (died while parked);
+            // no output produced yet, so it's retryable — drop + respawn cold. (#31)
+            if stdin.flush().await.is_err() {
+                return TurnOutcome::DeadOnReuse;
+            }
+            true
         }
     } else {
         false
@@ -3053,7 +3370,10 @@ async fn stream_one_turn(ctx: StreamCtx<'_>) -> TurnOutcome {
     // use the existing `turn_start` Instant.
     let ts_start_ms: u64 = {
         use std::time::{SystemTime, UNIX_EPOCH};
-        SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64
     };
     let mut perf_ttft_thinking_ms: Option<u64> = None;
     let mut perf_ttft_text_ms: Option<u64> = None;
@@ -3492,20 +3812,30 @@ async fn emit_turn_end_error(
 ) {
     // User clicked Stop → emit done (not error) so the UI clears + pops queue.
     if take_session_stopped(session_id) {
-        let _ = app.emit_to(window_label, DONE_EVENT, serde_json::json!({
-            "session_id": session_id,
-            "exit_code": status.and_then(|s| s.code()).unwrap_or(-1),
-            "turn_epoch": turn_epoch,
-        }));
+        let _ = app.emit_to(
+            window_label,
+            DONE_EVENT,
+            serde_json::json!({
+                "session_id": session_id,
+                "exit_code": status.and_then(|s| s.code()).unwrap_or(-1),
+                "turn_epoch": turn_epoch,
+            }),
+        );
         let _ = done.send(Ok(()));
         return;
     }
     // --resume index miss → session-lost so the frontend re-sends as first turn.
     if !is_first_turn && stderr_buf.contains("No conversation found with session ID:") {
-        log::warn!("warm_pool: --resume {session_id} failed (no conversation) — emitting session-lost");
-        let _ = app.emit_to(window_label, SESSION_LOST_EVENT, serde_json::json!({
-            "session_id": session_id, "turn_epoch": turn_epoch,
-        }));
+        log::warn!(
+            "warm_pool: --resume {session_id} failed (no conversation) — emitting session-lost"
+        );
+        let _ = app.emit_to(
+            window_label,
+            SESSION_LOST_EVENT,
+            serde_json::json!({
+                "session_id": session_id, "turn_epoch": turn_epoch,
+            }),
+        );
         let _ = done.send(Ok(()));
         return;
     }
@@ -3524,13 +3854,20 @@ async fn emit_turn_end_error(
     } else {
         format!(
             "claude exited with {} — {}",
-            status.and_then(|s| s.code()).map(|c| c.to_string()).unwrap_or_else(|| "signal".into()),
+            status
+                .and_then(|s| s.code())
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "signal".into()),
             raw
         )
     };
-    let _ = app.emit_to(window_label, ERROR_EVENT, serde_json::json!({
-        "session_id": session_id, "message": msg.clone(), "turn_epoch": turn_epoch,
-    }));
+    let _ = app.emit_to(
+        window_label,
+        ERROR_EVENT,
+        serde_json::json!({
+            "session_id": session_id, "message": msg.clone(), "turn_epoch": turn_epoch,
+        }),
+    );
     let _ = done.send(Err(msg));
 }
 
@@ -3543,21 +3880,36 @@ async fn emit_turn_end_error(
 static CUMULATIVE_CLI_API: Mutex<Option<HashMap<String, u64>>> = Mutex::new(None);
 
 fn prev_cumulative_cli_api(session_id: &str) -> u64 {
-    let mut g = match CUMULATIVE_CLI_API.lock() { Ok(g) => g, Err(p) => p.into_inner() };
-    g.get_or_insert_with(HashMap::new).get(session_id).copied().unwrap_or(0)
+    let mut g = match CUMULATIVE_CLI_API.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    g.get_or_insert_with(HashMap::new)
+        .get(session_id)
+        .copied()
+        .unwrap_or(0)
 }
 
 fn store_cumulative_cli_api(session_id: &str, cumulative: u64) {
-    let mut g = match CUMULATIVE_CLI_API.lock() { Ok(g) => g, Err(p) => p.into_inner() };
-    g.get_or_insert_with(HashMap::new).insert(session_id.to_string(), cumulative);
+    let mut g = match CUMULATIVE_CLI_API.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    g.get_or_insert_with(HashMap::new)
+        .insert(session_id.to_string(), cumulative);
 }
 
 /// Drop a session's cumulative-API entry when its reader loop ends, so the map
 /// only ever holds live sessions (the doc comment's "pruned lazily" promise —
 /// previously the map only ever grew, one stale entry per dead session).
 fn forget_cumulative_cli_api(session_id: &str) {
-    let mut g = match CUMULATIVE_CLI_API.lock() { Ok(g) => g, Err(p) => p.into_inner() };
-    if let Some(m) = g.as_mut() { m.remove(session_id); }
+    let mut g = match CUMULATIVE_CLI_API.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    if let Some(m) = g.as_mut() {
+        m.remove(session_id);
+    }
 }
 
 /// B2: build a `TurnPerf` from the result frame + accumulated TTFT milestones,
@@ -3585,14 +3937,23 @@ fn record_turn_perf(
     use crate::diagnostics::{self, perf::TurnPerf, DiagLevel, DiagStage};
 
     let usage = v.get("usage");
-    let input_tokens = usage.and_then(|u| u.get("input_tokens")).and_then(|x| x.as_u64());
-    let output_tokens = usage.and_then(|u| u.get("output_tokens")).and_then(|x| x.as_u64());
-    let cache_read_tokens =
-        usage.and_then(|u| u.get("cache_read_input_tokens")).and_then(|x| x.as_u64());
-    let cache_create_tokens =
-        usage.and_then(|u| u.get("cache_creation_input_tokens")).and_then(|x| x.as_u64());
+    let input_tokens = usage
+        .and_then(|u| u.get("input_tokens"))
+        .and_then(|x| x.as_u64());
+    let output_tokens = usage
+        .and_then(|u| u.get("output_tokens"))
+        .and_then(|x| x.as_u64());
+    let cache_read_tokens = usage
+        .and_then(|u| u.get("cache_read_input_tokens"))
+        .and_then(|x| x.as_u64());
+    let cache_create_tokens = usage
+        .and_then(|u| u.get("cache_creation_input_tokens"))
+        .and_then(|x| x.as_u64());
     let cost_usd = v.get("total_cost_usd").and_then(|x| x.as_f64());
-    let result_subtype = v.get("subtype").and_then(|s| s.as_str()).map(|s| s.to_owned());
+    let result_subtype = v
+        .get("subtype")
+        .and_then(|s| s.as_str())
+        .map(|s| s.to_owned());
     // CLI self-reported timing (server-side truth, independent of Rift): `ttft_ms`
     // = turn-start → first model token (the API's real latency), `duration_api_ms`
     // = total wall-time in API calls. Lets the Health pane attribute the model's
@@ -3605,11 +3966,14 @@ fn record_turn_perf(
     // `avg_cli_api_ms`), so storing the raw cumulative inflated the model's share
     // and zeroed Rift overhead for every turn 2+ in the AI Health attribution.
     // First turn (no prior) uses the value as-is.
-    let cli_api_ms = v.get("duration_api_ms").and_then(|x| x.as_u64()).map(|api| {
-        let prev = prev_cumulative_cli_api(stream_sid);
-        store_cumulative_cli_api(stream_sid, api);
-        api.saturating_sub(prev)
-    });
+    let cli_api_ms = v
+        .get("duration_api_ms")
+        .and_then(|x| x.as_u64())
+        .map(|api| {
+            let prev = prev_cumulative_cli_api(stream_sid);
+            store_cumulative_cli_api(stream_sid, api);
+            api.saturating_sub(prev)
+        });
 
     let cache_hit_rate = match (cache_read_tokens, input_tokens) {
         (Some(r), Some(i)) if r + i > 0 => Some(r as f64 / (r + i) as f64),
@@ -3618,9 +3982,18 @@ fn record_turn_perf(
 
     // WS6: attribute the first-reply wait to its dominant phase so the advisor
     // names the lever instead of inferring it. Pure fn in `perf`, unit-tested.
-    let pre_text_tool = if pre_text_tool_ms > 0 { Some(pre_text_tool_ms) } else { None };
+    let pre_text_tool = if pre_text_tool_ms > 0 {
+        Some(pre_text_tool_ms)
+    } else {
+        None
+    };
     let dominant_cause = crate::diagnostics::perf::classify_latency_cause(
-        ttft_text_ms, ttft_thinking_ms, first_line_ms, pre_text_tool, was_cold, cache_hit_rate,
+        ttft_text_ms,
+        ttft_thinking_ms,
+        first_line_ms,
+        pre_text_tool,
+        was_cold,
+        cache_hit_rate,
     );
 
     let rec = TurnPerf {
@@ -3642,7 +4015,11 @@ fn record_turn_perf(
         // The flag we actually sent: thinking-off floors any tier to "low"
         // (#69 — distinguishes a real deep turn from a floored one). Mirrors
         // `send_effort_flag` (which needs a &'static arg; `effort` here is borrowed).
-        send_effort: Some(if thinking_on { effort.to_owned() } else { "low".to_owned() }),
+        send_effort: Some(if thinking_on {
+            effort.to_owned()
+        } else {
+            "low".to_owned()
+        }),
         thinking_on: Some(thinking_on),
         ttft_first_line_ms: first_line_ms,
         pre_text_tool_ms: pre_text_tool,
@@ -3722,9 +4099,26 @@ pub async fn assistant_stop(
     permissions: tauri::State<'_, std::sync::Arc<PermissionRegistry>>,
 ) -> Result<(), String> {
     if !is_valid_session_id(&session_id) {
-        return Err(format!("invalid session_id: must be a UUID (got {} chars)", session_id.len()));
+        return Err(format!(
+            "invalid session_id: must be a UUID (got {} chars)",
+            session_id.len()
+        ));
     }
     mark_session_stopped(&session_id);
+    // Cancel permission asks before provider-specific early returns. OpenAI
+    // function calls use the same registry, so returning immediately after
+    // cancelling its HTTP stream would otherwise leave the approval card and
+    // oneshot parked until timeout.
+    let perms_cancelled = permissions.cancel_all_for_session(&session_id);
+    if perms_cancelled > 0 {
+        log::info!("assistant_stop: cancelled {perms_cancelled} pending permission ask(s) for {session_id}");
+    }
+    // OpenAI turns are native HTTP streams rather than child processes. Cancel
+    // their token before falling through to the Claude PID path. No active
+    // token means this is a Claude/idle session and existing behavior applies.
+    if super::openai::cancel_session(&session_id) {
+        return Ok(());
+    }
     // Unblock any parked ask_user for this session FIRST — independent of the
     // PID kill. A warm child blocked in the bridge on an ask_user oneshot can't
     // be reached by `taskkill` if its PID was already cleared (eviction /
@@ -3741,10 +4135,6 @@ pub async fn assistant_stop(
     // the full 120s timeout — the real prod wedge (child stuck 9+ min after a
     // permission card timed out). Dropping the sender resolves the await `Err` →
     // the reader denies + writes the control_response → the UI tool-chip clears.
-    let perms_cancelled = permissions.cancel_all_for_session(&session_id);
-    if perms_cancelled > 0 {
-        log::info!("assistant_stop: cancelled {perms_cancelled} pending permission ask(s) for {session_id}");
-    }
     // Fallback: SESSION_PIDS is per-turn (cleared on reap/eviction), but a WARM
     // child can outlive that entry and sit wedged (the documented "PID already
     // cleared" hole above). Without this, Stop on a wedged warm child silently
@@ -3816,7 +4206,10 @@ pub async fn assistant_stop(
 #[tauri::command]
 pub async fn assistant_kill_shell(session_id: String, pid: u32) -> Result<(), String> {
     if !is_valid_session_id(&session_id) {
-        return Err(format!("invalid session_id: must be a UUID (got {} chars)", session_id.len()));
+        return Err(format!(
+            "invalid session_id: must be a UUID (got {} chars)",
+            session_id.len()
+        ));
     }
     let Some(root) = get_session_pid(&session_id) else {
         return Ok(()); // turn already over — the shell tree died with it
@@ -3831,7 +4224,6 @@ pub async fn assistant_kill_shell(session_id: String, pid: u32) -> Result<(), St
     kill_child_tree_async(pid).await;
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -3861,19 +4253,37 @@ mod tests {
         // {"subtype":"set_model","model":"…"}} + trailing newline. A drift here
         // silently no-ops the push (the CLI errors the ack, the turn runs on
         // the OLD model/mode while the SpawnKey claims the new one).
-        let line = super::control_push_line("set_model", serde_json::json!({ "model": "claude-sonnet-5[1m]" }));
-        assert_eq!(line.last(), Some(&b'\n'), "stream-json lines are newline-delimited");
-        let v: serde_json::Value = serde_json::from_slice(&line[..line.len() - 1]).expect("valid JSON");
+        let line = super::control_push_line(
+            "set_model",
+            serde_json::json!({ "model": "claude-sonnet-5[1m]" }),
+        );
+        assert_eq!(
+            line.last(),
+            Some(&b'\n'),
+            "stream-json lines are newline-delimited"
+        );
+        let v: serde_json::Value =
+            serde_json::from_slice(&line[..line.len() - 1]).expect("valid JSON");
         assert_eq!(v["type"], "control_request");
         assert_eq!(v["request"]["subtype"], "set_model");
         assert_eq!(v["request"]["model"], "claude-sonnet-5[1m]");
-        assert!(v["request_id"].as_str().unwrap_or("").starts_with("rift-push-"));
+        assert!(v["request_id"]
+            .as_str()
+            .unwrap_or("")
+            .starts_with("rift-push-"));
 
-        let perm = super::control_push_line("set_permission_mode", serde_json::json!({ "mode": "acceptEdits" }));
-        let p: serde_json::Value = serde_json::from_slice(&perm[..perm.len() - 1]).expect("valid JSON");
+        let perm = super::control_push_line(
+            "set_permission_mode",
+            serde_json::json!({ "mode": "acceptEdits" }),
+        );
+        let p: serde_json::Value =
+            serde_json::from_slice(&perm[..perm.len() - 1]).expect("valid JSON");
         assert_eq!(p["request"]["subtype"], "set_permission_mode");
         assert_eq!(p["request"]["mode"], "acceptEdits");
-        assert_ne!(p["request_id"], v["request_id"], "request ids are unique per push");
+        assert_ne!(
+            p["request_id"], v["request_id"],
+            "request ids are unique per push"
+        );
     }
 
     // Plan-approval return mode: stripped from the decision ALWAYS (Rift-private,
@@ -3881,19 +4291,40 @@ mod tests {
     #[test]
     fn take_plan_return_mode_strips_and_validates() {
         let mut allow = serde_json::json!({ "behavior": "allow", "riftReturnMode": "acceptEdits" });
-        assert_eq!(super::take_plan_return_mode(&mut allow).as_deref(), Some("acceptEdits"));
-        assert!(allow.get("riftReturnMode").is_none(), "stripped before the control_response");
+        assert_eq!(
+            super::take_plan_return_mode(&mut allow).as_deref(),
+            Some("acceptEdits")
+        );
+        assert!(
+            allow.get("riftReturnMode").is_none(),
+            "stripped before the control_response"
+        );
 
         let mut deny = serde_json::json!({ "behavior": "deny", "message": "no", "riftReturnMode": "acceptEdits" });
-        assert_eq!(super::take_plan_return_mode(&mut deny), None, "deny never pushes a mode");
-        assert!(deny.get("riftReturnMode").is_none(), "stripped even on deny");
+        assert_eq!(
+            super::take_plan_return_mode(&mut deny),
+            None,
+            "deny never pushes a mode"
+        );
+        assert!(
+            deny.get("riftReturnMode").is_none(),
+            "stripped even on deny"
+        );
 
         let mut junk = serde_json::json!({ "behavior": "allow", "riftReturnMode": "sudo" });
-        assert_eq!(super::take_plan_return_mode(&mut junk), None, "invalid mode rejected");
+        assert_eq!(
+            super::take_plan_return_mode(&mut junk),
+            None,
+            "invalid mode rejected"
+        );
         assert!(junk.get("riftReturnMode").is_none());
 
         let mut plain = serde_json::json!({ "behavior": "allow" });
-        assert_eq!(super::take_plan_return_mode(&mut plain), None, "absent field is a no-op");
+        assert_eq!(
+            super::take_plan_return_mode(&mut plain),
+            None,
+            "absent field is a no-op"
+        );
     }
 
     #[test]
@@ -3905,14 +4336,26 @@ mod tests {
         // defaults to false) must therefore SKIP the shim, or every Fable send
         // hard-errors for any user whose CLI honors ANTHROPIC_BASE_URL. Opus and
         // Sonnet accept the disabled block, so they still use it.
-        assert!(!routes_through_nothink_shim(false, FABLE_MODEL), "Fable thinking-off must skip the shim (API 400s on disabled)");
-        assert!(!routes_through_nothink_shim(true, FABLE_MODEL), "Fable thinking-on never uses the shim either");
-        assert!(!routes_through_nothink_shim(false, HAIKU_MODEL), "Haiku has no thinking to disable");
+        assert!(
+            !routes_through_nothink_shim(false, FABLE_MODEL),
+            "Fable thinking-off must skip the shim (API 400s on disabled)"
+        );
+        assert!(
+            !routes_through_nothink_shim(true, FABLE_MODEL),
+            "Fable thinking-on never uses the shim either"
+        );
+        assert!(
+            !routes_through_nothink_shim(false, HAIKU_MODEL),
+            "Haiku has no thinking to disable"
+        );
         // Opus / Sonnet thinking-off DO route through the shim (they accept the
         // explicit disabled block); thinking-on never does.
         assert!(routes_through_nothink_shim(false, "opus"));
         assert!(routes_through_nothink_shim(false, "sonnet"));
-        assert!(!routes_through_nothink_shim(true, "opus"), "thinking-on never uses the shim");
+        assert!(
+            !routes_through_nothink_shim(true, "opus"),
+            "thinking-on never uses the shim"
+        );
     }
 
     #[tokio::test]
@@ -3929,7 +4372,10 @@ mod tests {
         );
         let mut lines = BufReader::new(stale.as_bytes()).lines();
         let dropped = drain_stale_buffered_lines(&mut lines).await;
-        assert_eq!(dropped, 3, "all three buffered residue lines must be dropped");
+        assert_eq!(
+            dropped, 3,
+            "all three buffered residue lines must be dropped"
+        );
         // Buffer is now at EOF — nothing leaks into the would-be next read.
         assert!(lines.next_line().await.unwrap().is_none());
     }
@@ -3949,7 +4395,10 @@ mod tests {
         // requested" incident: a benign window must NOT inject the plan-usage
         // reminder (which paired with the addendum steer to make the model go
         // passive on short user turns). The reproduced case was 16% / 67%.
-        assert!(!plan_usage_is_hot(16.0, 67.0), "16%/67% is healthy — must stay silent");
+        assert!(
+            !plan_usage_is_hot(16.0, 67.0),
+            "16%/67% is healthy — must stay silent"
+        );
         assert!(!plan_usage_is_hot(0.0, 0.0));
         assert!(!plan_usage_is_hot(89.9, 94.9), "just under both thresholds");
     }
@@ -3977,12 +4426,21 @@ mod tests {
 
         // Healthy long tool under the ceiling → keep re-arming, no matter how
         // long the pipe has been dead-silent (#88).
-        assert!(!watchdog_should_stall(1, under), "live tool under ceiling re-arms");
-        assert!(!watchdog_should_stall(3, under), "nested tools under ceiling re-arm");
+        assert!(
+            !watchdog_should_stall(1, under),
+            "live tool under ceiling re-arms"
+        );
+        assert!(
+            !watchdog_should_stall(3, under),
+            "nested tools under ceiling re-arm"
+        );
 
         // Past the ceiling → stall, chatty or silent alike.
         assert!(watchdog_should_stall(1, over), "tool past ceiling stalls");
-        assert!(watchdog_should_stall(5, over + 3600), "deeply wedged sub-agent stalls");
+        assert!(
+            watchdog_should_stall(5, over + 3600),
+            "deeply wedged sub-agent stalls"
+        );
 
         // No tool in flight → the plain no-progress stall (silent pipe).
         assert!(watchdog_should_stall(0, 0), "silent pipe, no tool → stall");
@@ -4000,11 +4458,20 @@ mod tests {
         );
         stash_interrupted_tools("test-sid-88", &inflight);
         let took = take_interrupted_tools("test-sid-88").expect("stashed note must be takeable");
-        assert_eq!(took, vec!["Bash(Start-Process -Verb RunAs -Wait deploy.ps1)".to_string()]);
-        assert!(take_interrupted_tools("test-sid-88").is_none(), "note is consumed on take");
+        assert_eq!(
+            took,
+            vec!["Bash(Start-Process -Verb RunAs -Wait deploy.ps1)".to_string()]
+        );
+        assert!(
+            take_interrupted_tools("test-sid-88").is_none(),
+            "note is consumed on take"
+        );
 
         stash_interrupted_tools("test-sid-88-clean", &std::collections::HashMap::new());
-        assert!(take_interrupted_tools("test-sid-88-clean").is_none(), "clean turn stashes nothing");
+        assert!(
+            take_interrupted_tools("test-sid-88-clean").is_none(),
+            "clean turn stashes nothing"
+        );
     }
 
     // #88 follow-up: `resolve_spawn` runs for BOTH sends and prewarms, but a
@@ -4050,29 +4517,48 @@ mod tests {
         assert_eq!(out.last(), Some(&b'\n'), "stays a valid NDJSON line");
         let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
         let text = v["message"]["content"][0]["text"].as_str().unwrap();
-        assert!(text.starts_with("<system-reminder>"), "note leads the prompt");
+        assert!(
+            text.starts_with("<system-reminder>"),
+            "note leads the prompt"
+        );
         assert!(text.contains("Bash(deploy.ps1)"));
-        assert!(text.ends_with("redeploy please"), "original prompt preserved");
-        assert!(take_interrupted_tools("sid-inject").is_none(), "stash consumed by the splice");
+        assert!(
+            text.ends_with("redeploy please"),
+            "original prompt preserved"
+        );
+        assert!(
+            take_interrupted_tools("sid-inject").is_none(),
+            "stash consumed by the splice"
+        );
 
         // Unparseable line → returned untouched AND the stash survives for the
         // next ordinary send (peek-then-take).
         stash_interrupted_tools("sid-inject-2", &inflight);
         let junk = b"not json\n".to_vec();
-        assert_eq!(super::inject_interrupted_note(junk.clone(), "sid-inject-2"), junk);
-        assert!(take_interrupted_tools("sid-inject-2").is_some(), "stash preserved on parse failure");
+        assert_eq!(
+            super::inject_interrupted_note(junk.clone(), "sid-inject-2"),
+            junk
+        );
+        assert!(
+            take_interrupted_tools("sid-inject-2").is_some(),
+            "stash preserved on parse failure"
+        );
     }
 
     #[test]
     fn tool_use_desc_prefers_identifying_input_and_caps_length() {
         let bash = serde_json::json!({"name":"Bash","input":{"command":"git push origin main"}});
         assert_eq!(tool_use_desc(&bash), "Bash(git push origin main)");
-        let write = serde_json::json!({"name":"Write","input":{"file_path":"src/a.ts","content":"..."}});
+        let write =
+            serde_json::json!({"name":"Write","input":{"file_path":"src/a.ts","content":"..."}});
         assert_eq!(tool_use_desc(&write), "Write(src/a.ts)");
         // Unknown input shape falls back to compact JSON; long inputs are
         // char-capped (never byte-sliced — no mid-UTF-8 panic).
         let long_cmd = "循".repeat(500);
         let big = serde_json::json!({"name":"Bash","input":{"command": long_cmd}});
-        assert_eq!(tool_use_desc(&big).chars().count(), "Bash()".chars().count() + 180);
+        assert_eq!(
+            tool_use_desc(&big).chars().count(),
+            "Bash()".chars().count() + 180
+        );
     }
 }

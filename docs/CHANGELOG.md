@@ -2,6 +2,15 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## Unreleased — Claude + OpenAI, one workspace
+
+- **OpenAI is a first-class provider.** Connect an OpenAI API key in Settings, discover models available to that API account, choose GPT per conversation, and stream Responses API output beside the existing Claude CLI route. ChatGPT subscriptions remain separate from API billing and are labeled clearly in-product.
+- **Shared tools and safety.** GPT turns support image input, reasoning effort, cancellation, usage reporting, and the same workspace-scoped file/search/git tools and permission prompts as Claude. OpenAI requests use `store: false`; conversation history stays in Rift's local records and API keys stay in the OS keychain.
+- **Faster startup.** Workspace screens now load on demand instead of shipping Chat, Settings, Workspace, Diagnostics, and AI Health in the initial route. The measured main route chunk dropped from 979.96 kB (194.41 kB gzip) to 0.11 kB (0.12 kB gzip); opened screens remain mounted so switching back is instant and state-safe.
+- **Cleaner internal API surface.** Unused exports were made module-private and the Rust workspace is Clippy-clean. The remaining dead-file scanner hits are intentional standalone/generator assets, not abandoned app code.
+- **Codex connection boundary.** Providers now finds a runnable standalone Codex CLI and can launch its official ChatGPT browser sign-in without copying auth files. The Windows Desktop package helper is explicitly rejected; an App Server turn route stays hidden until it has authenticated stream and approval coverage.
+- **Clearer control center.** The intro now exits as one clean left/right split; Settings and Workspace share a compact provider-readiness view; Workspace labels its official Claude Code news source and keeps the optional Claude digest unavailable until that route is connected.
+
 ## v0.149.0 — Autocorrect learns your words, and Rift cleans up after itself
 
 - **Autocorrect stops eating names like "FiveM".** Before "fixing" a word it doesn't recognise, it now asks Windows' own spellchecker, treats your open project's file names as real vocabulary, and ships knowing common gaming and dev terms (fivem, redm, obs, ryzen…). Real typos still get corrected exactly as before.

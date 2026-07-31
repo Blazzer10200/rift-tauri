@@ -2,13 +2,13 @@
 // serve.cjs - Long-running CDP wrapper for Rift's WebView2.
 //
 // Holds persistent WebSockets to WebView2 on localhost:9222, exposes a small
-// HTTP API on localhost:9223 so Claude (from a bash session) can fire commands
+// HTTP API on localhost:9223 so a coding agent can fire commands from bash
 // via curl with ~50ms total roundtrip instead of ~700ms PowerShell cold start.
 //
 // MULTI-TARGET (2026-05-28): WebView2 exposes every page as its own CDP target.
 // Rift's main UI is one (`http://localhost:1420/`); the in-app browser dock's
 // native child webview (Tauri `add_child`) is a SEPARATE target. Commands take
-// an optional `target` selector so Claude can observe/drive the embedded
+// an optional `target` selector so the agent can observe/drive the embedded
 // browser, not just the main UI:
 //   main    (default) -> the Rift app page (localhost:1420)
 //   browser           -> the embedded browser child webview (any non-localhost page)
@@ -25,6 +25,7 @@
 //   POST /wait     { js, timeoutMs?, intervalMs? } -> { value, polls, elapsedMs }
 //   POST /screenshot { format?, quality?, clip?, selector? } -> { path, bytes }
 //   POST /look     { selector?, level?, noShot? } -> { page, errors, errorCount, shot } (verify primitive)
+//   GET/POST /controls { selector?, limit?, includeHidden? } -> actionable controls + robust selectors
 //   POST /key      { key, modifiers? }          -> { ok, key }
 //   GET  /state                                 -> assistant-state snapshot
 //   GET  /page                                  -> generic page snapshot
@@ -240,7 +241,7 @@ class Conn {
             return;
         }
         // Events carry a `method`, never an `id`. Previously dropped on the floor —
-        // now funnelled into the log ring buffer so Claude can read what the UI
+        // now funnelled into the log ring buffer so the agent can read what the UI
         // printed/threw between commands (otherwise invisible to eval/state/DOM).
         if (frame.method) this._onEvent(frame.method, frame.params || {});
     }
@@ -576,6 +577,78 @@ async function findElements({ query, limit = 12 } = {}, target = 'main') {
     const r = await evalJs(js, 15000, target);
     if (r.error) return { error: r.error };
     return r.value;
+}
+
+// /controls — enumerate the actionable surface without requiring the caller to
+// know a label first. Unlike /ax, every row includes a document-unique selector
+// that can be handed directly to /click or `c.sh act click`. DOM order is kept so
+// the result doubles as a compact navigation map.
+async function controlInventory({ selector, limit = 80, includeHidden = false } = {}, target = 'main') {
+    const cap = Math.max(1, Math.min(Number(limit) || 80, 200));
+    const showHidden = includeHidden === true || includeHidden === '1' || includeHidden === 'true';
+    const js = `(() => {
+        ${UNIQ_JS}
+        const root = ${selector ? `document.querySelector(${JSON.stringify(selector)})` : 'document'};
+        if (!root) return { error: 'selector not found: ' + ${JSON.stringify(selector || '')} };
+        const query = 'button, a[href], input:not([type="hidden"]), textarea, select, summary, [role], [tabindex], [contenteditable="true"], [aria-label]';
+        const raw = [];
+        if (root instanceof Element && root.matches(query)) raw.push(root);
+        raw.push(...root.querySelectorAll(query));
+        const controls = [];
+        const seen = new Set();
+        let total = 0;
+        for (const el of raw) {
+            const tag = el.tagName.toLowerCase();
+            const explicitRole = el.getAttribute('role') || '';
+            const interactive = ['button','a','input','textarea','select','summary'].includes(tag)
+                || ['button','link','tab','menuitem','menuitemcheckbox','menuitemradio','checkbox','radio','switch','combobox','textbox','option','slider','spinbutton'].includes(explicitRole)
+                || el.tabIndex >= 0 || el.isContentEditable || typeof el.onclick === 'function'
+                || el.hasAttribute('aria-controls') || el.hasAttribute('aria-expanded');
+            if (!interactive) continue;
+            const r = el.getBoundingClientRect();
+            const cs = getComputedStyle(el);
+            const visible = !!(r.width && r.height && el.getClientRects().length)
+                && cs.visibility !== 'hidden' && cs.display !== 'none'
+                && cs.opacity !== '0' && el.getAttribute('aria-hidden') !== 'true';
+            if (!${showHidden} && !visible) continue;
+            total++;
+            if (controls.length >= ${cap}) continue;
+            const css = uniqSel(el);
+            if (seen.has(css)) continue;
+            seen.add(css);
+            const type = (el.getAttribute('type') || '').toLowerCase();
+            let role = explicitRole;
+            if (!role) {
+                if (tag === 'a') role = 'link';
+                else if (tag === 'button' || tag === 'summary') role = 'button';
+                else if (tag === 'textarea') role = 'textbox';
+                else if (tag === 'select') role = 'combobox';
+                else if (tag === 'input') role = ['checkbox','radio','range','number'].includes(type)
+                    ? ({ checkbox:'checkbox', radio:'radio', range:'slider', number:'spinbutton' })[type]
+                    : 'textbox';
+                else role = 'control';
+            }
+            const rawLabel = el.getAttribute('aria-label') || el.getAttribute('title')
+                || el.getAttribute('placeholder') || (el.innerText || el.textContent)
+                || (typeof el.value === 'string' ? el.value : '') || el.getAttribute('name') || '';
+            const label = rawLabel.trim().replace(/\\s+/g, ' ').slice(0, 80);
+            const states = [];
+            if (el.disabled || el.getAttribute('aria-disabled') === 'true') states.push('disabled');
+            if (el.checked || el.getAttribute('aria-checked') === 'true') states.push('checked');
+            if (el.getAttribute('aria-expanded')) states.push('expanded=' + el.getAttribute('aria-expanded'));
+            if (el.selected || el.getAttribute('aria-selected') === 'true') states.push('selected');
+            controls.push({ selector: css, role, label, visible,
+                state: states.join(',') || null,
+                shortcut: el.getAttribute('aria-keyshortcuts') || null,
+                rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) } });
+        }
+        return { count: controls.length, total, truncated: total > controls.length, controls };
+    })()`;
+    const r = await evalJs(js, 15000, target);
+    if (r.error) return { error: r.error };
+    const v = r.value || {};
+    if (v.error && selector) v.suggestions = await suggestSelectors(selector, target);
+    return v;
 }
 
 // /text — read the page/element as normalized rendered text (exact content,
@@ -1294,6 +1367,7 @@ async function runOp({ op, params = {}, target }, batchTarget = 'main') {
         case 'sleep': { const ms = Math.max(0, Math.min(params.ms ?? 300, 10000)); await new Promise(r => setTimeout(r, ms)); return { ok: true, sleptMs: ms }; }
         case 'settle': return settleQuiet(params, t);
         case 'find': return findElements(params, t);
+        case 'controls': return controlInventory(params, t);
         case 'text': return pageText(params, t);
         case 'key': return pressKey(params, t);
         case 'screenshot': return screenshot(params, t);
@@ -1368,6 +1442,8 @@ const routes = {
     'POST /ax': async (body, target) => axTree(body, target),
     'GET /find': async (body, target, query) => findElements(query, target),
     'POST /find': async (body, target) => findElements(body, target),
+    'GET /controls': async (body, target, query) => controlInventory(query, target),
+    'POST /controls': async (body, target) => controlInventory(body, target),
     'GET /text': async (body, target, query) => pageText(query, target),
     'POST /text': async (body, target) => pageText(body, target),
     'POST /measure': async (body, target) => measure(body, target),

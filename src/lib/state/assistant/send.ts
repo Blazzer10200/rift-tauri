@@ -18,7 +18,7 @@ import { accessibility } from "../accessibility.svelte";
 import { notify } from "../toast.svelte";
 import type { AssistantStore, TabState } from "../assistant.svelte";
 import type { Block, ChatMessage, ModelSel, QueueItem, TurnRecord } from "./types";
-import { effortToFlag, fableAvailable, fastEligible, haikuAvailable, FABLE_SUNSET_MS } from "./helpers";
+import { effortToFlag, fableAvailable, fastEligible, haikuAvailable, isOpenAIModel, FABLE_SUNSET_MS } from "./helpers";
 import { mcpPanel } from "../mcp-panel.svelte";
 import { appendSteerBlock, finalizeInflightBlocks, removeSteerBlock } from "./streaming";
 
@@ -63,11 +63,15 @@ export async function send(
   // queue drains, programmatic retries). A turn with no usable Claude session
   // dies as "claude exited with 1"; block it, re-probe (state may be stale),
   // and surface the reason. Slash commands above are local, so they still run.
-  if (!store.authReady) {
-    notify.danger("Claude isn't set up", {
-      detail: store.auth?.summary ?? "Open Settings to sign in or add an API key.",
+  if (!store.authReadyFor(liveTab)) {
+    const openai = isOpenAIModel(liveTab?.modelOverride ?? store.model);
+    notify.danger(openai ? "OpenAI isn't set up" : "Claude isn't set up", {
+      detail: openai
+        ? store.openAiStatus?.summary ?? "Open Settings → Providers and add an OpenAI API key."
+        : store.auth?.summary ?? "Open Settings to sign in or add an API key.",
     });
-    void store.refreshAuth();
+    if (openai) void store.refreshOpenAiStatus();
+    else void store.refreshAuth();
     return;
   }
   // Already streaming on this tab → STEER first (inject into the live turn so
@@ -326,7 +330,21 @@ export async function send(
     ? (trimmed ? `${textBlocks}\n\n${trimmed}` : textBlocks)
     : trimmed;
   try {
-    await invoke("assistant_send", {
+    const command = isOpenAIModel(effModel) ? "assistant_openai_send" : "assistant_send";
+    const openAiHistory = isOpenAIModel(effModel)
+      ? tab.openAiHistory.length > 0
+        ? tab.openAiHistory
+        : tab.messages.slice(0, -2).flatMap((message) => {
+          if (message.role !== "user" && message.role !== "assistant") return [];
+          const content = message.blocks
+            .filter((block): block is Extract<Block, { type: "text" }> => block.type === "text")
+            .map((block) => block.text)
+            .join("\n")
+            .trim();
+          return content ? [{ role: message.role, content }] : [];
+        })
+      : undefined;
+    await invoke(command, {
       prompt: effectivePrompt,
       sessionId: tab.cliSessionId,
       turnEpoch: tab.turnEpoch,
@@ -348,6 +366,7 @@ export async function send(
       // Per-tab root: each pane/window runs its turns in its own folder. Only
       // read on the first turn backend-side (then pinned per-session).
       root: store.effectiveRoot(tab),
+      history: openAiHistory,
     });
   } catch (e) {
     tab.onError(String(e));
@@ -375,6 +394,12 @@ async function steerOrQueue(
   };
   const sid = tab.cliSessionId;
   if (!sid) {
+    enqueue();
+    return;
+  }
+  // Responses HTTP streaming has no same-request steer channel. Keep the
+  // message ordered in Rift's ordinary queue and send it as the next turn.
+  if (isOpenAIModel(tab.pinnedModel ?? tab.modelOverride)) {
     enqueue();
     return;
   }
@@ -598,12 +623,18 @@ function runSlash(store: AssistantStore, input: string, tab: TabState | null): b
         v === "sonnet" || v === "opus" ? v
         : v === "fable" && fableAvailable() ? "claude-fable-5"
         : v === "haiku" && haikuAvailable() ? "haiku"
+        : v === "gpt" || v === "gpt-5.6" ? "gpt-5.6"
+        : v === "sol" || v === "gpt-5.6-sol" ? "gpt-5.6-sol"
+        : v === "terra" || v === "gpt-5.6-terra" ? "gpt-5.6-terra"
+        : v === "luna" || v === "gpt-5.6-luna" ? "gpt-5.6-luna"
         : null;
-      if (id) {
-        store.setModel(id);
-        notify.ok(`Model switched to ${v}.`);
+      if (id && store.openAiModelAvailable(id)) {
+        void store.selectModel(id);
+        notify.ok(`Model selected: ${v}.`);
+      } else if (id) {
+        store.lastError = `${v} isn't available to this OpenAI API account.`;
       } else {
-        const names = ["sonnet", "opus", ...(fableAvailable() ? ["fable"] : []), ...(haikuAvailable() ? ["haiku"] : [])];
+        const names = ["sonnet", "opus", "gpt", "sol", "terra", "luna", ...(fableAvailable() ? ["fable"] : []), ...(haikuAvailable() ? ["haiku"] : [])];
         store.lastError = `Unknown model "${arg}". Use ${names.join(", ")}.`;
       }
       return true;

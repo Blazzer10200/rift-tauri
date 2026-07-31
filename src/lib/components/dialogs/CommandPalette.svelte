@@ -11,6 +11,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { commandPalette, type SettingsSection } from "../../state/command-palette.svelte";
   import { workspace, type WorkspaceId } from "../../state/workspace.svelte";
+  import { goHome } from "../../state/nav";
   import { assistant } from "../../state/assistant.svelte";
   import { projects } from "../../state/projects.svelte";
   import { relTime } from "../workspace/hubHelpers";
@@ -46,24 +47,37 @@
   const items = $derived.by<Item[]>(() => {
     const out: Item[] = [];
 
-    // Workspace navigation
-    // Labels match the sidebar nav + workspaces registry — "Workspace" is the
-    // home/dashboard surface (NOT "Home", which collided with the empty-chat
-    // label). Keeps "Go to …" consistent across palette, sidebar, and titlebar.
-    const navs: { id: WorkspaceId; label: string; icon: Icon; kbd: string }[] = [
-      { id: "home",     label: "Workspace", icon: Home,          kbd: "Ctrl+1" },
-      { id: "chat",     label: "Chat",      icon: MessageSquare, kbd: "Ctrl+2" },
-      { id: "settings", label: "Settings",  icon: SettingsIcon,  kbd: "Ctrl+3" },
-    ];
-    for (const n of navs) {
+    // Ctrl+number follows workspace.order in AppShell. Derive both the
+    // destination and its hint from that order so reordering cannot desync the
+    // palette. "projects" is migration-only and never gets a second Workspace
+    // entry. Ctrl+1's home behavior is deliberately the fresh-chat verb; the
+    // Workspace hub remains available as its own unbound destination below.
+    const navs: Record<Exclude<WorkspaceId, "projects">, { label: string; icon: Icon }> = {
+      home: { label: "Home", icon: Home },
+      chat: { label: "Chat", icon: MessageSquare },
+      settings: { label: "Settings", icon: SettingsIcon },
+      "ai-health": { label: "AI Health", icon: Sparkles },
+      diagnostics: { label: "Diagnostics", icon: Info },
+    };
+    out.push({
+      id: "nav:workspace",
+      label: "Go to Workspace",
+      group: "Go to",
+      icon: Home,
+      keywords: "workspace hub projects dashboard",
+      run: () => workspace.setActive("home"),
+    });
+    for (const [idx, id] of workspace.order.entries()) {
+      if (id === "projects") continue;
+      const n = navs[id];
       out.push({
-        id: `nav:${n.id}`,
+        id: `nav:${id}`,
         label: `Go to ${n.label}`,
-        kbd: n.kbd,
+        kbd: `Ctrl+${idx + 1}`,
         group: "Go to",
         icon: n.icon,
-        keywords: `workspace pane home ${n.id}`,
-        run: () => workspace.setActive(n.id),
+        keywords: `workspace pane home ${id}`,
+        run: () => id === "home" ? goHome() : workspace.setActive(id),
       });
     }
 

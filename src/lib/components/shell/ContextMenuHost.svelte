@@ -8,6 +8,7 @@
   $effect(() => {
     const cur = contextMenu.current;
     if (!cur) return;
+    const invokingEl = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     pos = { x: cur.x, y: cur.y };
     // Clamp into viewport on the next frame so we have real dimensions.
     const raf = requestAnimationFrame(() => {
@@ -19,12 +20,28 @@
       if (nx + r.width + 4 > vw) nx = Math.max(4, vw - r.width - 4);
       if (ny + r.height + 4 > vh) ny = Math.max(4, vh - r.height - 4);
       pos = { x: nx, y: ny };
+      menuEl?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
     });
     const onDown = (e: MouseEvent) => {
       if (menuEl && !menuEl.contains(e.target as Node)) contextMenu.close();
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") contextMenu.close();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        contextMenu.close();
+        return;
+      }
+      if (!menuEl || !["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+      const items = [...menuEl.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")];
+      if (!items.length) return;
+      e.preventDefault();
+      const active = document.activeElement;
+      const at = items.indexOf(active instanceof HTMLButtonElement ? active : items[0]);
+      const next = e.key === "Home" ? 0
+        : e.key === "End" ? items.length - 1
+        : e.key === "ArrowDown" ? (at + 1) % items.length
+        : (at - 1 + items.length) % items.length;
+      items[next]?.focus();
     };
     const onAway = () => contextMenu.close();
     document.addEventListener("mousedown", onDown, true);
@@ -37,6 +54,7 @@
       document.removeEventListener("keydown", onKey, true);
       window.removeEventListener("blur", onAway);
       window.removeEventListener("resize", onAway);
+      if (invokingEl?.isConnected) invokingEl.focus();
     };
   });
 

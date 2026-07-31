@@ -15,7 +15,7 @@ import {
 } from "lucide-svelte";
 import { addPersonalWord, correctText, correctWord } from "$lib/utils/autocorrect";
 
-export type CtxIcon = typeof Copy;
+type CtxIcon = typeof Copy;
 
 export type CtxMenuItem =
   | {

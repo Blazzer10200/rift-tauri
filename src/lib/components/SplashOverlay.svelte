@@ -99,12 +99,10 @@
   aria-label="Starting Rift"
   inert={exiting}
 >
-  <!-- Two chassis half-panels + the seam between them. On exit the surface
-       PARTS along the seam — the rift opens — revealing the app assembling
-       underneath (AppShell/Sidebar data-intro entrance). -->
+  <!-- Two chassis half-panels. The split itself is the one visual event: no
+       pre-drawn center line competes with the app opening underneath. -->
   <div class="panel left" aria-hidden="true"></div>
   <div class="panel right" aria-hidden="true"></div>
-  <div class="seam" aria-hidden="true"></div>
   <div class="lockup">
     <div class="mark"><RiftLogo size={64} /></div>
     <div class="wordmark">
@@ -125,10 +123,8 @@
 
 <style>
   /* The splash IS the chassis — the same recessed machined material the app's
-     islands sit in (AppShell .app), split into two half-panels with a seam
-     between them. Brand reads as engraving on the surface, not a lit stage;
-     the ONE accent voice is the seam. On exit the halves part along it —
-     the rift opens onto the app (DESIGN.md §5, amended 2026-07-23). */
+     islands sit in (AppShell .app), split into two half-panels. Brand reads as
+     engraving on the surface; the rift appears only when the halves part. */
   .splash {
     position: fixed;
     inset: 0;
@@ -165,55 +161,10 @@
     background-size: 160px 160px;
     opacity: 0.025;
   }
-  /* Machined inner edges: each half carries a dark seam-facing cut. Only
-     visible once the halves part — the cut edge of the material. */
-  .panel.left  { box-shadow: inset -1px 0 0 oklch(0 0 0 / 0.45); }
-  .panel.right { box-shadow: inset 1px 0 0 oklch(0 0 0 / 0.45); }
+  /* The inner cuts are deliberately invisible at rest. They only become
+     apparent as negative space when the two chassis halves move apart. */
   .splash[data-exiting="true"] .panel.left  { transform: translateX(-101%); }
   .splash[data-exiting="true"] .panel.right { transform: translateX(101%); }
-
-  /* The rift — a full-height 1px accent seam where the surface will part.
-     Draws in from center, breathes by opacity only (stationary liveness,
-     never traveling motion). Whisper halo, not a glow blob. */
-  .seam {
-    position: absolute;
-    left: 50%;
-    top: 0;
-    bottom: 0;
-    width: 1px;
-    transform: scaleY(0);
-    transform-origin: center;
-    background: linear-gradient(
-      180deg,
-      transparent,
-      color-mix(in oklab, var(--accent) 65%, transparent) 22%,
-      color-mix(in oklab, white 25%, var(--accent)) 50%,
-      color-mix(in oklab, var(--accent) 65%, transparent) 78%,
-      transparent
-    );
-    box-shadow: 0 0 10px color-mix(in oklab, var(--accent) 22%, transparent);
-    opacity: 0.55;
-    animation:
-      seam-draw 520ms cubic-bezier(0.22, 1, 0.36, 1) 100ms both,
-      seam-breathe 3.8s ease-in-out 900ms infinite;
-  }
-  @keyframes seam-draw {
-    from { transform: scaleY(0); opacity: 0; }
-    to   { transform: scaleY(1); opacity: 0.55; }
-  }
-  @keyframes seam-breathe {
-    0%, 100% { opacity: 0.55; }
-    50%      { opacity: 0.72; }
-  }
-  /* Exit: the seam flares once as the surface parts, then it's gone — the
-     opening gap replaces it. */
-  .splash[data-exiting="true"] .seam {
-    animation: none;
-    transform: scaleY(1);
-    opacity: 0;
-    filter: brightness(1.6);
-    transition: opacity 260ms ease-out 100ms, filter 200ms ease-out;
-  }
 
   .lockup {
     position: absolute;
@@ -336,8 +287,6 @@
     .panel { transition: none; }
     .splash[data-exiting="true"] .panel.left,
     .splash[data-exiting="true"] .panel.right { transform: none; }
-    .seam { animation: none; opacity: 0.4; transform: scaleY(1); }
-    .splash[data-exiting="true"] .seam { transition: none; }
     .lockup { transition: none; }
     .mark, .wl, .boot, .bootline { animation: none; }
     .bootline::after { animation: none; }

@@ -5,7 +5,7 @@
     FolderOpen, Plus, Trash2, Check, X, Pencil,
     ArrowRight, Filter, FolderGit2, GitBranch, Folder, MessageSquare,
     Sparkles, History, Activity as ActivityIcon, Loader2, Flame, Cpu, Wrench, DollarSign,
-    Newspaper, ChevronDown, SplitSquareHorizontal, AlertTriangle, RotateCw,
+    Newspaper, ChevronDown, SplitSquareHorizontal, AlertTriangle, RotateCw, Terminal,
     TrendingUp, TrendingDown, Clock, RefreshCw,
   } from "lucide-svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -18,6 +18,7 @@
   } from "../home/statsHelpers";
   import { projects, projectRootKey } from "../../state/projects.svelte";
   import { assistant } from "../../state/assistant.svelte";
+  import { commandPalette } from "../../state/command-palette.svelte";
   import { workspace } from "../../state/workspace.svelte";
   import { goHome } from "../../state/nav";
   import { prettyPath, leafName, shortPath } from "../shell/tabsbar/helpers";
@@ -36,6 +37,31 @@
   const ctxName = $derived(hasRoot ? leafName(paneRoot!) : "workspace");
   const branch = $derived(assistant.workspaceBranch);
   const fileCount = $derived(assistant.workspaceFiles.length);
+  type ProviderPulse = { id: "claude" | "openai" | "codex"; label: string; detail: string; ready: boolean };
+  const providerPulses = $derived<ProviderPulse[]>([
+    {
+      id: "claude",
+      label: "Claude",
+      detail: assistant.authChecking ? "Checking CLI" : assistant.authReadyForModel("sonnet") ? "Ready" : "Connect CLI",
+      ready: assistant.authReadyForModel("sonnet"),
+    },
+    {
+      id: "openai",
+      label: "OpenAI",
+      detail: assistant.openAiChecking ? "Checking access" : assistant.openAiStatus?.ready ? "API key set" : "Add API key",
+      ready: assistant.openAiStatus?.ready === true && !assistant.openAiModelsError,
+    },
+    {
+      id: "codex",
+      label: "Codex",
+      detail: assistant.codexChecking ? "Checking CLI" : assistant.codexStatus?.ready ? "CLI signed in" : assistant.codexStatus?.cliPresent ? "Sign in" : "Install CLI",
+      ready: assistant.codexStatus?.ready === true,
+    },
+  ]);
+  function openProviderSettings() {
+    commandPalette.requestSettingsSection("claude");
+    workspace.setActive("settings");
+  }
 
   // Land at the top whenever the hub becomes the active surface — the page
   // stays mounted (keep-alive), so without this it reopens mid-scroll.
@@ -408,6 +434,22 @@
         </div>
       </header>
 
+      <!-- Provider pulse is a compact capability readout, not a second Settings
+           page. One click takes the user to the full connection controls. -->
+      <section class="provider-pulse" aria-label="AI provider readiness">
+        <div class="provider-pulse-head"><Sparkles size={13} /> AI routes <span>Choose a model in chat; manage connections in Settings.</span></div>
+        <div class="provider-pulse-list">
+          {#each providerPulses as provider (provider.id)}
+            <button class="provider-pulse-item" class:ready={provider.ready} type="button" onclick={openProviderSettings}>
+              {#if provider.id === "claude" || provider.id === "codex"}<Terminal size={12} />{:else}<Sparkles size={12} />{/if}
+              <b>{provider.label}</b>
+              <span>{provider.detail}</span>
+              <ArrowRight size={12} aria-hidden="true" />
+            </button>
+          {/each}
+        </div>
+      </section>
+
       <!-- Inline project editor — focused task, spans full width above columns. -->
       {#if editing}
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions -- Escape-to-close is a keyboard-only enhancement; all controls stay reachable -->
@@ -563,9 +605,9 @@
                 {@const pulse = pulseOf(p)}
                 {@const active = isActive(p)}
                 {@const scope = scopeLabel(p)}
-                <div class="pcard" class:active role="button" tabindex="0"
-                  onclick={() => (active ? goHome() : void openProject(p))}
-                  onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); active ? goHome() : void openProject(p); } }}>
+                <article class="pcard" class:active>
+                  <button class="pcard-open" type="button" aria-label={`${active ? "Continue" : "Open"} ${p.name}`}
+                    onclick={() => (active ? goHome() : void openProject(p))}>
                   <div class="pcard-top">
                     <span class="pcard-mono" style="--ph:{projectHue(p.name)}">{monogram(p.name)}</span>
                     <div class="pcard-id">
@@ -575,16 +617,6 @@
                       </div>
                       <div class="pcard-path mono" use:tooltip={prettyPath(p.root)}>{shortPath(p.root)}</div>
                     </div>
-                    {#if assistant.canAddPane}
-                      <button class="pcard-act" type="button"
-                        onclick={(e) => { e.stopPropagation(); void openInSplit(p); }} use:tooltip={"Open in split"} aria-label="Open in split pane">
-                        <SplitSquareHorizontal size={13} />
-                      </button>
-                    {/if}
-                    <button class="pcard-act" type="button"
-                      onclick={(e) => { e.stopPropagation(); startEdit(p); }} use:tooltip={"Edit project"} aria-label="Edit project">
-                      <Pencil size={12} />
-                    </button>
                   </div>
                   <div class="pcard-foot">
                     {#if pulse.chats > 0}
@@ -597,7 +629,18 @@
                     {#if scope}<span class="scope-chip sm"><Filter size={10} /> {scope}</span>{/if}
                     <span class="pcard-go" aria-hidden="true">{#if active}Continue{/if}<ArrowRight size={14} /></span>
                   </div>
-                </div>
+                  </button>
+                  <div class="pcard-actions">
+                    {#if assistant.canAddPane}
+                      <button class="pcard-act" type="button" onclick={() => void openInSplit(p)} use:tooltip={"Open in split"} aria-label={`Open ${p.name} in split pane`}>
+                        <SplitSquareHorizontal size={13} />
+                      </button>
+                    {/if}
+                    <button class="pcard-act" type="button" onclick={() => startEdit(p)} use:tooltip={"Edit project"} aria-label={`Edit ${p.name}`}>
+                      <Pencil size={12} />
+                    </button>
+                  </div>
+                </article>
               {/each}
             </div>
           {/if}
@@ -748,7 +791,7 @@
             aria-expanded={newsOpen} aria-controls="ws-news-body">
             <span class="nsh-ic"><Newspaper size={14} /></span>
             <span class="nsh-tx">What's new in AI</span>
-            {#if !newsOpen}<span class="nsh-hint">Claude Code releases &amp; this week in AI</span>{/if}
+            {#if !newsOpen}<span class="nsh-hint">Claude Code release notes &amp; an optional verified digest</span>{/if}
             <ChevronDown size={16} class={"nsh-chev" + (newsOpen ? " open" : "")} />
           </button>
           {#if newsOpen}
@@ -815,6 +858,24 @@
   .head-eyebrow { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--fg-faint); }
   .greet-line { font-size: 23px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.28; margin: 0; text-wrap: pretty; color: var(--fg); }
   .band-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+  /* Provider pulse keeps cross-provider readiness visible where work starts.
+     It remains one compact row at desktop widths, then stacks cleanly instead
+     of creating a nested scroll surface on narrow screens. */
+  .provider-pulse { display: flex; align-items: center; gap: 12px; padding: 9px 11px; border-radius: var(--radius-xl); border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 2.5%, transparent); }
+  .provider-pulse-head { display: inline-flex; align-items: center; gap: 6px; flex: none; color: var(--fg-2); font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
+  .provider-pulse-head :global(svg) { color: var(--accent); }
+  .provider-pulse-head > span { color: var(--fg-faint); font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+  .provider-pulse-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; flex: 1; min-width: 0; }
+  .provider-pulse-item { min-width: 0; display: grid; grid-template-columns: 12px auto minmax(0, 1fr) 12px; align-items: center; gap: 5px; padding: 5px 7px; border-radius: 7px; color: var(--fg-subtle); background: transparent; font: inherit; text-align: left; cursor: pointer; transition: color var(--dur-fast), background var(--dur-fast); }
+  .provider-pulse-item:hover { color: var(--fg); background: var(--surface-hover); }
+  .provider-pulse-item:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+  .provider-pulse-item :global(svg) { color: var(--fg-faint); }
+  .provider-pulse-item b { color: var(--fg-muted); font-size: 10.5px; font-weight: 650; }
+  .provider-pulse-item span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-faint); font-size: 10px; }
+  .provider-pulse-item.ready b, .provider-pulse-item.ready span, .provider-pulse-item.ready :global(svg) { color: var(--ok); }
+  @media (max-width: 960px) { .provider-pulse { align-items: flex-start; flex-direction: column; gap: 7px; } .provider-pulse-list { width: 100%; } }
+  @media (max-width: 640px) { .provider-pulse-list { grid-template-columns: 1fr; } .provider-pulse-head > span { display: none; } }
 
   /* ── Hub v3 — action-first: Jump back in → Projects → Activity → News.
      Launch targets lead; the retrospective Activity band follows. (v2 kept the
@@ -1092,18 +1153,19 @@
   .proj-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 8px; }
   .proj-grid.solo { grid-template-columns: minmax(0, 1fr); }
   @media (max-width: 680px) { .proj-grid { grid-template-columns: minmax(0, 1fr); } }
-  .pcard { display: flex; flex-direction: column; gap: 9px; padding: 11px 13px; text-align: left; cursor: pointer; font: inherit; min-width: 0;
+  .pcard { position: relative; display: flex; flex-direction: column; gap: 9px; padding: 11px 13px; text-align: left; font: inherit; min-width: 0;
     border-radius: var(--radius-xl); border: 1px solid var(--island-border); background: var(--island-fill);
     transition: border-color var(--dur-fast), box-shadow var(--dur-fast), transform var(--dur-fast), background var(--dur-fast); }
   .pcard:hover { border-color: var(--border-strong); background: color-mix(in oklab, var(--fg) 4.5%, transparent);
     box-shadow: 0 8px 20px -16px color-mix(in oklab, var(--fg) 40%, transparent); transform: translateY(-1px); }
-  .pcard:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
+  .pcard-open { display: flex; flex-direction: column; gap: 9px; width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; font: inherit; cursor: pointer; }
+  .pcard-open:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); border-radius: 7px; }
   /* Active card speaks accent twice (pill + Continue) — the frame stays quiet:
      a cooled border + faint wash, no glow halo (owner: calm it, 2026-07-16). */
   .pcard.active { border-color: color-mix(in oklab, var(--accent) 22%, var(--border));
     background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 5%, var(--bg-elev-1)), var(--bg-elev-1) 75%); }
   .pcard.active:hover { border-color: color-mix(in oklab, var(--accent) 34%, var(--border)); }
-  .pcard-top { display: flex; align-items: center; gap: 11px; min-width: 0; }
+  .pcard-top { display: flex; align-items: center; gap: 11px; min-width: 0; padding-right: 54px; }
   /* Identity hue (--ph, hashed from the project name) instead of the shared
      accent — each project wears its own color across card/switcher/chips. */
   .pcard-mono { width: 32px; height: 32px; flex: none; display: grid; place-items: center; border-radius: var(--radius);
@@ -1123,6 +1185,7 @@
     color: var(--fg-faint); opacity: 0.4; transition: opacity var(--dur-fast), background var(--dur-fast), color var(--dur-fast); }
   .pcard:hover .pcard-act { opacity: 1; }
   .pcard-act:hover { background: var(--surface-hover); color: var(--fg); opacity: 1; }
+  .pcard-actions { position: absolute; top: 14px; right: 13px; display: flex; align-items: center; gap: 2px; }
   .pcard-foot { display: flex; align-items: center; gap: 10px; min-width: 0; }
   .pmeta { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--fg-muted);
     font-variant-numeric: tabular-nums; flex: none; }

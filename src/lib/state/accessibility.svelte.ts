@@ -6,7 +6,7 @@
 // All prefs are local (localStorage); the dyslexia-mode flag is forwarded
 // per-turn to `assistant_send` so the Rust side can append the addendum.
 
-export type DyslexicFont = "system" | "lexend";
+type DyslexicFont = "system" | "lexend";
 
 const DYSLEXIA_KEY = "rift.a11y.dyslexia.v1";
 const FONT_KEY = "rift.a11y.font.v1";

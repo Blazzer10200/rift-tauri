@@ -5,7 +5,7 @@
   // ←/→ effort nudges); this child renders, handles clicks, and owns the
   // pointer-drag slider. Derives re-compute here from the shared modelMatrix
   // + assistant store — same pure helpers the parent uses, so they can't drift.
-  import { Check, ChevronRight, HelpCircle, Plus, SpellCheck, Zap } from "lucide-svelte";
+  import { Check, ChevronRight, HelpCircle, LoaderCircle, LockKeyhole, Plus, SpellCheck, Zap } from "lucide-svelte";
   import { tick } from "svelte";
   import { assistant, type TabState } from "../../../state/assistant.svelte";
   import { fastEligible } from "../../../state/assistant/helpers";
@@ -14,22 +14,22 @@
   import { tooltip } from "$lib/actions/tooltip";
   import { personalWords, removePersonalWord } from "$lib/utils/autocorrect";
   import {
-    MODEL_OPTIONS, currentModels, legacyModels, modelShortcut, modelWindowSuffix,
-    dialStopsFor, dialIdxFor, clampEffortIdx,
+    MODEL_OPTIONS, currentModels, legacyModels, modelWindowSuffix,
+    dialStopsFor, dialIdxFor, clampEffortIdx, effortCapsFor, modelAccessFor, providerStatusFor,
     type ModelOpt, type SettingsRow,
   } from "./modelMatrix";
 
   let {
     tab = null,
-    settingsIdx,
     activeKind,
+    activeModelId,
     anchor,
     onPickModel,
     onRequestClose,
   }: {
     tab?: TabState | null;
-    settingsIdx: number;
     activeKind: SettingsRow["kind"] | null;
+    activeModelId: ModelOpt["id"] | null;
     anchor: HTMLElement | null;
     onPickModel: (m: ModelOpt) => void;
     onRequestClose: () => void;
@@ -82,18 +82,41 @@
     return () => cancelAnimationFrame(raf);
   });
 
-  const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === assistant.modelFor(tab)));
+  const paneModel = $derived(assistant.modelFor(tab));
+  const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === paneModel));
+  const providerAccess = $derived({
+    claudeReady: assistant.auth?.cliPresent === true
+      && (assistant.auth.pill === "green" || assistant.auth.pill === "yellow"),
+    claudeChecking: assistant.authChecking,
+    claudeError: assistant.authError,
+    openAiConfigured: assistant.openAiStatus?.ready === true,
+    openAiChecking: assistant.openAiChecking,
+    openAiModels: assistant.openAiModels,
+    openAiError: assistant.openAiModelsError,
+  });
+  const openAiProviderStatus = $derived(providerStatusFor("openai", providerAccess));
+  const claudeProviderStatus = $derived(providerStatusFor("claude", providerAccess));
+  const selectableModels = $derived(MODEL_OPTIONS.filter((m) => modelAccessFor(m, providerAccess).enabled));
+  const currentModelAccess = $derived(currentModel ? modelAccessFor(currentModel, providerAccess) : null);
+  const sessionPinnedModel = $derived(tab?.pinnedModel ?? null);
+  const sessionModelDiverged = $derived(sessionPinnedModel !== null && sessionPinnedModel !== paneModel);
+  function shortcutFor(m: ModelOpt): number | null {
+    const i = selectableModels.findIndex((candidate) => candidate.id === m.id);
+    return i >= 0 && i < 9 ? i + 1 : null;
+  }
+  const currentOpenAiModels = currentModels.filter((m) => m.provider === "openai");
+  const currentClaudeModels = currentModels.filter((m) => m.provider === "claude");
   // Fast mode — surfaces only on fast-eligible (Opus-family) rows. The stored
   // global pref survives on other models but is inert there (send.ts gates it).
-  const fastApplies = $derived(!!currentModel && fastEligible(currentModel.id));
+  const fastApplies = $derived(currentModelAccess?.enabled === true && !!currentModel && fastEligible(currentModel.id));
   // ── Reasoning: ONE ladder ─────────────────────────────────────────────────
   // The old Thinking toggle + effort slider were two knobs over one wire lever
   // (see modelMatrix DIAL_STOPS). The ladder is the honest control: rung 0 =
   // fastest (thinking off, `--effort low`); each higher rung sends its flag.
   // Writes go through assistant.setThinkingDial so both backing fields flip
   // atomically (one cache-bust hint, not two).
-  const effortStops = $derived(dialStopsFor(currentModel));
-  const dialApplies = $derived(effortStops.length > 0); // a model with effort
+  const effortStops = $derived(dialStopsFor(effortCapsFor(currentModel, assistant.openAiModels)));
+  const dialApplies = $derived(currentModelAccess?.enabled === true && effortStops.length > 0); // a connected model with effort
   const effortIdx = $derived(dialIdxFor(effortStops, assistant.thinkingOnFor(tab), assistant.effortFor(tab)));
   const currentEffort = $derived(effortStops[effortIdx] ?? effortStops[0]);
   function setEffortByIdx(i: number) {
@@ -152,6 +175,7 @@
   // the model ("Claude Fable 5 weekly…"). Null when the account has no such
   // bucket or limits haven't loaded; the row simply shows no chip.
   function modelLimitFor(m: ModelOpt): ScopedLimit | null {
+    if (m.provider === "openai") return null;
     const fam = m.id === "claude-fable-5" ? "fable"
       : m.id === "haiku" ? "haiku"
       : m.id.includes("sonnet") ? "sonnet"
@@ -163,10 +187,10 @@
   // (matches the desktop picker) instead of a permanently-expanded Legacy block.
   // Opens on hover/focus of the trigger row; the active model being a legacy one
   // surfaces it (accent dot + auto-open) so the current pick is never hidden.
-  const activeIsLegacy = $derived(legacyModels.some((m) => m.id === assistant.effectiveModel));
+  const activeIsLegacy = $derived(legacyModels.some((m) => m.id === paneModel));
   // Keep the flyout open whenever the active model OR the keyboard cursor lands
   // on a legacy row — otherwise arrowing onto Opus 4.7 highlights nothing.
-  const cursorIsLegacy = $derived(!!MODEL_OPTIONS[settingsIdx]?.legacy);
+  const cursorIsLegacy = $derived(legacyModels.some((m) => m.id === activeModelId));
   // Transient open-drivers: mouse hover + an explicit pin via the "More models"
   // click. `legacyOpen` is fully derived so it auto-CLOSES when the keyboard
   // cursor arrows back off a legacy row (no hover/pin) — the old one-way $effect
@@ -187,6 +211,7 @@
      menu vanishes). Buttons inside already preventDefault; this catches the
      misclick zones between them. -->
 <div
+  id="model-effort-menu"
   class="rift-menu settings-menu"
   role="menu"
   tabindex="-1"
@@ -196,8 +221,10 @@
   onmousedown={(e) => e.preventDefault()}
 >
   {#snippet modelRow(m: ModelOpt)}
-    {@const sel = m.id === assistant.effectiveModel}
+    {@const sel = m.id === paneModel}
     {@const lim = modelLimitFor(m)}
+    {@const access = modelAccessFor(m, providerAccess)}
+    {@const shortcut = shortcutFor(m)}
     <!-- Dense one-line row (Claude-Desktop density): name + inline tags left,
          meta + ✓/hotkey right. The blurb/tagline lives in the tooltip. -->
     <button
@@ -206,14 +233,17 @@
       aria-checked={sel}
       class="pop-item model-row"
       class:sel
-      class:active={MODEL_OPTIONS[settingsIdx]?.id === m.id}
+      class:active={activeModelId === m.id}
       class:limited={m.limited}
-      use:tooltip={`${m.tagline} — ${m.blurb}`}
-      onmousedown={(e) => { e.preventDefault(); onPickModel(m); }}
+      class:unavailable={!access.enabled}
+      disabled={!access.enabled}
+      use:tooltip={access.enabled ? `${m.tagline} — ${m.blurb}` : access.detail}
+      onmousedown={(e) => { e.preventDefault(); if (access.enabled) onPickModel(m); }}
     >
       <span class="pi-name">
         <span class="model-name">{m.label} {m.version}</span>
-        {#if m.id === assistant.sessionPinnedModel && assistant.sessionModelDiverged}<span class="pi-tag session">this chat</span>
+        {#if !access.enabled}<span class="pi-tag access-tag state-{access.state}">{access.tag}</span>
+        {:else if m.id === sessionPinnedModel && sessionModelDiverged}<span class="pi-tag session">this chat</span>
         {:else if m.suffix}<span class="pi-tag">{modelWindowSuffix(m.id, assistant.planCap)}</span>{/if}
         {#if lim}<span
           class="pi-usage zone-{limitZone(lim.percent, lim.severity)}"
@@ -221,21 +251,29 @@
         >{Math.round(lim.percent)}%</span>{/if}
       </span>
       <span class="model-trail">
-        {#if sel}
+        {#if !access.enabled}
+          {#if access.state === "checking"}<LoaderCircle size={13} class="provider-spin" />{:else}<LockKeyhole size={12} class="provider-lock" />{/if}
+        {:else if sel}
           <Check size={14} class="pop-ck" />
-        {:else}
-          <kbd class="model-num">{modelShortcut(m.id)}</kbd>
+        {:else if shortcut}
+          <kbd class="model-num">{shortcut}</kbd>
         {/if}
       </span>
     </button>
   {/snippet}
 
-  <div class="rift-menu-head">Model</div>
-  {#each currentModels as m (m.id)}
+  <div class="rift-menu-head"><span>OpenAI API</span><span class="provider-head-note state-{openAiProviderStatus.state}"><i></i>{openAiProviderStatus.tag}</span></div>
+  {#each currentOpenAiModels as m (m.id)}
     {@render modelRow(m)}
   {/each}
 
-  {#if legacyModels.length > 0}
+  <div class="provider-separator"></div>
+  <div class="rift-menu-head"><span>Claude Code</span><span class="provider-head-note state-{claudeProviderStatus.state}"><i></i>{claudeProviderStatus.tag}</span></div>
+  {#each currentClaudeModels as m (m.id)}
+    {@render modelRow(m)}
+  {/each}
+
+  {#if legacyModels.length > 0 && (claudeProviderStatus.enabled || activeIsLegacy)}
     <div
       class="legacy-zone"
       role="presentation"
@@ -266,12 +304,12 @@
     </div>
   {/if}
 
-  {#if assistant.sessionModelDiverged}
-    {@const pinned = MODEL_OPTIONS.find((m) => m.id === assistant.sessionPinnedModel)}
+  {#if sessionModelDiverged}
+    {@const pinned = MODEL_OPTIONS.find((m) => m.id === sessionPinnedModel)}
     {@const picked = currentModel}
     <div class="session-note" role="note">
       <span class="sn-text">
-        This chat has been running on <strong>{pinned ? `${pinned.label} ${pinned.version}` : assistant.sessionPinnedModel}</strong>.
+        This chat has been running on <strong>{pinned ? `${pinned.label} ${pinned.version}` : sessionPinnedModel}</strong>.
         Your next message switches it to <strong>{picked ? `${picked.label} ${picked.version}` : "the new model"}</strong>.
       </span>
       <button
@@ -401,8 +439,10 @@
         <div class="er-knob" class:xhigh={currentEffort.id === "xhigh"} style="left: {knobPct}%" aria-hidden="true"></div>
       </div>
     </div>
+    <p class="model-caption" class:warn={currentEffort.id === "xhigh"}>{modelCaption}</p>
+  {:else if currentModelAccess?.enabled === false}
+    <p class="model-caption access-note">{currentModelAccess.detail}</p>
   {/if}
-  <p class="model-caption" class:warn={dialApplies && currentEffort.id === "xhigh"}>{modelCaption}</p>
 </div>
 
 <style>
@@ -417,7 +457,7 @@
   :global(.rift-menu.settings-menu) {
     position: fixed;
     width: 296px; min-width: 280px;
-    max-height: min(82vh, 580px);
+    max-height: min(calc(100vh - 24px), 690px);
     overflow-y: auto;
     z-index: 9998;
     padding: 5px; border-radius: 12px;
@@ -447,6 +487,22 @@
     display: flex; align-items: center; gap: 7px;
     font-size: var(--sm-eyebrow); font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
     color: var(--fg-faint); padding: 9px 9px 6px;
+  }
+  :global(.settings-menu .provider-head-note) {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
+    font-size: 8.5px; letter-spacing: 0.05em; color: var(--fg-faint);
+    text-transform: none;
+  }
+  :global(.settings-menu .provider-head-note i) {
+    width: 5px; height: 5px; border-radius: 50%; background: currentColor;
+  }
+  :global(.settings-menu .provider-head-note.state-ready) { color: var(--ok); }
+  :global(.settings-menu .provider-head-note.state-checking) { color: var(--accent); }
+  :global(.settings-menu .provider-head-note.state-setup) { color: var(--warn); }
+  :global(.settings-menu .provider-head-note.state-error),
+  :global(.settings-menu .provider-head-note.state-unavailable) { color: var(--danger); }
+  :global(.settings-menu .provider-separator) {
+    height: 1px; margin: 5px 9px 1px; background: color-mix(in oklab, var(--border) 80%, transparent);
   }
   /* "More models" flyout — legacy generations fold behind this trigger row
      (desktop-picker parity). The flyout expands in-flow below the trigger with
@@ -512,6 +568,11 @@
     background: color-mix(in oklab, var(--accent) 14%, transparent);
     border: 1px solid color-mix(in oklab, var(--accent) 35%, transparent);
   }
+  :global(.settings-menu .pi-tag.access-tag) { font-size: 9px; font-weight: 600; }
+  :global(.settings-menu .pi-tag.access-tag.state-setup) { color: var(--warn); }
+  :global(.settings-menu .pi-tag.access-tag.state-checking) { color: var(--accent); }
+  :global(.settings-menu .pi-tag.access-tag.state-error),
+  :global(.settings-menu .pi-tag.access-tag.state-unavailable) { color: var(--danger); }
   /* Live weekly-limit chip — % used of the account's model-scoped usage bucket
      (usage endpoint limits[]). Tinted by the shared limitZone thresholds so it
      agrees with the status bar + UsagePanel. Absent when no bucket matches. */
@@ -586,6 +647,11 @@
   }
   :global(.settings-menu .model-row.sel .pi-name) { color: var(--fg); font-weight: 600; }
   :global(.settings-menu .model-row.limited .model-name) { color: var(--accent); }
+  :global(.settings-menu .model-row.unavailable) { cursor: not-allowed; opacity: 0.48; }
+  :global(.settings-menu .model-row.unavailable:hover) { background: transparent; }
+  :global(.settings-menu .provider-lock) { color: var(--fg-faint); }
+  :global(.settings-menu .provider-spin) { color: var(--accent); animation: provider-spin 0.9s linear infinite; }
+  @keyframes provider-spin { to { transform: rotate(360deg); } }
   /* Coming-soon teaser — present but visibly not-yet: dimmed, inert, no hover lift. */
   :global(.settings-menu .model-row.soon) { cursor: default; opacity: 0.68; }
   :global(.settings-menu .model-row.soon:hover) { background: transparent; }
@@ -813,6 +879,7 @@
     transition: color var(--dur-fast) ease;
   }
   :global(.settings-menu .model-caption.warn) { color: var(--warn); }
+  :global(.settings-menu .model-caption.access-note) { color: var(--warn); }
 
   @media (prefers-reduced-motion: reduce) {
     :global(.settings-menu),

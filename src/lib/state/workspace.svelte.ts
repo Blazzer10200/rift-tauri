@@ -9,6 +9,14 @@ export const WORKSPACE_IDS: readonly WorkspaceId[] = [
   "home", "chat", "projects", "settings", "ai-health", "diagnostics",
 ] as const;
 
+// "projects" remains an accepted legacy id so persisted state can migrate, but
+// it is no longer an active destination. Keeping it out of the ordered route
+// list prevents a duplicate Workspace entry and leaves every Ctrl+number slot
+// pointing at a real current destination.
+export const NAVIGABLE_WORKSPACE_IDS: readonly WorkspaceId[] = [
+  "home", "chat", "settings", "ai-health", "diagnostics",
+] as const;
+
 const ACTIVE_KEY = "rift.ui.workspace.v1";
 const ORDER_KEY = "rift.ui.workspace-order.v1";
 
@@ -48,10 +56,16 @@ const LEGACY_KEYS_TO_SWEEP = [
 ] as const;
 
 const DISABLED: ReadonlySet<WorkspaceId> = new Set([]);
-const DEFAULT_ORDER: readonly WorkspaceId[] = WORKSPACE_IDS;
+const DEFAULT_ORDER: readonly WorkspaceId[] = NAVIGABLE_WORKSPACE_IDS.filter(
+  (id) => !DISABLED.has(id),
+);
 
 function isWorkspaceId(v: unknown): v is WorkspaceId {
   return typeof v === "string" && (WORKSPACE_IDS as readonly string[]).includes(v);
+}
+
+function isNavigableWorkspaceId(v: unknown): v is WorkspaceId {
+  return isWorkspaceId(v) && v !== "projects" && !DISABLED.has(v);
 }
 
 class WorkspaceState {
@@ -91,7 +105,7 @@ class WorkspaceState {
       if (raw) {
         const arr = JSON.parse(raw) as unknown;
         if (Array.isArray(arr)) {
-          const valid = arr.filter(isWorkspaceId);
+          const valid = arr.filter(isNavigableWorkspaceId);
           const seen = new Set(valid);
           // Backfill any ids missing from stored order — covers new workspace
           // additions in later releases for users w/ persisted older order.
@@ -131,7 +145,7 @@ class WorkspaceState {
         const arr = JSON.parse(legacyOrder) as unknown;
         if (Array.isArray(arr)) {
           const seeded: WorkspaceId[] = ["chat"];
-          for (const id of arr) if (isWorkspaceId(id) && !seeded.includes(id)) seeded.push(id);
+          for (const id of arr) if (isNavigableWorkspaceId(id) && !seeded.includes(id)) seeded.push(id);
           for (const id of DEFAULT_ORDER) if (!seeded.includes(id)) seeded.push(id);
           localStorage.setItem(ORDER_KEY, JSON.stringify(seeded));
         }
@@ -141,12 +155,13 @@ class WorkspaceState {
   }
 
   setActive(id: WorkspaceId) {
-    if (DISABLED.has(id)) return;
-    this.activeId = id;
-    if (!this.everOpened.has(id)) {
-      const s = new Set(this.everOpened); s.add(id); this.everOpened = s;
+    const target = id === "projects" ? "home" : id;
+    if (DISABLED.has(target)) return;
+    this.activeId = target;
+    if (!this.everOpened.has(target)) {
+      const s = new Set(this.everOpened); s.add(target); this.everOpened = s;
     }
-    localStorage.setItem(ACTIVE_KEY, id);
+    localStorage.setItem(ACTIVE_KEY, target);
   }
 
   reorder(from: number, to: number) {

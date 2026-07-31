@@ -163,7 +163,7 @@ type StreamBlock =
 //               call, so without this the footer claimed "Applied 1 file" on a
 //               turn that changed nothing in the user's repo.
 //  - "text":    no tools at all (a plain answer) → no status badge
-export type TurnOutcome = "applied" | "ran" | "failed" | "planned" | "text";
+type TurnOutcome = "applied" | "ran" | "failed" | "planned" | "text";
 
 export type TurnModel = {
   blocks: StreamBlock[];
@@ -176,7 +176,7 @@ export type TurnModel = {
   bgAgents: number;
 };
 
-export type WorkSeg =
+type WorkSeg =
   | { seg: "rich"; tool: StreamTool; poll?: number }
   | { seg: "edit"; tools: StreamTool[] }
   | { seg: "other"; tools: StreamTool[] };

@@ -8,6 +8,7 @@
     ChevronDown, Cpu, Terminal, Code2, Building2,
   } from "lucide-svelte";
   import { news, type DigestItem } from "../../state/news.svelte";
+  import { assistant } from "../../state/assistant.svelte";
   import { fmtAgo } from "./welcomeShared";
   import { tooltip } from "$lib/actions/tooltip";
 
@@ -15,6 +16,7 @@
   // Workspace "What's new" strip), drop our own title row to avoid a stacked
   // duplicate header — the refresh + "last checked" still ride a slim toolbar.
   let { embedded = false }: { embedded?: boolean } = $props();
+  const claudeReady = $derived(assistant.authReadyForModel("sonnet"));
 
   // Tick once a minute so "Xm ago" stays fresh while the page is open.
   let now = $state(Date.now());
@@ -110,6 +112,12 @@
     </div>
   {/if}
 
+  <div class="news-coverage">
+    <Terminal size={12} />
+    <span><b>Source coverage</b> · official Claude Code release notes</span>
+    <span class="coverage-note">Provider readiness stays visible above in Workspace.</span>
+  </div>
+
   <!-- ── Tier 2 digest (opt-in) ── -->
   <div class="digest">
     {#if news.digestStatus === "loading"}
@@ -144,12 +152,12 @@
     {:else}
       <!-- Costs money → WARN language at the point of consent (DESIGN §8): amber
            tint, cost line in the row itself. Accent = free; amber = spends. -->
-      <button class="digest-cta" type="button" onclick={() => void news.summarize()}>
+      <button class="digest-cta" type="button" disabled={!claudeReady} onclick={() => void news.summarize()}>
         <span class="dc-ic"><Sparkles size={15} /></span>
         <span class="dc-tx">
-          <b>Summarize this week in AI</b>
-          <small>Claude searches the web for the latest Anthropic &amp; Claude Code news.</small>
-          <small class="dc-cost">Runs one Claude turn — billed like a chat message.</small>
+          <b>Summarize recent provider news</b>
+          <small>Claude searches official sources and the web for recent Anthropic and Claude Code updates.</small>
+          <small class="dc-cost">{claudeReady ? "Runs one Claude turn — billed like a chat message." : "Connect Claude to run this optional digest."}</small>
         </span>
       </button>
       {#if news.digestError}<div class="digest-err"><AlertTriangle size={12} /> {news.digestError}</div>{/if}
@@ -218,6 +226,10 @@
     color: var(--fg-faint); transition: background var(--dur-fast), color var(--dur-fast); }
   .news-refresh:hover:not(:disabled) { background: var(--surface-hover); color: var(--fg-2); }
   .news-refresh:disabled { opacity: 0.6; cursor: default; }
+  .news-coverage { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 7px 9px; border-radius: var(--radius); color: var(--fg-faint); background: color-mix(in oklab, var(--fg) 3%, transparent); border: 1px solid var(--border); font-size: 10.5px; line-height: 1.4; }
+  .news-coverage :global(svg) { color: var(--fg-subtle); flex: none; }
+  .news-coverage b { color: var(--fg-muted); font-weight: 650; }
+  .coverage-note { margin-left: auto; color: var(--fg-faint); }
 
   /* ── Tier-2 digest ── */
   .digest { display: flex; flex-direction: column; gap: 8px; }
@@ -226,8 +238,11 @@
     background: linear-gradient(180deg, var(--warn-soft), transparent);
     transition: border-color var(--dur-fast), transform var(--dur-fast) var(--ease-page); }
   .digest-cta:hover { border-color: color-mix(in oklab, var(--warn) 55%, var(--border)); transform: translateY(-1px); }
+  .digest-cta:disabled { cursor: not-allowed; opacity: 0.68; }
+  .digest-cta:disabled:hover { border-color: color-mix(in oklab, var(--warn) 24%, var(--border)); transform: none; }
   .dc-ic { display: grid; place-items: center; width: 30px; height: 30px; flex: none; border-radius: var(--radius-lg);
     background: var(--warn-soft); color: var(--warn); }
+  @media (max-width: 640px) { .coverage-note { width: 100%; margin-left: 18px; } }
   .dc-tx { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
   .dc-tx b { font-size: var(--fs-md); font-weight: 620; color: var(--fg); }
   .dc-tx small { font-size: var(--fs-sm); color: var(--fg-muted); }

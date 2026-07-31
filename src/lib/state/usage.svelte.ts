@@ -19,7 +19,7 @@ export type ScopedLimit = {
   scope: { model: { displayName: string | null } | null } | null;
   isActive: boolean;
 };
-export type RateLimits = {
+type RateLimits = {
   fiveHour: LimitWindow | null; sevenDay: LimitWindow | null;
   sevenDayOpus: LimitWindow | null; sevenDaySonnet: LimitWindow | null;
   extraUsage: ExtraUsage | null; limits: ScopedLimit[]; fetchedAt: number;
@@ -29,7 +29,7 @@ export type RateLimits = {
 // the JSON contract in oneshot.rs ANALYZE_META_PROMPT; the model is instructed
 // to emit exactly this. Parse is guarded, so a malformed reply degrades to an
 // error string rather than throwing.
-export type AdviceImpact = "high" | "medium" | "low";
+type AdviceImpact = "high" | "medium" | "low";
 // A concrete one-tap action a card can carry. The model emits a machine value;
 // the frontend re-validates it (see normalizeApply) before ever applying — the
 // model's value is a suggestion, not a trusted command.

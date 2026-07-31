@@ -7,6 +7,8 @@ import type { ModelFamily, ModelSel, PermissionMode, RiftPlan, ThinkingEffort } 
 const MODEL_SELS: readonly ModelSel[] = [
   "sonnet", "opus", "claude-opus-4-8", "claude-opus-4-7", "haiku", "claude-fable-5",
   "claude-opus-4-6", "claude-opus-4-5", "claude-sonnet-4-6", "claude-sonnet-4-5",
+  "gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+  "gpt-5.3-codex",
 ] as const;
 
 // Claude Fable 5 — owner call 2026-07-01: keep it ALWAYS VISIBLE (flag `false`)
@@ -30,7 +32,7 @@ export function fableAvailable(): boolean {
 // (the fast-tier fallback). Label/effort/history fallbacks stay intact so old
 // Haiku conversations still render. Flip false to restore if it ever returns;
 // mirror HAIKU_DISABLED in config.rs (backend coerces a pinned Haiku session).
-export const HAIKU_DISABLED = false;
+const HAIKU_DISABLED = false;
 export function haikuAvailable(): boolean {
   return !HAIKU_DISABLED;
 }
@@ -133,9 +135,14 @@ export function saveModel(v: ModelSel, ws?: string | null) {
 
 /** Map a selected model to its visual family for the aurora hue. */
 export function modelFamily(model: ModelSel): ModelFamily {
+  if (isOpenAIModel(model)) return "openai";
   if (model === "haiku") return "haiku";
   if (model === "opus" || model.includes("opus") || model === "claude-fable-5") return "opus";
   return "sonnet";
+}
+
+export function isOpenAIModel(model: string | null | undefined): boolean {
+  return typeof model === "string" && model.startsWith("gpt-");
 }
 
 export function loadEffort(ws?: string | null): ThinkingEffort {
@@ -390,6 +397,8 @@ export function modelNativeWindow(model: string | null): number {
   if (!model) return 200_000;
   if (/\[1m\]/i.test(model)) return 1_000_000;
   const id = model.toLowerCase();
+  if (id.startsWith("gpt-5.6")) return 1_050_000;
+  if (id === "gpt-5.3-codex") return 400_000;
   if (id.includes("haiku")) return 200_000;
   if (/^(opus|sonnet|fable)$/.test(id)) return 1_000_000;
   // Sonnet 4.6 / 5 are 1M (the backend appends `[1m]` to the CLI arg for them —
@@ -409,6 +418,9 @@ export function modelNativeWindow(model: string | null): number {
  *  legitimately want the raw model window; omit it = native window (no clamp). */
 export function ctxWindowForModelId(model: string | null, planCap?: number): number {
   const native = modelNativeWindow(model);
+  // Claude's user-selected subscription entitlement does not apply to OpenAI
+  // API models, which have their own native context limits and billing path.
+  if (isOpenAIModel(model)) return native;
   return planCap !== undefined ? Math.min(native, planCap) : native;
 }
 
@@ -500,6 +512,11 @@ export const MODEL_MAX_EFFORT: Record<ModelSel, ThinkingEffort> = {
   "claude-sonnet-4-6": "ultra",
   "claude-sonnet-4-5": "ultra",
   haiku: "none",
+  "gpt-5.6": "ultra",
+  "gpt-5.6-sol": "ultra",
+  "gpt-5.6-terra": "ultra",
+  "gpt-5.6-luna": "ultra",
+  "gpt-5.3-codex": "ultra",
 };
 
 /** Clamp an effort tier to a model's ceiling. Pure. Fixes the slider hiding

@@ -20,7 +20,7 @@ function makeFakeStorage() {
 
 let fakeLS: ReturnType<typeof makeFakeStorage>;
 
-const DEFAULT_ORDER = ["home", "chat", "projects", "settings", "ai-health", "diagnostics"] as const;
+const DEFAULT_ORDER = ["home", "chat", "settings", "ai-health", "diagnostics"] as const;
 
 beforeEach(() => {
   fakeLS = makeFakeStorage();
@@ -135,20 +135,20 @@ describe("local-llm retired (provider rip-out)", () => {
 const ORDER_KEY = "rift.ui.workspace-order.v1";
 
 describe("init() — order restore + backfill", () => {
-  it("restores a full stored order verbatim", () => {
+  it("drops the legacy projects duplicate from a stored order", () => {
     const stored = ["settings", "chat", "home", "ai-health", "diagnostics", "projects"];
     fakeLS.setItem(ORDER_KEY, JSON.stringify(stored));
     workspace.init();
-    expect(workspace.order).toEqual(stored);
+    expect(workspace.order).toEqual(["settings", "chat", "home", "ai-health", "diagnostics"]);
   });
 
-  it("backfills ids missing from an older stored order at their DEFAULT_ORDER-relative slot", () => {
+  it("drops the legacy projects duplicate and backfills current destinations in default-relative order", () => {
     // A user persisted [settings, chat] before newer workspaces existed. Missing
     // ids must land at their default-relative position (not the end) so the
     // positional Ctrl+N switching matches the kbd hints.
     fakeLS.setItem(ORDER_KEY, JSON.stringify(["settings", "chat"]));
     workspace.init();
-    expect(workspace.order).toEqual(["home", "projects", "settings", "chat", "ai-health", "diagnostics"]);
+    expect(workspace.order).toEqual(["home", "settings", "chat", "ai-health", "diagnostics"]);
   });
 
   it("filters unknown ids out of a stored order (and backfills the rest)", () => {
@@ -180,7 +180,7 @@ describe("init() — order restore + backfill", () => {
 describe("reorder() / resetOrder()", () => {
   it("moves an id and persists the new order", () => {
     workspace.reorder(1, 3); // chat → after settings
-    expect(workspace.order).toEqual(["home", "projects", "settings", "chat", "ai-health", "diagnostics"]);
+    expect(workspace.order).toEqual(["home", "settings", "ai-health", "chat", "diagnostics"]);
     expect(JSON.parse(fakeLS.getItem(ORDER_KEY)!)).toEqual(workspace.order);
   });
 

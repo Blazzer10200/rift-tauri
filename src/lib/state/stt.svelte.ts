@@ -36,7 +36,7 @@ export function isLocalEngine(e: SttEngine): boolean {
   return e === "whisper" || e === "parakeet";
 }
 
-export type SttConfig = {
+type SttConfig = {
   enabled: boolean;
   language: string;
   append_to_draft: boolean;
@@ -65,7 +65,7 @@ export type ModelInfo = {
   path: string | null;
 };
 
-export type DownloadProgress = {
+type DownloadProgress = {
   model: string;
   downloaded: number;
   total: number;
@@ -73,7 +73,7 @@ export type DownloadProgress = {
   message: string | null;
 };
 
-export type SttState =
+type SttState =
   | "idle"
   | "loading_model"
   | "recording"

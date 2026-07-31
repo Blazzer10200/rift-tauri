@@ -42,6 +42,7 @@ type SaveableTab = {
   effortOverride: ThinkingEffort | null;
   thinkingOverride: boolean | null;
   lastTurnUsage: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
+  openAiHistory?: unknown[];
   // Per-project scope: the folder this tab's turns run in. Stamped onto the
   // saved record so the sidebar can filter chats to the open project.
   workspaceRoot: string | null;
@@ -211,6 +212,9 @@ export function buildSaveRecord(
     messages: tab.messages,
     cliSessionId: tab.cliSessionId || convoId,
     lastTurnUsage: tab.lastTurnUsage ?? undefined,
+    // Never derive API continuation state from rendered messages. The backend
+    // validates size/shape again before it leaves the device.
+    openAiHistory: tab.openAiHistory?.length ? tab.openAiHistory : undefined,
     // Scope the convo to the tab's OWN folder, else the GLOBAL workspace
     // default — never `host.activeRoot`, which is the focused pane's root and
     // would misfile a background/unfiled tab under an unrelated project (a
@@ -454,6 +458,7 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     // #32: hydrate the ctx meter from the saved final-turn usage — without
     // this a restored convo shows a blank gauge until the next turn lands.
     tab.lastTurnUsage = convo.lastTurnUsage ?? null;
+    tab.openAiHistory = Array.isArray(convo.openAiHistory) ? convo.openAiHistory : [];
     // The record's workspaceRoot was SAVED (buildSaveRecord) but never read
     // back — a restored convo silently lost its per-tab root, so turns ran
     // root-less (no workspace MCP tools, builtin reads against the wrong cwd;

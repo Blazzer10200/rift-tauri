@@ -1,5 +1,5 @@
 // Beta-program acknowledgment gate. Shown once on first launch before testers
-// use the app — distinct from onboarding (that gates on missing Claude auth;
+// use the app — distinct from onboarding (that gates on missing provider auth;
 // this gates on a one-time "I understand" for the beta + AI-mistakes notice).
 // Bump ACK_VERSION to re-prompt everyone after a material change to the terms.
 

@@ -168,16 +168,20 @@
   }
 
   const modelLabel = $derived(message.model ? shortModel(message.model) : null);
-  // Local-LLM turns run a non-Anthropic model (id never starts with "claude").
+  const isOpenAiModel = $derived(!!message.model && /^gpt-/i.test(message.model));
+  // Local-LLM turns run neither a Claude nor OpenAI model.
   // Label them "Local model" so the header identity matches what the model
   // actually is — derived per-message so history stays correct when the live
   // toggle later flips.
-  const isLocalModel = $derived(!!message.model && !/^claude/i.test(message.model));
+  const isLocalModel = $derived(
+    !!message.model && !/^claude/i.test(message.model) && !isOpenAiModel,
+  );
   // Family key for aurora tinting — drives the bubble's left rail + avatar
   // halo color so each assistant turn carries the same hue as the composer
   // that produced it.
-  const modelFamily = $derived.by<"sonnet" | "opus" | "haiku" | null>(() => {
+  const modelFamily = $derived.by<"sonnet" | "opus" | "haiku" | "openai" | null>(() => {
     if (!message.model) return null;
+    if (isOpenAiModel) return "openai";
     const m = /claude-(opus|sonnet|haiku)/i.exec(message.model);
     return m ? (m[1].toLowerCase() as "sonnet" | "opus" | "haiku") : null;
   });
@@ -284,7 +288,7 @@
   <div class="body">
     {#if !isUser}
       <div class="turn-head">
-        <span class="role-name">{isLocalModel ? (modelLabel ?? "Local model") : "Claude"}</span>
+        <span class="role-name">{isLocalModel ? (modelLabel ?? "Local model") : isOpenAiModel ? "OpenAI" : "Claude"}</span>
         {#if modelLabel && !isLocalModel}
           <span class="head-sep" aria-hidden="true">·</span>
           <span class="head-model" use:tooltip={"Model for this turn"}>{modelLabel}</span>
@@ -521,7 +525,7 @@
               type="button"
               class="stop-notice-btn"
               onclick={() => assistant.send("Continue from where you left off.", tabId)}
-              use:tooltip={"Ask Claude to continue the truncated response"}
+              use:tooltip={"Ask the model to continue the truncated response"}
             >Continue</button>
           {/if}
         </div>

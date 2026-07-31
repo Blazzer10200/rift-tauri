@@ -4,35 +4,37 @@ One doc for everything between "I want to use this" and "I want to contribute." 
 
 1. [End-user install (Onboarding)](#1-end-user-install-onboarding)
 2. [Building from source (Contributing)](#2-building-from-source-contributing)
-3. [Claude Code w/ Rift on the Pro plan](#3-claude-code-w-rift-on-the-pro-plan)
-4. [Releases](#4-releases)
-5. [Configuration & environment variables](#5-configuration--environment-variables)
+3. [OpenAI API setup](#3-openai-api-setup)
+4. [Claude Code w/ Rift on the Pro plan](#4-claude-code-w-rift-on-the-pro-plan)
+5. [Releases](#5-releases)
+6. [Configuration & environment variables](#6-configuration--environment-variables)
 
 ---
 
 ## 1. End-user install (Onboarding)
 
-For someone handed a `Setup.exe` who wants to start coding with Claude against a local folder.
+For someone handed a `Setup.exe` who wants to use Claude, OpenAI, or both against a local folder.
 
 ### Install
 
 - Run `Rift-win-Setup.exe`. Per-user install, no admin required. Lands at `%LOCALAPPDATA%\Rift\rift-tauri.exe` w/ a Start-menu shortcut.
 - SmartScreen flag → **More info → Run anyway** (no code-signing cert yet).
 
-### Sign in to Claude
+### Connect a provider
 
-Rift drives the `claude` CLI, so it uses whatever auth the CLI has.
+At least one provider must be connected:
 
-- Easiest: install Claude Code (`npm install -g @anthropic-ai/claude-code`), run `claude` once, and complete the browser login (Pro/Max/Team) — see §3.
+- **Claude:** install Claude Code (`npm install -g @anthropic-ai/claude-code`), run `claude` once, and complete browser login (Pro/Max/Team)—see §4.
 - Or add an `ANTHROPIC_API_KEY` in **Settings → API key**; Rift passes it to the CLI per turn.
-- The auth pill in the composer goes green when the CLI can reach Claude.
+- **OpenAI:** add a key from the OpenAI API platform in **Settings → Providers → OpenAI API**—see §3. ChatGPT subscriptions and API billing are separate.
+- Provider status appears in Settings and the model picker disables models whose provider is not ready.
 
 ### Pick a workspace + chat
 
-- **Open a folder** (the workspace picker). Everything Claude does is scoped to that folder via Rift's local MCP server.
-- Type in the composer and send. Claude can `read_file` / `list_dir` / `grep` and run local git (`git_status` / `diff` / `log` / `pull` / `commit` / `push`) against the folder — all on your machine, no remote connections.
-- **GitHub (optional):** if the folder's `origin` is a GitHub repo and the [`gh` CLI](https://cli.github.com) is signed in, the branch chip grows a CI status dot — click it for ahead/behind, the latest workflow run, and the branch's PR, plus one-click "ask Claude to fix the failing run" / "draft a PR". Claude gets matching tools (`gh_checks` / `gh_run_view` / `gh_pr_list` / `gh_pr_view` / `gh_pr_diff`, and `gh_pr_create` at Standard trust). Rift stores no token — everything rides your own `gh` login, and the repo is always pinned to `origin`.
-- **Per-turn controls** sit on the composer: model (Fable/Opus/Sonnet — legacy models in the "More models" flyout), permission mode, thinking effort.
+- **Open a folder** in the workspace picker. Provider tools are scoped to that folder.
+- Type in the composer and send. Both routes can use `read_file` / `list_dir` / `grep` and local git tools (`git_status` / `diff` / `log` / `pull` / `commit` / `push`). Network access occurs for the selected provider and any external tool action you approve.
+- **GitHub (optional):** if the folder's `origin` is a GitHub repo and the [`gh` CLI](https://cli.github.com) is signed in, the branch chip shows CI/PR state and the assistant receives matching `gh_*` tools. Rift stores no GitHub token; calls use your existing `gh` login and stay pinned to `origin`.
+- **Per-turn controls** sit on the composer: provider/model, permission mode, and reasoning effort. OpenAI model rows come from the account-visible model list with Rift defaults as a fallback.
 - **Permission modes** — ask-before-edits, edit-automatically, plan, auto, or bypass. In the asking modes a gated tool surfaces an Allow/Deny bar before it runs.
 - **Tabs / panes** — open multiple concurrent chats; each carries its own model + permission mode + effort.
 
@@ -42,7 +44,8 @@ Rift self-updates via Velopack. It checks on launch + every ~6h; when a build is
 
 ### Trouble?
 
-- The CLI not found / not signed in → the auth pill explains it; install / sign in to `claude` (§3) or add an API key in Settings.
+- Claude unavailable → install/sign in to `claude` (§4) or add an Anthropic key in Settings.
+- OpenAI unavailable → add a valid OpenAI API key in Settings (§3); a ChatGPT login alone does not authorize API requests.
 - CLI logs/auth live under `~/.claude/`. Rift's own config is managed in-app via Settings.
 
 ---
@@ -82,7 +85,7 @@ Dev watches `src/` + `src-tauri/src/` and hot-reloads. **Don't run `cargo check`
 | Where | What |
 |---|---|
 | `src/` | SvelteKit frontend (Svelte 5 runes, Tailwind 4) |
-| `src-tauri/src/` | Rust backend — `assistant/` (Claude CLI spawn + MCP server + local git), `browser/`, `commands/`, `diagnostics/`, `state/`, `stt/`, plus `lib.rs` / `update_service.rs` / `secrets.rs` |
+| `src-tauri/src/` | Rust backend — `assistant/` (Claude CLI, OpenAI Responses API, shared tools + local git), `browser/`, `commands/`, `diagnostics/`, `state/`, `stt/`, plus `lib.rs` / `update_service.rs` / `secrets.rs` |
 | `src-tauri/capabilities/` | Tauri 2 permission grants |
 | `docs/` | Architecture, security model, release history |
 | `scripts/` | Dev launcher + release pipeline + CDP helpers |
@@ -96,7 +99,26 @@ Dev watches `src/` + `src-tauri/src/` and hot-reloads. **Don't run `cargo check`
 
 ---
 
-## 3. Claude Code w/ Rift on the Pro plan
+## 3. OpenAI API setup
+
+Rift uses OpenAI's API directly; it does not automate the ChatGPT website and does not consume a ChatGPT Plus/Pro subscription.
+
+1. Create an API key in the OpenAI platform and make sure the API account has billing/access configured.
+2. Open **Settings → Providers → OpenAI API**, paste the key, and save. Rift validates the key shape, stores it in Windows Credential Manager, and never returns it to the WebView.
+3. Refresh models or open the composer model picker. Rift combines its supported GPT defaults with the GPT chat/reasoning models visible to that API account.
+4. Select a GPT model for a conversation and send normally.
+
+OpenAI turns use `/v1/responses` with streaming and `store: false`. Rift owns conversation persistence locally and sends the prior canonical Responses items with the next turn, including opaque encrypted reasoning, tool, and compaction state that cannot be recreated from display text. Image attachments, reasoning effort, cancellation, usage reporting, and permission-gated workspace tools use the same UI contract as Claude. Environment `OPENAI_API_KEY` values are detected only to explain setup; they are deliberately ignored until the user explicitly saves a key in Rift.
+
+## 3.1 Codex / ChatGPT CLI connection
+
+Settings → Providers can inspect a standalone `codex` CLI and launch its official `codex login` browser flow. This uses the ChatGPT subscription authorized for Codex; it is separate from OpenAI API-key billing. Rift never reads or copies Codex’s auth cache, and it rejects the packaged Windows Desktop helper because that executable is not a supported standalone CLI. The App Server turn adapter is intentionally not exposed as a model route until its streamed event and approval contracts have authenticated coverage.
+
+For a real pre-release check, use the dev app: save a test key, refresh the model list, send one plain text turn, run one read-only workspace tool, then cancel a streaming turn. Never place a test key in source, logs, screenshots, or shell output.
+
+---
+
+## 4. Claude Code w/ Rift on the Pro plan
 
 Optional power-user setup — Rift works fine with a plain `claude` login and zero config. This section is a Pro-plan-optimized tuning pass for Claude Code (the CLI Rift drives via MCP). ~10 min.
 
@@ -156,7 +178,7 @@ Rift's Assistant shells `claude` with `--mcp-config <rift.mcp.json>` + `--allowe
 
 ---
 
-## 4. Releases
+## 5. Releases
 
 Maintainers only. Versions bumped manually across all three files (`package.json` + `Cargo.toml` + `tauri.conf.json`) BEFORE `scripts/release.ps1` runs — preflight bails on any mismatch (and on a dirty tree, which also catches an un-committed `Cargo.lock` after a version bump).
 
@@ -175,9 +197,9 @@ CI runs on a self-hosted runner. When a tagged release sits `queued` and never s
 
 ---
 
-## 5. Configuration & environment variables
+## 6. Configuration & environment variables
 
-**End users need ZERO environment variables.** Rift is self-contained: secrets (an optional `ANTHROPIC_API_KEY`) live in the OS keychain via Settings, never in env or files; app config is written to `~/.rift/`; downloaded Whisper STT models land in `~/.rift/models/`. Nothing reads a machine-specific path or port at runtime.
+**End users need zero environment variables.** Rift is self-contained: Anthropic and OpenAI API keys live in separate OS-keychain slots via Settings, never in config files or the WebView; app config is written to `~/.rift/`; downloaded speech models land in `~/.rift/models/`. Nothing reads a machine-specific path or port at runtime.
 
 Every variable below is **optional** and scoped to development or release tooling:
 
@@ -188,4 +210,4 @@ Every variable below is **optional** and scoped to development or release toolin
 | `RIFT_CDP_MAX_EDGE` | dev | Overrides the 2576px screenshot long-edge clamp in `scripts/cdp/serve.cjs`. Cosmetic. |
 | `RIFT_MCP_SERVER` | internal | Set by Rift on itself when it re-spawns as the stdio MCP child for a turn. **Do not set manually.** |
 
-CLI-side knobs (`CLAUDE_CODE_*`, `ANTHROPIC_API_KEY`) belong to the `claude` CLI, not Rift — see §3. Rift actively **strips** `ANTHROPIC_API_KEY` from the CLI's environment on every turn so the in-app keychain key (or the CLI's own browser login) is the single source of auth truth.
+CLI-side knobs (`CLAUDE_CODE_*`, `ANTHROPIC_API_KEY`) belong to the `claude` CLI, not Rift—see §4. Rift actively **strips** `ANTHROPIC_API_KEY` from the CLI environment on every turn so the in-app keychain key (or the CLI browser login) is the single source of Claude auth. The native OpenAI route likewise ignores `OPENAI_API_KEY` from the process environment; the explicit keychain value is its only credential source.
