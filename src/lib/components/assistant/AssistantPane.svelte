@@ -45,7 +45,7 @@
   const showEmpty = $derived(messages.length === 0);
   const openAiTab = $derived(isOpenAIModel(assistant.modelFor(tab)));
   const needsAuth = $derived(
-    openAiTab ? assistant.openAiStatus?.ready !== true : assistant.auth?.pill === "red",
+    openAiTab ? !assistant.chatGptModelAvailable(assistant.modelFor(tab)) : assistant.auth?.pill === "red",
   );
   // Notices are session-global; only show on the focused pane to avoid dup banners.
   const showNotice = $derived(focused && !!assistant.lastNotice);

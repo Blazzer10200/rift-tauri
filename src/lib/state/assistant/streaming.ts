@@ -1372,6 +1372,10 @@ export function onStreamLine(tab: TabState, raw: string) {
       break;
     }
     case "result": {
+      const codexThreadId = (env as { codex_thread_id?: unknown }).codex_thread_id;
+      if (typeof codexThreadId === "string" && codexThreadId !== tab.codexThreadId) {
+        tab.codexThreadId = codexThreadId;
+      }
       // The native OpenAI backend sends the canonical stateless continuation
       // separately from display text. Preserve it before `done` triggers the
       // conversation save; opaque reasoning/compaction items must survive reload.
@@ -1461,6 +1465,10 @@ export function onStreamLine(tab: TabState, raw: string) {
       break;
     }
     case "system": {
+      const codexThreadId = (env as { codex_thread_id?: unknown }).codex_thread_id;
+      if (typeof codexThreadId === "string" && codexThreadId !== tab.codexThreadId) {
+        tab.codexThreadId = codexThreadId;
+      }
       const sysModel = typeof env.model === "string" ? env.model : null;
       if (sysModel) {
         tab.lastModelId = sysModel;

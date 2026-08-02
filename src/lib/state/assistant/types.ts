@@ -77,6 +77,16 @@ export type CodexStatus = {
   summary: string;
 };
 
+export type CodexModel = {
+  id: `gpt-${string}`;
+  label: string;
+  description: string;
+  isDefault: boolean;
+  defaultReasoningEffort: string;
+  supportedReasoningEfforts: string[];
+  imageInput: boolean;
+};
+
 export type OpenAiModel = {
   id: string;
   label: string;
@@ -321,6 +331,8 @@ export type ConversationRecord = {
   /** Canonical OpenAI Responses input items. Includes opaque encrypted
    * reasoning, tool and compaction items required by `store:false` replay. */
   openAiHistory?: unknown[];
+  /** Opaque thread owned and persisted by the signed-in Codex App Server. */
+  codexThreadId?: string;
   /** Per-project scope: workspace folder active when this convo's turns run.
    *  Stamped on save so the sidebar can filter to the open project. */
   workspaceRoot?: string | null;
@@ -399,7 +411,7 @@ export type ModelSel =
   | "sonnet" | "opus" | "haiku" | "claude-fable-5"
   | "claude-opus-4-8" | "claude-opus-4-7" | "claude-opus-4-6" | "claude-opus-4-5"
   | "claude-sonnet-4-6" | "claude-sonnet-4-5"
-  | "gpt-5.6" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" | "gpt-5.3-codex";
+  | `gpt-${string}`;
 
 /** Visual family for the per-model aurora hue (sonnet=blue, opus=purple,
  *  haiku=teal). Both Opus versions collapse to "opus". */

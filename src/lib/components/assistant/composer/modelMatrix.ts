@@ -3,7 +3,7 @@
 // 2026-06-10 so the parent's onKey navigation and the SettingsMenu/PermMenu
 // children derive from one source and can never disagree.
 import { Hand, Code2, ClipboardList, Zap, Infinity as InfinityIcon, Gem, Feather, Sparkles, Rabbit, Orbit } from "lucide-svelte";
-import type { ModelSel, OpenAiModel, PermissionMode, ThinkingEffort } from "../../../state/assistant/types";
+import type { CodexModel, ModelSel, OpenAiModel, PermissionMode, ThinkingEffort } from "../../../state/assistant/types";
 import { fableAvailable, haikuAvailable, MODEL_MAX_EFFORT, ctxWindowForModelId } from "../../../state/assistant/helpers";
 import { CHATGPT } from "../../../state/assistant/providerDisplay";
 import type { ModelSel as ModelSelType } from "../../../state/assistant/types";
@@ -64,6 +64,10 @@ export const MODEL_OPTIONS: ModelOpt[] = [
   { id: "gpt-5.6-sol", label: "GPT Sol", version: "5.6", tagline: "Highest-capability GPT-5.6 variant", blurb: "Deep agentic reasoning", ctx: "1.05M ctx", suffix: "1.05M context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.6-sol"], icon: Orbit, provider: "openai" },
   { id: "gpt-5.6-terra", label: "GPT Terra", version: "5.6", tagline: "Balanced GPT-5.6 variant", blurb: "Balanced capability and speed", ctx: "1.05M ctx", suffix: "1.05M context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.6-terra"], icon: Orbit, provider: "openai" },
   { id: "gpt-5.6-luna", label: "GPT Luna", version: "5.6", tagline: "Fast GPT-5.6 variant", blurb: "Fast everyday responses", ctx: "1.05M ctx", suffix: "1.05M context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.6-luna"], icon: Orbit, provider: "openai" },
+  { id: "gpt-5.5", label: "GPT", version: "5.5", tagline: "Previous GPT generation available to this ChatGPT account", blurb: "General reasoning and tools", ctx: "Account", suffix: "", legacy: false, effort: true, maxEffort: "ultra", icon: Orbit, provider: "openai" },
+  { id: "gpt-5.4", label: "GPT", version: "5.4", tagline: "Established GPT reasoning model", blurb: "General reasoning and tools", ctx: "Account", suffix: "", legacy: false, effort: true, maxEffort: "ultra", icon: Orbit, provider: "openai" },
+  { id: "gpt-5.4-mini", label: "GPT Mini", version: "5.4", tagline: "Smaller, faster GPT model", blurb: "Fast coding and everyday tasks", ctx: "Account", suffix: "", legacy: false, effort: true, maxEffort: "ultra", icon: Orbit, provider: "openai" },
+  { id: "gpt-5.3-codex-spark", label: "GPT Codex Spark", version: "5.3", tagline: "Fast coding model from your ChatGPT account", blurb: "Focused coding and quick edits", ctx: "Account", suffix: "", legacy: false, effort: true, maxEffort: "ultra", icon: Code2, provider: "openai" },
   { id: "gpt-5.3-codex", label: "GPT Codex", version: "5.3", tagline: "ChatGPT's agentic coding model", blurb: "Coding-focused reasoning & tools", ctx: "400K ctx", suffix: "400K context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.3-codex"], icon: Code2, provider: "openai" },
   ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", tagline: "Anthropic's most capable model — limited run", blurb: "Most capable — limited run", ctx: "1M ctx", suffix: "1M context", legacy: false, limited: true, effort: true, maxEffort: MODEL_MAX_EFFORT["claude-fable-5"], icon: Sparkles, provider: "claude" as const }] : []),
   { id: "opus",            label: "Opus",   version: "5",   tagline: "Newest + most capable — complex reasoning & agentic coding", blurb: "Deep reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.opus, icon: Gem, provider: "claude" },
@@ -83,6 +87,11 @@ export type ProviderAccessContext = {
   claudeReady: boolean;
   claudeChecking: boolean;
   claudeError: string | null;
+  claudeFree: boolean;
+  codexReady: boolean;
+  codexChecking: boolean;
+  codexModels: readonly CodexModel[] | null;
+  codexError: string | null;
   openAiConfigured: boolean;
   openAiChecking: boolean;
   openAiModels: readonly OpenAiModel[] | null;
@@ -103,16 +112,29 @@ export type ModelAccess = {
  * CLI because every Claude turn still routes through it. */
 export function modelAccessFor(m: ModelOpt, ctx: ProviderAccessContext): ModelAccess {
   if (m.provider === "claude") {
+    if (ctx.claudeFree && !isFreeClaudeModel(m.id)) {
+      return { state: "unavailable", enabled: false, tag: "Paid plan", detail: `${m.label} isn't included in Claude Free.` };
+    }
     if (ctx.claudeReady) return { state: "ready", enabled: true, tag: "Connected", detail: m.tagline };
     if (ctx.claudeChecking) return { state: "checking", enabled: false, tag: "Checking", detail: "Checking the Claude Code connection." };
     if (ctx.claudeError) return { state: "error", enabled: false, tag: "Check failed", detail: ctx.claudeError };
-    return { state: "setup", enabled: false, tag: "Connect Claude", detail: "Install and sign in to Claude Code in Settings → AI." };
+    return { state: "setup", enabled: false, tag: "Connect Claude", detail: "Install and sign in to Claude Code in Settings → Providers." };
+  }
+
+  const codexModel = ctx.codexModels?.find((model) => model.id === m.id);
+  if (ctx.codexReady && codexModel) {
+    return { state: "ready", enabled: true, tag: "Connected", detail: codexModel.description || m.tagline };
+  }
+
+  if (ctx.codexChecking && !ctx.openAiConfigured) {
+    return { state: "checking", enabled: false, tag: "Checking", detail: "Checking your ChatGPT subscription." };
   }
 
   if (!ctx.openAiConfigured) {
     if (ctx.openAiChecking) return { state: "checking", enabled: false, tag: "Checking", detail: `Checking ${CHATGPT.apiAccess}.` };
-    if (ctx.openAiError) return { state: "error", enabled: false, tag: "Check failed", detail: ctx.openAiError };
-    return { state: "setup", enabled: false, tag: "Connect ChatGPT", detail: `Add a ${CHATGPT.apiKey} in Settings → AI. ${CHATGPT.apiBilling}` };
+    if (ctx.codexError && ctx.openAiError) return { state: "error", enabled: false, tag: "Check failed", detail: ctx.codexError };
+    if (ctx.codexReady) return { state: "unavailable", enabled: false, tag: "Not in plan", detail: `${m.label} ${m.version} isn't offered by your ChatGPT account.` };
+    return { state: "setup", enabled: false, tag: "Connect ChatGPT", detail: "Sign in with ChatGPT in Settings → Providers. An API key is optional." };
   }
   if (ctx.openAiChecking) return { state: "checking", enabled: false, tag: "Checking", detail: `Checking which models ${CHATGPT.apiAccess} can use.` };
   if (ctx.openAiError || !ctx.openAiModels) {
@@ -123,6 +145,10 @@ export function modelAccessFor(m: ModelOpt, ctx: ProviderAccessContext): ModelAc
     return { state: "unavailable", enabled: false, tag: "No access", detail: `${m.label} ${m.version} isn't available through ${CHATGPT.apiAccess}.` };
   }
   return { state: "ready", enabled: true, tag: "Connected", detail: m.tagline };
+}
+
+export function isFreeClaudeModel(id: ModelSel): boolean {
+  return id === "sonnet" || id === "haiku" || id.includes("sonnet");
 }
 
 export function providerStatusFor(provider: ModelOpt["provider"], ctx: ProviderAccessContext): ModelAccess {
@@ -147,8 +173,15 @@ export function effortCapsFor(m: ModelOpt | undefined, models: readonly OpenAiMo
  *  context", not the static "1M context" baked into MODEL_OPTIONS. Derives from
  *  the SAME `ctxWindowForModelId` that drives the gauge + compaction pill, so all
  *  three agree. `planCap` is the value from `assistant.planCap`. */
-export function modelWindowSuffix(id: ModelSelType, planCap: number): string {
-  const w = ctxWindowForModelId(id, planCap);
+export function modelWindowSuffix(
+  id: ModelSelType,
+  planCap: number,
+  reported?: { model: string; window: number } | null,
+): string {
+  const norm = (value: string) => value.replace(/\[1m\]$/i, "").toLowerCase();
+  const w = reported && norm(reported.model) === norm(id)
+    ? reported.window
+    : ctxWindowForModelId(id, planCap);
   if (w > 1_000_000) return `${(w / 1_000_000).toFixed(2)}M context`;
   return w >= 1_000_000 ? "1M context" : `${Math.round(w / 1000)}K context`;
 }

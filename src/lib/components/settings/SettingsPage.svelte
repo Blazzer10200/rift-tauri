@@ -3,7 +3,7 @@
   import { untrack, onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import {
-    Cog, Info, RefreshCw, Sparkles, Palette,
+    Info, RefreshCw, Sparkles, Palette,
     FolderOpen, Copy, Check, Eye, EyeOff, Mic,
     CircleCheck, RotateCcw, Trash2, ArrowUpCircle, Loader2,
     Download, ShieldCheck, ExternalLink, Bug, Terminal,
@@ -47,10 +47,10 @@
   ] as const;
 
   type Section = "appearance" | "chat" | "claude" | "speech" | "about";
-  const ST_SECTIONS: { id: Section; label: string; icon: typeof Cog; sub: string; dot?: "ok" | "warn" }[] = [
+  const ST_SECTIONS: { id: Section; label: string; icon: typeof Info; sub: string; dot?: "ok" | "warn" }[] = [
     { id: "appearance", label: "Appearance", icon: Palette,       sub: "Accent color, density, and code rendering — every change applies instantly." },
     { id: "chat",       label: "Chat",       icon: MessageSquare, sub: "How conversations read — stream layout, detail level, and reading comfort." },
-    { id: "claude",     label: "AI",         icon: Sparkles,      sub: "Connections, model access, and advanced AI controls." },
+    { id: "claude",     label: "Providers",  icon: Sparkles,      sub: "Connect Claude and ChatGPT, then manage their advanced routes." },
     { id: "speech",     label: "Voice",      icon: Mic,           sub: "Dictation, transcription engine, and voice commands." },
     { id: "about",      label: "System",     icon: Info,          sub: "Build details, keyboard shortcuts, local tools, and diagnostics." },
   ];
@@ -79,12 +79,13 @@
     { tab: "chat",       anchor: "card-rendering", card: "Chat rendering",    title: "Command output",      kw: "terminal shell peek full minimal" },
     { tab: "chat",       anchor: "card-comfort",   card: "Reading comfort",   title: "Dyslexia-friendly mode", kw: "lexend accessibility font reading" },
     { tab: "chat",       anchor: "card-comfort",   card: "Reading comfort",   title: "Warm reading tint",   kw: "sepia glare eyes overlay" },
+    { tab: "chat",       anchor: "card-comfort",   card: "Reading comfort",   title: "Autocorrect",         kw: "typing typos spelling composer" },
     { tab: "chat",       anchor: "card-comfort",   card: "Reading comfort",   title: "Line and letter spacing", kw: "line height readability" },
     { tab: "claude",     anchor: "card-session",   card: "Claude session",    title: "Use my full Claude Code config", kw: "claude.md hooks mcp skills settings piggyback sandbox" },
     { tab: "claude",     anchor: "card-session",   card: "Claude session",    title: "Git tools",           kw: "read-only standard commit push trust" },
     { tab: "claude",     anchor: "card-session",   card: "Claude session",    title: "Plan",                kw: "free pro max context window 200k 1m gauge subscription" },
-    { tab: "claude",     anchor: "card-admin",     card: "Administrator access", title: "Relaunch as administrator", kw: "admin elevated elevation uac privileges run as administrator sudo" },
-    { tab: "claude",     anchor: "card-admin",     card: "Administrator access", title: "Always run as administrator", kw: "admin elevated elevation uac no prompt scheduled task startup" },
+    { tab: "about",      anchor: "card-admin",     card: "Administrator access", title: "Relaunch as administrator", kw: "admin elevated elevation uac privileges run as administrator sudo" },
+    { tab: "about",      anchor: "card-admin",     card: "Administrator access", title: "Always run as administrator", kw: "admin elevated elevation uac no prompt scheduled task startup" },
     { tab: "claude",     anchor: "card-api",       card: "API key & spending", title: "API-key fallback",   kw: "anthropic console token sk-ant billing keychain" },
     { tab: "claude",     anchor: "card-api",       card: "API key & spending", title: "Per-turn cost cap",  kw: "budget dollar limit spend guard" },
     { tab: "claude",     anchor: "card-chatgpt",   card: "ChatGPT", title: "ChatGPT connection", kw: "chatgpt codex openai gpt api key billing responses account cli app server subscription login" },
@@ -241,9 +242,6 @@
     if (!p) return;
     try { await openPath(p); } catch (e) { console.error("openPath failed", e); }
   }
-  async function openClaudeCode() {
-    try { await openUrl("https://claude.com/claude-code"); } catch (e) { console.error("openUrl failed", e); }
-  }
   async function openRepo() {
     try { await openUrl("https://github.com/Blazzer10200/rift-tauri"); } catch (e) { console.error("openUrl failed", e); }
   }
@@ -280,7 +278,7 @@
   const RESET_COPY: Partial<Record<Section, string>> = {
     appearance: "Accent, density, and code rendering go back to the stock emerald look.",
     chat: "Stream layout, detail dials, and reading comfort go back to their defaults.",
-    claude: "Full config on, git tools read-only, plan Max. Your API key and spending cap are kept.",
+    claude: "Full config on, git tools read-only, and the conservative 200K Claude profile. API keys and spending caps are kept.",
     speech: "All voice-input settings return to factory defaults. Downloaded Whisper models stay on disk.",
   };
   // In-flight latch: stacked confirm() calls (double-click, programmatic) leave
@@ -416,15 +414,6 @@
       && !assistantStore.openAiModelsError && openAiSupportedCount > 0,
   );
   const codexConnected = $derived(assistantStore.codexStatus?.ready === true && !assistantStore.codexChecking);
-  const chatGptConnected = $derived(codexConnected || openAiConnected);
-  const chatGptChecking = $derived(assistantStore.codexChecking || assistantStore.openAiChecking);
-  const claudeConnected = $derived(
-    assistantStore.auth?.cliPresent === true
-      && (assistantStore.auth.pill === "green" || assistantStore.auth.pill === "yellow"),
-  );
-  function focusProvider(id: "claude" | "chatgpt") {
-    document.getElementById(`card-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }
   function fmtAgo(ts: number, now: number): string {
     const s = Math.max(0, Math.round((now - ts) / 1000));
     if (s < 10) return "just now";
@@ -562,29 +551,6 @@
 <div class="sb-main">
   <!-- ── Hero + sticky tab bar ── -->
   <PageHero eyebrow="Settings" title={activeMeta.label} desc={activeMeta.sub} padBottom={false} maxWidth={820}>
-    {#snippet chip()}
-      <span class="sb-chip ghost"><span class="mono">local workspace</span></span>
-      <button
-        class="sb-chip {updates.summary.kind}"
-        type="button"
-        onclick={() => updates.open()}
-        use:tooltip={updates.summary.kind === "dev" ? "Running an unpackaged dev build — auto-update is off" : "Check for updates"}
-      >
-        {#if updates.summary.kind === "warn"}
-          <ArrowUpCircle size={14} />
-        {:else if updates.summary.kind === "busy"}
-          <Loader2 size={14} class="spin" />
-        {:else if updates.summary.kind === "dev"}
-          <Cog size={13} />
-        {:else if updates.summary.kind === "danger"}
-          <RefreshCw size={13} />
-        {:else}
-          <CircleCheck size={14} />
-        {/if}
-        <span class="sb-chip-ver mono">{appVersion}</span>
-        {#if updates.summary.label}<span class="sb-chip-tag">{updates.summary.label}</span>{/if}
-      </button>
-    {/snippet}
     {#snippet children()}
       <div class="tabrow">
         <div class="tabnav" role="tablist">
@@ -677,7 +643,6 @@
 
           <div class="card" id="card-accent">
             <div class="card-tt">Accent color <span class="ap-dot" style="background: oklch(0.72 var(--accent-c) var(--accent-h));"></span>
-              <button class="st-btn card-tt-act" type="button" onclick={() => uiPrefs.resetAccent()} use:tooltip={"Back to the stock emerald look"}><RotateCcw size={13} /> Reset</button>
             </div>
             <div class="card-sub">The highlight color used across Rift — buttons, toggles, selection, focus rings. Pick a swatch or dial in your own hue; the whole app follows.</div>
               <div class="swatches">
@@ -879,6 +844,10 @@
             <div><div class="ctl-t">Warm reading tint</div><div class="ctl-s">A soft sepia overlay on chat bubbles to ease bright-white-on-dark glare.</div></div>
             <button class="rift-toggle" class:on={accessibility.warmTint} role="switch" aria-checked={accessibility.warmTint} aria-label="Warm reading tint" type="button" onclick={() => accessibility.setWarmTint(!accessibility.warmTint)}><span class="rift-toggle-knob"></span></button>
           </div>
+          <div class="ctl-row tight">
+            <div><div class="ctl-t">Autocorrect while typing</div><div class="ctl-s">Fixes common typos after each word. Paths, commands, and code-like text are skipped.</div></div>
+            <button class="rift-toggle" class:on={assistantStore.autocorrect} role="switch" aria-checked={assistantStore.autocorrect} aria-label="Autocorrect while typing" type="button" onclick={() => assistantStore.setAutocorrect(!assistantStore.autocorrect)}><span class="rift-toggle-knob"></span></button>
+          </div>
           <!-- A mock reply styled by the REAL a11y pipeline: the global
                data-a11y-* selectors target .bubble/.markdown-body, so this
                inherits font/spacing/tint with zero duplicated logic. -->
@@ -899,20 +868,8 @@
     {#if activeSec === "claude"}
       <div class="set-surface"><div class="set-col">
         <div class="provider-section-head">
-          <span>AI connections</span>
-          <p>Choose Claude or ChatGPT. Each connection has one primary account route; optional API access stays clearly separate.</p>
-        </div>
-        <div class="provider-overview" aria-label="Provider connection summary">
-          <button class="provider-overview-item" class:ready={claudeConnected} type="button" onclick={() => focusProvider("claude")}>
-            <span class="provider-overview-icon"><Terminal size={15} /></span>
-            <span class="provider-overview-copy"><b>Claude</b><small>CLI session</small></span>
-            <span class="provider-overview-state">{assistantStore.authChecking ? "Checking" : claudeConnected ? "Ready" : "Action needed"}</span>
-          </button>
-          <button class="provider-overview-item" class:ready={chatGptConnected} type="button" onclick={() => focusProvider("chatgpt")}>
-            <span class="provider-overview-icon"><Terminal size={15} /></span>
-            <span class="provider-overview-copy"><b>ChatGPT</b><small>Account + optional API access</small></span>
-            <span class="provider-overview-state">{chatGptChecking ? "Checking" : codexConnected ? "Ready" : openAiConnected ? "API ready" : assistantStore.codexStatus?.cliPresent ? "Sign in" : "Set up"}</span>
-          </button>
+          <span>Claude</span>
+          <p>Your Claude Code connection and Claude-only preferences.</p>
         </div>
         <!-- session status promoted to a hero banner — auth + CLI version share one surface -->
         <div class="sb-status {assistantDot ?? 'ok'}" id="card-claude">
@@ -1028,44 +985,8 @@
           </div>
         </div>
 
-        {#if elevation.supported}
-          <div class="card" id="card-admin">
-            <div class="card-tt">Administrator access</div>
-            <div class="card-sub">Run Rift elevated so the assistant's tools inherit admin rights — no per-action UAC prompts, just like launching VS Code as administrator.</div>
-            <div class="ctl-row tight">
-              <div>
-                <div class="ctl-t">Status</div>
-                <div class="ctl-s">
-                  {#if elevation.elevated}
-                    Running as <strong>Administrator</strong>. Commands the assistant runs are elevated — no per-action prompts.
-                  {:else}
-                    Running as a <strong>standard user</strong>. Elevated actions each trigger a Windows UAC prompt.
-                  {/if}
-                </div>
-              </div>
-              {#if elevation.elevated}
-                <span class="admin-live"><ShieldCheck size={14} /> Administrator</span>
-              {:else}
-                <button class="st-btn" type="button" disabled={elevation.busy} onclick={() => void elevation.relaunchAsAdmin()}>
-                  {#if elevation.busy}<Loader2 size={14} class="st-spin" /> Relaunching…{:else}<ShieldCheck size={14} /> Relaunch as administrator{/if}
-                </button>
-              {/if}
-            </div>
-            <div class="ctl-row tight no-line">
-              <div>
-                <div class="ctl-t">Always run as administrator</div>
-                <div class="ctl-s">Rift launches elevated every time with no UAC prompt (via a per-user scheduled task). Convenient — but every tool the assistant runs then has full admin rights. Turn it off anytime; the task is removed.</div>
-              </div>
-              <button class="rift-toggle" class:on={elevation.alwaysElevated} role="switch" aria-checked={elevation.alwaysElevated} aria-label="Always run as administrator" disabled={elevation.busy} type="button" onclick={() => void elevation.setAlwaysElevated(!elevation.alwaysElevated)}><span class="rift-toggle-knob"></span></button>
-            </div>
-            {#if elevation.error}
-              <div class="st-note">{elevation.error}</div>
-            {/if}
-          </div>
-        {/if}
-
-          <div class="card" id="card-api">
-            <div class="card-tt">Claude API access</div>
+          <details class="card provider-advanced" id="card-api">
+            <summary class="card-tt">Optional Claude API access</summary>
             <div class="card-sub">Where your turns bill. Setting a key switches from your subscription to pay-per-token via the Anthropic Console.</div>
             <!-- Route strip: which billing path is live right now. -->
             <div class="route" aria-hidden="true">
@@ -1111,7 +1032,7 @@
               </div>
               {#if asstMaxBudgetMsg}<div class="st-note">{asstMaxBudgetMsg}</div>{/if}
             {/if}
-          </div>
+          </details>
 
           <div class="provider-section-head provider-section-head--runtime">
             <span>ChatGPT</span>
@@ -1143,8 +1064,8 @@
             {#if assistantStore.codexError}<div class="st-note warn">Rift couldn't inspect Codex: {assistantStore.codexError}</div>{/if}
           </div>
 
-          <div class="card provider-card" id="card-chatgpt">
-            <div class="card-tt">ChatGPT API access</div>
+          <details class="card provider-card provider-advanced" id="card-chatgpt">
+            <summary class="card-tt">Optional ChatGPT API access</summary>
             <div class="card-sub">Optional native GPT access for Rift. Your key stays in the OS keychain; this route is billed separately from your ChatGPT subscription.</div>
             <div class="route" aria-hidden="true">
               <span class="route-node" class:on={assistantStore.hasOpenAiApiKey}>API access</span>
@@ -1178,7 +1099,7 @@
             {#if assistantStore.openAiStatus?.envApiKeyPresent && !assistantStore.hasOpenAiApiKey}
               <div class="st-note">A system <code>OPENAI_API_KEY</code> exists, but Rift deliberately ignores environment keys. Paste it above to opt in explicitly.</div>
             {/if}
-          </div>
+          </details>
 
           <button class="set-expand set-reset" type="button" onclick={() => void resetTab("claude")}><RotateCcw size={13} /> Reset Claude preferences</button>
       </div></div>
@@ -1319,7 +1240,7 @@
                       options={[{ value: "", label: "System default" }, ...stt.inputDevices.map((d) => ({ value: d, label: d }))]}
                       onChange={(v) => void stt.setConfig({ input_device: v === "" ? null : v })}
                       disabled={!stt.config.enabled}
-                      ariaLabel="Whisper input device"
+                      ariaLabel="Speech input device"
                     />
                   </div>
                   <button type="button" class="st-btn" onclick={() => void stt.refreshInputDevices()} use:tooltip={"Refresh device list"} aria-label="Refresh"><RefreshCw size={14} /></button>
@@ -1389,6 +1310,31 @@
 
     {#if activeSec === "about"}
       <div class="set-surface"><div class="set-col">
+          {#if elevation.supported}
+            <div class="card" id="card-admin">
+              <div class="card-tt">Administrator access</div>
+              <div class="card-sub">Controls Rift's Windows permissions. This affects every provider and local tool.</div>
+              <div class="ctl-row tight">
+                <div>
+                  <div class="ctl-t">Status</div>
+                  <div class="ctl-s">{elevation.elevated ? "Running as Administrator. Assistant tools inherit elevated access." : "Running as a standard user. Elevated actions use Windows approval."}</div>
+                </div>
+                {#if elevation.elevated}
+                  <span class="admin-live"><ShieldCheck size={14} /> Administrator</span>
+                {:else}
+                  <button class="st-btn" type="button" disabled={elevation.busy} onclick={() => void elevation.relaunchAsAdmin()}>
+                    {#if elevation.busy}<Loader2 size={14} class="st-spin" /> Relaunching…{:else}<ShieldCheck size={14} /> Relaunch as administrator{/if}
+                  </button>
+                {/if}
+              </div>
+              <div class="ctl-row tight no-line">
+                <div><div class="ctl-t">Always run as administrator</div><div class="ctl-s">Uses a per-user scheduled task so Rift starts elevated without repeated prompts. Every provider tool then receives full admin access.</div></div>
+                <button class="rift-toggle" class:on={elevation.alwaysElevated} role="switch" aria-checked={elevation.alwaysElevated} aria-label="Always run as administrator" disabled={elevation.busy} type="button" onclick={() => void elevation.setAlwaysElevated(!elevation.alwaysElevated)}><span class="rift-toggle-knob"></span></button>
+              </div>
+              {#if elevation.error}<div class="st-note">{elevation.error}</div>{/if}
+            </div>
+          {/if}
+
           <div class="card" id="card-build">
             <div class="card-tt">Build &amp; install</div>
             <div class="card-sub">This copy of Rift, the stack it's built on, and where it keeps its files.</div>
@@ -1428,10 +1374,10 @@
               <span class="st-about-ic"><ExternalLink size={15} /></span>
               <span class="st-about-body"><span class="st-about-t">Source code &amp; license</span><span class="st-about-s">MIT-licensed and open on GitHub — github.com/Blazzer10200/rift-tauri</span></span>
             </button>
-            <button class="st-powered" type="button" onclick={() => void openClaudeCode()} use:tooltip={"Rift runs every turn through Anthropic's Claude Code CLI — opens claude.com/claude-code. Rift is an independent project, not affiliated with Anthropic."}>
+            <div class="st-powered" aria-label="Rift works with Claude and ChatGPT">
               <span class="st-powered-mark"><Terminal size={15} /></span>
-              <span class="st-powered-t">Powered by <b>Claude Code</b></span>
-            </button>
+              <span class="st-powered-t">Works with <b>Claude + ChatGPT</b></span>
+            </div>
           </div>
 
           <div class="card" id="card-shortcuts">
@@ -1576,23 +1522,13 @@
   .provider-section-head { margin: 0 2px 10px; }
   .provider-section-head > span { display: block; color: var(--fg); font-size: 11px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; }
   .provider-section-head > p { margin: 5px 0 0; color: var(--fg-subtle); font-size: 11.5px; line-height: 1.5; }
-  /* Connection overview is the scan layer: provider details stay in their
-     existing cards below, while this compact row answers "what is ready?". */
-  .provider-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
-  .provider-overview-item { min-width: 0; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 9px 10px; border-radius: var(--radius-lg); border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 2.5%, transparent); color: var(--fg-muted); font: inherit; text-align: left; cursor: pointer; transition: border-color var(--dur-fast), background var(--dur-fast), transform var(--dur-fast); }
-  .provider-overview-item:hover { border-color: var(--border-strong); background: var(--surface-hover); transform: translateY(-1px); }
-  .provider-overview-item:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
-  .provider-overview-item.ready { border-color: color-mix(in oklab, var(--ok) 30%, var(--border)); background: linear-gradient(180deg, color-mix(in oklab, var(--ok) 7%, transparent), transparent); }
-  .provider-overview-icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; color: var(--fg-subtle); background: var(--bg-elev-2); }
-  .provider-overview-item.ready .provider-overview-icon { color: var(--ok); background: var(--ok-soft); }
-  .provider-overview-copy { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-  .provider-overview-copy b { color: var(--fg-2); font-size: 11.5px; font-weight: 650; }
-  .provider-overview-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-faint); font-size: 10px; }
-  .provider-overview-state { font-size: 9.5px; font-weight: 650; color: var(--fg-faint); white-space: nowrap; }
-  .provider-overview-item.ready .provider-overview-state { color: var(--ok); }
-  @media (max-width: 760px) { .provider-overview { grid-template-columns: 1fr; } }
   .provider-section-head--runtime { margin-top: 26px; }
   .provider-card { border-color: color-mix(in oklab, var(--accent) 22%, var(--island-border)); }
+  .provider-advanced > summary { cursor: pointer; list-style: none; }
+  .provider-advanced > summary::-webkit-details-marker { display: none; }
+  .provider-advanced > summary::after { content: "Show"; float: right; color: var(--fg-faint); font-size: 10px; font-weight: 600; }
+  .provider-advanced[open] > summary::after { content: "Hide"; }
+  .provider-advanced[open] > summary { margin-bottom: 6px; }
   .provider-model-count { margin-left: auto; color: var(--ok); font-size: 10px; font-weight: 650; }
   .set-col > .card { margin-bottom: 16px; animation: blockIn var(--dur-base) var(--ease-page) both; }
   .set-col > .card:last-child { margin-bottom: 0; }
@@ -1779,27 +1715,6 @@
   .kbd-or { color: var(--fg-faint); font-size: 10px; margin: 0 2px; }
   .mono { font-family: var(--font-mono); }
 
-  /* ── Hero tab bar (hero chrome via PageHero component) ── */
-  .sb-chip { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--surface); border: 1px solid var(--border); color: var(--fg-2); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: default; }
-  button.sb-chip { cursor: pointer; transition: background var(--dur-fast), border-color var(--dur-fast); }
-  button.sb-chip:hover { background: var(--surface-hover); border-color: var(--border-strong); }
-  .sb-chip.ok { background: var(--ok-soft); border-color: color-mix(in oklch, var(--ok) 28%, transparent); color: var(--ok); }
-  .sb-chip.ok :global(svg) { color: var(--ok); }
-  .sb-chip.warn { background: var(--warn-soft); border-color: color-mix(in oklch, var(--warn) 28%, transparent); color: var(--warn); }
-  .sb-chip.warn :global(svg) { color: var(--warn); }
-  .sb-chip.danger { background: var(--danger-soft); border-color: color-mix(in oklch, var(--danger) 28%, transparent); color: var(--danger); }
-  .sb-chip.danger :global(svg) { color: var(--danger); }
-  /* Dev build — calm neutral, not an alarm. A quiet mono tag, no colored fill. */
-  .sb-chip.dev { color: var(--fg-2); }
-  .sb-chip.dev :global(svg) { color: var(--fg-subtle); }
-  /* The static "local workspace" chip carries no state — recede it below the
-     interactive version pill so the eye lands on the actionable one. */
-  .sb-chip.ghost { background: transparent; border-color: color-mix(in oklch, var(--border) 70%, transparent); color: var(--fg-subtle); }
-  .sb-chip-ver { font-family: var(--font-mono); font-weight: 600; }
-  /* Version → tag separator: a mid-dot in the chip's own muted ink. */
-  .sb-chip-tag { position: relative; padding-left: 9px; margin-left: 2px; font-size: 11px; opacity: 0.9; }
-  .sb-chip-tag::before { content: ""; position: absolute; left: 0; top: 50%; width: 3px; height: 3px; margin-top: -1.5px; border-radius: 50%; background: currentColor; opacity: 0.55; }
-  .sb-chip .mono { font-family: var(--font-mono); }
 
   /* ── Session status banner ── */
   .sb-status { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 16px 18px; margin-bottom: 18px; border-radius: var(--r-card); background: linear-gradient(180deg, color-mix(in oklab, var(--ok) 6%, var(--surface)), var(--surface)); border: 1px solid color-mix(in oklab, var(--ok) 20%, var(--border)); }

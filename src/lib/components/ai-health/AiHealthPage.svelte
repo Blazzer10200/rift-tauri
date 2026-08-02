@@ -6,7 +6,7 @@
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
-  import { HeartPulse, Gauge, Sparkles, ArrowRight, Wrench, Loader2, AlertTriangle, Check, Undo2, SlidersHorizontal, Wifi, Snowflake, Plug } from "lucide-svelte";
+  import { HeartPulse, Gauge, Sparkles, ArrowRight, Wrench, Loader2, AlertTriangle, Check, Undo2, Wifi, Snowflake, Plug } from "lucide-svelte";
   import PageHero from "../shared/PageHero.svelte";
   import { usage, type LimitWindow, type AdviceApply } from "../../state/usage.svelte";
   import { assistant, type ModelSel } from "../../state/assistant.svelte";
@@ -617,18 +617,6 @@
   // Per-turn dollar budget is only a real knob in API-key mode (pay-per-token).
   // For a subscription session it's inert (usage-limit windows govern spend), so
   // it's dropped from the "knobs Rift can tune" list rather than shown as a lie.
-  // Effort row reads "Low" when the master switch is off (the ladder's rung 0 —
-  // that IS the wire state: `--effort low`), else the tier's label — so it
-  // matches what the composer ladder shows.
-  const thinkingLabel = $derived(
-    assistant.thinkingEnabled ? (EFFORT_LABEL[assistant.thinkingEffort] ?? assistant.thinkingEffort) : "Low",
-  );
-  const configRows = $derived([
-    { k: "Default effort", v: thinkingLabel },
-    { k: "Default model", v: MODEL_LABEL[assistant.model] ?? assistant.model },
-    ...(assistant.hasApiKey ? [{ k: "Per-turn budget", v: budgetLabel(assistant.maxBudgetUsd) }] : []),
-  ]);
-
   // Read the live value a given apply action would replace — for current→new.
   function currentValueFor(a: AdviceApply): string {
     if (a.kind === "effort") return assistant.thinkingEnabled ? (EFFORT_LABEL[assistant.thinkingEffort] ?? assistant.thinkingEffort) : "Low";
@@ -698,7 +686,7 @@
 <div class="sb-main">
   <PageHero
     eyebrow="Experimental"
-    title="AI Health"
+    title="Claude Usage & Health"
     desc="See how you're using Claude through Rift — your plan limits, where your usage goes, and one-tap advice on how to stretch your plan further."
   >
     {#snippet chip()}
@@ -921,19 +909,6 @@
           {/if}
         </section>
       {/if}
-
-      <!-- ── Current setup ── the live harness knobs an apply action tunes -->
-      <section class="ah-card half">
-        <div class="ah-card-h"><SlidersHorizontal size={15} strokeWidth={1.9} />Your current setup</div>
-        <div class="ah-cfg">
-          {#each configRows as row (row.k)}
-            <div class="ah-cfg-row"><span class="ah-cfg-k">{row.k}</span><span class="ah-cfg-v">{row.v}</span></div>
-          {/each}
-        </div>
-        {#if !usage.advice}
-          <p class="ah-cfg-note">These are the knobs Rift can tune for you. Advice above applies straight to them — one tap, undoable.</p>
-        {/if}
-      </section>
 
       <!-- ── MCP servers (#93-4) ── per-session tool-server health from the
            latest init frame — the same data /mcp prints, as a persistent

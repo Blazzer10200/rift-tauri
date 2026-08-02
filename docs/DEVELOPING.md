@@ -25,8 +25,8 @@ For someone handed a `Setup.exe` who wants to use Claude, ChatGPT, or both again
 At least one provider must be connected:
 
 - **Claude:** install Claude Code (`npm install -g @anthropic-ai/claude-code`), run `claude` once, and complete browser login (Pro/Max/Team)—see §4.
-- Or add an `ANTHROPIC_API_KEY` in **Settings → AI → Claude API access**; Rift passes it to the CLI per turn.
-- **ChatGPT:** sign in through the Codex CLI for subscription-backed access, or add a key from the OpenAI API platform under **Settings → AI → ChatGPT API access**—see §3. Subscription and API billing are separate.
+- Or add an `ANTHROPIC_API_KEY` in **Settings → Providers → Optional Claude API access**; Rift passes it to the CLI per turn.
+- **ChatGPT:** sign in through the Codex CLI for subscription-backed access, or add a key from the OpenAI API platform under **Settings → Providers → Optional ChatGPT API access**—see §3. Subscription and API billing are separate.
 - Provider status appears in Settings and the model picker disables models whose provider is not ready.
 
 ### Pick a workspace + chat
@@ -45,7 +45,7 @@ Rift self-updates via Velopack. It checks on launch + every ~6h; when a build is
 ### Trouble?
 
 - Claude unavailable → install/sign in to `claude` (§4) or add an Anthropic key in Settings.
-- ChatGPT API unavailable → add a valid API key under Settings → AI (§3); a ChatGPT login alone does not authorize API requests.
+- ChatGPT subscription unavailable → install/sign in to the standalone Codex CLI, then re-probe Settings → Providers. API-only failures stay under the optional API disclosure (§3).
 - CLI logs/auth live under `~/.claude/`. Rift's own config is managed in-app via Settings.
 
 ---
@@ -106,7 +106,7 @@ Dev watches `src/` + `src-tauri/src/` and hot-reloads. **Don't run `cargo check`
 Rift uses OpenAI's API directly; it does not automate the ChatGPT website and does not consume a ChatGPT Plus/Pro subscription.
 
 1. Create an API key in the OpenAI platform and make sure the API account has billing/access configured.
-2. Open **Settings → AI → ChatGPT API access**, paste the key, and save. Rift validates the key shape, stores it in Windows Credential Manager, and never returns it to the WebView.
+2. Open **Settings → Providers → Optional ChatGPT API access**, paste the key, and save. Rift validates the key shape, stores it in Windows Credential Manager, and never returns it to the WebView.
 3. Refresh models or open the composer model picker. Rift combines its supported GPT defaults with the GPT chat/reasoning models visible to that API account.
 4. Select a GPT model for a conversation and send normally.
 
@@ -114,7 +114,7 @@ OpenAI turns use `/v1/responses` with streaming and `store: false`. Rift owns co
 
 ## 3.1 Codex / ChatGPT CLI connection
 
-Settings → AI can inspect a standalone `codex` CLI and launch its official `codex login` browser flow. This uses the ChatGPT subscription authorized for Codex; it is separate from API-key billing. Rift never reads or copies Codex’s auth cache, and it rejects the packaged Windows Desktop helper because that executable is not a supported standalone CLI. The App Server turn adapter is intentionally not exposed as a model route until its streamed event and approval contracts have authenticated coverage.
+Settings → Providers inspects a standalone `codex` CLI and launches its official `codex login` browser flow. This uses the ChatGPT subscription authorized for Codex; it is separate from API-key billing. Rift never reads or copies Codex’s auth cache, and rejects the packaged Windows Desktop helper because it is not a supported standalone CLI. Subscription turns use the local App Server (`initialize` → model list → thread start/resume → turn start); Rift maps streamed items, reasoning, approvals, questions, usage, cancellation, and completion into the same UI contract as Claude, while persisting only the Codex thread id.
 
 For a real pre-release check, use the dev app: save a test key, refresh the model list, send one plain text turn, run one read-only workspace tool, then cancel a streaming turn. Never place a test key in source, logs, screenshots, or shell output.
 

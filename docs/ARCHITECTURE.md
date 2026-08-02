@@ -98,7 +98,7 @@ Other stores: `environment.svelte.ts` (host-tool presence — git/node/npm/cargo
 
 ### Components (`src/lib/components/`)
 - `assistant/` — the Chat surface: `MessageBubble`, `ToolChip`, `EditDiff`, `Markdown`, `Composer` (split into `composer/*`), `AssistantPane`, `AssistantPage`, `AssistantWelcome` (warm/cold welcome), `PermissionBar`. Sub-agent dispatches render **inline** as cards (`stream/StreamAgent` live · `toolchip/AgentCard` persisted) — no floating dock.
-- `workspace/` — `WorkspacePage.svelte`, the merged Workspace (home) surface; its provider pulse deep-links to Settings → AI, while `NewsFeed.svelte` labels its independently verified source coverage rather than implying every connected provider supplies a feed. `globPreview.ts` + `welcomeShared.ts` back its glob validation and shared greeting.
+- `workspace/` — `WorkspacePage.svelte`, the merged Workspace (home) surface. Provider setup lives only in Settings → Providers; `NewsFeed.svelte` labels Claude's independently verified source coverage rather than implying every connected provider supplies a feed. `globPreview.ts` + `welcomeShared.ts` back its glob validation and shared greeting.
 - `shell/` — `Titlebar` (custom drag region — needs `core:window:allow-start-dragging`), `WorkspaceShell`, `Sidebar`, `Topbar`, `StatusBar`, `ConversationList`, `ProjectRail`, `ContextMenuHost`, `RiftLogo`. (`tabsbar/` holds only pure helpers now — `ChatTabsBar` was folded in.)
 - `home/` (`statsHelpers.ts` — the pure usage-stat aggregation WorkspacePage + AiHealth both read) · `settings/` · `local-llm/` · `ai-health/` · `webview/` · `onboarding/` — the other workspaces, onboarding, and browser pane.
 

@@ -4113,6 +4113,15 @@ pub async fn assistant_stop(
     if perms_cancelled > 0 {
         log::info!("assistant_stop: cancelled {perms_cancelled} pending permission ask(s) for {session_id}");
     }
+    // Codex and OpenAI turns are provider-managed streams rather than Claude
+    // children. Cancel their token before falling through to the PID path.
+    let cancelled_ask = ask_user.cancel_all_for_session(&session_id);
+    if cancelled_ask > 0 {
+        log::info!("assistant_stop: cancelled {cancelled_ask} pending ask_user for {session_id}");
+    }
+    if super::codex_app_server::cancel_codex_session(&session_id) {
+        return Ok(());
+    }
     // OpenAI turns are native HTTP streams rather than child processes. Cancel
     // their token before falling through to the Claude PID path. No active
     // token means this is a Claude/idle session and existing behavior applies.
@@ -4125,10 +4134,6 @@ pub async fn assistant_stop(
     // prior-turn cleanup), so the kill alone would leave the bridge parked for
     // the full 600s timeout and the UI spinner stuck. Cancelling here drops the
     // sender → the bridge waiter resolves Err immediately → MCP child unblocks.
-    let cancelled = ask_user.cancel_all_for_session(&session_id);
-    if cancelled > 0 {
-        log::info!("assistant_stop: cancelled {cancelled} pending ask_user for {session_id}");
-    }
     // Same safety net for a parked `can_use_tool` permission ask (cont.228): the
     // stdout reader awaits the user's Allow/Deny on a PermissionRegistry oneshot.
     // If the PID is already gone the kill is a no-op and that await would park for

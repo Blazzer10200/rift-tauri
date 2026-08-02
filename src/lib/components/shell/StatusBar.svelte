@@ -17,7 +17,7 @@
 
   const openAi = $derived(isOpenAIModel(assistant.effectiveModel));
   const connected = $derived(
-    openAi ? assistant.openAiStatus?.ready === true : !!(assistant.auth?.loggedIn || assistant.hasApiKey),
+    openAi ? assistant.chatGptModelAvailable(assistant.effectiveModel) : !!(assistant.auth?.loggedIn || assistant.hasApiKey),
   );
   const providerLabel = $derived(modelProviderLabel(assistant.effectiveModel));
   const repoName = $derived.by(() => {
@@ -75,7 +75,7 @@
   }
 
   function openAdminSettings() {
-    commandPalette.requestSettingsSection("claude");
+    commandPalette.requestSettingsSection("about");
     workspace.setActive("settings");
   }
 

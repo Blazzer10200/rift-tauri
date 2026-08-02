@@ -2,6 +2,15 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.151.0 — ChatGPT subscription turns and a calmer Rift
+
+- **ChatGPT subscriptions now work inside Rift.** The signed-in Codex CLI supplies the live account model catalog, and Rift runs turns through the official local App Server with streaming text, reasoning, tools, approvals, questions, usage, cancellation, and resumable thread IDs.
+- **ChatGPT is the default when the account is connected.** Existing Claude-first workspace pins migrate once to the account's live default GPT model. The picker shows every supported account model, prefers the subscription route, and keeps the separately billed API-key route as an optional fallback.
+- **Claude Free no longer advertises paid models.** The conservative 200K profile shows Sonnet and Haiku only, hides Opus/Fable and legacy paid rows, and repairs an incompatible saved selection before a turn can start.
+- **Provider setup is organized in one place.** Settings is now Appearance, Chat, Providers, Voice, and System. Optional Claude and ChatGPT API controls are collapsed, administrator access lives under System, onboarding leads with ChatGPT sign-in, and status labels match the active provider.
+- **Less duplicated interface chrome.** Workspace no longer repeats provider status or the sidebar's create actions, the model menu contains only models and effort, autocorrect moved to Chat settings, Claude usage is labeled honestly, and redundant setup/version summaries were removed.
+- **Verified on the real account path.** A live GPT Sol 5.6 turn and a same-thread follow-up both completed through Rift with the expected text, usage, persistence, and zero WebView console errors.
+
 ## v0.150.2 — ChatGPT clarity and a cleaner AI setup
 
 - **One ChatGPT identity throughout Rift.** The model picker, composer, onboarding, status bar, Workspace, and Settings now present ChatGPT consistently instead of mixing OpenAI and Codex as if they were separate providers. Technical API and CLI details remain visible only where they explain setup or billing.

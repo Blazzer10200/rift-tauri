@@ -287,6 +287,7 @@ pub fn run() {
             commands::assistant_openai_list_models,
             commands::assistant_codex_status,
             commands::assistant_codex_open_login,
+            commands::assistant_codex_list_models,
             commands::assistant_autocompact_config,
             commands::assistant_get_use_full_config,
             commands::assistant_set_use_full_config,
@@ -298,6 +299,7 @@ pub fn run() {
             commands::install_local_tool,
             commands::assistant_send,
             commands::assistant_openai_send,
+            commands::assistant_codex_send,
             commands::assistant_steer,
             commands::assistant_prewarm,
             commands::assistant_enhance_prompt,
@@ -382,6 +384,7 @@ pub fn run() {
                 // apply-only IMAGENAME sweep is deliberately NOT mirrored — on a
                 // normal exit it could hit a second running Rift instance.
                 assistant::warm_pool::drain_all_for_shutdown();
+                assistant::codex_app_server::cancel_all_codex_turns();
                 assistant::kill_all_session_children();
                 // Scrub the on-disk bridge token from
                 // `~/.rift/assistant/mcp-config.json` — stale the instant we exit.

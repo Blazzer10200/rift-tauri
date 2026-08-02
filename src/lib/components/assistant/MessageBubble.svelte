@@ -175,7 +175,10 @@
   // actually is — derived per-message so history stays correct when the live
   // toggle later flips.
   const isLocalModel = $derived(
-    !!message.model && !/^claude/i.test(message.model) && !isOpenAiModel,
+    !!message.model
+      && !/^claude/i.test(message.model)
+      && !/^(opus|sonnet|haiku)$/i.test(message.model)
+      && !isOpenAiModel,
   );
   // Family key for aurora tinting — drives the bubble's left rail + avatar
   // halo color so each assistant turn carries the same hue as the composer

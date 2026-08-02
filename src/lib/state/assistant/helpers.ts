@@ -99,7 +99,8 @@ const PERMISSION_MODES: readonly PermissionMode[] = [
 /** Validate an untrusted string (e.g. a saved convo's model) into a ModelSel.
  *  Returns null for unknown values and for Fable past its sunset. */
 export function asModelSel(v: unknown): ModelSel | null {
-  if (typeof v !== "string" || !(MODEL_SELS as readonly string[]).includes(v)) return null;
+  if (typeof v !== "string") return null;
+  if (!(MODEL_SELS as readonly string[]).includes(v) && !isOpenAIModel(v)) return null;
   if (v === "claude-fable-5" && !fableAvailable()) return null;
   if (v === "haiku" && !haikuAvailable()) return null;
   return v as ModelSel;
@@ -110,7 +111,7 @@ export function loadModel(ws?: string | null): ModelSel {
     if (typeof localStorage !== "undefined") {
       const k = wsKey(MODEL_KEY, ws);
       const v = (k ? localStorage.getItem(k) : null) ?? localStorage.getItem(MODEL_KEY);
-      if (v && (MODEL_SELS as readonly string[]).includes(v)) {
+      if (v && ((MODEL_SELS as readonly string[]).includes(v) || isOpenAIModel(v))) {
         if (v === "claude-fable-5" && !fableAvailable()) return "opus"; // matches backend FABLE_FALLBACK_MODEL (turn.rs)
         if (v === "haiku" && !haikuAvailable()) return "sonnet"; // Haiku pulled → fast-tier fallback (mirror config.rs)
         return v as ModelSel;
@@ -128,6 +129,27 @@ export function saveModel(v: ModelSel, ws?: string | null) {
     const k = wsKey(MODEL_KEY, ws);
     if (k) localStorage.setItem(k, v); // per-workspace pin — never touches the global baseline
     else localStorage.setItem(MODEL_KEY, v); // no workspace → set the baseline default
+  } catch {
+    /* storage disabled */
+  }
+}
+
+/** One release migration from Claude-first defaults to the user's live
+ * ChatGPT account default. Existing GPT pins stay untouched; Claude pins move
+ * together so opening a different project cannot silently restore Opus. */
+export function migrateClaudeModelPinsTo(next: ModelSel) {
+  try {
+    if (typeof localStorage === "undefined") return;
+    const keys: string[] = [MODEL_KEY];
+    const prefix = `${MODEL_KEY}::`;
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(prefix)) keys.push(key);
+    }
+    for (const key of keys) {
+      const current = localStorage.getItem(key);
+      if (current && !isOpenAIModel(current)) localStorage.setItem(key, next);
+    }
   } catch {
     /* storage disabled */
   }
@@ -496,7 +518,7 @@ export const EFFORT_ORDER: readonly ThinkingEffort[] = [
  *  Sonnet 5 honors xhigh + max server-side (unlike Sonnet 4.6, which rejected
  *  xhigh and capped at deep); Haiku rejects effort wholesale (`none`). Mirror
  *  the Sonnet ceiling in src-tauri/src/assistant/turn.rs (model_max_effort). */
-export const MODEL_MAX_EFFORT: Record<ModelSel, ThinkingEffort> = {
+export const MODEL_MAX_EFFORT: Record<string, ThinkingEffort> = {
   opus: "ultra",
   "claude-opus-4-8": "ultra",
   "claude-opus-4-7": "ultra",

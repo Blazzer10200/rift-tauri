@@ -67,10 +67,10 @@ export async function send(
     const openai = isOpenAIModel(liveTab?.modelOverride ?? store.model);
     notify.danger(openai ? "ChatGPT isn't set up" : "Claude isn't set up", {
       detail: openai
-        ? store.openAiStatus?.summary ?? "Open Settings → AI and add a ChatGPT API key."
+        ? store.codexStatus?.summary ?? store.openAiStatus?.summary ?? "Open Settings → Providers and connect ChatGPT."
         : store.auth?.summary ?? "Open Settings to sign in or add an API key.",
     });
-    if (openai) void store.refreshOpenAiStatus();
+    if (openai) void Promise.all([store.refreshCodexStatus(), store.refreshOpenAiStatus()]);
     else void store.refreshAuth();
     return;
   }
@@ -330,8 +330,16 @@ export async function send(
     ? (trimmed ? `${textBlocks}\n\n${trimmed}` : textBlocks)
     : trimmed;
   try {
-    const command = isOpenAIModel(effModel) ? "assistant_openai_send" : "assistant_send";
-    const openAiHistory = isOpenAIModel(effModel)
+    const chatGptRoute = isOpenAIModel(effModel) ? store.chatGptRouteFor(effModel) : null;
+    if (isOpenAIModel(effModel) && !chatGptRoute) {
+      throw new Error("This ChatGPT model is not available on the connected account.");
+    }
+    const command = chatGptRoute === "codex"
+      ? "assistant_codex_send"
+      : chatGptRoute === "openai"
+        ? "assistant_openai_send"
+        : "assistant_send";
+    const openAiHistory = chatGptRoute === "openai"
       ? tab.openAiHistory.length > 0
         ? tab.openAiHistory
         : tab.messages.slice(0, -2).flatMap((message) => {
@@ -344,17 +352,28 @@ export async function send(
           return content ? [{ role: message.role, content }] : [];
         })
       : undefined;
-    await invoke(command, {
+    const sharedArgs = {
       prompt: effectivePrompt,
       sessionId: tab.cliSessionId,
       turnEpoch: tab.turnEpoch,
-      isFirstTurn,
       model: effModel,
       attachments: turnAttachments.length > 0 ? turnAttachments : null,
-      dyslexiaMode: accessibility.dyslexiaMode,
       thinkingEffort: sendEffort,
-      thinkingEnabled: store.thinkingOnFor(tab),
       permissionMode: store.permissionMode,
+      root: store.effectiveRoot(tab),
+    };
+    if (chatGptRoute === "codex") {
+      await invoke(command, {
+        ...sharedArgs,
+        codexThreadId: tab.codexThreadId,
+      });
+      return;
+    }
+    await invoke(command, {
+      ...sharedArgs,
+      isFirstTurn,
+      dyslexiaMode: accessibility.dyslexiaMode,
+      thinkingEnabled: store.thinkingOnFor(tab),
       // Sent pre-gated by model family so an ineligible model never carries a
       // stale global `on` into the SpawnKey; the backend re-gates by CLI
       // version (caps.fast_mode) on top.
@@ -365,7 +384,6 @@ export async function send(
       // forward-compat hook (turn.rs Phase C) — don't re-add a hard-coded null here.
       // Per-tab root: each pane/window runs its turns in its own folder. Only
       // read on the first turn backend-side (then pinned per-session).
-      root: store.effectiveRoot(tab),
       history: openAiHistory,
     });
   } catch (e) {

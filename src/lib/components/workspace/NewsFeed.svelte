@@ -115,7 +115,7 @@
   <div class="news-coverage">
     <Terminal size={12} />
     <span><b>Source coverage</b> · official Claude Code release notes</span>
-    <span class="coverage-note">Provider readiness stays visible above in Workspace.</span>
+    <span class="coverage-note">Connections are managed in Settings → Providers.</span>
   </div>
 
   <!-- ── Tier 2 digest (opt-in) ── -->
@@ -155,7 +155,7 @@
       <button class="digest-cta" type="button" disabled={!claudeReady} onclick={() => void news.summarize()}>
         <span class="dc-ic"><Sparkles size={15} /></span>
         <span class="dc-tx">
-          <b>Summarize recent provider news</b>
+          <b>Summarize recent Claude news</b>
           <small>Claude searches official sources and the web for recent Anthropic and Claude Code updates.</small>
           <small class="dc-cost">{claudeReady ? "Runs one Claude turn — billed like a chat message." : "Connect Claude to run this optional digest."}</small>
         </span>

@@ -12,5 +12,7 @@ export const CHATGPT = {
 
 export function modelProviderLabel(model: string | null | undefined): "Claude" | "ChatGPT" | "Local model" {
   if (!model) return "Local model";
-  return /^gpt-/i.test(model) ? CHATGPT.label : /^claude/i.test(model) ? "Claude" : "Local model";
+  if (/^gpt-/i.test(model)) return CHATGPT.label;
+  if (/^claude/i.test(model) || /^(opus|sonnet|haiku)$/i.test(model)) return "Claude";
+  return "Local model";
 }

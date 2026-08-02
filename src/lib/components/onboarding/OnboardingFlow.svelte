@@ -11,7 +11,7 @@
   import RiftLogo from "$lib/components/shell/RiftLogo.svelte";
   import { uiPrefs, ACCENTS } from "$lib/state/ui-prefs.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
-  import { MODE_OPTIONS, currentModels, type ModelOpt } from "$lib/components/assistant/composer/modelMatrix";
+  import { MODE_OPTIONS, currentModels, isFreeClaudeModel, type ModelOpt } from "$lib/components/assistant/composer/modelMatrix";
   import type { ThinkingEffort } from "$lib/state/assistant/types";
   import { isOpenAIModel } from "$lib/state/assistant/helpers";
   import { CHATGPT } from "$lib/state/assistant/providerDisplay";
@@ -43,12 +43,19 @@
   function selectProvider(next: "claude" | "openai") {
     provider = next;
     connectConnected = next === "openai"
-      ? assistant.openAiStatus?.ready === true
+      ? assistant.codexStatus?.ready === true || assistant.openAiStatus?.ready === true
       : assistant.auth?.pill === "green" || assistant.auth?.pill === "yellow";
-    if (next === "openai" && !isOpenAIModel(assistant.model)) assistant.setModel("gpt-5.6");
+    if (next === "openai" && !isOpenAIModel(assistant.model)) {
+      assistant.setModel(assistant.codexModels?.find((model) => model.isDefault)?.id ?? "gpt-5.6-sol");
+    }
     if (next === "claude" && isOpenAIModel(assistant.model)) assistant.setModel("sonnet");
     warnSkipConnect = false;
   }
+
+  const defaultModels = $derived(currentModels.filter((model) =>
+    model.provider === (provider === "openai" ? "openai" : "claude")
+      && (model.provider !== "claude" || assistant.plan !== "free" || isFreeClaudeModel(model.id))
+  ));
 
   function goto(n: number) {
     if (n < step) {
@@ -235,13 +242,13 @@
               </div>
             </div>
           {:else if step === 2}
-            <ObStage kind={provider} caption={provider === "claude" ? "local CLI connection" : "secure API connection"} />
+            <ObStage kind={provider} caption={provider === "claude" ? "local CLI connection" : "ChatGPT account connection"} />
             <div class="ob-seg ob-provider-seg" role="radiogroup" aria-label="AI provider">
               <button type="button" class="ob-seg-btn ob-provider-btn" class:on={provider === "claude"} role="radio" aria-checked={provider === "claude"} onclick={() => selectProvider("claude")}>
                 <Terminal size={15} /><span><b>Claude</b><small>CLI or API key</small></span>
               </button>
               <button type="button" class="ob-seg-btn ob-provider-btn" class:on={provider === "openai"} role="radio" aria-checked={provider === "openai"} onclick={() => selectProvider("openai")}>
-                <Orbit size={15} /><span><b>ChatGPT</b><small>API access</small></span>
+                <Orbit size={15} /><span><b>ChatGPT</b><small>subscription or optional API</small></span>
               </button>
             </div>
             {#if provider === "claude"}
@@ -303,8 +310,8 @@
               <div class="ob-field">
                 <span class="ob-flabel">Model</span>
                 <div class="ob-seg" role="radiogroup" aria-label="Default model">
-                  {#each currentModels as m (m.id)}
-                    {@const available = assistant.openAiModelAvailable(m.id)}
+                  {#each defaultModels as m (m.id)}
+                    {@const available = m.provider === "openai" ? assistant.chatGptModelAvailable(m.id) : assistant.authReadyForModel(m.id)}
                     <button
                       type="button"
                       class="ob-seg-btn"

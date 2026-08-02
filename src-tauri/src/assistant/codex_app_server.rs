@@ -1,0 +1,1147 @@
+//! Codex App Server adapter for ChatGPT subscription-backed turns.
+//!
+//! Authentication remains entirely inside the official Codex CLI. Rift speaks
+//! the public JSONL App Server protocol, translates its events into Rift's
+//! existing assistant stream envelopes, and persists only the opaque thread id.
+
+use std::collections::{HashMap, HashSet};
+use std::process::Stdio;
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
+
+use serde::Serialize;
+use serde_json::{json, Value};
+use tauri::{AppHandle, Emitter, Manager};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines};
+use tokio::process::{Child, ChildStdin, ChildStdout};
+use tokio_util::sync::CancellationToken;
+
+use super::{AskUserRegistry, AssistantAttachment, PermissionRegistry};
+
+const STREAM_EVENT: &str = "assistant://stream";
+const DONE_EVENT: &str = "assistant://done";
+const ERROR_EVENT: &str = "assistant://error";
+const PERMISSION_EVENT: &str = "assistant://permission-request";
+const ASK_USER_EVENT: &str = "assistant://ask-user";
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexModel {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+    pub is_default: bool,
+    pub default_reasoning_effort: String,
+    pub supported_reasoning_efforts: Vec<String>,
+    pub image_input: bool,
+}
+
+struct AppServer {
+    child: Child,
+    stdin: ChildStdin,
+    lines: Lines<BufReader<ChildStdout>>,
+    next_id: u64,
+    pending: Vec<Value>,
+}
+
+impl AppServer {
+    async fn spawn() -> Result<Self, String> {
+        let exe = super::codex::resolve_codex_cli().ok_or_else(|| {
+            "No runnable Codex CLI was found. Install it from Settings → AI.".to_string()
+        })?;
+        let mut command = super::codex::command_for(&exe, &["app-server"]);
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        let mut child = command
+            .spawn()
+            .map_err(|e| format!("start Codex App Server: {e}"))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or("Codex App Server stdin unavailable")?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or("Codex App Server stdout unavailable")?;
+        let mut server = Self {
+            child,
+            stdin,
+            lines: BufReader::new(stdout).lines(),
+            next_id: 1,
+            pending: Vec::new(),
+        };
+        server
+            .request(
+                "initialize",
+                json!({
+                    "clientInfo": { "name": "rift", "title": "Rift", "version": env!("CARGO_PKG_VERSION") },
+                    "capabilities": { "experimentalApi": true }
+                }),
+            )
+            .await?;
+        server.notify("initialized", json!({})).await?;
+        Ok(server)
+    }
+
+    async fn write(&mut self, value: &Value) -> Result<(), String> {
+        let mut line =
+            serde_json::to_vec(value).map_err(|e| format!("encode App Server message: {e}"))?;
+        line.push(b'\n');
+        self.stdin
+            .write_all(&line)
+            .await
+            .map_err(|e| format!("write App Server message: {e}"))?;
+        self.stdin
+            .flush()
+            .await
+            .map_err(|e| format!("flush App Server message: {e}"))
+    }
+
+    async fn notify(&mut self, method: &str, params: Value) -> Result<(), String> {
+        self.write(&json!({ "method": method, "params": params }))
+            .await
+    }
+
+    async fn request(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.write(&json!({ "id": id, "method": method, "params": params }))
+            .await?;
+        loop {
+            let line = tokio::time::timeout(Duration::from_secs(20), self.lines.next_line())
+                .await
+                .map_err(|_| format!("Codex App Server timed out waiting for {method}"))?
+                .map_err(|e| format!("read Codex App Server: {e}"))?
+                .ok_or_else(|| "Codex App Server exited unexpectedly".to_string())?;
+            let msg: Value = serde_json::from_str(&line)
+                .map_err(|e| format!("invalid Codex App Server JSON: {e}"))?;
+            if msg.get("id").and_then(Value::as_u64) == Some(id) {
+                if let Some(error) = msg.get("error") {
+                    return Err(app_server_error(error));
+                }
+                return Ok(msg.get("result").cloned().unwrap_or(Value::Null));
+            }
+            if msg.get("method").is_some() {
+                self.pending.push(msg);
+            }
+        }
+    }
+
+    async fn shutdown(&mut self) {
+        let _ = self.child.kill().await;
+    }
+}
+
+fn app_server_error(error: &Value) -> String {
+    error
+        .get("message")
+        .and_then(Value::as_str)
+        .unwrap_or("Codex App Server request failed")
+        .to_string()
+}
+
+fn active_turns() -> &'static Mutex<HashMap<String, CancellationToken>> {
+    static ACTIVE: OnceLock<Mutex<HashMap<String, CancellationToken>>> = OnceLock::new();
+    ACTIVE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+struct ActiveGuard(String);
+
+impl Drop for ActiveGuard {
+    fn drop(&mut self) {
+        let mut active = active_turns().lock().unwrap_or_else(|p| p.into_inner());
+        active.remove(&self.0);
+    }
+}
+
+fn register_turn(session_id: &str) -> (CancellationToken, ActiveGuard) {
+    let token = CancellationToken::new();
+    let mut active = active_turns().lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(old) = active.insert(session_id.to_string(), token.clone()) {
+        old.cancel();
+    }
+    (token, ActiveGuard(session_id.to_string()))
+}
+
+pub fn cancel_codex_session(session_id: &str) -> bool {
+    let token = active_turns()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .get(session_id)
+        .cloned();
+    if let Some(token) = token {
+        token.cancel();
+        true
+    } else {
+        false
+    }
+}
+
+pub fn cancel_all_codex_turns() {
+    let tokens: Vec<_> = active_turns()
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .values()
+        .cloned()
+        .collect();
+    for token in tokens {
+        token.cancel();
+    }
+}
+
+#[tauri::command]
+pub async fn assistant_codex_list_models() -> Result<Vec<CodexModel>, String> {
+    let mut server = AppServer::spawn().await?;
+    let result = server
+        .request(
+            "model/list",
+            json!({ "includeHidden": false, "limit": 100 }),
+        )
+        .await;
+    server.shutdown().await;
+    let result = result?;
+    let models = result
+        .get("data")
+        .and_then(Value::as_array)
+        .ok_or("Codex returned an invalid model list")?;
+    Ok(models.iter().filter_map(parse_model).collect())
+}
+
+fn parse_model(value: &Value) -> Option<CodexModel> {
+    if value
+        .get("hidden")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    let id = value
+        .get("model")
+        .or_else(|| value.get("id"))
+        .and_then(Value::as_str)?
+        .to_string();
+    let efforts = value
+        .get("supportedReasoningEfforts")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.get("reasoningEffort").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default();
+    let modalities = value.get("inputModalities").and_then(Value::as_array);
+    Some(CodexModel {
+        id,
+        label: value
+            .get("displayName")
+            .and_then(Value::as_str)
+            .unwrap_or("GPT")
+            .to_string(),
+        description: value
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        is_default: value
+            .get("isDefault")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        default_reasoning_effort: value
+            .get("defaultReasoningEffort")
+            .and_then(Value::as_str)
+            .unwrap_or("medium")
+            .to_string(),
+        supported_reasoning_efforts: efforts,
+        image_input: modalities
+            .is_none_or(|items| items.iter().any(|item| item.as_str() == Some("image"))),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+#[tauri::command]
+pub async fn assistant_codex_send(
+    app: AppHandle,
+    window: tauri::Window,
+    prompt: String,
+    session_id: String,
+    codex_thread_id: Option<String>,
+    model: Option<String>,
+    attachments: Option<Vec<AssistantAttachment>>,
+    thinking_effort: Option<String>,
+    thinking_enabled: Option<bool>,
+    turn_epoch: Option<u64>,
+    permission_mode: Option<String>,
+    root: Option<String>,
+) -> Result<(), String> {
+    if !super::is_valid_session_id(&session_id) {
+        return Err("invalid session_id: must be a UUID".into());
+    }
+    let attachments = attachments.unwrap_or_default();
+    super::turn::validate_attachments(&attachments)?;
+    if prompt.trim().is_empty() && attachments.is_empty() {
+        return Err("empty ChatGPT message".into());
+    }
+    let model = model.ok_or("No ChatGPT model is selected")?;
+    if !super::is_valid_model_name(&model) || !model.starts_with("gpt-") {
+        return Err("invalid ChatGPT model id".into());
+    }
+    let cfg = super::config::load_config();
+    let permission_mode = permission_mode
+        .filter(|mode| super::config::is_valid_permission_mode(mode))
+        .or(cfg.permission_mode)
+        .unwrap_or_else(|| "default".into());
+    let root = resolve_root(root.as_deref(), cfg.current_root.as_deref())?;
+    let epoch = turn_epoch.unwrap_or(0);
+    let window_label = window.label().to_string();
+    let (cancel, _guard) = register_turn(&session_id);
+    let mut server = AppServer::spawn().await?;
+    let result = run_turn(
+        &app,
+        &window_label,
+        &session_id,
+        epoch,
+        &mut server,
+        codex_thread_id.as_deref(),
+        &model,
+        &prompt,
+        &attachments,
+        thinking_enabled.unwrap_or(false),
+        thinking_effort.as_deref(),
+        &permission_mode,
+        root.as_deref(),
+        &cancel,
+    )
+    .await;
+    server.shutdown().await;
+    if let Err(error) = &result {
+        let _ = app.emit_to(
+            &window_label,
+            ERROR_EVENT,
+            json!({ "session_id": session_id, "message": error, "turn_epoch": epoch }),
+        );
+    }
+    result
+}
+
+fn resolve_root(
+    requested: Option<&str>,
+    configured: Option<&std::path::Path>,
+) -> Result<Option<String>, String> {
+    let candidate = requested
+        .filter(|value| !value.trim().is_empty())
+        .map(std::path::PathBuf::from)
+        .or_else(|| configured.map(std::path::PathBuf::from))
+        .or_else(super::current_root);
+    let Some(candidate) = candidate else {
+        return Ok(None);
+    };
+    if !candidate.is_dir() {
+        return Err(format!(
+            "workspace folder does not exist: {}",
+            candidate.display()
+        ));
+    }
+    Ok(Some(
+        super::canonicalize_root(candidate)?
+            .to_string_lossy()
+            .into_owned(),
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_turn(
+    app: &AppHandle,
+    window: &str,
+    session: &str,
+    epoch: u64,
+    server: &mut AppServer,
+    prior_thread: Option<&str>,
+    model: &str,
+    prompt: &str,
+    attachments: &[AssistantAttachment],
+    thinking_enabled: bool,
+    thinking_effort: Option<&str>,
+    permission_mode: &str,
+    root: Option<&str>,
+    cancel: &CancellationToken,
+) -> Result<(), String> {
+    let approval_policy = if permission_mode == "bypassPermissions" {
+        "never"
+    } else {
+        "on-request"
+    };
+    let roots = root.map(|value| vec![value]).unwrap_or_default();
+    let thread_result = if let Some(thread_id) = prior_thread.filter(|id| !id.trim().is_empty()) {
+        server
+            .request(
+                "thread/resume",
+                json!({
+                    "threadId": thread_id,
+                    "cwd": root,
+                    "model": model,
+                    "approvalPolicy": approval_policy,
+                    "runtimeWorkspaceRoots": roots,
+                }),
+            )
+            .await?
+    } else {
+        server
+            .request(
+                "thread/start",
+                json!({
+                    "cwd": root,
+                    "model": model,
+                    "approvalPolicy": approval_policy,
+                    "approvalsReviewer": "user",
+                    "runtimeWorkspaceRoots": roots,
+                    "serviceName": "rift",
+                    "ephemeral": false,
+                }),
+            )
+            .await?
+    };
+    let thread_id = thread_result
+        .pointer("/thread/id")
+        .and_then(Value::as_str)
+        .or(prior_thread)
+        .ok_or("Codex did not return a thread id")?
+        .to_string();
+
+    emit_line(
+        app,
+        window,
+        session,
+        epoch,
+        json!({
+            "type": "system", "subtype": "init", "model": model,
+            "provider": "codex", "codex_thread_id": thread_id,
+        }),
+    );
+
+    let effort = effort_name(thinking_enabled, thinking_effort);
+    let sandbox = sandbox_policy(permission_mode, root);
+    let mut input = vec![json!({ "type": "text", "text": prompt })];
+    for attachment in attachments {
+        input.push(json!({
+            "type": "image",
+            "url": format!("data:{};base64,{}", attachment.mime, attachment.data_base64),
+        }));
+    }
+    let collaboration = if permission_mode == "plan" {
+        json!({ "mode": "plan", "settings": {
+            "model": model, "reasoning_effort": effort, "developer_instructions": null
+        }})
+    } else {
+        Value::Null
+    };
+    let turn = server
+        .request(
+            "turn/start",
+            json!({
+                "threadId": thread_id,
+                "input": input,
+                "cwd": root,
+                "model": model,
+                "effort": effort,
+                "summary": "concise",
+                "approvalPolicy": approval_policy,
+                "sandboxPolicy": sandbox,
+                "collaborationMode": collaboration,
+                "runtimeWorkspaceRoots": roots,
+            }),
+        )
+        .await?;
+    let turn_id = turn
+        .pointer("/turn/id")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    stream_turn(
+        app,
+        window,
+        session,
+        epoch,
+        server,
+        &thread_id,
+        &turn_id,
+        model,
+        permission_mode,
+        cancel,
+    )
+    .await
+}
+
+fn effort_name(thinking_enabled: bool, effort: Option<&str>) -> &'static str {
+    if !thinking_enabled {
+        return "low";
+    }
+    match effort {
+        Some("ultra") => "xhigh",
+        Some("deep") => "high",
+        Some("none") => "low",
+        _ => "medium",
+    }
+}
+
+fn sandbox_policy(mode: &str, root: Option<&str>) -> Value {
+    match mode {
+        "bypassPermissions" => json!({ "type": "dangerFullAccess" }),
+        "plan" => json!({ "type": "readOnly", "networkAccess": false }),
+        _ => json!({
+            "type": "workspaceWrite", "writableRoots": root.into_iter().collect::<Vec<_>>(),
+            "networkAccess": false, "excludeTmpdirEnvVar": true, "excludeSlashTmp": true,
+        }),
+    }
+}
+
+#[derive(Default)]
+struct StreamState {
+    thinking: bool,
+    agent_delta_items: HashSet<String>,
+    usage: Option<Value>,
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn stream_turn(
+    app: &AppHandle,
+    window: &str,
+    session: &str,
+    epoch: u64,
+    server: &mut AppServer,
+    thread_id: &str,
+    turn_id: &str,
+    model: &str,
+    permission_mode: &str,
+    cancel: &CancellationToken,
+) -> Result<(), String> {
+    let mut state = StreamState::default();
+    let mut queued = std::mem::take(&mut server.pending);
+    let mut interrupting = false;
+    loop {
+        let value = if !queued.is_empty() {
+            queued.remove(0)
+        } else if interrupting {
+            let line = tokio::time::timeout(Duration::from_secs(4), server.lines.next_line())
+                .await
+                .map_err(|_| "ChatGPT cancellation timed out".to_string())?
+                .map_err(|e| format!("read Codex stream: {e}"))?
+                .ok_or_else(|| "Codex App Server ended during cancellation".to_string())?;
+            serde_json::from_str::<Value>(&line)
+                .map_err(|e| format!("invalid Codex stream JSON: {e}"))?
+        } else {
+            let line = tokio::select! {
+                _ = cancel.cancelled() => {
+                    interrupting = true;
+                    let id = server.next_id;
+                    server.next_id += 1;
+                    server.write(&json!({
+                        "id": id, "method": "turn/interrupt",
+                        "params": { "threadId": thread_id, "turnId": turn_id }
+                    })).await?;
+                    continue;
+                }
+                line = server.lines.next_line() => {
+                    line.map_err(|e| format!("read Codex stream: {e}"))?
+                }
+            }
+            .ok_or_else(|| "Codex App Server ended before the turn completed".to_string())?;
+            serde_json::from_str::<Value>(&line)
+                .map_err(|e| format!("invalid Codex stream JSON: {e}"))?
+        };
+        if value.get("method").is_none() {
+            continue;
+        }
+        if value.get("id").is_some() {
+            handle_server_request(app, window, session, epoch, server, &value, permission_mode)
+                .await?;
+            continue;
+        }
+        let method = value
+            .get("method")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let params = value.get("params").cloned().unwrap_or(Value::Null);
+        if params
+            .get("threadId")
+            .and_then(Value::as_str)
+            .is_some_and(|id| id != thread_id)
+        {
+            continue;
+        }
+        match method {
+            "item/agentMessage/delta" => {
+                if let Some(delta) = params.get("delta").and_then(Value::as_str) {
+                    if let Some(id) = params.get("itemId").and_then(Value::as_str) {
+                        state.agent_delta_items.insert(id.to_string());
+                    }
+                    emit_text_delta(app, window, session, epoch, delta);
+                }
+            }
+            "item/reasoning/summaryTextDelta" | "item/reasoning/textDelta" => {
+                if !state.thinking {
+                    state.thinking = true;
+                    emit_line(
+                        app,
+                        window,
+                        session,
+                        epoch,
+                        json!({
+                            "type":"stream_event", "event": {"type":"content_block_start", "index":1,
+                            "content_block":{"type":"thinking","thinking":"","signature":""}}
+                        }),
+                    );
+                }
+                if let Some(delta) = params.get("delta").and_then(Value::as_str) {
+                    emit_line(
+                        app,
+                        window,
+                        session,
+                        epoch,
+                        json!({
+                            "type":"stream_event", "event": {"type":"content_block_delta", "index":1,
+                            "delta":{"type":"thinking_delta","thinking":delta}}
+                        }),
+                    );
+                }
+            }
+            "item/started" => emit_item_started(app, window, session, epoch, params.get("item")),
+            "item/completed" => {
+                if params.pointer("/item/type").and_then(Value::as_str) == Some("reasoning")
+                    && state.thinking
+                {
+                    state.thinking = false;
+                    emit_line(
+                        app,
+                        window,
+                        session,
+                        epoch,
+                        json!({
+                            "type":"stream_event", "event":{"type":"content_block_stop","index":1}
+                        }),
+                    );
+                }
+                emit_item_completed(
+                    app,
+                    window,
+                    session,
+                    epoch,
+                    params.get("item"),
+                    &state.agent_delta_items,
+                );
+            }
+            "thread/tokenUsage/updated" => state.usage = params.get("tokenUsage").cloned(),
+            "thread/compacted" => emit_line(
+                app,
+                window,
+                session,
+                epoch,
+                json!({
+                    "type":"system", "subtype":"compact_boundary", "provider":"codex"
+                }),
+            ),
+            "turn/plan/updated" => {
+                if let Some(plan) = params.get("plan").and_then(Value::as_str) {
+                    emit_line(
+                        app,
+                        window,
+                        session,
+                        epoch,
+                        json!({
+                            "type":"assistant", "message":{"content":[{
+                                "type":"tool_use", "id":format!("codex-plan-{turn_id}"),
+                                "name":"ExitPlanMode", "input":{"plan":plan}
+                            }]}
+                        }),
+                    );
+                }
+            }
+            "turn/completed" => {
+                if state.thinking {
+                    emit_line(
+                        app,
+                        window,
+                        session,
+                        epoch,
+                        json!({
+                            "type":"stream_event", "event":{"type":"content_block_stop","index":1}
+                        }),
+                    );
+                }
+                let status = params
+                    .pointer("/turn/status")
+                    .and_then(Value::as_str)
+                    .unwrap_or("failed");
+                let error = params
+                    .pointer("/turn/error/message")
+                    .and_then(Value::as_str);
+                emit_result(
+                    app,
+                    window,
+                    session,
+                    epoch,
+                    CodexResult {
+                        model,
+                        thread_id,
+                        status,
+                        error,
+                        usage: state.usage.as_ref(),
+                    },
+                );
+                emit_done(
+                    app,
+                    window,
+                    session,
+                    epoch,
+                    if status == "completed" { 0 } else { -1 },
+                );
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+}
+
+fn emit_item_started(
+    app: &AppHandle,
+    window: &str,
+    session: &str,
+    epoch: u64,
+    item: Option<&Value>,
+) {
+    let Some(item) = item else { return };
+    let Some(id) = item.get("id").and_then(Value::as_str) else {
+        return;
+    };
+    let (name, input) = match item.get("type").and_then(Value::as_str) {
+        Some("commandExecution") => (
+            "Bash",
+            json!({ "command": item.get("command").cloned().unwrap_or(Value::Null) }),
+        ),
+        Some("fileChange") => (
+            "Edit",
+            json!({ "changes": item.get("changes").cloned().unwrap_or(Value::Null) }),
+        ),
+        Some("mcpToolCall") => (
+            item.get("tool")
+                .and_then(Value::as_str)
+                .unwrap_or("MCP tool"),
+            item.get("arguments").cloned().unwrap_or(Value::Null),
+        ),
+        Some("webSearch") => (
+            "WebSearch",
+            json!({ "query": item.get("query").cloned().unwrap_or(Value::Null) }),
+        ),
+        Some("dynamicToolCall") => (
+            item.get("tool").and_then(Value::as_str).unwrap_or("Tool"),
+            item.get("arguments").cloned().unwrap_or(Value::Null),
+        ),
+        _ => return,
+    };
+    emit_line(
+        app,
+        window,
+        session,
+        epoch,
+        json!({
+            "type":"assistant", "message":{"content":[{
+                "type":"tool_use", "id":id, "name":name, "input":input
+            }]}
+        }),
+    );
+}
+
+fn emit_item_completed(
+    app: &AppHandle,
+    window: &str,
+    session: &str,
+    epoch: u64,
+    item: Option<&Value>,
+    agent_delta_items: &HashSet<String>,
+) {
+    let Some(item) = item else { return };
+    let Some(id) = item.get("id").and_then(Value::as_str) else {
+        return;
+    };
+    match item.get("type").and_then(Value::as_str) {
+        Some("agentMessage") if !agent_delta_items.contains(id) => {
+            if let Some(text) = item.get("text").and_then(Value::as_str) {
+                emit_text_delta(app, window, session, epoch, text);
+            }
+        }
+        Some("commandExecution") => {
+            let output = item
+                .get("aggregatedOutput")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let failed = item.get("status").and_then(Value::as_str) == Some("failed")
+                || item
+                    .get("exitCode")
+                    .and_then(Value::as_i64)
+                    .is_some_and(|code| code != 0);
+            emit_tool_result(app, window, session, epoch, id, output, failed);
+        }
+        Some("fileChange") => emit_tool_result(
+            app,
+            window,
+            session,
+            epoch,
+            id,
+            &serde_json::to_string_pretty(&item.get("changes").cloned().unwrap_or(Value::Null))
+                .unwrap_or_default(),
+            item.get("status").and_then(Value::as_str) == Some("failed"),
+        ),
+        Some("mcpToolCall") | Some("dynamicToolCall") | Some("webSearch") => {
+            let output = item
+                .get("result")
+                .or_else(|| item.get("error"))
+                .cloned()
+                .unwrap_or_else(|| json!({"status": item.get("status")}));
+            emit_tool_result(
+                app,
+                window,
+                session,
+                epoch,
+                id,
+                &serde_json::to_string_pretty(&output).unwrap_or_default(),
+                item.get("status").and_then(Value::as_str) == Some("failed")
+                    || item.get("error").is_some(),
+            );
+        }
+        _ => {}
+    }
+}
+
+async fn handle_server_request(
+    app: &AppHandle,
+    window: &str,
+    session: &str,
+    epoch: u64,
+    server: &mut AppServer,
+    request: &Value,
+    permission_mode: &str,
+) -> Result<(), String> {
+    let id = request
+        .get("id")
+        .cloned()
+        .ok_or("Codex request missing id")?;
+    let method = request
+        .get("method")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let params = request.get("params").cloned().unwrap_or(Value::Null);
+    match method {
+        "item/commandExecution/requestApproval" | "item/fileChange/requestApproval" => {
+            let auto_accept = permission_mode == "bypassPermissions"
+                || (method.contains("fileChange")
+                    && matches!(permission_mode, "acceptEdits" | "auto"));
+            let decision = if auto_accept {
+                "accept"
+            } else {
+                await_permission(app, window, session, &id, method, &params).await?
+            };
+            server
+                .write(&json!({ "id": id, "result": { "decision": decision } }))
+                .await?;
+        }
+        "item/tool/requestUserInput" => {
+            let answers = await_user_input(app, window, session, epoch, &id, &params).await?;
+            server
+                .write(&json!({ "id": id, "result": { "answers": answers } }))
+                .await?;
+        }
+        _ => {
+            server.write(&json!({ "id": id, "error": { "code": -32601, "message": "Rift does not support this App Server request yet" } })).await?;
+        }
+    }
+    Ok(())
+}
+
+async fn await_permission(
+    app: &AppHandle,
+    window: &str,
+    session: &str,
+    protocol_id: &Value,
+    method: &str,
+    params: &Value,
+) -> Result<&'static str, String> {
+    let registry = app
+        .try_state::<std::sync::Arc<PermissionRegistry>>()
+        .ok_or("permission registry unavailable")?
+        .inner()
+        .clone();
+    let request_id = format!("codex:{session}:{}", protocol_id);
+    let tool_id = params
+        .get("itemId")
+        .and_then(Value::as_str)
+        .unwrap_or(&request_id);
+    let is_file = method.contains("fileChange");
+    let input = if is_file {
+        json!({ "reason": params.get("reason"), "root": params.get("grantRoot") })
+    } else {
+        json!({ "command": params.get("command"), "cwd": params.get("cwd"), "reason": params.get("reason") })
+    };
+    let (rx, _guard) = registry.register_guarded(request_id.clone(), session.to_string());
+    app.emit_to(
+        window,
+        PERMISSION_EVENT,
+        json!({
+            "session_id":session, "request_id":request_id, "tool_use_id":tool_id,
+            "tool_name": if is_file { "Edit" } else { "Bash" }, "input":input,
+            "suggestions":Value::Null, "kind":"tool",
+        }),
+    )
+    .map_err(|e| format!("show permission request: {e}"))?;
+    let decision = tokio::time::timeout(Duration::from_secs(120), rx)
+        .await
+        .map_err(|_| "permission request timed out".to_string())?
+        .map_err(|_| "permission request was cancelled".to_string())?;
+    Ok(
+        if decision.get("behavior").and_then(Value::as_str) == Some("allow") {
+            "accept"
+        } else {
+            "decline"
+        },
+    )
+}
+
+async fn await_user_input(
+    app: &AppHandle,
+    window: &str,
+    session: &str,
+    epoch: u64,
+    protocol_id: &Value,
+    params: &Value,
+) -> Result<Value, String> {
+    let registry = app
+        .try_state::<std::sync::Arc<AskUserRegistry>>()
+        .ok_or("ask-user registry unavailable")?
+        .inner()
+        .clone();
+    let request_id = format!("codex:{session}:{}", protocol_id);
+    let tool_id = params
+        .get("itemId")
+        .and_then(Value::as_str)
+        .unwrap_or(&request_id);
+    emit_line(
+        app,
+        window,
+        session,
+        epoch,
+        json!({
+            "type":"assistant", "message":{"content":[{
+                "type":"tool_use", "id":tool_id, "name":"mcp__rift__ask_user",
+                "input":{"questions":params.get("questions").cloned().unwrap_or_else(|| json!([]))}
+            }]}
+        }),
+    );
+    let (rx, _guard) = registry.register_guarded(request_id.clone(), session.to_string());
+    app.emit_to(
+        window,
+        ASK_USER_EVENT,
+        json!({
+            "request_id":request_id, "session_id":session,
+            "questions":params.get("questions").cloned().unwrap_or_else(|| json!([])),
+        }),
+    )
+    .map_err(|e| format!("show user question: {e}"))?;
+    let answer = tokio::time::timeout(Duration::from_secs(600), rx)
+        .await
+        .map_err(|_| "user question timed out".to_string())?
+        .map_err(|_| "user question was cancelled".to_string())?;
+    Ok(codex_answers(params.get("questions"), &answer))
+}
+
+fn codex_answers(questions: Option<&Value>, answer: &Value) -> Value {
+    let submitted = answer.get("answers").and_then(Value::as_array);
+    let mut out = serde_json::Map::new();
+    for question in questions.and_then(Value::as_array).into_iter().flatten() {
+        let Some(id) = question.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let text = question
+            .get("question")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let values = submitted
+            .and_then(|items| {
+                items
+                    .iter()
+                    .find(|item| item.get("question").and_then(Value::as_str) == Some(text))
+            })
+            .and_then(|item| item.get("answer"))
+            .map(|value| match value {
+                Value::Array(items) => Value::Array(items.clone()),
+                Value::String(value) => json!([value]),
+                _ => json!([]),
+            })
+            .unwrap_or_else(|| json!([]));
+        out.insert(id.to_string(), json!({ "answers": values }));
+    }
+    Value::Object(out)
+}
+
+fn emit_text_delta(app: &AppHandle, window: &str, session: &str, epoch: u64, delta: &str) {
+    emit_line(
+        app,
+        window,
+        session,
+        epoch,
+        json!({
+            "type":"stream_event", "event":{"type":"content_block_delta","index":0,
+            "delta":{"type":"text_delta","text":delta}}
+        }),
+    );
+}
+
+fn emit_tool_result(
+    app: &AppHandle,
+    window: &str,
+    session: &str,
+    epoch: u64,
+    id: &str,
+    output: &str,
+    is_error: bool,
+) {
+    emit_line(
+        app,
+        window,
+        session,
+        epoch,
+        json!({
+            "type":"user", "message":{"content":[{
+                "type":"tool_result", "tool_use_id":id, "content":output, "is_error":is_error
+            }]}
+        }),
+    );
+}
+
+struct CodexResult<'a> {
+    model: &'a str,
+    thread_id: &'a str,
+    status: &'a str,
+    error: Option<&'a str>,
+    usage: Option<&'a Value>,
+}
+
+fn emit_result(app: &AppHandle, window: &str, session: &str, epoch: u64, result: CodexResult<'_>) {
+    let CodexResult {
+        model,
+        thread_id,
+        status,
+        error,
+        usage,
+    } = result;
+    let last = usage
+        .and_then(|value| value.get("last"))
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let total = usage
+        .and_then(|value| value.get("total"))
+        .cloned()
+        .unwrap_or_else(|| last.clone());
+    let rift_usage = |value: &Value| {
+        json!({
+            "input_tokens": value.get("inputTokens").and_then(Value::as_i64).unwrap_or(0),
+            "output_tokens": value.get("outputTokens").and_then(Value::as_i64).unwrap_or(0),
+            "cache_read_input_tokens": value.get("cachedInputTokens").and_then(Value::as_i64).unwrap_or(0),
+            "cache_creation_input_tokens": value.get("cacheWriteInputTokens").and_then(Value::as_i64).unwrap_or(0),
+        })
+    };
+    emit_line(
+        app,
+        window,
+        session,
+        epoch,
+        json!({
+            "type":"assistant", "message":{"content":[], "usage":rift_usage(&last)}
+        }),
+    );
+    let context = usage
+        .and_then(|value| value.get("modelContextWindow"))
+        .and_then(Value::as_i64);
+    emit_line(
+        app,
+        window,
+        session,
+        epoch,
+        json!({
+            "type":"result", "subtype":if status == "completed" {"success"} else {status},
+            "is_error":status == "failed", "errors":error.into_iter().collect::<Vec<_>>(),
+            "result":"", "usage":rift_usage(&total), "provider":"codex",
+            "codex_thread_id":thread_id,
+            "modelUsage":context.map(|window| json!({(model):{"contextWindow":window}})).unwrap_or_else(|| json!({})),
+        }),
+    );
+}
+
+fn emit_line(app: &AppHandle, window: &str, session: &str, epoch: u64, value: Value) {
+    if let Ok(line) = serde_json::to_string(&value) {
+        let _ = app.emit_to(
+            window,
+            STREAM_EVENT,
+            json!({
+                "session_id":session, "line":line, "turn_epoch":epoch,
+            }),
+        );
+    }
+}
+
+fn emit_done(app: &AppHandle, window: &str, session: &str, epoch: u64, exit_code: i32) {
+    let _ = app.emit_to(
+        window,
+        DONE_EVENT,
+        json!({
+            "session_id":session, "exit_code":exit_code, "turn_epoch":epoch,
+        }),
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{codex_answers, effort_name, parse_model, sandbox_policy};
+    use serde_json::json;
+
+    #[test]
+    fn model_list_uses_live_catalog_fields() {
+        let model = parse_model(&json!({
+            "model":"gpt-5.6-sol", "displayName":"GPT-5.6 Sol", "description":"Agentic",
+            "hidden":false, "isDefault":true, "defaultReasoningEffort":"low",
+            "supportedReasoningEfforts":[{"reasoningEffort":"low"},{"reasoningEffort":"high"}],
+            "inputModalities":["text","image"]
+        }))
+        .unwrap();
+        assert_eq!(model.id, "gpt-5.6-sol");
+        assert!(model.is_default);
+        assert!(model.image_input);
+        assert_eq!(model.supported_reasoning_efforts, ["low", "high"]);
+    }
+
+    #[test]
+    fn permission_modes_map_to_safe_sandboxes() {
+        assert_eq!(sandbox_policy("plan", Some("C:\\repo"))["type"], "readOnly");
+        assert_eq!(
+            sandbox_policy("default", Some("C:\\repo"))["type"],
+            "workspaceWrite"
+        );
+        assert_eq!(
+            sandbox_policy("bypassPermissions", None)["type"],
+            "dangerFullAccess"
+        );
+        assert_eq!(effort_name(true, Some("ultra")), "xhigh");
+        assert_eq!(effort_name(false, Some("ultra")), "low");
+    }
+
+    #[test]
+    fn ask_user_answers_are_keyed_for_app_server() {
+        let questions = json!([{"id":"choice","question":"Pick one"}]);
+        let answer = json!({"answers":[{"question":"Pick one","answer":"A"}]});
+        assert_eq!(
+            codex_answers(Some(&questions), &answer),
+            json!({"choice":{"answers":["A"]}})
+        );
+    }
+}

@@ -5,17 +5,15 @@
   // ←/→ effort nudges); this child renders, handles clicks, and owns the
   // pointer-drag slider. Derives re-compute here from the shared modelMatrix
   // + assistant store — same pure helpers the parent uses, so they can't drift.
-  import { Check, ChevronRight, HelpCircle, LoaderCircle, LockKeyhole, Plus, SpellCheck, Zap } from "lucide-svelte";
+  import { Check, ChevronRight, HelpCircle, LoaderCircle, LockKeyhole, Plus, Zap } from "lucide-svelte";
   import { tick } from "svelte";
   import { assistant, type TabState } from "../../../state/assistant.svelte";
   import { fastEligible } from "../../../state/assistant/helpers";
   import { usage, limitZone, type ScopedLimit } from "../../../state/usage.svelte";
   import { portal } from "$lib/actions/portal";
   import { tooltip } from "$lib/actions/tooltip";
-  import { personalWords, removePersonalWord } from "$lib/utils/autocorrect";
-  import { CHATGPT } from "$lib/state/assistant/providerDisplay";
   import {
-    MODEL_OPTIONS, currentModels, legacyModels, modelWindowSuffix,
+    MODEL_OPTIONS, currentModels, legacyModels, modelWindowSuffix, isFreeClaudeModel,
     dialStopsFor, dialIdxFor, clampEffortIdx, effortCapsFor, modelAccessFor, providerStatusFor,
     type ModelOpt, type SettingsRow,
   } from "./modelMatrix";
@@ -35,9 +33,6 @@
     onPickModel: (m: ModelOpt) => void;
     onRequestClose: () => void;
   } = $props();
-
-  // Personal-dictionary snapshot — fresh on every open (menu is {#if}-mounted).
-  let learned = $state(personalWords());
 
   // Portal to <body> + position against the trigger pill (same pattern as
   // PermMenu) — escapes the composer's overflow/backdrop-filter containing
@@ -90,6 +85,11 @@
       && (assistant.auth.pill === "green" || assistant.auth.pill === "yellow"),
     claudeChecking: assistant.authChecking,
     claudeError: assistant.authError,
+    claudeFree: assistant.plan === "free",
+    codexReady: assistant.codexStatus?.ready === true,
+    codexChecking: assistant.codexChecking,
+    codexModels: assistant.codexModels,
+    codexError: assistant.codexModelsError ?? assistant.codexError,
     openAiConfigured: assistant.openAiStatus?.ready === true,
     openAiChecking: assistant.openAiChecking,
     openAiModels: assistant.openAiModels,
@@ -106,7 +106,9 @@
     return i >= 0 && i < 9 ? i + 1 : null;
   }
   const currentOpenAiModels = currentModels.filter((m) => m.provider === "openai");
-  const currentClaudeModels = currentModels.filter((m) => m.provider === "claude");
+  const currentClaudeModels = $derived(currentModels.filter((m) =>
+    m.provider === "claude" && (assistant.plan !== "free" || isFreeClaudeModel(m.id))
+  ));
   // Fast mode — surfaces only on fast-eligible (Opus-family) rows. The stored
   // global pref survives on other models but is inert there (send.ts gates it).
   const fastApplies = $derived(currentModelAccess?.enabled === true && !!currentModel && fastEligible(currentModel.id));
@@ -245,7 +247,7 @@
         <span class="model-name">{m.label} {m.version}</span>
         {#if !access.enabled}<span class="pi-tag access-tag state-{access.state}">{access.tag}</span>
         {:else if m.id === sessionPinnedModel && sessionModelDiverged}<span class="pi-tag session">this chat</span>
-        {:else if m.suffix}<span class="pi-tag">{modelWindowSuffix(m.id, assistant.planCap)}</span>{/if}
+        {:else if m.suffix}<span class="pi-tag">{modelWindowSuffix(m.id, assistant.planCap, tab?.reportedCtxWindow)}</span>{/if}
         {#if lim}<span
           class="pi-usage zone-{limitZone(lim.percent, lim.severity)}"
           use:tooltip={`Your weekly ${m.label} limit — ${Math.round(lim.percent)}% used${lim.isActive ? " · in use now" : ""}`}
@@ -263,7 +265,7 @@
     </button>
   {/snippet}
 
-  <div class="rift-menu-head"><span>{CHATGPT.apiAccess}</span><span class="provider-head-note state-{openAiProviderStatus.state}"><i></i>{openAiProviderStatus.tag}</span></div>
+  <div class="rift-menu-head"><span>ChatGPT</span><span class="provider-head-note state-{openAiProviderStatus.state}"><i></i>{openAiProviderStatus.tag}</span></div>
   {#each currentOpenAiModels as m (m.id)}
     {@render modelRow(m)}
   {/each}
@@ -274,7 +276,7 @@
     {@render modelRow(m)}
   {/each}
 
-  {#if legacyModels.length > 0 && (claudeProviderStatus.enabled || activeIsLegacy)}
+  {#if assistant.plan !== "free" && legacyModels.length > 0 && (claudeProviderStatus.enabled || activeIsLegacy)}
     <div
       class="legacy-zone"
       role="presentation"
@@ -349,41 +351,6 @@
     </button>
   {/if}
 
-  <div class="rift-menu-divider"></div>
-  <!-- Autocorrect — opt-in typing-time typo fix (word-finish boundary). Pure
-       FE, free, so the ON tint is accent, not the pay-per-use amber. -->
-  <button
-    type="button"
-    role="menuitemcheckbox"
-    aria-checked={assistant.autocorrect}
-    class="pop-item rich ac-row"
-    use:tooltip={"Autocorrect — fixes common typos as you finish each word. Skips slash commands, paths, and code-like text."}
-    onmousedown={(e) => { e.preventDefault(); assistant.setAutocorrect(!assistant.autocorrect); }}
-  >
-    <span class="ac-glyph" class:on={assistant.autocorrect} aria-hidden="true"><SpellCheck size={13} /></span>
-    <span class="pi-text">
-      <span class="pi-name"><span class="model-name">Autocorrect</span></span>
-      <span class="pi-sub">Fix typos as you type — applied when a word is finished</span>
-    </span>
-    <span class="fast-switch ac-switch" class:on={assistant.autocorrect} aria-hidden="true"><i></i></span>
-  </button>
-  {#if assistant.autocorrect && learned.length}
-    <!-- Personal dictionary — words learned from undo / right-click "Add to
-         dictionary". Click a chip to forget it. -->
-    <div class="ac-dict">
-      <span class="ac-dict-k">Learned words</span>
-      <div class="ac-dict-list">
-        {#each learned as w (w)}
-          <button
-            type="button"
-            class="ac-chip"
-            use:tooltip={"Remove — autocorrect may change this word again"}
-            onmousedown={(e) => { e.preventDefault(); removePersonalWord(w); learned = personalWords(); }}
-          >{w}<span class="ac-chip-x" aria-hidden="true">×</span></button>
-        {/each}
-      </div>
-    </div>
-  {/if}
 
   {#if dialApplies}
     <div class="rift-menu-divider"></div>

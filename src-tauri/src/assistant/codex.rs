@@ -66,11 +66,11 @@ fn codex_candidates() -> Vec<PathBuf> {
     candidates.into_iter().find(|path| is_runnable(path)).into_iter().collect()
 }
 
-fn resolve_codex_cli() -> Option<PathBuf> {
+pub(super) fn resolve_codex_cli() -> Option<PathBuf> {
     codex_candidates().into_iter().next()
 }
 
-fn command_for(exe: &Path, args: &[&str]) -> Command {
+pub(super) fn command_for(exe: &Path, args: &[&str]) -> Command {
     #[cfg(windows)]
     if matches!(exe.extension().and_then(|ext| ext.to_str()), Some("cmd") | Some("bat")) {
         let mut command = Command::new("cmd.exe");

@@ -36,7 +36,7 @@
 
 1. Download the latest `Rift-win-Setup.exe` from the **[releases page](https://github.com/Blazzer10200/rift-tauri/releases)** and run it.
 2. Per-user install, no admin needed. Rift self-updates from then on (background download, apply on restart, one-click consent).
-3. On first launch, connect Claude and/or ChatGPT from Settings → AI. Keys entered in Rift are stored in Windows Credential Manager—never in app files or the WebView. ChatGPT subscription sign-in uses the local Codex CLI; optional ChatGPT API access uses a separately billed OpenAI API key.
+3. On first launch, connect Claude and/or ChatGPT from Settings → Providers. Keys entered in Rift are stored in Windows Credential Manager—never in app files or the WebView. ChatGPT subscription sign-in uses the local Codex CLI; optional ChatGPT API access uses a separately billed OpenAI API key.
 
 **Requirements:** Windows 11 x64 and at least one provider: the [Claude Code CLI](https://claude.com/claude-code) with a Claude login/API key, or ChatGPT through the standalone Codex CLI and optional [OpenAI API key](https://platform.openai.com/api-keys). ChatGPT subscriptions and API usage are billed separately. macOS/Linux build from source but are not packaged or tested yet.
 
@@ -49,27 +49,27 @@
 - **Permission modes** — ask-before-edits, auto-edit, plan-first, or bypass — switchable per turn.
 - **Voice dictation** — push-to-talk speech-to-text plus a prompt-enhance wand.
 - **Browser dock** — the assistant can open docs or your local dev server in an in-app pane beside the chat.
-- **ChatGPT API support** — native OpenAI Responses API streaming, reasoning effort, image input, account-visible model discovery, permission-gated function calls, cancellation, and locally persisted conversation history.
-- **Provider-aware workspace** — at-a-glance Claude and ChatGPT connection status, with subscription and optional API access explained separately; Workspace news names its exact official source, and optional AI summaries stay gated behind their required connection.
+- **ChatGPT subscription + API support** — Codex App Server turns use the signed-in ChatGPT account; the optional OpenAI Responses API route supports separately billed keys. Both stream reasoning, tools, images, usage, cancellation, and local conversation continuity.
+- **Provider-aware setup** — Settings keeps Claude and ChatGPT connections in one place, explains subscription and optional API billing separately, and the model picker shows only models the connected routes can use.
 - **Compatible endpoints (experimental)** — connect supported Anthropic-compatible or local endpoints from Settings.
 - **Self-update** — Velopack checks on launch and every 6 hours; updates apply on restart.
 
 ## How it works
 
-Tauri 2 (Rust) shell around a SvelteKit 2 / Svelte 5 frontend. Claude turns run through the official Claude Code CLI with a warm child process. OpenAI turns use the native Responses API with `store: false`; Rift sends the locally saved canonical Responses items on each turn. Both routes share workspace-scoped file, search, git, permission, and UI tools. The Codex connection uses only the official standalone CLI’s public status/login commands; its App Server turn route is not exposed until authenticated contract coverage exists. There is no Rift server or telemetry service: data leaves the machine only for the provider call or a tool action you authorize.
+Tauri 2 (Rust) shell around a SvelteKit 2 / Svelte 5 frontend. Claude turns run through the official Claude Code CLI with a warm child process. ChatGPT subscription turns run through the signed-in Codex CLI's local App Server, and persist only its thread id. Optional API-key turns use the native Responses API with `store: false`; Rift saves the canonical continuation locally. Every route shares workspace, permission, streaming, and UI contracts. There is no Rift server or telemetry service: data leaves the machine only for the provider call or a tool action you authorize.
 
 Full picture in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## FAQ
 
 **Do I need Claude Code installed?**
-Only for Claude models. ChatGPT API models use Rift's native route and require an API key instead.
+Only for Claude models. ChatGPT subscriptions use the standalone Codex CLI; the optional native API route requires an OpenAI API key instead.
 
 **Does my Claude Pro / Max subscription work?**
 Yes. Sign in to the CLI as usual — Rift turns are ordinary Claude Code usage on your plan. Your own API key works too.
 
 **Does my ChatGPT Plus / Pro subscription work?**
-ChatGPT and the OpenAI API are billed separately. Rift's GPT integration needs a key from the OpenAI API platform and uses the models available to that API account. Settings can sign a standalone Codex CLI into ChatGPT without copying its credentials; Codex App Server turns remain a tracked, authenticated-test-gated route.
+Yes. Sign the standalone Codex CLI into ChatGPT and Rift uses the models offered to that account through its local App Server. OpenAI API keys remain optional and separately billed.
 
 **Where does my code go?**
 Only to the provider selected for that turn and to any external tool action you approve. Rift has no intermediary server, telemetry, or analytics. Details in [`docs/SECURITY.md`](docs/SECURITY.md).

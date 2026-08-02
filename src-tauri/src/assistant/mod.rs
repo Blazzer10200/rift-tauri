@@ -14,6 +14,7 @@ pub mod bridge;
 pub mod cli_caps;
 pub mod cli_install;
 pub mod codex;
+pub mod codex_app_server;
 pub mod config;
 pub mod convo_store;
 pub mod env_checks;
@@ -62,6 +63,7 @@ pub use env_checks::*;
 pub use oneshot::*;
 pub use openai::*;
 pub use codex::*;
+pub use codex_app_server::*;
 // "What's new in AI" feed (Workspace page): deterministic changelog+npm fetch +
 // opt-in AI digest in `news.rs`. Glob re-export for the __cmd__ items.
 pub use news::*;

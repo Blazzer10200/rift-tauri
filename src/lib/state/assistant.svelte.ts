@@ -28,6 +28,7 @@ import type {
   AuthStatus,
   OpenAiStatus,
   OpenAiModel,
+  CodexModel,
   CodexStatus,
   AgentSpawn,
   ChatMessage,
@@ -50,6 +51,7 @@ import { MAX_PANES } from "./assistant/types";
 import {
   loadModel,
   saveModel,
+  migrateClaudeModelPinsTo,
   loadEffort,
   saveEffort,
   clampEffort,
@@ -229,6 +231,8 @@ export class TabState {
    * deliberately separate from display messages: the API requires opaque
    * reasoning/tool/compaction output that must never be reconstructed from UI. */
   openAiHistory = $state<unknown[]>([]);
+  /** Opaque App Server continuation id for ChatGPT subscription turns. */
+  codexThreadId = $state<string | null>(null);
   streaming = $state(false);
   /** True while the in-flight turn is a manual /compact — the CLI compacts
    *  natively with no tools/text until the boundary lands, so without this the
@@ -496,6 +500,8 @@ class AssistantStore {
   openAiChecking = $state(false);
   openAiModelsError = $state<string | null>(null);
   codexStatus = $state<CodexStatus | null>(null);
+  codexModels = $state<CodexModel[] | null>(null);
+  codexModelsError = $state<string | null>(null);
   codexChecking = $state(false);
   codexError = $state<string | null>(null);
   authChecking = $state(false);
@@ -511,7 +517,7 @@ class AssistantStore {
     return this.authReadyForModel(this.modelFor(tab));
   }
   authReadyForModel(model: ModelSel): boolean {
-    if (isOpenAIModel(model)) return this.openAiModelAvailable(model);
+    if (isOpenAIModel(model)) return this.chatGptModelAvailable(model);
     return this.auth?.cliPresent === true
       && (this.auth.pill === "green" || this.auth.pill === "yellow");
   }
@@ -1090,6 +1096,22 @@ class AssistantStore {
     return this.openAiModels.find((model) => model.id === id)?.available === true;
   }
 
+  codexModelAvailable(id: ModelSel): boolean {
+    return isOpenAIModel(id)
+      && this.codexStatus?.ready === true
+      && !this.codexModelsError
+      && this.codexModels?.some((model) => model.id === id) === true;
+  }
+
+  chatGptModelAvailable(id: ModelSel): boolean {
+    return this.codexModelAvailable(id) || this.openAiModelAvailable(id);
+  }
+
+  chatGptRouteFor(id: ModelSel): "codex" | "openai" | null {
+    if (this.codexModelAvailable(id)) return "codex";
+    return this.openAiModelAvailable(id) ? "openai" : null;
+  }
+
   setThinkingEffort(v: ThinkingEffort, tab: TabState | null = this.activeTab) {
     const prev = this.effortFor(tab);
     if (prev === v) return;
@@ -1212,6 +1234,12 @@ class AssistantStore {
     this.plan = v;
     savePlan(v);
     this.telemetry.event("plan.change", { from: prev, to: v });
+    if (v === "free" && !isOpenAIModel(this.model) && !this.model.includes("sonnet") && this.model !== "haiku") {
+      this.setModel("sonnet", this.activeTab);
+      notify.info("Switched to Claude Free models", {
+        detail: "Opus and Fable are hidden while the 200K Claude Free profile is selected.",
+      });
+    }
   }
 
   /** Claude-session prefs → factory defaults. Credentials stay: the API key and
@@ -1286,6 +1314,7 @@ class AssistantStore {
 
   private async initInner() {
     if (this.unlistens.length > 0) return;
+    this.normalizeClaudeFreeModel();
     const gen = this.initGen;
     // Backend tags every stream/done/error event w/ the originating CLI
     // session_id (S104). We route by session_id to the right TabState so
@@ -1939,15 +1968,49 @@ class AssistantStore {
   async refreshCodexStatus() {
     this.codexChecking = true;
     this.codexError = null;
+    this.codexModelsError = null;
     try {
       this.codexStatus = await invoke<CodexStatus>("assistant_codex_status");
+      if (this.codexStatus.ready) {
+        try {
+          this.codexModels = await invoke<CodexModel[]>("assistant_codex_list_models");
+          this.migrateToChatGptDefault();
+        } catch (e) {
+          this.codexModels = null;
+          this.codexModelsError = humanizeError(e);
+        }
+      } else {
+        this.codexModels = null;
+      }
     } catch (e) {
       console.warn("assistant_codex_status failed", e);
       this.codexStatus = null;
+      this.codexModels = null;
       this.codexError = humanizeError(e);
     } finally {
       this.codexChecking = false;
     }
+  }
+
+  private migrateToChatGptDefault() {
+    const next = this.codexModels?.find((model) => model.isDefault)?.id;
+    if (!next || typeof localStorage === "undefined") return;
+    const migrationKey = "rift.assistant.chatgptDefault.v4";
+    if (localStorage.getItem(migrationKey)) return;
+    localStorage.setItem(migrationKey, "done");
+    migrateClaudeModelPinsTo(next);
+    if (isOpenAIModel(this.modelFor(this.activeTab)) || (this.activeTab?.messages.length ?? 0) > 0) return;
+    this.setModel(next, this.activeTab);
+    notify.info("ChatGPT is now your default", {
+      detail: `${this.codexModels?.find((model) => model.id === next)?.label ?? next} came from your signed-in account.`,
+    });
+  }
+
+  private normalizeClaudeFreeModel() {
+    const current = this.modelFor(this.activeTab);
+    if (this.plan !== "free" || isOpenAIModel(current)) return;
+    if (current.includes("sonnet") || current === "haiku") return;
+    this.setModel("sonnet", this.activeTab);
   }
 
   /** Opens only the official Codex CLI sign-in flow; credentials stay with

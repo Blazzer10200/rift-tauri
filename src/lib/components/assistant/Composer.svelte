@@ -440,6 +440,11 @@
       && (assistant.auth.pill === "green" || assistant.auth.pill === "yellow"),
     claudeChecking: assistant.authChecking,
     claudeError: assistant.authError,
+    claudeFree: assistant.plan === "free",
+    codexReady: assistant.codexStatus?.ready === true,
+    codexChecking: assistant.codexChecking,
+    codexModels: assistant.codexModels,
+    codexError: assistant.codexModelsError ?? assistant.codexError,
     openAiConfigured: assistant.openAiStatus?.ready === true,
     openAiChecking: assistant.openAiChecking,
     openAiModels: assistant.openAiModels,
@@ -624,9 +629,9 @@
       const openai = currentModel?.provider === "openai";
       notify.danger(openai ? "ChatGPT isn't ready" : "Claude isn't ready", {
         detail: currentModelAccess?.detail
-          ?? (openai ? `Open Settings → AI and connect ${CHATGPT.apiAccess}.` : "Open Settings → AI and connect Claude Code."),
+          ?? (openai ? "Open Settings → Providers and connect ChatGPT." : "Open Settings → Providers and connect Claude."),
       });
-      if (openai) void assistant.refreshOpenAiStatus();
+      if (openai) void Promise.all([assistant.refreshCodexStatus(), assistant.refreshOpenAiStatus()]);
       else void assistant.refreshAuth();
       return;
     }
@@ -1655,7 +1660,7 @@
             aria-controls={settingsOpen ? "model-effort-menu" : undefined}
             aria-label="Model & effort"
             use:tooltip={currentModelAccess?.enabled !== true
-              ? `${currentModel ? `${currentModel.label} ${currentModel.version}` : paneEffectiveModel} · ${currentModelAccess?.tag ?? "Unavailable"}\n${currentModelAccess?.detail ?? "Connect this provider in Settings → AI."}`
+              ? `${currentModel ? `${currentModel.label} ${currentModel.version}` : paneEffectiveModel} · ${currentModelAccess?.tag ?? "Unavailable"}\n${currentModelAccess?.detail ?? "Connect this provider in Settings → Providers."}`
               : dialApplies
               ? `Model · effort\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel} · ${currentEffort?.label} effort — ${effortIdx === 0 ? "replies immediately" : "reasons before replying"}`
               : `Model\n${currentModel ? `${currentModel.label} ${currentModel.version}` : paneEffectiveModel} · no extended thinking`}
