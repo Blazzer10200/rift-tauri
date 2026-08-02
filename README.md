@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/Blazzer10200/rift-tauri/releases"><img src="https://img.shields.io/github/v/release/Blazzer10200/rift-tauri?label=download&color=10b981" alt="Latest release" /></a>
-  <img src="https://img.shields.io/badge/providers-Claude%20%2B%20OpenAI-8b5cf6" alt="Claude and OpenAI providers" />
+  <img src="https://img.shields.io/badge/providers-Claude%20%2B%20ChatGPT-8b5cf6" alt="Claude and ChatGPT providers" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license" /></a>
   <img src="https://img.shields.io/badge/platform-Windows%2011-0078d4" alt="Windows 11" />
   <img src="https://img.shields.io/badge/Tauri%202-Rust%20%2B%20Svelte%205-f74c00" alt="Tauri 2" />
@@ -36,7 +36,7 @@
 
 1. Download the latest `Rift-win-Setup.exe` from the **[releases page](https://github.com/Blazzer10200/rift-tauri/releases)** and run it.
 2. Per-user install, no admin needed. Rift self-updates from then on (background download, apply on restart, one-click consent).
-3. On first launch, connect Claude and/or OpenAI. Keys entered in Rift are stored in Windows Credential Manager—never in app files or the WebView. The Providers page can also inspect and sign in to a local Codex CLI without importing its credentials.
+3. On first launch, connect Claude and/or ChatGPT from Settings → AI. Keys entered in Rift are stored in Windows Credential Manager—never in app files or the WebView. ChatGPT subscription sign-in uses the local Codex CLI; optional ChatGPT API access uses a separately billed OpenAI API key.
 
 **Requirements:** Windows 11 x64 and at least one provider: the [Claude Code CLI](https://claude.com/claude-code) with a Claude login/API key, or ChatGPT through the standalone Codex CLI and optional [OpenAI API key](https://platform.openai.com/api-keys). ChatGPT subscriptions and API usage are billed separately. macOS/Linux build from source but are not packaged or tested yet.
 
@@ -49,8 +49,8 @@
 - **Permission modes** — ask-before-edits, auto-edit, plan-first, or bypass — switchable per turn.
 - **Voice dictation** — push-to-talk speech-to-text plus a prompt-enhance wand.
 - **Browser dock** — the assistant can open docs or your local dev server in an in-app pane beside the chat.
-- **Native OpenAI support** — Responses API streaming, reasoning effort, image input, account-visible model discovery, permission-gated function calls, cancellation, and locally persisted conversation history.
-- **Provider-aware workspace** — at-a-glance Claude, OpenAI, and Codex connection status; Workspace news names its exact official source, and optional AI summaries stay gated behind their required connection.
+- **ChatGPT API support** — native OpenAI Responses API streaming, reasoning effort, image input, account-visible model discovery, permission-gated function calls, cancellation, and locally persisted conversation history.
+- **Provider-aware workspace** — at-a-glance Claude and ChatGPT connection status, with subscription and optional API access explained separately; Workspace news names its exact official source, and optional AI summaries stay gated behind their required connection.
 - **Compatible endpoints (experimental)** — connect supported Anthropic-compatible or local endpoints from Settings.
 - **Self-update** — Velopack checks on launch and every 6 hours; updates apply on restart.
 

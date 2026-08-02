@@ -25,7 +25,7 @@ For someone handed a `Setup.exe` who wants to use Claude, ChatGPT, or both again
 At least one provider must be connected:
 
 - **Claude:** install Claude Code (`npm install -g @anthropic-ai/claude-code`), run `claude` once, and complete browser login (Pro/Max/Team)—see §4.
-- Or add an `ANTHROPIC_API_KEY` in **Settings → API key**; Rift passes it to the CLI per turn.
+- Or add an `ANTHROPIC_API_KEY` in **Settings → AI → Claude API access**; Rift passes it to the CLI per turn.
 - **ChatGPT:** sign in through the Codex CLI for subscription-backed access, or add a key from the OpenAI API platform under **Settings → AI → ChatGPT API access**—see §3. Subscription and API billing are separate.
 - Provider status appears in Settings and the model picker disables models whose provider is not ready.
 
@@ -34,7 +34,7 @@ At least one provider must be connected:
 - **Open a folder** in the workspace picker. Provider tools are scoped to that folder.
 - Type in the composer and send. Both routes can use `read_file` / `list_dir` / `grep` and local git tools (`git_status` / `diff` / `log` / `pull` / `commit` / `push`). Network access occurs for the selected provider and any external tool action you approve.
 - **GitHub (optional):** if the folder's `origin` is a GitHub repo and the [`gh` CLI](https://cli.github.com) is signed in, the branch chip shows CI/PR state and the assistant receives matching `gh_*` tools. Rift stores no GitHub token; calls use your existing `gh` login and stay pinned to `origin`.
-- **Per-turn controls** sit on the composer: provider/model, permission mode, and reasoning effort. OpenAI model rows come from the account-visible model list with Rift defaults as a fallback.
+- **Per-turn controls** sit on the composer: provider/model, permission mode, and reasoning effort. ChatGPT API model rows come from the account-visible OpenAI model list with Rift defaults as a fallback.
 - **Permission modes** — ask-before-edits, edit-automatically, plan, auto, or bypass. In the asking modes a gated tool surfaces an Allow/Deny bar before it runs.
 - **Tabs / panes** — open multiple concurrent chats; each carries its own model + permission mode + effort.
 
@@ -97,7 +97,7 @@ Dev watches `src/` + `src-tauri/src/` and hot-reloads. **Don't run `cargo check`
 - `cargo test` if you touched anything testable
 - Or run `npm run verify` for the complete local gate. During live UI work, use `npm run verify:frontend`; `npm run verify` deliberately refuses to collide with an active Tauri dev process.
 - `npm run doctor` reports the repo, toolchain, provider CLIs, Tauri dev, and CDP health without reading or printing credentials.
-- Don't bump versions — the release pipeline handles `package.json` / `Cargo.toml` / `tauri.conf.json` in lockstep.
+- Don't hand-edit version files independently. Maintainers use `pwsh scripts/bump.ps1 <version>` to keep `package.json`, `Cargo.toml`, `tauri.conf.json`, and the generated `Cargo.lock` aligned before tagging.
 
 ---
 
@@ -182,7 +182,7 @@ Rift's Assistant shells `claude` with `--mcp-config <rift.mcp.json>` + `--allowe
 
 ## 5. Releases
 
-Maintainers only. Versions bumped manually across all three files (`package.json` + `Cargo.toml` + `tauri.conf.json`) BEFORE `scripts/release.ps1` runs — preflight bails on any mismatch (and on a dirty tree, which also catches an un-committed `Cargo.lock` after a version bump).
+Maintainers only. Run `pwsh scripts/bump.ps1 <version>` before `scripts/release.ps1`; it updates `package.json`, `Cargo.toml`, and `tauri.conf.json` together, while Cargo refreshes `Cargo.lock`. Preflight bails on any mismatch or dirty tree.
 
 When dependencies change, regenerate the bundled license notices: `python scripts/gen-third-party-notices.py` rewrites `THIRD-PARTY-NOTICES.md` (shipped inside the installer next to the exe) — commit the result.
 
@@ -190,10 +190,10 @@ When dependencies change, regenerate the bundled license notices: `python script
 
 ### Ship flow + guard rails
 
-The tag-driven `release.yml` now **runs the full test suite (`cargo test` + `svelte-check` + `vitest`) before it builds/publishes** — a tag can no longer ship code whose tests are red (the v0.31.0 failure mode). Two optional helpers around a ship:
+The tag-driven `release.yml` **runs pinned Rust 1.97/Clippy plus the full test suite (`cargo test` + `svelte-check` + `vitest`) before it builds/publishes**. The same toolchain is pinned locally by `rust-toolchain.toml`, preventing local/CI lint drift. Two optional helpers around a ship:
 
 - `pwsh scripts/smoke-turn.ps1 -Model haiku` — **before** tagging, prove a real Claude turn still completes end-to-end (spawns `claude` with Rift's exact turn flags against a throwaway folder; ~a cent of quota). Covers the live-turn check that CDP can't.
-- `pwsh scripts/ship-watch.ps1` — **after** `git push --tags`, blocks on the release run and reports green/red (exit-status mirrors the run). Replaces the manual "confirm CI landed next session" step.
+- `pwsh scripts/ship-watch.ps1 <tag>` — **after** pushing the annotated tag, blocks on that release run and reports green/red (exit status mirrors the run). Replaces the manual "confirm CI landed next session" step.
 
 CI runs on a self-hosted runner. When a tagged release sits `queued` and never starts, or the **Verify published** step red-X's a release that actually shipped, the run usually just needs a cancel + rerun once the runner service is back.
 
