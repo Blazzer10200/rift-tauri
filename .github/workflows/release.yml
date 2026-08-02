@@ -58,6 +58,8 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       # No GitHub cache step: the self-hosted runner has a persistent warm
       # CARGO_TARGET_DIR (D:\cargo-target) + sccache, so restoring/uploading a

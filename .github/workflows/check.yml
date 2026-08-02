@@ -32,6 +32,8 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Install cargo-machete
         run: cargo install cargo-machete --locked || true
