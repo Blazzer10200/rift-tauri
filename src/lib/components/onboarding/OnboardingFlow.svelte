@@ -14,6 +14,7 @@
   import { MODE_OPTIONS, currentModels, type ModelOpt } from "$lib/components/assistant/composer/modelMatrix";
   import type { ThinkingEffort } from "$lib/state/assistant/types";
   import { isOpenAIModel } from "$lib/state/assistant/helpers";
+  import { CHATGPT } from "$lib/state/assistant/providerDisplay";
   import {
     Check, ChevronLeft, ChevronRight, FolderGit2, FolderOpen,
     History, Loader2, Orbit, Terminal, TriangleAlert,
@@ -24,7 +25,7 @@
 
   const steps = [
     { t: "Welcome", s: "What Rift is" },
-    { t: "Connect AI", s: "Claude or OpenAI" },
+    { t: "Connect AI", s: "Claude or ChatGPT" },
     { t: "Open a project", s: "Choose a folder" },
     { t: "Defaults", s: "Model & working style" },
   ];
@@ -197,7 +198,7 @@
             <header class="ob-head">
               <span class="ob-eyebrow">Step 1 · Welcome</span>
               <h1 class="ob-title">Meet Rift</h1>
-              <p class="ob-sub">Rift is a local coding workspace for Claude and OpenAI models. It reads, searches, and edits only inside the folder you choose; prompts and relevant context go directly to the provider you connect.</p>
+              <p class="ob-sub">Rift is a local coding workspace for Claude and ChatGPT models. It reads, searches, and edits only inside the folder you choose; prompts and relevant context go directly to the AI service you connect.</p>
             </header>
             <div class="ob-vlist">
               <div class="ob-vrow">
@@ -240,7 +241,7 @@
                 <Terminal size={15} /><span><b>Claude</b><small>CLI or API key</small></span>
               </button>
               <button type="button" class="ob-seg-btn ob-provider-btn" class:on={provider === "openai"} role="radio" aria-checked={provider === "openai"} onclick={() => selectProvider("openai")}>
-                <Orbit size={15} /><span><b>OpenAI</b><small>API key</small></span>
+                <Orbit size={15} /><span><b>ChatGPT</b><small>API access</small></span>
               </button>
             </div>
             {#if provider === "claude"}
@@ -249,7 +250,7 @@
               <OpenAiConnect onConnectedChange={(c) => { connectConnected = c; if (c) warnSkipConnect = false; }} />
             {/if}
             {#if warnSkipConnect}
-              <p class="ob-hint ob-hint--warn"><TriangleAlert size={14} /><span>{provider === "claude" ? "Claude" : "OpenAI"} isn't connected yet, so that provider can't reply. Press Next again to continue anyway, or finish connecting first.</span></p>
+              <p class="ob-hint ob-hint--warn"><TriangleAlert size={14} /><span>{provider === "claude" ? "Claude" : CHATGPT.label} isn't connected yet, so that service can't reply. Press Next again to continue anyway, or finish connecting first.</span></p>
             {/if}
           {:else if step === 3}
             <ObStage kind="project" caption="your workspace" />

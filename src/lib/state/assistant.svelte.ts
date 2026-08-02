@@ -1070,14 +1070,14 @@ class AssistantStore {
 
   /** Provider sessions use different wire histories and tool protocols. A
    * cross-provider pick therefore starts a fresh chat instead of pretending a
-   * Claude session can be resumed by OpenAI (or vice versa). */
+   * Claude session can be resumed by ChatGPT (or vice versa). */
   async selectModel(v: ModelSel, tab: TabState | null = this.activeTab) {
     const previous = this.modelFor(tab);
     const crossesProvider = isOpenAIModel(previous) !== isOpenAIModel(v);
     if (crossesProvider && (tab?.messages.length ?? 0) > 0) {
       await this.newChatWithModel(v);
       notify.info("Started a fresh provider session", {
-        detail: "Claude and OpenAI chats keep separate histories so tool state stays correct.",
+        detail: "Claude and ChatGPT chats keep separate histories so tool state stays correct.",
       });
       return;
     }
@@ -1217,7 +1217,7 @@ class AssistantStore {
   /** Claude-session prefs → factory defaults. Credentials stay: the API key and
    *  spending cap are not preferences and are never touched by a reset. */
   async resetSessionDefaults() {
-    this.setPlan("max");
+    this.setPlan("free");
     await this.setTrustLevel("readonly");
     await this.setUseFullConfig(true);
   }
@@ -2038,7 +2038,7 @@ class AssistantStore {
       await invoke("assistant_set_openai_api_key", { apiKey: v });
       await this.refreshOpenAiStatus();
     } catch (e) {
-      notify.danger("Couldn't save OpenAI API key", { detail: humanizeError(e) });
+      notify.danger("Couldn't save ChatGPT API key", { detail: humanizeError(e) });
       throw e;
     }
   }

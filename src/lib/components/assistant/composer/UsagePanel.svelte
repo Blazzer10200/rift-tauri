@@ -168,7 +168,7 @@
         <FoldVertical size={12} /> Compact conversation
       </button>
     {:else if mode === "ctx"}
-      <div class="up-empty">OpenAI compacts this conversation automatically before its context limit.</div>
+      <div class="up-empty">ChatGPT compacts this conversation automatically before its context limit.</div>
     {/if}
     {#if mode === "full"}<div class="up-sep" aria-hidden="true"></div>{/if}
   {:else if mode === "ctx"}

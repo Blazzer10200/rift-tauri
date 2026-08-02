@@ -13,6 +13,7 @@
   import { portal } from "$lib/actions/portal";
   import { tooltip } from "$lib/actions/tooltip";
   import { personalWords, removePersonalWord } from "$lib/utils/autocorrect";
+  import { CHATGPT } from "$lib/state/assistant/providerDisplay";
   import {
     MODEL_OPTIONS, currentModels, legacyModels, modelWindowSuffix,
     dialStopsFor, dialIdxFor, clampEffortIdx, effortCapsFor, modelAccessFor, providerStatusFor,
@@ -262,7 +263,7 @@
     </button>
   {/snippet}
 
-  <div class="rift-menu-head"><span>OpenAI API</span><span class="provider-head-note state-{openAiProviderStatus.state}"><i></i>{openAiProviderStatus.tag}</span></div>
+  <div class="rift-menu-head"><span>{CHATGPT.apiAccess}</span><span class="provider-head-note state-{openAiProviderStatus.state}"><i></i>{openAiProviderStatus.tag}</span></div>
   {#each currentOpenAiModels as m (m.id)}
     {@render modelRow(m)}
   {/each}

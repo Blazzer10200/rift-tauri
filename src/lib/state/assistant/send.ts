@@ -65,9 +65,9 @@ export async function send(
   // and surface the reason. Slash commands above are local, so they still run.
   if (!store.authReadyFor(liveTab)) {
     const openai = isOpenAIModel(liveTab?.modelOverride ?? store.model);
-    notify.danger(openai ? "OpenAI isn't set up" : "Claude isn't set up", {
+    notify.danger(openai ? "ChatGPT isn't set up" : "Claude isn't set up", {
       detail: openai
-        ? store.openAiStatus?.summary ?? "Open Settings → Providers and add an OpenAI API key."
+        ? store.openAiStatus?.summary ?? "Open Settings → AI and add a ChatGPT API key."
         : store.auth?.summary ?? "Open Settings to sign in or add an API key.",
     });
     if (openai) void store.refreshOpenAiStatus();
@@ -632,7 +632,7 @@ function runSlash(store: AssistantStore, input: string, tab: TabState | null): b
         void store.selectModel(id);
         notify.ok(`Model selected: ${v}.`);
       } else if (id) {
-        store.lastError = `${v} isn't available to this OpenAI API account.`;
+        store.lastError = `${v} isn't available to this ChatGPT API account.`;
       } else {
         const names = ["sonnet", "opus", "gpt", "sol", "terra", "luna", ...(fableAvailable() ? ["fable"] : []), ...(haikuAvailable() ? ["haiku"] : [])];
         store.lastError = `Unknown model "${arg}". Use ${names.join(", ")}.`;

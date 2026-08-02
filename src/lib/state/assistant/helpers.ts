@@ -315,11 +315,9 @@ export function saveFastMode(v: boolean) {
 
 const RIFT_PLANS: readonly RiftPlan[] = ["free", "pro", "max"] as const;
 
-/** The user's subscription plan (USER-SET — Anthropic exposes no plan signal for
- *  OAuth users; see the RiftPlan type doc). Fresh installs default to `max` (1M)
- *  because that's correct for Max/Team/Enterprise and credit-enabled Pro — the
- *  majority of paying users. Free / uncredited-Pro users set their tier once in
- *  Settings, capping the gauge honestly at 200K. */
+/** The user's context limit (USER-SET — Anthropic exposes no reliable live plan
+ *  signal for OAuth users; see the RiftPlan type doc). Fresh installs start at
+ *  the safe 200K cap; people who have verified 1M access can opt in. */
 export function loadPlan(): RiftPlan {
   try {
     const v = typeof localStorage !== "undefined" ? localStorage.getItem(PLAN_KEY) : null;
@@ -327,7 +325,7 @@ export function loadPlan(): RiftPlan {
   } catch {
     /* SSR or storage disabled */
   }
-  return "max";
+  return "free";
 }
 
 export function savePlan(v: RiftPlan) {
@@ -338,10 +336,9 @@ export function savePlan(v: RiftPlan) {
   }
 }
 
-/** Context-window ceiling the user's plan grants, regardless of the model's
- *  native window. Free is hard-capped at 200K even on 1M-native models; Pro
- *  (with usage credits) and Max get the full 1M. `ctxWindowForModelId` clamps
- *  the model-native window down to this. */
+/** Context-window ceiling chosen by the user, regardless of the model's native
+ *  window. The conservative choice is 200K; verified 1M access unlocks the
+ *  full 1M. `ctxWindowForModelId` clamps the model-native window down to this. */
 export function planContextCap(plan: RiftPlan): number {
   return plan === "free" ? 200_000 : 1_000_000;
 }
@@ -387,7 +384,7 @@ export function fmtTokens(n: number): string {
   return String(Math.round(n));
 }
 
-/** The model's NATIVE context window (tokens), ignoring plan entitlement. Haiku
+/** The model's NATIVE context window (tokens), ignoring the selected limit. Haiku
  *  is 200K; current-gen Opus 4.8 / Sonnet 5 / Fable 5 are 1M. Matches the FULL
  *  pinned ids (claude-opus-4-8 …) AND the bare aliases Rift sends to the CLI
  *  (`opus`/`sonnet`/`fable` — see modelMatrix.ts MODEL_OPTIONS). Without the alias
@@ -410,16 +407,16 @@ export function modelNativeWindow(model: string | null): number {
   return 200_000;
 }
 
-/** Effective context window for a model under the user's plan: the model's native
- *  window clamped to the plan ceiling. A Free user on Opus → min(1M, 200K) = 200K;
- *  a Max user → 1M. Single source of truth for the ctx% gauge (assistant.svelte.ts),
+/** Effective context window for a model under the user's chosen limit: the native
+ *  window clamped to that ceiling. At 200K an Opus turn is min(1M, 200K); at 1M it
+ *  can use 1M. Single source of truth for the ctx% gauge (assistant.svelte.ts),
  *  the compaction pill (streaming.ts), and the picker labels (modelMatrix.ts) — so
  *  all three report the SAME number. `planCap` is optional for call sites that
  *  legitimately want the raw model window; omit it = native window (no clamp). */
 export function ctxWindowForModelId(model: string | null, planCap?: number): number {
   const native = modelNativeWindow(model);
-  // Claude's user-selected subscription entitlement does not apply to OpenAI
-  // API models, which have their own native context limits and billing path.
+  // Claude's user-selected limit does not apply to ChatGPT API models, which
+  // have their own native context limits and billing path.
   if (isOpenAIModel(model)) return native;
   return planCap !== undefined ? Math.min(native, planCap) : native;
 }

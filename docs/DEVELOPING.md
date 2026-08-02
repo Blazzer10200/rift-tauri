@@ -4,7 +4,7 @@ One doc for everything between "I want to use this" and "I want to contribute." 
 
 1. [End-user install (Onboarding)](#1-end-user-install-onboarding)
 2. [Building from source (Contributing)](#2-building-from-source-contributing)
-3. [OpenAI API setup](#3-openai-api-setup)
+3. [ChatGPT API access](#3-chatgpt-api-access)
 4. [Claude Code w/ Rift on the Pro plan](#4-claude-code-w-rift-on-the-pro-plan)
 5. [Releases](#5-releases)
 6. [Configuration & environment variables](#6-configuration--environment-variables)
@@ -13,7 +13,7 @@ One doc for everything between "I want to use this" and "I want to contribute." 
 
 ## 1. End-user install (Onboarding)
 
-For someone handed a `Setup.exe` who wants to use Claude, OpenAI, or both against a local folder.
+For someone handed a `Setup.exe` who wants to use Claude, ChatGPT, or both against a local folder.
 
 ### Install
 
@@ -26,7 +26,7 @@ At least one provider must be connected:
 
 - **Claude:** install Claude Code (`npm install -g @anthropic-ai/claude-code`), run `claude` once, and complete browser login (Pro/Max/Team)—see §4.
 - Or add an `ANTHROPIC_API_KEY` in **Settings → API key**; Rift passes it to the CLI per turn.
-- **OpenAI:** add a key from the OpenAI API platform in **Settings → Providers → OpenAI API**—see §3. ChatGPT subscriptions and API billing are separate.
+- **ChatGPT:** sign in through the Codex CLI for subscription-backed access, or add a key from the OpenAI API platform under **Settings → AI → ChatGPT API access**—see §3. Subscription and API billing are separate.
 - Provider status appears in Settings and the model picker disables models whose provider is not ready.
 
 ### Pick a workspace + chat
@@ -45,7 +45,7 @@ Rift self-updates via Velopack. It checks on launch + every ~6h; when a build is
 ### Trouble?
 
 - Claude unavailable → install/sign in to `claude` (§4) or add an Anthropic key in Settings.
-- OpenAI unavailable → add a valid OpenAI API key in Settings (§3); a ChatGPT login alone does not authorize API requests.
+- ChatGPT API unavailable → add a valid API key under Settings → AI (§3); a ChatGPT login alone does not authorize API requests.
 - CLI logs/auth live under `~/.claude/`. Rift's own config is managed in-app via Settings.
 
 ---
@@ -95,16 +95,18 @@ Dev watches `src/` + `src-tauri/src/` and hot-reloads. **Don't run `cargo check`
 - `npm run check` clean
 - `cargo check --manifest-path src-tauri/Cargo.toml` clean (dev quit first)
 - `cargo test` if you touched anything testable
+- Or run `npm run verify` for the complete local gate. During live UI work, use `npm run verify:frontend`; `npm run verify` deliberately refuses to collide with an active Tauri dev process.
+- `npm run doctor` reports the repo, toolchain, provider CLIs, Tauri dev, and CDP health without reading or printing credentials.
 - Don't bump versions — the release pipeline handles `package.json` / `Cargo.toml` / `tauri.conf.json` in lockstep.
 
 ---
 
-## 3. OpenAI API setup
+## 3. ChatGPT API access
 
 Rift uses OpenAI's API directly; it does not automate the ChatGPT website and does not consume a ChatGPT Plus/Pro subscription.
 
 1. Create an API key in the OpenAI platform and make sure the API account has billing/access configured.
-2. Open **Settings → Providers → OpenAI API**, paste the key, and save. Rift validates the key shape, stores it in Windows Credential Manager, and never returns it to the WebView.
+2. Open **Settings → AI → ChatGPT API access**, paste the key, and save. Rift validates the key shape, stores it in Windows Credential Manager, and never returns it to the WebView.
 3. Refresh models or open the composer model picker. Rift combines its supported GPT defaults with the GPT chat/reasoning models visible to that API account.
 4. Select a GPT model for a conversation and send normally.
 
@@ -112,7 +114,7 @@ OpenAI turns use `/v1/responses` with streaming and `store: false`. Rift owns co
 
 ## 3.1 Codex / ChatGPT CLI connection
 
-Settings → Providers can inspect a standalone `codex` CLI and launch its official `codex login` browser flow. This uses the ChatGPT subscription authorized for Codex; it is separate from OpenAI API-key billing. Rift never reads or copies Codex’s auth cache, and it rejects the packaged Windows Desktop helper because that executable is not a supported standalone CLI. The App Server turn adapter is intentionally not exposed as a model route until its streamed event and approval contracts have authenticated coverage.
+Settings → AI can inspect a standalone `codex` CLI and launch its official `codex login` browser flow. This uses the ChatGPT subscription authorized for Codex; it is separate from API-key billing. Rift never reads or copies Codex’s auth cache, and it rejects the packaged Windows Desktop helper because that executable is not a supported standalone CLI. The App Server turn adapter is intentionally not exposed as a model route until its streamed event and approval contracts have authenticated coverage.
 
 For a real pre-release check, use the dev app: save a test key, refresh the model list, send one plain text turn, run one read-only workspace tool, then cancel a streaming turn. Never place a test key in source, logs, screenshots, or shell output.
 

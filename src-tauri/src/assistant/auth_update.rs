@@ -133,15 +133,9 @@ pub async fn assistant_auth_probe() -> Result<AuthStatus, String> {
     } else if out.logged_in {
         out.pill = "green".into();
         let who = out.email.as_deref().unwrap_or("Claude account");
-        let sub = out.subscription_type.as_deref().unwrap_or("").trim();
-        // Positively distinguish a subscription session (claude.ai OAuth, Pro/
-        // Max) from a logged-in Console/API account — the latter still reports
-        // loggedIn:true but bills per-token against no plan. `authMethod` ==
-        // "claude.ai" is the subscription signal; `apiProvider` == "firstParty"
-        // rules out Bedrock/Vertex third-party routing. A Console login reports
-        // a different authMethod and no subscriptionType, so it must NOT read as
-        // a subscription. (Real shapes: subscription → authMethod "claude.ai",
-        // apiProvider "firstParty", subscriptionType "max"/"pro".)
+        // The CLI can report a cached `subscriptionType` after a plan change.
+        // Keep it as diagnostic data, but never advertise it as a verified live
+        // entitlement or feed it into the user-facing account label.
         let claude_ai = out
             .auth_method
             .as_deref()
@@ -152,20 +146,8 @@ pub async fn assistant_auth_probe() -> Result<AuthStatus, String> {
             .as_deref()
             .map(|p| p.eq_ignore_ascii_case("firstParty"))
             .unwrap_or(false);
-        let is_subscription = claude_ai && !sub.is_empty();
-        out.summary = if is_subscription {
-            let plan: &str = match sub.to_ascii_lowercase().as_str() {
-                "max" => "Max",
-                "pro" => "Pro",
-                "team" => "Team",
-                "enterprise" => "Enterprise",
-                _ => sub, // unknown tier — surface the raw label rather than drop it
-            };
-            format!("Claude {plan} subscription · {who}")
-        } else if claude_ai || first_party {
-            // claude.ai login but no tier string yet — still a subscription
-            // session, just without a reported plan. Don't mislabel it API.
-            format!("Claude subscription · {who}")
+        out.summary = if claude_ai || first_party {
+            format!("Claude account connected · {who}")
         } else {
             // Logged in via a Console/API account → per-token billing, no plan.
             format!("Claude API account · {who} (per-token billing)")

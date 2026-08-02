@@ -19,6 +19,7 @@
   import TurnSummary from "./bubble/TurnSummary.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
+  import { modelProviderLabel } from "$lib/state/assistant/providerDisplay";
   import { portal } from "$lib/actions/portal";
   import { contextMenu, copyText, type CtxMenuItem } from "../../state/contextMenu.svelte";
 
@@ -288,7 +289,7 @@
   <div class="body">
     {#if !isUser}
       <div class="turn-head">
-        <span class="role-name">{isLocalModel ? (modelLabel ?? "Local model") : isOpenAiModel ? "OpenAI" : "Claude"}</span>
+        <span class="role-name">{isLocalModel ? (modelLabel ?? "Local model") : modelProviderLabel(message.model)}</span>
         {#if modelLabel && !isLocalModel}
           <span class="head-sep" aria-hidden="true">·</span>
           <span class="head-model" use:tooltip={"Model for this turn"}>{modelLabel}</span>

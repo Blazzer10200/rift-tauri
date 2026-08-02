@@ -13,7 +13,7 @@
   // have mounted to load the stylesheet.
   import "$lib/styles/onboarding.css";
   import {
-    Terminal, UserCheck, BadgeCheck, CheckCircle2, AlertCircle, Loader2,
+    Terminal, UserCheck, CheckCircle2, AlertCircle, Loader2,
     RefreshCw, Copy, Check, KeyRound, LogIn,
   } from "lucide-svelte";
 
@@ -157,12 +157,6 @@
         <span class="v warn"><AlertCircle size={14} /> not yet</span>
       {/if}
     </div>
-    {#if status.subscriptionType}
-      <div class="ob-statrow">
-        <span class="k"><BadgeCheck size={15} /> Plan</span>
-        <span class="v">{status.subscriptionType}</span>
-      </div>
-    {/if}
     {#if status.summary}
       <div class="ob-statrow ob-statrow--summary">
         <span class="v">{status.summary}</span>

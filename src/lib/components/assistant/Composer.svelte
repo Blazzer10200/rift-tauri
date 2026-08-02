@@ -6,6 +6,7 @@
   import GhPopover from "./GhPopover.svelte";
   import { notify } from "../../state/toast.svelte";
   import { clampEffort, isOpenAIModel, modelFamily } from "../../state/assistant/helpers";
+  import { CHATGPT } from "../../state/assistant/providerDisplay";
   import { cliCommands } from "../../state/assistant/cliCommands.svelte";
   import { requestPrewarm, resetPrewarmDedup } from "../../state/assistant/prewarm";
   import { fuzzyScore, slashScore, isFileDrag, attachImageFiles, summarizeAttach, attachTextFiles, summarizeTextAttach } from "./composer/helpers";
@@ -178,7 +179,7 @@
   // shared placeholder-fade rise; frozen on the first hint under
   // reduced-motion.
   const IDLE_HINTS = $derived.by(() => {
-    const provider = isOpenAIModel(assistant.modelFor(tab)) ? "GPT" : "Claude";
+    const provider = isOpenAIModel(assistant.modelFor(tab)) ? CHATGPT.label : "Claude";
     const hints = [
       `Ask ${provider} anything`,
       "Type / for a command",
@@ -621,9 +622,9 @@
     // the actionable reason via the notice banner.
     if (currentModelAccess?.enabled !== true) {
       const openai = currentModel?.provider === "openai";
-      notify.danger(openai ? "OpenAI isn't ready" : "Claude isn't ready", {
+      notify.danger(openai ? "ChatGPT isn't ready" : "Claude isn't ready", {
         detail: currentModelAccess?.detail
-          ?? (openai ? "Open Settings → Providers and connect an OpenAI API key." : "Open Settings → Providers and connect Claude Code."),
+          ?? (openai ? `Open Settings → AI and connect ${CHATGPT.apiAccess}.` : "Open Settings → AI and connect Claude Code."),
       });
       if (openai) void assistant.refreshOpenAiStatus();
       else void assistant.refreshAuth();
@@ -1654,7 +1655,7 @@
             aria-controls={settingsOpen ? "model-effort-menu" : undefined}
             aria-label="Model & effort"
             use:tooltip={currentModelAccess?.enabled !== true
-              ? `${currentModel ? `${currentModel.label} ${currentModel.version}` : paneEffectiveModel} · ${currentModelAccess?.tag ?? "Unavailable"}\n${currentModelAccess?.detail ?? "Connect this provider in Settings → Providers."}`
+              ? `${currentModel ? `${currentModel.label} ${currentModel.version}` : paneEffectiveModel} · ${currentModelAccess?.tag ?? "Unavailable"}\n${currentModelAccess?.detail ?? "Connect this provider in Settings → AI."}`
               : dialApplies
               ? `Model · effort\n${currentModel ? `${currentModel.label} ${currentModel.version}` : assistant.effectiveModel} · ${currentEffort?.label} effort — ${effortIdx === 0 ? "replies immediately" : "reasons before replying"}`
               : `Model\n${currentModel ? `${currentModel.label} ${currentModel.version}` : paneEffectiveModel} · no extended thinking`}

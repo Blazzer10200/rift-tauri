@@ -53,6 +53,14 @@ struct ResponseRound {
     calls: Vec<FunctionCall>,
 }
 
+struct CompletedResponse<'a> {
+    requested_model: &'a str,
+    response: &'a Value,
+    final_usage: &'a UsageTotals,
+    totals: &'a UsageTotals,
+    continuation: &'a [Value],
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenAiStatus {
@@ -98,9 +106,9 @@ pub fn assistant_openai_status() -> Result<OpenAiStatus, String> {
         env_api_key_present: env_present,
         ready: configured,
         summary: if configured {
-            "OpenAI API key configured".into()
+            "ChatGPT API key configured".into()
         } else {
-            "Add an OpenAI API key in Settings to use GPT models".into()
+            "Add a ChatGPT API key in Settings → AI to use GPT models".into()
         },
     })
 }
@@ -111,7 +119,7 @@ pub fn assistant_set_openai_api_key(api_key: Option<String>) -> Result<(), Strin
     match value {
         Some(key) => {
             if key.len() < 20 || key.len() > 512 || key.chars().any(char::is_whitespace) {
-                return Err("OpenAI API key format is invalid".into());
+                return Err("ChatGPT API key format is invalid".into());
             }
             crate::secrets::set(crate::secrets::OPENAI_API_KEY, key)
         }
@@ -306,7 +314,7 @@ pub async fn assistant_openai_send(
         return Err("empty OpenAI message".into());
     }
     let key = current_api_key().ok_or_else(|| {
-        "OpenAI isn't configured — add an API key in Settings → Providers".to_string()
+        "ChatGPT API access isn't configured — add a key in Settings → AI".to_string()
     })?;
     let model = model.unwrap_or_else(|| DEFAULT_MODEL.into());
     if !super::is_valid_model_name(&model) {
@@ -397,11 +405,13 @@ pub async fn assistant_openai_send(
                 &window_label,
                 &session_id,
                 epoch,
-                &model,
-                &round.response,
-                &round_usage,
-                &totals,
-                &continuation,
+                CompletedResponse {
+                    requested_model: &model,
+                    response: &round.response,
+                    final_usage: &round_usage,
+                    totals: &totals,
+                    continuation: &continuation,
+                },
             );
             emit_done(&app, &window_label, &session_id, epoch, 0);
             return Ok(());
@@ -1081,26 +1091,23 @@ fn emit_usage_and_result(
     window: &str,
     session: &str,
     epoch: u64,
-    requested_model: &str,
-    response: &Value,
-    final_usage: &UsageTotals,
-    totals: &UsageTotals,
-    continuation: &[Value],
+    completed: CompletedResponse<'_>,
 ) {
-    let model = response
+    let model = completed
+        .response
         .get("model")
         .and_then(Value::as_str)
-        .unwrap_or(requested_model);
+        .unwrap_or(completed.requested_model);
     let final_rift_usage = json!({
-        "input_tokens": final_usage.input,
-        "output_tokens": final_usage.output,
-        "cache_read_input_tokens": final_usage.cached,
+        "input_tokens": completed.final_usage.input,
+        "output_tokens": completed.final_usage.output,
+        "cache_read_input_tokens": completed.final_usage.cached,
         "cache_creation_input_tokens": 0,
     });
     let total_rift_usage = json!({
-        "input_tokens": totals.input,
-        "output_tokens": totals.output,
-        "cache_read_input_tokens": totals.cached,
+        "input_tokens": completed.totals.input,
+        "output_tokens": completed.totals.output,
+        "cache_read_input_tokens": completed.totals.cached,
         "cache_creation_input_tokens": 0,
     });
     emit_line(
@@ -1122,8 +1129,8 @@ fn emit_usage_and_result(
             "usage": total_rift_usage,
             "modelUsage": context_window(model).map(|window| json!({ (model): { "contextWindow": window } })).unwrap_or_else(|| json!({})),
             "provider": "openai",
-            "response_id": response.get("id").cloned().unwrap_or(Value::Null),
-            "openai_history": continuation,
+            "response_id": completed.response.get("id").cloned().unwrap_or(Value::Null),
+            "openai_history": completed.continuation,
         }),
     );
 }
@@ -1169,11 +1176,11 @@ fn openai_http_error(status: u16, body: &str) -> String {
             .map(str::to_owned)
     });
     match status {
-        401 => "OpenAI rejected the API key. Update it in Settings → Providers.".into(),
+        401 => "ChatGPT rejected the API key. Update it in Settings → AI.".into(),
         429 => {
-            message.unwrap_or_else(|| "OpenAI rate limit or account spending limit reached.".into())
+            message.unwrap_or_else(|| "ChatGPT API rate limit or account spending limit reached.".into())
         }
-        _ => message.unwrap_or_else(|| format!("OpenAI returned HTTP {status}")),
+        _ => message.unwrap_or_else(|| format!("ChatGPT API returned HTTP {status}")),
     }
 }
 
@@ -1287,7 +1294,7 @@ mod tests {
     fn http_errors_do_not_echo_raw_bodies_for_auth() {
         assert_eq!(
             openai_http_error(401, r#"{"error":{"message":"secret-shaped server text"}}"#),
-            "OpenAI rejected the API key. Update it in Settings → Providers."
+            "ChatGPT rejected the API key. Update it in Settings → AI."
         );
     }
 

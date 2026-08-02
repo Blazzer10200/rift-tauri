@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   rust:
-    name: rust (cargo check + test + machete)
+    name: rust (clippy + test + machete)
     # Self-hosted WS2022 runner; persistent warm target/.
     # Advisory scanning (cargo audit) lives in audit.yml on a DAILY schedule —
     # a fresh RUSTSEC advisory is not a property of the pushed commit, and
@@ -36,8 +36,8 @@ jobs:
       - name: Install cargo-machete
         run: cargo install cargo-machete --locked || true
 
-      - name: cargo check
-        run: cargo check --manifest-path src-tauri/Cargo.toml
+      - name: clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
       - name: cargo test
         run: cargo test --manifest-path src-tauri/Cargo.toml

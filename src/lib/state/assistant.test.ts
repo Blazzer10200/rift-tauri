@@ -124,9 +124,12 @@ const stubTurn = (overrides: Partial<StubTurn>): StubTurn => ({
 });
 
 describe("assistant.ctxWindowFor()", () => {
-  it("defaults to the plan cap (1M on default max plan) when no tab passed", () => {
-    // cont.229b plan-aware window: with no tab/model the window falls through to
-    // planCap, which defaults to max=1M (was a hardcoded 200K pre-plan-arc).
+  beforeEach(() => assistant.setPlan("max"));
+  afterEach(() => assistant.setPlan("free"));
+
+  it("uses the selected 1M cap when no tab is passed", () => {
+    // With no tab/model, the window falls through to the explicitly selected
+    // 1M cap. The app default remains the conservative 200K choice.
     expect(assistant.ctxWindowFor(null)).toBe(1_000_000);
   });
 
@@ -239,6 +242,9 @@ describe("recordTurnUsage — ctx pill reads point-in-time, not cumulative task 
 });
 
 describe("assistant.ctxPctFor()", () => {
+  beforeEach(() => assistant.setPlan("max"));
+  afterEach(() => assistant.setPlan("free"));
+
   it("returns 0 when no usage", () => {
     const tab = { lastModelId: "claude-sonnet-4-6", lastTurnUsage: null } as any;
     expect(assistant.ctxPctFor(tab)).toBe(0);

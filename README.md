@@ -5,7 +5,7 @@
 <h1 align="center">Rift</h1>
 
 <p align="center">
-  Claude Code and OpenAI models in one native Windows workspace.<br/>
+  Claude Code and ChatGPT models in one native Windows workspace.<br/>
   Point Rift at a folder and chat — your chosen model can read, edit, search, and run git in place.<br/>
   <strong>No server, no telemetry — everything runs on your machine.</strong>
 </p>
@@ -38,7 +38,7 @@
 2. Per-user install, no admin needed. Rift self-updates from then on (background download, apply on restart, one-click consent).
 3. On first launch, connect Claude and/or OpenAI. Keys entered in Rift are stored in Windows Credential Manager—never in app files or the WebView. The Providers page can also inspect and sign in to a local Codex CLI without importing its credentials.
 
-**Requirements:** Windows 11 x64 and at least one provider: the [Claude Code CLI](https://claude.com/claude-code) with a Claude login/API key, or an [OpenAI API key](https://platform.openai.com/api-keys). A ChatGPT subscription does not include API usage. macOS/Linux build from source but are not packaged or tested yet.
+**Requirements:** Windows 11 x64 and at least one provider: the [Claude Code CLI](https://claude.com/claude-code) with a Claude login/API key, or ChatGPT through the standalone Codex CLI and optional [OpenAI API key](https://platform.openai.com/api-keys). ChatGPT subscriptions and API usage are billed separately. macOS/Linux build from source but are not packaged or tested yet.
 
 ## What it does
 
@@ -63,7 +63,7 @@ Full picture in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 ## FAQ
 
 **Do I need Claude Code installed?**
-Only for Claude models. OpenAI models use Rift's native API route and require an OpenAI API key instead.
+Only for Claude models. ChatGPT API models use Rift's native route and require an API key instead.
 
 **Does my Claude Pro / Max subscription work?**
 Yes. Sign in to the CLI as usual — Rift turns are ordinary Claude Code usage on your plan. Your own API key works too.

@@ -31,6 +31,7 @@
   import Select from "../Select.svelte";
   import PageHero from "../shared/PageHero.svelte";
   import { MODEL_OPTIONS } from "../assistant/composer/modelMatrix";
+  import { CHATGPT } from "$lib/state/assistant/providerDisplay";
 
   const DENSITIES = ["compact", "regular", "comfy"] as const;
   const NARRATIONS = [
@@ -49,9 +50,9 @@
   const ST_SECTIONS: { id: Section; label: string; icon: typeof Cog; sub: string; dot?: "ok" | "warn" }[] = [
     { id: "appearance", label: "Appearance", icon: Palette,       sub: "Accent color, density, and code rendering — every change applies instantly." },
     { id: "chat",       label: "Chat",       icon: MessageSquare, sub: "How conversations read — stream layout, detail level, and reading comfort." },
-    { id: "claude",     label: "Providers",  icon: Sparkles,      sub: "Connect Claude, OpenAI, and Codex, then choose models per conversation." },
-    { id: "speech",     label: "Speech",     icon: Mic,           sub: "Voice-to-text input — Web Speech (online), Parakeet (on-device, fast) or Whisper (on-device, multilingual)." },
-    { id: "about",      label: "About",      icon: Info,          sub: "Build info, keyboard shortcuts, local tools, and support diagnostics." },
+    { id: "claude",     label: "AI",         icon: Sparkles,      sub: "Connections, model access, and advanced AI controls." },
+    { id: "speech",     label: "Voice",      icon: Mic,           sub: "Dictation, transcription engine, and voice commands." },
+    { id: "about",      label: "System",     icon: Info,          sub: "Build details, keyboard shortcuts, local tools, and diagnostics." },
   ];
 
   let activeSec = $state<Section>("appearance");
@@ -86,8 +87,7 @@
     { tab: "claude",     anchor: "card-admin",     card: "Administrator access", title: "Always run as administrator", kw: "admin elevated elevation uac no prompt scheduled task startup" },
     { tab: "claude",     anchor: "card-api",       card: "API key & spending", title: "API-key fallback",   kw: "anthropic console token sk-ant billing keychain" },
     { tab: "claude",     anchor: "card-api",       card: "API key & spending", title: "Per-turn cost cap",  kw: "budget dollar limit spend guard" },
-    { tab: "claude",     anchor: "card-openai",    card: "OpenAI API", title: "OpenAI API key", kw: "openai chatgpt gpt api key billing responses" },
-    { tab: "claude",     anchor: "card-codex",     card: "Codex account", title: "Codex ChatGPT sign-in", kw: "codex chatgpt account cli app server subscription login" },
+    { tab: "claude",     anchor: "card-chatgpt",   card: "ChatGPT", title: "ChatGPT connection", kw: "chatgpt codex openai gpt api key billing responses account cli app server subscription login" },
     { tab: "speech",     anchor: "card-engine",    card: "Engine",             title: "Speech-to-text",     kw: "voice mic dictation stt enable" },
     { tab: "speech",     anchor: "card-engine",    card: "Engine",             title: "Recognition engine", kw: "web speech whisper parakeet on-device azure" },
     { tab: "speech",     anchor: "card-engine",    card: "Web Speech",         title: "Language",           kw: "english spanish french german locale bcp-47" },
@@ -416,11 +416,13 @@
       && !assistantStore.openAiModelsError && openAiSupportedCount > 0,
   );
   const codexConnected = $derived(assistantStore.codexStatus?.ready === true && !assistantStore.codexChecking);
+  const chatGptConnected = $derived(codexConnected || openAiConnected);
+  const chatGptChecking = $derived(assistantStore.codexChecking || assistantStore.openAiChecking);
   const claudeConnected = $derived(
     assistantStore.auth?.cliPresent === true
       && (assistantStore.auth.pill === "green" || assistantStore.auth.pill === "yellow"),
   );
-  function focusProvider(id: "claude" | "openai" | "codex") {
+  function focusProvider(id: "claude" | "chatgpt") {
     document.getElementById(`card-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
   function fmtAgo(ts: number, now: number): string {
@@ -457,7 +459,7 @@
       openAiApiKeyVisible = false;
     } catch (e) {
       console.error("setOpenAiApiKey failed", e);
-      openAiApiKeyMsg = "Couldn't save the OpenAI API key. See logs for details.";
+      openAiApiKeyMsg = `Couldn't save the ${CHATGPT.apiKey}. See logs for details.`;
     } finally {
       openAiApiKeySaving = false;
     }
@@ -898,7 +900,7 @@
       <div class="set-surface"><div class="set-col">
         <div class="provider-section-head">
           <span>AI connections</span>
-          <p>Choose the route that fits the task. Each provider keeps its own sign-in, model access, and billing boundary.</p>
+          <p>Choose Claude or ChatGPT. Each connection has one primary account route; optional API access stays clearly separate.</p>
         </div>
         <div class="provider-overview" aria-label="Provider connection summary">
           <button class="provider-overview-item" class:ready={claudeConnected} type="button" onclick={() => focusProvider("claude")}>
@@ -906,15 +908,10 @@
             <span class="provider-overview-copy"><b>Claude</b><small>CLI session</small></span>
             <span class="provider-overview-state">{assistantStore.authChecking ? "Checking" : claudeConnected ? "Ready" : "Action needed"}</span>
           </button>
-          <button class="provider-overview-item" class:ready={openAiConnected} type="button" onclick={() => focusProvider("openai")}>
-            <span class="provider-overview-icon"><Sparkles size={15} /></span>
-            <span class="provider-overview-copy"><b>OpenAI</b><small>Responses API</small></span>
-            <span class="provider-overview-state">{assistantStore.openAiChecking ? "Checking" : openAiConnected ? "Ready" : assistantStore.hasOpenAiApiKey ? "Verify access" : "Add key"}</span>
-          </button>
-          <button class="provider-overview-item" class:ready={codexConnected} type="button" onclick={() => focusProvider("codex")}>
+          <button class="provider-overview-item" class:ready={chatGptConnected} type="button" onclick={() => focusProvider("chatgpt")}>
             <span class="provider-overview-icon"><Terminal size={15} /></span>
-            <span class="provider-overview-copy"><b>Codex</b><small>ChatGPT CLI</small></span>
-            <span class="provider-overview-state">{assistantStore.codexChecking ? "Checking" : codexConnected ? "Ready" : assistantStore.codexStatus?.cliPresent ? "Sign in" : "Install CLI"}</span>
+            <span class="provider-overview-copy"><b>ChatGPT</b><small>Account + optional API access</small></span>
+            <span class="provider-overview-state">{chatGptChecking ? "Checking" : codexConnected ? "Ready" : openAiConnected ? "API ready" : assistantStore.codexStatus?.cliPresent ? "Sign in" : "Set up"}</span>
           </button>
         </div>
         <!-- session status promoted to a hero banner — auth + CLI version share one surface -->
@@ -995,76 +992,14 @@
           {/if}
         </div>
 
-        <div class="card provider-card" id="card-openai">
-          <div class="card-tt">OpenAI</div>
-          <div class="card-sub">GPT models through OpenAI's Responses API. Your key is stored in the OS keychain and never enters the WebView.</div>
-          <div class="route" aria-hidden="true">
-            <span class="route-node" class:on={assistantStore.hasOpenAiApiKey}>OpenAI API</span>
-            <span class="route-arrow">→</span>
-            <span class="route-note">{assistantStore.openAiChecking ? "Checking account model access…" : assistantStore.openAiModelsError ? "Model access check failed" : assistantStore.openAiStatus?.summary ?? "API key required"}</span>
-            {#if assistantStore.openAiModels}
-              <span class="provider-model-count">{openAiSupportedCount} Rift models available</span>
-            {/if}
-          </div>
-          <div class="ctl-row tight">
-            <div>
-              <label class="ctl-t" for="openai-apikey">OpenAI API key</label>
-              <div class="ctl-s">API usage is billed separately from ChatGPT. Responses use stateless mode; Rift keeps the conversation history locally.</div>
-            </div>
-            <div class="ctl-actions">
-              {#if assistantStore.hasOpenAiApiKey}
-                <span class="st-pill" class:ok={openAiConnected} class:warn={!openAiConnected}><span class="dot"></span>{assistantStore.openAiChecking ? "Checking" : assistantStore.openAiModelsError ? "Needs attention" : openAiConnected ? "Connected" : "Configured"}</span>
-                <button class="st-btn danger-btn" type="button" disabled={openAiApiKeySaving} onclick={() => { openAiApiKeyDraft = ""; void saveOpenAiApiKey(); }}>Clear</button>
-              {:else}
-                <span class="st-secret">
-                  <input id="openai-apikey" class="st-input mono" type={openAiApiKeyVisible ? "text" : "password"} placeholder="sk-…" style="width:100%; max-width:188px;" bind:value={openAiApiKeyDraft} autocomplete="off" spellcheck="false" />
-                  <button class="st-eye" type="button" onclick={() => (openAiApiKeyVisible = !openAiApiKeyVisible)} aria-label={openAiApiKeyVisible ? "Hide API key" : "Show API key"}>{#if openAiApiKeyVisible}<EyeOff size={14} />{:else}<Eye size={14} />{/if}</button>
-                </span>
-                <button class="st-btn primary" type="button" onclick={saveOpenAiApiKey} disabled={openAiApiKeySaving || !openAiApiKeyDirty}>{openAiApiKeySaving ? "Saving…" : "Connect"}</button>
-              {/if}
-            </div>
-          </div>
-          {#if openAiApiKeyMsg}<div class="st-note">{openAiApiKeyMsg}</div>{/if}
-          {#if assistantStore.openAiModelsError}<div class="st-note warn">Rift couldn't verify model access: {assistantStore.openAiModelsError}. Use Re-probe above to try again.</div>{/if}
-          {#if openAiOtherCount > 0}<div class="st-note">{openAiOtherCount} additional account model{openAiOtherCount === 1 ? " is" : "s are"} visible to the API but not yet supported by Rift.</div>{/if}
-          {#if assistantStore.openAiStatus?.envApiKeyPresent && !assistantStore.hasOpenAiApiKey}
-            <div class="st-note">A system <code>OPENAI_API_KEY</code> exists, but Rift deliberately ignores environment keys. Paste it above to opt in explicitly.</div>
-          {/if}
-        </div>
-
-        <div class="card provider-card" id="card-codex">
-          <div class="card-tt">Codex account</div>
-          <div class="card-sub">ChatGPT subscription sign-in through the local Codex CLI. Rift never reads or copies your Codex credentials.</div>
-          <div class="route" aria-hidden="true">
-            <span class="route-node" class:on={assistantStore.codexStatus?.cliPresent}>Codex CLI</span>
-            <span class="route-arrow">→</span>
-            <span class="route-note">{assistantStore.codexChecking ? "Checking Codex…" : assistantStore.codexError ?? assistantStore.codexStatus?.summary ?? "Checking Codex…"}</span>
-          </div>
-          <div class="ctl-row tight no-line">
-            <div>
-              <div class="ctl-t">ChatGPT sign-in</div>
-              <div class="ctl-s">Uses the CLI’s own browser flow and local App Server. This is separate from OpenAI API-key billing.</div>
-            </div>
-            <div class="ctl-actions">
-              <span class="st-pill" class:ok={codexConnected} class:warn={!codexConnected}><span class="dot"></span>{assistantStore.codexChecking ? "Checking" : codexConnected ? "Connected" : assistantStore.codexStatus?.cliPresent ? "Sign in needed" : "CLI needed"}</span>
-              {#if assistantStore.codexStatus?.cliPresent}
-                <button class="st-btn primary" type="button" disabled={assistantStore.codexChecking || codexConnected} onclick={() => void assistantStore.startCodexLogin()}>{codexConnected ? "Connected" : "Connect"}</button>
-              {/if}
-              <button class="st-btn" type="button" disabled={assistantStore.codexChecking} onclick={() => void assistantStore.refreshCodexStatus()}>Re-probe</button>
-            </div>
-          </div>
-          {#if assistantStore.codexStatus?.cliVersion}<div class="st-note">Codex CLI {assistantStore.codexStatus.cliVersion}</div>{/if}
-          {#if assistantStore.codexError}<div class="st-note warn">Rift couldn't inspect Codex: {assistantStore.codexError}</div>{/if}
-        </div>
-
         <div class="provider-section-head provider-section-head--runtime">
-          <span>Claude runtime</span>
-          <p>Claude-specific session behavior, system access, and optional API billing.</p>
+          <span>Claude preferences</span>
+          <p>Advanced session, access, and billing controls for Claude.</p>
         </div>
 
         <div class="card" id="card-session">
           <div class="card-tt">Claude session</div>
-          <div class="card-sub">How each turn runs — config, git access, and plan.</div>
+          <div class="card-sub">How Claude turns run: config, git access, and a conservative context limit.</div>
           <div class="ctl-row tight">
             <div><div class="ctl-t">Use my full Claude Code config</div><div class="ctl-s">Layers your global <code>~/.claude</code> setup — CLAUDE.md, hooks, skills, MCP servers — into every turn. Off = sandboxed with Rift's tools only.</div></div>
             <button class="rift-toggle" class:on={assistantStore.useFullConfig && !assistantStore.hasApiKey} role="switch" aria-checked={assistantStore.useFullConfig && !assistantStore.hasApiKey} aria-label="Use full Claude Code config" disabled={assistantStore.hasApiKey} type="button" onclick={() => void assistantStore.setUseFullConfig(!assistantStore.useFullConfig)}><span class="rift-toggle-knob"></span></button>
@@ -1077,11 +1012,10 @@
             </div>
           </div>
           <div class="ctl-row tight no-line">
-            <div><div class="ctl-t">Plan</div><div class="ctl-s">Sets the context-window gauge — Anthropic doesn't expose your plan, so pick it here. Free caps at 200K; Pro and Max unlock 1M.</div></div>
-            <div class="seg" role="radiogroup" aria-label="Subscription plan">
-              <button class:on={assistantStore.plan === "free"} role="radio" aria-checked={assistantStore.plan === "free"} tabindex={assistantStore.plan === "free" ? 0 : -1} type="button" onkeydown={onRadioKey} onclick={() => assistantStore.setPlan("free")}>Free</button>
-              <button class:on={assistantStore.plan === "pro"} role="radio" aria-checked={assistantStore.plan === "pro"} tabindex={assistantStore.plan === "pro" ? 0 : -1} type="button" onkeydown={onRadioKey} onclick={() => assistantStore.setPlan("pro")}>Pro</button>
-              <button class:on={assistantStore.plan === "max"} role="radio" aria-checked={assistantStore.plan === "max"} tabindex={assistantStore.plan === "max" ? 0 : -1} type="button" onkeydown={onRadioKey} onclick={() => assistantStore.setPlan("max")}>Max</button>
+            <div><div class="ctl-t">Context limit</div><div class="ctl-s">Claude Code does not provide a reliable live entitlement check. Set the limit you know your account allows; use 200K when unsure.</div></div>
+            <div class="seg" role="radiogroup" aria-label="Claude context limit">
+              <button class:on={assistantStore.plan === "free"} role="radio" aria-checked={assistantStore.plan === "free"} tabindex={assistantStore.plan === "free" ? 0 : -1} type="button" onkeydown={onRadioKey} onclick={() => assistantStore.setPlan("free")}>200K</button>
+              <button class:on={assistantStore.plan !== "free"} role="radio" aria-checked={assistantStore.plan !== "free"} tabindex={assistantStore.plan !== "free" ? 0 : -1} type="button" onkeydown={onRadioKey} onclick={() => assistantStore.setPlan("max")}>1M</button>
             </div>
           </div>
           <!-- What the picker actually drives: the context gauge, live. -->
@@ -1092,9 +1026,6 @@
             </div>
             <span class="plan-gauge-cap mono">{assistantStore.plan === "free" ? "200K" : "1M"} context</span>
           </div>
-          {#if assistantStore.plan === "pro"}
-            <div class="st-note">Pro reaches 1M only once usage credits are enabled at <code>claude.ai/settings/usage</code> — otherwise it behaves like 200K.</div>
-          {/if}
         </div>
 
         {#if elevation.supported}
@@ -1134,7 +1065,7 @@
         {/if}
 
           <div class="card" id="card-api">
-            <div class="card-tt">API key &amp; spending</div>
+            <div class="card-tt">Claude API access</div>
             <div class="card-sub">Where your turns bill. Setting a key switches from your subscription to pay-per-token via the Anthropic Console.</div>
             <!-- Route strip: which billing path is live right now. -->
             <div class="route" aria-hidden="true">
@@ -1182,7 +1113,74 @@
             {/if}
           </div>
 
-          <button class="set-expand set-reset" type="button" onclick={() => void resetTab("claude")}><RotateCcw size={13} /> Reset Claude session to defaults</button>
+          <div class="provider-section-head provider-section-head--runtime">
+            <span>ChatGPT</span>
+            <p>Use your ChatGPT account with Codex. API access is optional and separately billed.</p>
+          </div>
+
+          <div class="card provider-card" id="card-codex">
+            <div class="card-tt">ChatGPT subscription</div>
+            <div class="card-sub">Your ChatGPT account connects through the local Codex CLI. Rift never reads or copies your credentials.</div>
+            <div class="route" aria-hidden="true">
+              <span class="route-node" class:on={assistantStore.codexStatus?.cliPresent}>Codex CLI</span>
+              <span class="route-arrow">→</span>
+              <span class="route-note">{assistantStore.codexChecking ? "Checking Codex…" : assistantStore.codexError ?? assistantStore.codexStatus?.summary ?? "Checking Codex…"}</span>
+            </div>
+            <div class="ctl-row tight no-line">
+              <div>
+                <div class="ctl-t">ChatGPT sign-in</div>
+                <div class="ctl-s">Uses the CLI’s own browser flow and local App Server. This is separate from ChatGPT API billing.</div>
+              </div>
+              <div class="ctl-actions">
+                <span class="st-pill" class:ok={codexConnected} class:warn={!codexConnected}><span class="dot"></span>{assistantStore.codexChecking ? "Checking" : codexConnected ? "Connected" : assistantStore.codexStatus?.cliPresent ? "Sign in needed" : "CLI needed"}</span>
+                {#if assistantStore.codexStatus?.cliPresent}
+                  <button class="st-btn primary" type="button" disabled={assistantStore.codexChecking || codexConnected} onclick={() => void assistantStore.startCodexLogin()}>{codexConnected ? "Connected" : "Connect"}</button>
+                {/if}
+                <button class="st-btn" type="button" disabled={assistantStore.codexChecking} onclick={() => void assistantStore.refreshCodexStatus()}>Re-probe</button>
+              </div>
+            </div>
+            {#if assistantStore.codexStatus?.cliVersion}<div class="st-note">Codex CLI {assistantStore.codexStatus.cliVersion}</div>{/if}
+            {#if assistantStore.codexError}<div class="st-note warn">Rift couldn't inspect Codex: {assistantStore.codexError}</div>{/if}
+          </div>
+
+          <div class="card provider-card" id="card-chatgpt">
+            <div class="card-tt">ChatGPT API access</div>
+            <div class="card-sub">Optional native GPT access for Rift. Your key stays in the OS keychain; this route is billed separately from your ChatGPT subscription.</div>
+            <div class="route" aria-hidden="true">
+              <span class="route-node" class:on={assistantStore.hasOpenAiApiKey}>API access</span>
+              <span class="route-arrow">→</span>
+              <span class="route-note">{assistantStore.openAiChecking ? "Checking account model access…" : assistantStore.openAiModelsError ? "Model access check failed" : assistantStore.openAiStatus?.summary ?? `${CHATGPT.apiKey} required`}</span>
+              {#if assistantStore.openAiModels}
+                <span class="provider-model-count">{openAiSupportedCount} Rift models available</span>
+              {/if}
+            </div>
+            <div class="ctl-row tight">
+              <div>
+                <label class="ctl-t" for="openai-apikey">{CHATGPT.apiKey}</label>
+                <div class="ctl-s">{CHATGPT.apiBilling} Rift keeps the conversation history locally.</div>
+              </div>
+              <div class="ctl-actions">
+                {#if assistantStore.hasOpenAiApiKey}
+                  <span class="st-pill" class:ok={openAiConnected} class:warn={!openAiConnected}><span class="dot"></span>{assistantStore.openAiChecking ? "Checking" : assistantStore.openAiModelsError ? "Needs attention" : openAiConnected ? "Connected" : "Configured"}</span>
+                  <button class="st-btn danger-btn" type="button" disabled={openAiApiKeySaving} onclick={() => { openAiApiKeyDraft = ""; void saveOpenAiApiKey(); }}>Clear</button>
+                {:else}
+                  <span class="st-secret">
+                    <input id="openai-apikey" class="st-input mono" type={openAiApiKeyVisible ? "text" : "password"} placeholder="sk-…" style="width:100%; max-width:188px;" bind:value={openAiApiKeyDraft} autocomplete="off" spellcheck="false" />
+                    <button class="st-eye" type="button" onclick={() => (openAiApiKeyVisible = !openAiApiKeyVisible)} aria-label={openAiApiKeyVisible ? "Hide API key" : "Show API key"}>{#if openAiApiKeyVisible}<EyeOff size={14} />{:else}<Eye size={14} />{/if}</button>
+                  </span>
+                  <button class="st-btn primary" type="button" onclick={saveOpenAiApiKey} disabled={openAiApiKeySaving || !openAiApiKeyDirty}>{openAiApiKeySaving ? "Saving…" : "Connect"}</button>
+                {/if}
+              </div>
+            </div>
+            {#if openAiApiKeyMsg}<div class="st-note">{openAiApiKeyMsg}</div>{/if}
+            {#if assistantStore.openAiModelsError}<div class="st-note warn">Rift couldn't verify model access: {assistantStore.openAiModelsError}. Use Re-probe above to try again.</div>{/if}
+            {#if openAiOtherCount > 0}<div class="st-note">{openAiOtherCount} additional account model{openAiOtherCount === 1 ? " is" : "s are"} visible to the API but not yet supported by Rift.</div>{/if}
+            {#if assistantStore.openAiStatus?.envApiKeyPresent && !assistantStore.hasOpenAiApiKey}
+              <div class="st-note">A system <code>OPENAI_API_KEY</code> exists, but Rift deliberately ignores environment keys. Paste it above to opt in explicitly.</div>
+            {/if}
+          </div>
+
+          <button class="set-expand set-reset" type="button" onclick={() => void resetTab("claude")}><RotateCcw size={13} /> Reset Claude preferences</button>
       </div></div>
     {/if}
 
@@ -1580,7 +1578,7 @@
   .provider-section-head > p { margin: 5px 0 0; color: var(--fg-subtle); font-size: 11.5px; line-height: 1.5; }
   /* Connection overview is the scan layer: provider details stay in their
      existing cards below, while this compact row answers "what is ready?". */
-  .provider-overview { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
+  .provider-overview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
   .provider-overview-item { min-width: 0; display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 9px 10px; border-radius: var(--radius-lg); border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 2.5%, transparent); color: var(--fg-muted); font: inherit; text-align: left; cursor: pointer; transition: border-color var(--dur-fast), background var(--dur-fast), transform var(--dur-fast); }
   .provider-overview-item:hover { border-color: var(--border-strong); background: var(--surface-hover); transform: translateY(-1px); }
   .provider-overview-item:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }

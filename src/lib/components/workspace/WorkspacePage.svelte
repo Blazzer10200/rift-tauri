@@ -37,7 +37,7 @@
   const ctxName = $derived(hasRoot ? leafName(paneRoot!) : "workspace");
   const branch = $derived(assistant.workspaceBranch);
   const fileCount = $derived(assistant.workspaceFiles.length);
-  type ProviderPulse = { id: "claude" | "openai" | "codex"; label: string; detail: string; ready: boolean };
+  type ProviderPulse = { id: "claude" | "chatgpt"; label: string; detail: string; ready: boolean };
   const providerPulses = $derived<ProviderPulse[]>([
     {
       id: "claude",
@@ -46,16 +46,18 @@
       ready: assistant.authReadyForModel("sonnet"),
     },
     {
-      id: "openai",
-      label: "OpenAI",
-      detail: assistant.openAiChecking ? "Checking access" : assistant.openAiStatus?.ready ? "API key set" : "Add API key",
-      ready: assistant.openAiStatus?.ready === true && !assistant.openAiModelsError,
-    },
-    {
-      id: "codex",
-      label: "Codex",
-      detail: assistant.codexChecking ? "Checking CLI" : assistant.codexStatus?.ready ? "CLI signed in" : assistant.codexStatus?.cliPresent ? "Sign in" : "Install CLI",
-      ready: assistant.codexStatus?.ready === true,
+      id: "chatgpt",
+      label: "ChatGPT",
+      detail: assistant.codexChecking || assistant.openAiChecking
+        ? "Checking access"
+        : assistant.codexStatus?.ready
+          ? "Account ready"
+          : assistant.openAiStatus?.ready && !assistant.openAiModelsError
+            ? "API access ready"
+            : assistant.codexStatus?.cliPresent
+              ? "Sign in"
+              : "Set up",
+      ready: assistant.codexStatus?.ready === true || (assistant.openAiStatus?.ready === true && !assistant.openAiModelsError),
     },
   ]);
   function openProviderSettings() {
@@ -437,11 +439,11 @@
       <!-- Provider pulse is a compact capability readout, not a second Settings
            page. One click takes the user to the full connection controls. -->
       <section class="provider-pulse" aria-label="AI provider readiness">
-        <div class="provider-pulse-head"><Sparkles size={13} /> AI routes <span>Choose a model in chat; manage connections in Settings.</span></div>
+        <div class="provider-pulse-head"><Sparkles size={13} /> AI connections <span>Choose a model in chat; manage connections in Settings.</span></div>
         <div class="provider-pulse-list">
           {#each providerPulses as provider (provider.id)}
             <button class="provider-pulse-item" class:ready={provider.ready} type="button" onclick={openProviderSettings}>
-              {#if provider.id === "claude" || provider.id === "codex"}<Terminal size={12} />{:else}<Sparkles size={12} />{/if}
+              {#if provider.id === "claude" || provider.id === "chatgpt"}<Terminal size={12} />{:else}<Sparkles size={12} />{/if}
               <b>{provider.label}</b>
               <span>{provider.detail}</span>
               <ArrowRight size={12} aria-hidden="true" />
@@ -866,7 +868,7 @@
   .provider-pulse-head { display: inline-flex; align-items: center; gap: 6px; flex: none; color: var(--fg-2); font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
   .provider-pulse-head :global(svg) { color: var(--accent); }
   .provider-pulse-head > span { color: var(--fg-faint); font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: none; }
-  .provider-pulse-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; flex: 1; min-width: 0; }
+  .provider-pulse-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; flex: 1; min-width: 0; }
   .provider-pulse-item { min-width: 0; display: grid; grid-template-columns: 12px auto minmax(0, 1fr) 12px; align-items: center; gap: 5px; padding: 5px 7px; border-radius: 7px; color: var(--fg-subtle); background: transparent; font: inherit; text-align: left; cursor: pointer; transition: color var(--dur-fast), background var(--dur-fast); }
   .provider-pulse-item:hover { color: var(--fg); background: var(--surface-hover); }
   .provider-pulse-item:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }

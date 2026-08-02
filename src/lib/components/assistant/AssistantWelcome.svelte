@@ -13,6 +13,7 @@
   import ClaudeConnect from "$lib/components/onboarding/ClaudeConnect.svelte";
   import OpenAiConnect from "$lib/components/onboarding/OpenAiConnect.svelte";
   import { isOpenAIModel } from "$lib/state/assistant/helpers";
+  import { CHATGPT } from "$lib/state/assistant/providerDisplay";
   import { leafName, shortPath } from "$lib/components/shell/tabsbar/helpers";
   import { greeting, fmtAgo } from "$lib/components/workspace/welcomeShared";
   import Skeleton from "$lib/components/shell/Skeleton.svelte";
@@ -28,7 +29,7 @@
 
   // ── Cold-state orientation copy (mirrors comp app/data.jsx) ──────────────
   const RIFT_TAGLINE =
-    "A native coding workspace for Claude and OpenAI models, with project-scoped tools and visible permission controls.";
+    `A native coding workspace for Claude and ${CHATGPT.label}, with project-scoped tools and visible permission controls.`;
   const RIFT_STEPS = [
     {
       icon: Folder,

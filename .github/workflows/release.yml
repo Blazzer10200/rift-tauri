@@ -166,19 +166,22 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
-      # Test gate: the tag-driven release used to build+publish with NO test gate
+      # Quality gate: the tag-driven release used to build+publish with NO test gate
       # (tests lived only in the separate, push-triggered `check` workflow, which
       # cancel-in-progress can kill before a tag ships). v0.31.0 shipped a build
-      # whose `cargo test` had gone red in check. These three steps run on the
+      # whose `cargo test` had gone red in check. These four steps run on the
       # warm self-hosted target/ and fail the job BEFORE the build/publish below,
       # so a tag can never ship un-tested code again (skipped ONLY when check.yml
       # already proved this exact sha green -- see gate dedup above).
-      - name: cargo test
+      - name: clippy
         if: steps.gates.outputs.mode == 'inline'
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - name: svelte-check
         if: steps.gates.outputs.mode == 'inline'
         run: npm run check
+      - name: cargo test
+        if: steps.gates.outputs.mode == 'inline'
+        run: cargo test --manifest-path src-tauri/Cargo.toml
       - name: vitest
         if: steps.gates.outputs.mode == 'inline'
         run: npm test

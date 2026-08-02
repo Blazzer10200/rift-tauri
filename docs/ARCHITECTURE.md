@@ -15,6 +15,17 @@ Rift is a Tauri 2 desktop app with two assistant engines—Claude through the of
 | Assistant engines | Claude CLI + stdio MCP; OpenAI Responses API + native function loop | `src-tauri/src/assistant/` |
 | Distribution | NSIS first-install → Velopack self-update | `update_service.rs` · `scripts/release.ps1` |
 
+### Fast navigation
+
+| If you are changing... | Start here |
+|---|---|
+| Provider status, auth, or model readiness | `src/lib/state/assistant.svelte.ts`, `src/lib/state/assistant/providerDisplay.ts`, `src-tauri/src/assistant/{auth_update,codex,openai}.rs` |
+| Sending, streaming, tools, or continuation state | `src/lib/state/assistant/{send,streaming}.ts`, `src-tauri/src/assistant/{turn,openai,mcp_server}.rs` |
+| Composer model/effort controls | `src/lib/components/assistant/Composer.svelte`, `src/lib/components/assistant/composer/{SettingsMenu,modelMatrix}.ts` |
+| Settings and connection UI | `src/lib/components/settings/SettingsPage.svelte`, `src/lib/components/onboarding/` |
+| Live UI debugging | `.agents/skills/rift-ui/SKILL.md`, `scripts/cdp/c.sh`, then `npm run cdp:doctor` |
+| Local correctness gates | `npm run doctor`, `npm run verify:frontend`, `npm run verify` |
+
 The frontend is a single-window SPA (no SSR at runtime—SvelteKit is the build tool). The workspace registry (`src/lib/components/workspaces/index.ts`) has six IDs: **Workspace** (`home`, ⌨1), **Chat** (`chat`, ⌨2), legacy **`projects`** (folded to `home`), **Settings** (⌨4), **Diagnostics** (⌨5), and **AI Health** (⌨6). Each workspace is a dynamic import: only the active screen loads at startup, while every opened screen stays mounted afterward to preserve scroll, focus, and in-flight state. A fresh install defaults to `chat` (`workspace.svelte.ts`).
 
 ## 3. Request lifecycle — a turn, end to end
@@ -87,7 +98,7 @@ Other stores: `environment.svelte.ts` (host-tool presence — git/node/npm/cargo
 
 ### Components (`src/lib/components/`)
 - `assistant/` — the Chat surface: `MessageBubble`, `ToolChip`, `EditDiff`, `Markdown`, `Composer` (split into `composer/*`), `AssistantPane`, `AssistantPage`, `AssistantWelcome` (warm/cold welcome), `PermissionBar`. Sub-agent dispatches render **inline** as cards (`stream/StreamAgent` live · `toolchip/AgentCard` persisted) — no floating dock.
-- `workspace/` — `WorkspacePage.svelte`, the merged Workspace (home) surface; its provider pulse deep-links to Settings → Providers, while `NewsFeed.svelte` labels its independently verified source coverage rather than implying every connected provider supplies a feed. `globPreview.ts` + `welcomeShared.ts` back its glob validation and shared greeting.
+- `workspace/` — `WorkspacePage.svelte`, the merged Workspace (home) surface; its provider pulse deep-links to Settings → AI, while `NewsFeed.svelte` labels its independently verified source coverage rather than implying every connected provider supplies a feed. `globPreview.ts` + `welcomeShared.ts` back its glob validation and shared greeting.
 - `shell/` — `Titlebar` (custom drag region — needs `core:window:allow-start-dragging`), `WorkspaceShell`, `Sidebar`, `Topbar`, `StatusBar`, `ConversationList`, `ProjectRail`, `ContextMenuHost`, `RiftLogo`. (`tabsbar/` holds only pure helpers now — `ChatTabsBar` was folded in.)
 - `home/` (`statsHelpers.ts` — the pure usage-stat aggregation WorkspacePage + AiHealth both read) · `settings/` · `local-llm/` · `ai-health/` · `webview/` · `onboarding/` — the other workspaces, onboarding, and browser pane.
 

@@ -412,15 +412,12 @@ export type ModelFamily = "sonnet" | "opus" | "haiku" | "openai";
  *  `plan`) need the approval surface from Piece 2 to be fully functional. */
 export type PermissionMode = "default" | "acceptEdits" | "plan" | "auto" | "bypassPermissions";
 
-/** Subscription plan the logged-in user is on. Drives the context-window CAP
- *  applied to the model's native window (see `planContextCap` / `ctxWindowForModelId`
- *  in helpers.ts). Anthropic exposes NO programmatic plan/entitlement signal for
- *  OAuth users (no API field, no CLI JSON), so this is a USER-SET preference, not
- *  detected. Reality (2026-06, support.claude.com): Free is hard-capped at 200K
- *  even on Opus/Sonnet; Pro gets the full 1M in Claude Code only with usage
- *  credits enabled (else quota-gated); Max/Team/Enterprise get 1M automatically.
- *  Default is `max` (1M) because that's correct for the majority of paying users;
- *  Free / uncredited-Pro users set their tier once. */
+/** Stored context-limit choice. Drives the ceiling applied to a Claude model's
+ *  native window (see `planContextCap` / `ctxWindowForModelId` in helpers.ts).
+ *  The Claude CLI can expose stale account metadata after a plan change, so Rift
+ *  never treats this as detected entitlement. Default is conservative `free`
+ *  (200K); a person with verified 1M access can opt in. The legacy values remain
+ *  for migration compatibility, not as subscription claims. */
 export type RiftPlan = "free" | "pro" | "max";
 
 /** Assistant trust level gating the local git tools. Must stay in sync with

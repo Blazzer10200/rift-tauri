@@ -74,9 +74,11 @@ fn command_for(exe: &Path, args: &[&str]) -> Command {
     #[cfg(windows)]
     if matches!(exe.extension().and_then(|ext| ext.to_str()), Some("cmd") | Some("bat")) {
         let mut command = Command::new("cmd.exe");
-        let args = args.join(" ");
         command.args(["/d", "/s", "/c"]);
-        command.arg(format!("\"\"{}\" {}\"", exe.display(), args));
+        // Keep the command path and its arguments separate. Pre-quoting this
+        // into one `/c` string makes Windows escape the inner quotes, so a
+        // space-free `codex.cmd --version` is treated as a literal command.
+        command.arg(exe).args(args);
         command.kill_on_drop(true);
         return command;
     }

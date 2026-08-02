@@ -13,12 +13,13 @@
   import Skeleton from "./Skeleton.svelte";
   import { bootLoad } from "$lib/state/bootLoad.svelte";
   import { isOpenAIModel } from "$lib/state/assistant/helpers";
+  import { modelProviderLabel } from "$lib/state/assistant/providerDisplay";
 
   const openAi = $derived(isOpenAIModel(assistant.effectiveModel));
   const connected = $derived(
     openAi ? assistant.openAiStatus?.ready === true : !!(assistant.auth?.loggedIn || assistant.hasApiKey),
   );
-  const providerLabel = $derived(openAi ? "OpenAI" : "Claude");
+  const providerLabel = $derived(modelProviderLabel(assistant.effectiveModel));
   const repoName = $derived.by(() => {
     const leaf = (assistant.activeRoot ?? "").replace(/[/\\]+$/, "").split(/[/\\]/).pop();
     if (leaf) return leaf;

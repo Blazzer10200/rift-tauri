@@ -2,6 +2,14 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.150.0 — ChatGPT clarity and a cleaner AI setup
+
+- **One ChatGPT identity throughout Rift.** The model picker, composer, onboarding, status bar, Workspace, and Settings now present ChatGPT consistently instead of mixing OpenAI and Codex as if they were separate providers. Technical API and CLI details remain visible only where they explain setup or billing.
+- **A cleaner AI settings page.** Connections are grouped into Claude and ChatGPT, with Claude preferences kept together and ChatGPT subscription sign-in clearly separated from optional API-key access. The main tabs are now Appearance, Chat, AI, Voice, and System.
+- **Truthful Claude account status.** Rift no longer turns potentially stale CLI subscription metadata into a “Claude Max” claim. It reports connection health and provides an explicit conservative 200K or verified 1M context-limit choice instead.
+- **Reliable standalone Codex discovery on Windows.** Rift now launches the npm-installed Codex command shim correctly, recognizes the local ChatGPT login, and keeps the future App Server turn route behind its authenticated-test boundary.
+- **Faster development and safer releases.** `npm run doctor` reports the local toolchain, provider CLIs, Tauri dev process, and CDP state without exposing credentials. `npm run verify` runs static analysis before the expensive tests and refuses to collide with a running Tauri dev build; main and tag-driven release CI now enforce the same warning-free Clippy gate.
+
 ## v0.149.1 — Claude + OpenAI, one workspace
 
 - **OpenAI is a first-class provider.** Connect an OpenAI API key in Settings, discover models available to that API account, choose GPT per conversation, and stream Responses API output beside the existing Claude CLI route. ChatGPT subscriptions remain separate from API billing and are labeled clearly in-product.

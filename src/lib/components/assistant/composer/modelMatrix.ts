@@ -5,6 +5,7 @@
 import { Hand, Code2, ClipboardList, Zap, Infinity as InfinityIcon, Gem, Feather, Sparkles, Rabbit, Orbit } from "lucide-svelte";
 import type { ModelSel, OpenAiModel, PermissionMode, ThinkingEffort } from "../../../state/assistant/types";
 import { fableAvailable, haikuAvailable, MODEL_MAX_EFFORT, ctxWindowForModelId } from "../../../state/assistant/helpers";
+import { CHATGPT } from "../../../state/assistant/providerDisplay";
 import type { ModelSel as ModelSelType } from "../../../state/assistant/types";
 
 type EffortOpt = { id: ThinkingEffort; label: string; hint: string };
@@ -59,11 +60,11 @@ export type ModelOpt = {
 // sunset date in helpers.ts). Owner call 2026-07-01: kept always-visible even
 // while the upstream access gate holds — hard-pull only (set FABLE_DISABLED).
 export const MODEL_OPTIONS: ModelOpt[] = [
-  { id: "gpt-5.6", label: "GPT", version: "5.6", tagline: "OpenAI's current general-purpose reasoning model", blurb: "OpenAI default — text, vision & tools", ctx: "1.05M ctx", suffix: "1.05M context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.6"], icon: Orbit, provider: "openai" },
+  { id: "gpt-5.6", label: "GPT", version: "5.6", tagline: "ChatGPT's general-purpose reasoning model", blurb: "ChatGPT default — text, vision & tools", ctx: "1.05M ctx", suffix: "1.05M context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.6"], icon: Orbit, provider: "openai" },
   { id: "gpt-5.6-sol", label: "GPT Sol", version: "5.6", tagline: "Highest-capability GPT-5.6 variant", blurb: "Deep agentic reasoning", ctx: "1.05M ctx", suffix: "1.05M context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.6-sol"], icon: Orbit, provider: "openai" },
   { id: "gpt-5.6-terra", label: "GPT Terra", version: "5.6", tagline: "Balanced GPT-5.6 variant", blurb: "Balanced capability and speed", ctx: "1.05M ctx", suffix: "1.05M context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.6-terra"], icon: Orbit, provider: "openai" },
   { id: "gpt-5.6-luna", label: "GPT Luna", version: "5.6", tagline: "Fast GPT-5.6 variant", blurb: "Fast everyday responses", ctx: "1.05M ctx", suffix: "1.05M context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.6-luna"], icon: Orbit, provider: "openai" },
-  { id: "gpt-5.3-codex", label: "GPT Codex", version: "5.3", tagline: "OpenAI's agentic coding model", blurb: "Coding-focused reasoning & tools", ctx: "400K ctx", suffix: "400K context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.3-codex"], icon: Code2, provider: "openai" },
+  { id: "gpt-5.3-codex", label: "GPT Codex", version: "5.3", tagline: "ChatGPT's agentic coding model", blurb: "Coding-focused reasoning & tools", ctx: "400K ctx", suffix: "400K context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.3-codex"], icon: Code2, provider: "openai" },
   ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", tagline: "Anthropic's most capable model — limited run", blurb: "Most capable — limited run", ctx: "1M ctx", suffix: "1M context", legacy: false, limited: true, effort: true, maxEffort: MODEL_MAX_EFFORT["claude-fable-5"], icon: Sparkles, provider: "claude" as const }] : []),
   { id: "opus",            label: "Opus",   version: "5",   tagline: "Newest + most capable — complex reasoning & agentic coding", blurb: "Deep reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.opus, icon: Gem, provider: "claude" },
   { id: "sonnet",          label: "Sonnet", version: "5",   tagline: "Best speed + intelligence balance — the default",            blurb: "Everyday default — speed + smarts", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.sonnet, icon: Feather, provider: "claude" },
@@ -97,7 +98,7 @@ export type ModelAccess = {
 };
 
 /** One honest access decision shared by the composer, model picker, and send
- * gate. A stored key is only configuration; OpenAI models become selectable
+ * gate. A stored key is only configuration; ChatGPT API models become selectable
  * after the account model probe confirms the exact id. Claude requires the
  * CLI because every Claude turn still routes through it. */
 export function modelAccessFor(m: ModelOpt, ctx: ProviderAccessContext): ModelAccess {
@@ -105,21 +106,21 @@ export function modelAccessFor(m: ModelOpt, ctx: ProviderAccessContext): ModelAc
     if (ctx.claudeReady) return { state: "ready", enabled: true, tag: "Connected", detail: m.tagline };
     if (ctx.claudeChecking) return { state: "checking", enabled: false, tag: "Checking", detail: "Checking the Claude Code connection." };
     if (ctx.claudeError) return { state: "error", enabled: false, tag: "Check failed", detail: ctx.claudeError };
-    return { state: "setup", enabled: false, tag: "Connect Claude", detail: "Install and sign in to Claude Code in Settings → Providers." };
+    return { state: "setup", enabled: false, tag: "Connect Claude", detail: "Install and sign in to Claude Code in Settings → AI." };
   }
 
   if (!ctx.openAiConfigured) {
-    if (ctx.openAiChecking) return { state: "checking", enabled: false, tag: "Checking", detail: "Checking the OpenAI API connection." };
+    if (ctx.openAiChecking) return { state: "checking", enabled: false, tag: "Checking", detail: `Checking ${CHATGPT.apiAccess}.` };
     if (ctx.openAiError) return { state: "error", enabled: false, tag: "Check failed", detail: ctx.openAiError };
-    return { state: "setup", enabled: false, tag: "Connect OpenAI", detail: "Add an OpenAI API key in Settings → Providers. ChatGPT subscriptions do not include API access." };
+    return { state: "setup", enabled: false, tag: "Connect ChatGPT", detail: `Add a ${CHATGPT.apiKey} in Settings → AI. ${CHATGPT.apiBilling}` };
   }
-  if (ctx.openAiChecking) return { state: "checking", enabled: false, tag: "Checking", detail: "Checking which models this OpenAI API account can use." };
+  if (ctx.openAiChecking) return { state: "checking", enabled: false, tag: "Checking", detail: `Checking which models ${CHATGPT.apiAccess} can use.` };
   if (ctx.openAiError || !ctx.openAiModels) {
-    return { state: "error", enabled: false, tag: "Check failed", detail: ctx.openAiError ?? "Rift couldn't verify this model. Re-probe Providers in Settings." };
+    return { state: "error", enabled: false, tag: "Check failed", detail: ctx.openAiError ?? "Rift couldn't verify this model. Re-probe AI connections in Settings." };
   }
   const accountModel = ctx.openAiModels.find((model) => model.id === m.id);
   if (!accountModel?.available) {
-    return { state: "unavailable", enabled: false, tag: "No access", detail: `${m.label} ${m.version} isn't available to this OpenAI API account.` };
+    return { state: "unavailable", enabled: false, tag: "No access", detail: `${m.label} ${m.version} isn't available through ${CHATGPT.apiAccess}.` };
   }
   return { state: "ready", enabled: true, tag: "Connected", detail: m.tagline };
 }

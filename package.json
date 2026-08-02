@@ -1,6 +1,6 @@
 {
   "name": "rift-tauri",
-  "version": "0.149.1",
+  "version": "0.150.0",
   "description": "A local-workspace coding assistant for Windows with Claude and OpenAI providers in a native Tauri shell.",
   "type": "module",
   "scripts": {
@@ -10,8 +10,12 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && npm run check:tokens",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "check:tokens": "node design-system/check-tokens.mjs",
+    "doctor": "pwsh -NoProfile -File scripts/project-doctor.ps1",
     "tauri": "tauri",
     "test": "vitest run",
+    "verify": "pwsh -NoProfile -File scripts/verify.ps1",
+    "verify:frontend": "pwsh -NoProfile -File scripts/verify.ps1 -FrontendOnly",
+    "verify:rust": "pwsh -NoProfile -File scripts/verify.ps1 -RustOnly",
     "verify:openai": "pwsh -NoProfile -File scripts/verify-openai.ps1",
     "cdp:serve": "node scripts/cdp/serve.cjs",
     "cdp:dev": "pwsh -NoProfile -File scripts/run-dev-deelevated.ps1 -WaitForCdp",
