@@ -341,7 +341,7 @@ fn clip(s: &str, max: usize) -> String {
     while end > 0 && !s.is_char_boundary(end) {
         end -= 1;
     }
-    format!("{}…", &s[..end].trim_end())
+    format!("{}…", s[..end].trim_end())
 }
 
 #[cfg(test)]

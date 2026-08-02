@@ -1,6 +1,6 @@
 {
   "name": "rift-tauri",
-  "version": "0.150.1",
+  "version": "0.150.2",
   "description": "A local-workspace coding assistant for Windows with Claude and OpenAI providers in a native Tauri shell.",
   "type": "module",
   "scripts": {

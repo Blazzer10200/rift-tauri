@@ -55,7 +55,7 @@ Rift self-updates via Velopack. It checks on launch + every ~6h; when a build is
 ### Prerequisites
 
 - **Windows 11** (primary target). macOS / Linux build but aren't packaged.
-- **Rust** stable (latest) via [rustup](https://rustup.rs/). CI tracks `@stable` (no pinned minimum).
+- **Rust** via [rustup](https://rustup.rs/). The repository's `rust-toolchain.toml` pins the same compiler and Clippy component used by CI, so local and release gates cannot drift onto different lint sets.
 - **Node.js** 20+ via [`nvm-windows`](https://github.com/coreybutler/nvm-windows).
 - **`npm`** — *not* pnpm (lockfile is npm).
 - **Git Bash** for shell scripts.
