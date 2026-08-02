@@ -130,7 +130,7 @@
 <header class="ob-head">
   {#if !standalone}<span class="ob-eyebrow">Step 2 · Connect Claude</span>{/if}
   <h1 class="ob-title">Connect Claude</h1>
-  <p class="ob-sub">Rift is powered by the <code>claude</code> command-line tool and your own Claude account, so you stay in control of your sign-in and billing. You can finish this step now, or later in Settings → Claude.</p>
+  <p class="ob-sub">Rift is powered by the <code>claude</code> command-line tool and your own Claude account, so you stay in control of your sign-in and billing. You can finish this step now, or later in Settings → Providers.</p>
 </header>
 
 {#if !status && probing}

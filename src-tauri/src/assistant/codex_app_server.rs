@@ -36,6 +36,60 @@ pub struct CodexModel {
     pub image_input: bool,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexRateWindow {
+    pub used_percent: f64,
+    pub window_duration_mins: Option<u64>,
+    pub resets_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexRateLimit {
+    pub id: String,
+    pub name: Option<String>,
+    pub plan_type: Option<String>,
+    pub primary: Option<CodexRateWindow>,
+    pub secondary: Option<CodexRateWindow>,
+    pub reached_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexUsageSummary {
+    pub lifetime_tokens: Option<u64>,
+    pub peak_daily_tokens: Option<u64>,
+    pub longest_running_turn_sec: Option<u64>,
+    pub current_streak_days: Option<u64>,
+    pub longest_streak_days: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexSkill {
+    pub name: String,
+    pub description: String,
+    pub path: String,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexAccountOverview {
+    pub models: Vec<CodexModel>,
+    pub skills: Vec<CodexSkill>,
+    pub auth_type: Option<String>,
+    pub email: Option<String>,
+    pub plan_type: Option<String>,
+    pub requires_openai_auth: bool,
+    pub rate_limits: Vec<CodexRateLimit>,
+    pub rate_limits_error: Option<String>,
+    pub reset_credits_available: Option<u64>,
+    pub usage: Option<CodexUsageSummary>,
+    pub usage_error: Option<String>,
+}
+
 struct AppServer {
     child: Child,
     stdin: ChildStdin,
@@ -207,6 +261,200 @@ pub async fn assistant_codex_list_models() -> Result<Vec<CodexModel>, String> {
         .and_then(Value::as_array)
         .ok_or("Codex returned an invalid model list")?;
     Ok(models.iter().filter_map(parse_model).collect())
+}
+
+#[tauri::command]
+pub async fn assistant_codex_account_overview(
+    root: Option<String>,
+) -> Result<CodexAccountOverview, String> {
+    let mut server = AppServer::spawn().await?;
+    let models = server
+        .request(
+            "model/list",
+            json!({ "includeHidden": false, "limit": 100 }),
+        )
+        .await;
+    let root = resolve_root(root.as_deref(), super::config::load_config().current_root.as_deref())?;
+    let skills = if let Some(root) = root.as_deref() {
+        server
+            .request(
+                "skills/list",
+                json!({ "cwds": [root], "forceReload": false }),
+            )
+            .await
+    } else {
+        Ok(json!({ "data": [] }))
+    };
+    let account = server
+        .request("account/read", json!({ "refreshToken": false }))
+        .await;
+    let rate_limits = server.request("account/rateLimits/read", json!({})).await;
+    let usage = server.request("account/usage/read", json!({})).await;
+    server.shutdown().await;
+
+    let mut overview = parse_account_overview(&account?, rate_limits, usage);
+    let models = models?;
+    overview.models = models
+        .get("data")
+        .and_then(Value::as_array)
+        .ok_or("Codex returned an invalid model list")?
+        .iter()
+        .filter_map(parse_model)
+        .collect();
+    // Skills are an enhancement, not an account-readiness gate. Older App
+    // Server builds can omit this method; keep models/account/limits usable.
+    overview.skills = skills
+        .as_ref()
+        .map(|value| parse_skills(value, root.as_deref()))
+        .unwrap_or_default();
+    Ok(overview)
+}
+
+fn parse_skills(value: &Value, root: Option<&str>) -> Vec<CodexSkill> {
+    value
+        .get("data")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|entry| {
+            root.is_none_or(|root| entry.get("cwd").and_then(Value::as_str) == Some(root))
+        })
+        .flat_map(|entry| {
+            entry
+                .get("skills")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+        })
+        .filter_map(|skill| {
+            Some(CodexSkill {
+                name: skill.get("name")?.as_str()?.to_string(),
+                description: skill
+                    .get("description")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                path: skill
+                    .get("path")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                enabled: skill.get("enabled").and_then(Value::as_bool).unwrap_or(true),
+            })
+        })
+        .collect()
+}
+
+fn leading_skill_name(prompt: &str) -> Option<&str> {
+    let token = prompt.split_whitespace().next()?;
+    let name = token.strip_prefix('$')?;
+    (!name.is_empty()
+        && name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_')))
+    .then_some(name)
+}
+
+fn parse_rate_window(value: Option<&Value>) -> Option<CodexRateWindow> {
+    let value = value?.as_object()?;
+    Some(CodexRateWindow {
+        used_percent: value.get("usedPercent").and_then(Value::as_f64).unwrap_or(0.0).clamp(0.0, 100.0),
+        window_duration_mins: value.get("windowDurationMins").and_then(Value::as_u64),
+        resets_at: value.get("resetsAt").and_then(Value::as_i64),
+    })
+}
+
+fn parse_rate_limit(value: &Value, fallback_id: Option<&str>) -> Option<CodexRateLimit> {
+    let id = value
+        .get("limitId")
+        .and_then(Value::as_str)
+        .or(fallback_id)?
+        .to_string();
+    Some(CodexRateLimit {
+        id,
+        name: value.get("limitName").and_then(Value::as_str).map(str::to_string),
+        plan_type: value.get("planType").and_then(Value::as_str).map(str::to_string),
+        primary: parse_rate_window(value.get("primary")),
+        secondary: parse_rate_window(value.get("secondary")),
+        reached_type: value
+            .get("rateLimitReachedType")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+    })
+}
+
+fn parse_usage_summary(value: &Value) -> Option<CodexUsageSummary> {
+    let summary = value.get("summary")?.as_object()?;
+    Some(CodexUsageSummary {
+        lifetime_tokens: summary.get("lifetimeTokens").and_then(Value::as_u64),
+        peak_daily_tokens: summary.get("peakDailyTokens").and_then(Value::as_u64),
+        longest_running_turn_sec: summary.get("longestRunningTurnSec").and_then(Value::as_u64),
+        current_streak_days: summary.get("currentStreakDays").and_then(Value::as_u64),
+        longest_streak_days: summary.get("longestStreakDays").and_then(Value::as_u64),
+    })
+}
+
+fn parse_account_overview(
+    account_result: &Value,
+    rate_limits_result: Result<Value, String>,
+    usage_result: Result<Value, String>,
+) -> CodexAccountOverview {
+    let account = account_result.get("account");
+    let auth_type = account
+        .and_then(|value| value.get("type"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let email = account
+        .and_then(|value| value.get("email"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let mut plan_type = account
+        .and_then(|value| value.get("planType"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let requires_openai_auth = account_result
+        .get("requiresOpenaiAuth")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    let (mut rate_limits, rate_limits_error, reset_credits_available) = match rate_limits_result {
+        Ok(value) => {
+            let mut parsed = Vec::new();
+            if let Some(by_id) = value.get("rateLimitsByLimitId").and_then(Value::as_object) {
+                parsed.extend(by_id.iter().filter_map(|(id, limit)| parse_rate_limit(limit, Some(id))));
+            } else if let Some(limit) = value.get("rateLimits") {
+                parsed.extend(parse_rate_limit(limit, None));
+            }
+            parsed.sort_by(|left, right| left.id.cmp(&right.id));
+            if plan_type.is_none() {
+                plan_type = parsed.iter().find_map(|limit| limit.plan_type.clone());
+            }
+            let credits = value
+                .pointer("/rateLimitResetCredits/availableCount")
+                .and_then(Value::as_u64);
+            (parsed, None, credits)
+        }
+        Err(error) => (Vec::new(), Some(error), None),
+    };
+    rate_limits.shrink_to_fit();
+    let (usage, usage_error) = match usage_result {
+        Ok(value) => (parse_usage_summary(&value), None),
+        Err(error) => (None, Some(error)),
+    };
+
+    CodexAccountOverview {
+        models: Vec::new(),
+        skills: Vec::new(),
+        auth_type,
+        email,
+        plan_type,
+        requires_openai_auth,
+        rate_limits,
+        rate_limits_error,
+        reset_credits_available,
+        usage,
+        usage_error,
+    }
 }
 
 fn parse_model(value: &Value) -> Option<CodexModel> {
@@ -425,6 +673,22 @@ async fn run_turn(
     let effort = effort_name(thinking_enabled, thinking_effort);
     let sandbox = sandbox_policy(permission_mode, root);
     let mut input = vec![json!({ "type": "text", "text": prompt })];
+    if let (Some(root), Some(skill_name)) = (root, leading_skill_name(prompt)) {
+        if let Ok(result) = server
+            .request(
+                "skills/list",
+                json!({ "cwds": [root], "forceReload": false }),
+            )
+            .await
+        {
+            if let Some(skill) = parse_skills(&result, Some(root))
+                .into_iter()
+                .find(|skill| skill.enabled && skill.name == skill_name && !skill.path.is_empty())
+            {
+                input.push(json!({ "type": "skill", "name": skill.name, "path": skill.path }));
+            }
+        }
+    }
     for attachment in attachments {
         input.push(json!({
             "type": "image",
@@ -1102,7 +1366,10 @@ fn emit_done(app: &AppHandle, window: &str, session: &str, epoch: u64, exit_code
 
 #[cfg(test)]
 mod tests {
-    use super::{codex_answers, effort_name, parse_model, sandbox_policy};
+    use super::{
+        codex_answers, effort_name, leading_skill_name, parse_account_overview, parse_model,
+        sandbox_policy,
+    };
     use serde_json::json;
 
     #[test]
@@ -1143,5 +1410,48 @@ mod tests {
             codex_answers(Some(&questions), &answer),
             json!({"choice":{"answers":["A"]}})
         );
+    }
+
+    #[test]
+    fn account_overview_preserves_plan_limits_and_usage() {
+        let overview = parse_account_overview(
+            &json!({
+                "account":{"type":"chatgpt","email":"user@example.com","planType":"free"},
+                "requiresOpenaiAuth":true
+            }),
+            Ok(json!({
+                "rateLimitsByLimitId":{"codex":{"limitId":"codex","primary":{
+                    "usedPercent":25.5,"windowDurationMins":300,"resetsAt":1785654000
+                }}},
+                "rateLimitResetCredits":{"availableCount":2}
+            })),
+            Ok(json!({"summary":{"lifetimeTokens":1234,"currentStreakDays":8}})),
+        );
+
+        assert_eq!(overview.plan_type.as_deref(), Some("free"));
+        assert_eq!(overview.email.as_deref(), Some("user@example.com"));
+        assert_eq!(overview.rate_limits[0].primary.as_ref().unwrap().used_percent, 25.5);
+        assert_eq!(overview.reset_credits_available, Some(2));
+        assert_eq!(overview.usage.unwrap().current_streak_days, Some(8));
+    }
+
+    #[test]
+    fn account_overview_keeps_partial_failures_visible() {
+        let overview = parse_account_overview(
+            &json!({"account":{"type":"chatgpt"},"requiresOpenaiAuth":true}),
+            Err("rate limit probe failed".into()),
+            Err("usage probe failed".into()),
+        );
+
+        assert!(overview.rate_limits.is_empty());
+        assert_eq!(overview.rate_limits_error.as_deref(), Some("rate limit probe failed"));
+        assert_eq!(overview.usage_error.as_deref(), Some("usage probe failed"));
+    }
+
+    #[test]
+    fn only_a_leading_safe_dollar_token_invokes_a_skill() {
+        assert_eq!(leading_skill_name("  $quick-review inspect this"), Some("quick-review"));
+        assert_eq!(leading_skill_name("explain $quick-review"), None);
+        assert_eq!(leading_skill_name("$bad/path inspect"), None);
     }
 }

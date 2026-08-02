@@ -82,6 +82,11 @@ pub struct Conversation {
     /// (Option default = None); frontend falls back to `id` on load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cli_session_id: Option<String>,
+    /// ChatGPT transport pinned by the first GPT turn (`codex` subscription or
+    /// separately billed `openai` API). Optional for legacy conversations;
+    /// the frontend infers those from provider-owned continuation state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_gpt_route: Option<String>,
     /// Per-project scoping: the workspace folder active when this conversation's
     /// turns run. Stamped by the frontend on save (`tab.workspaceRoot ?? activeRoot`).
     /// Legacy convos lack it (None) — the list backfills from the cwd sidecar.
@@ -684,6 +689,37 @@ fn delete_project_jsonls(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chat_gpt_route_round_trips_and_remains_optional_for_legacy_records() {
+        let raw = serde_json::json!({
+            "id": "550e8400-e29b-41d4-a716-446655440000",
+            "title": "Pinned route",
+            "model": "gpt-5.6-sol",
+            "createdAt": 1,
+            "updatedAt": 2,
+            "messages": [],
+            "chatGptRoute": "codex",
+            "futureField": true
+        });
+        let convo: Conversation = serde_json::from_value(raw).expect("route record parses");
+        assert_eq!(convo.chat_gpt_route.as_deref(), Some("codex"));
+        assert_eq!(convo.extra.get("futureField"), Some(&serde_json::Value::Bool(true)));
+
+        let saved = serde_json::to_value(&convo).expect("route record serializes");
+        assert_eq!(saved.get("chatGptRoute").and_then(|v| v.as_str()), Some("codex"));
+
+        let legacy: Conversation = serde_json::from_value(serde_json::json!({
+            "id": "550e8400-e29b-41d4-a716-446655440001",
+            "title": "Legacy",
+            "model": "gpt-5.6-sol",
+            "createdAt": 1,
+            "updatedAt": 2,
+            "messages": []
+        }))
+        .expect("legacy route-less record parses");
+        assert_eq!(legacy.chat_gpt_route, None);
+    }
 
     #[test]
     fn convo_path_rejects_traversal_and_separators() {

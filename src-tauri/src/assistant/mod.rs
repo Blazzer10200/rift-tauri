@@ -15,6 +15,7 @@ pub mod cli_caps;
 pub mod cli_install;
 pub mod codex;
 pub mod codex_app_server;
+pub(crate) mod transcript_cleanup;
 pub mod config;
 pub mod convo_store;
 pub mod env_checks;

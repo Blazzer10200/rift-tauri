@@ -35,15 +35,34 @@
   // the user never opens Home.
   const limits = $derived.by(() => {
     const rl = usage.rateLimits;
-    if (!rl) return [] as { t: string; u: number; r: string | null; z: string }[];
+    if (!rl) return [] as { k: string; t: string; label: string; u: number; r: string | null; z: string }[];
     // Severity for the matching generic window (endpoint's own judgment) —
     // tints the pill amber/red so trouble is visible without opening anything.
     const sev = (kind: string) => rl.limits?.find((l) => l.kind === kind)?.severity ?? null;
-    const out: { t: string; u: number; r: string | null; z: string }[] = [];
-    if (rl.fiveHour) out.push({ t: "5h", u: Math.round(rl.fiveHour.utilization), r: rl.fiveHour.resetsAt, z: limitZone(rl.fiveHour.utilization, sev("session")) });
-    if (rl.sevenDay) out.push({ t: "7d", u: Math.round(rl.sevenDay.utilization), r: rl.sevenDay.resetsAt, z: limitZone(rl.sevenDay.utilization, sev("weekly_all")) });
+    const out: { k: string; t: string; label: string; u: number; r: string | null; z: string }[] = [];
+    if (rl.fiveHour) out.push({ k: "claude-5h", t: "5h", label: "5-hour window", u: Math.round(rl.fiveHour.utilization), r: rl.fiveHour.resetsAt, z: limitZone(rl.fiveHour.utilization, sev("session")) });
+    if (rl.sevenDay) out.push({ k: "claude-7d", t: "7d", label: "Weekly · all models", u: Math.round(rl.sevenDay.utilization), r: rl.sevenDay.resetsAt, z: limitZone(rl.sevenDay.utilization, sev("weekly_all")) });
     return out;
   });
+  const chatGptLimits = $derived.by(() => {
+    const out: { k: string; t: string; label: string; u: number; r: string | null; z: string }[] = [];
+    for (const limit of assistant.codexAccount?.rateLimits.slice(0, 2) ?? []) {
+      const window = limit.primary;
+      if (!window) continue;
+      const mins = window.windowDurationMins;
+      const windowLabel = mins === 300 ? "5h" : mins === 10_080 ? "7d" : null;
+      const compactName = (limit.name ?? limit.id)
+        .replace(/^GPT-[^-]+-Codex-/i, "")
+        .replace(/^GPT-/i, "")
+        .slice(0, 8);
+      const t = windowLabel && !out.some((row) => row.t === windowLabel) ? windowLabel : compactName;
+      const used = Math.round(window.usedPercent);
+      const reset = window.resetsAt ? new Date(window.resetsAt * 1000).toISOString() : null;
+      out.push({ k: `chatgpt-${limit.id}`, t, label: limit.name ?? limit.id, u: used, r: reset, z: limitZone(used, null) });
+    }
+    return out;
+  });
+  const activeLimits = $derived(openAi ? chatGptLimits : limits);
 
   let usageOpen = $state(false);
 
@@ -80,9 +99,13 @@
   }
 
   onMount(() => {
-    void usage.refreshRateLimits(assistant.auth?.cliVersion ?? null);
+    const refreshLimits = () => {
+      if (openAi) void assistant.refreshCodexStatus();
+      else void usage.refreshRateLimits(assistant.auth?.cliVersion ?? null);
+    };
+    refreshLimits();
     void elevation.refresh();
-    const h = setInterval(() => void usage.refreshRateLimits(assistant.auth?.cliVersion ?? null), 300_000);
+    const h = setInterval(refreshLimits, 300_000);
     return () => clearInterval(h);
   });
 </script>
@@ -93,7 +116,7 @@
     <span class="sb-sep"></span>
     <span class="sb-item"><Skeleton w="66px" h="11px" radius="5px" delay={110} /></span>
   {:else}
-  <!-- LEFT ZONE — session identity: Claude connection, then the workspace
+  <!-- LEFT ZONE — session identity: provider connection, then the workspace
        (project + branch) as one tight cluster. One separator total. -->
   <button
     class="sb-item sb-btn sb-conn"
@@ -105,20 +128,20 @@
     {connected ? providerLabel : `${providerLabel} offline`}
   </button>
   <span class="sb-sep"></span>
-  <span class="sb-group">
+  <span class="sb-group sb-context">
     <button class="sb-item sb-btn" type="button" onclick={() => workspace.setActive("home")} use:tooltip={"Open Workspace"}>
-      {repoName}
+      <span class="sb-clip">{repoName}</span>
     </button>
     {#if assistant.workspaceBranch}
       {#if ghActive}
-        <button class="sb-item sb-btn" type="button" bind:this={ghAnchor}
+        <button class="sb-item sb-btn sb-branch" type="button" bind:this={ghAnchor}
           onclick={() => (ghOpen = !ghOpen)} use:tooltip={"GitHub — branch status"}
           aria-haspopup="dialog" aria-expanded={ghOpen}>
-          <GitBranch size={11} />{assistant.workspaceBranch}
+          <GitBranch size={11} /><span class="sb-clip">{assistant.workspaceBranch}</span>
           {#if github.dot !== "none"}<span class="gh-dot {github.dot}"></span>{/if}
         </button>
       {:else}
-        <span class="sb-item"><GitBranch size={11} />{assistant.workspaceBranch}</span>
+        <span class="sb-item sb-branch"><GitBranch size={11} /><span class="sb-clip">{assistant.workspaceBranch}</span></span>
       {/if}
     {/if}
   </span>
@@ -154,22 +177,22 @@
       </button>
     {/if}
     <span class="sb-item sb-date">{today}</span>
-    {#if !openAi && limits.length}
+    {#if activeLimits.length}
       <span class="sb-usage">
-        {#each limits as l (l.t)}
+        {#each activeLimits as l (l.k)}
           <button
             class="rl sb-btn"
             type="button"
             data-zone={l.z}
-            onclick={() => (usageOpen = !usageOpen)}
+            onclick={() => openAi ? workspace.setActive("ai-health") : (usageOpen = !usageOpen)}
             aria-expanded={usageOpen}
-            use:tooltip={`${l.t === "5h" ? "5-hour window" : "Weekly · all models"} — ${l.u}% used${fmtReset(l.r)}`}
+            use:tooltip={`${l.label} — ${l.u}% used${fmtReset(l.r)}`}
           >
             <span class="rl-t">{l.t}</span>
             <span class="rl-bar"><i style="width:{l.u}%"></i></span>
           </button>
         {/each}
-        {#if usageOpen}
+        {#if usageOpen && !openAi}
           <UsagePanel tab={assistant.activeTab} anchor="statusbar" ignoreSel=".sb-usage" onClose={() => (usageOpen = false)} />
         {/if}
       </span>
@@ -180,7 +203,7 @@
 <style>
   /* Rides inside the main island as its footer — hairline separator only, fill
      comes from the island (no second surface). */
-  .statusbar { flex: none; height: 27px; display: flex; align-items: center; gap: 13px; padding: 0 16px;
+  .statusbar { flex: none; height: 27px; display: flex; align-items: center; gap: 13px; padding: 0 16px; overflow: hidden;
     border-top: 1px solid var(--border); background: transparent;
     font-size: 11px; color: var(--fg-subtle); position: relative; z-index: 1; }
   .sb-item { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
@@ -205,6 +228,9 @@
   /* Zone clusters — tighter internal gap than the bar's own 13px so related
      items read as one unit and the bar resolves into two calm groups. */
   .sb-group { display: inline-flex; align-items: center; gap: 9px; min-width: 0; }
+  .sb-context { overflow: hidden; }
+  .sb-context > .sb-item { min-width: 0; }
+  .sb-clip { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sb-right { flex: none; gap: 12px; }
   /* AI disclaimer — moved here from the composer (home revamp): ambient
      app-level info belongs to the ambient bar. Centered between the identity
@@ -221,5 +247,19 @@
   .rl[data-zone="warn"] .rl-t { color: var(--warn); }
   .rl[data-zone="hot"] .rl-bar i { background: var(--danger); box-shadow: 0 0 6px color-mix(in oklab, var(--danger) 55%, transparent); }
   .rl[data-zone="hot"] .rl-t { color: var(--danger); }
+  @media (max-width: 920px) {
+    .sb-note { display: none; }
+    .sb-right { margin-left: auto; }
+  }
+  @media (max-width: 720px) {
+    .statusbar { gap: 9px; padding-inline: 12px; }
+    .sb-date { display: none; }
+    .sb-right { gap: 9px; }
+    .sb-usage { gap: 10px; }
+    .rl-bar { width: 34px; }
+  }
+  @media (max-width: 540px) {
+    .sb-branch { display: none; }
+  }
   @media (prefers-reduced-motion: reduce) { .rl-bar i { transition: none; } }
 </style>

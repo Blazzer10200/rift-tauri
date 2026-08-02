@@ -739,8 +739,8 @@
           <button class="nsh-toggle" type="button" onclick={toggleNews}
             aria-expanded={newsOpen} aria-controls="ws-news-body">
             <span class="nsh-ic"><Newspaper size={14} /></span>
-            <span class="nsh-tx">Claude updates</span>
-            {#if !newsOpen}<span class="nsh-hint">Claude Code release notes &amp; an optional verified digest</span>{/if}
+            <span class="nsh-tx">AI updates</span>
+            {#if !newsOpen}<span class="nsh-hint">Source-labeled provider releases and optional digests</span>{/if}
             <ChevronDown size={16} class={"nsh-chev" + (newsOpen ? " open" : "")} />
           </button>
           {#if newsOpen}

@@ -1,6 +1,6 @@
 <script lang="ts">
-  // First-run flow. Pure-assistant build: 4 actionable steps — welcome (w/ beta
-  // notice + accent picker folded in), guided Claude connect, open a project,
+  // First-run flow: 4 actionable steps — welcome (w/ beta notice + accent
+  // picker folded in), guided provider connect, open a project,
   // and defaults (model / effort / git tools). Mounted by AppShell when the
   // first-run gate is open; onDone fires on finish OR skip and persists the
   // dismissal + beta acknowledgment.
@@ -43,7 +43,7 @@
   function selectProvider(next: "claude" | "openai") {
     provider = next;
     connectConnected = next === "openai"
-      ? assistant.codexStatus?.ready === true || assistant.openAiStatus?.ready === true
+      ? assistant.codexStatus?.ready === true
       : assistant.auth?.pill === "green" || assistant.auth?.pill === "yellow";
     if (next === "openai" && !isOpenAIModel(assistant.model)) {
       assistant.setModel(assistant.codexModels?.find((model) => model.isDefault)?.id ?? "gpt-5.6-sol");
@@ -56,6 +56,12 @@
     model.provider === (provider === "openai" ? "openai" : "claude")
       && (model.provider !== "claude" || assistant.plan !== "free" || isFreeClaudeModel(model.id))
   ));
+  const selectedModelLabel = $derived.by(() => {
+    const live = assistant.codexModels?.find((model) => model.id === assistant.model);
+    if (live) return live.label;
+    const known = currentModels.find((model) => model.id === assistant.model);
+    return known ? `${known.label} ${known.version}` : assistant.model;
+  });
 
   function goto(n: number) {
     if (n < step) {
@@ -244,11 +250,11 @@
           {:else if step === 2}
             <ObStage kind={provider} caption={provider === "claude" ? "local CLI connection" : "ChatGPT account connection"} />
             <div class="ob-seg ob-provider-seg" role="radiogroup" aria-label="AI provider">
+              <button type="button" class="ob-seg-btn ob-provider-btn" class:on={provider === "openai"} role="radio" aria-checked={provider === "openai"} onclick={() => selectProvider("openai")}>
+                <Orbit size={15} /><span><b>ChatGPT</b><small>account via Codex App Server</small></span>
+              </button>
               <button type="button" class="ob-seg-btn ob-provider-btn" class:on={provider === "claude"} role="radio" aria-checked={provider === "claude"} onclick={() => selectProvider("claude")}>
                 <Terminal size={15} /><span><b>Claude</b><small>CLI or API key</small></span>
-              </button>
-              <button type="button" class="ob-seg-btn ob-provider-btn" class:on={provider === "openai"} role="radio" aria-checked={provider === "openai"} onclick={() => selectProvider("openai")}>
-                <Orbit size={15} /><span><b>ChatGPT</b><small>subscription or optional API</small></span>
               </button>
             </div>
             {#if provider === "claude"}
@@ -300,7 +306,7 @@
               <p class="ob-hint"><span>You can also skip this for now. Rift will use a private scratch space until you choose a folder — open one at any time from the Workspace page.</span></p>
             {/if}
           {:else}
-            <ObStage kind="defaults" caption="tuned to you" />
+            <ObStage kind="defaults" caption="tuned to you" modelLabel={selectedModelLabel} />
             <header class="ob-head">
               <span class="ob-eyebrow">Step 4 · Defaults</span>
               <h1 class="ob-title">Pick your defaults</h1>
@@ -358,6 +364,7 @@
     <!-- ── Footer: progress dots + nav ── -->
     <footer class="ob-foot">
       <div class="ob-foot-left">
+        <button type="button" class="ob-skip-link ob-skip-mobile" onclick={onDone}>Skip setup</button>
         <div class="ob-foot-dots">
           {#each steps as s, i (s.t)}
             {@const n = i + 1}

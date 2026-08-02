@@ -2,6 +2,15 @@
 
 > Live changelog = current version only. History via `git log -- docs/CHANGELOG.md`.
 
+## v0.151.1 — ChatGPT parity without pop-up consoles
+
+- **ChatGPT messages stay in Rift.** Codex and native ChatGPT API helpers now launch headlessly on Windows, including npm `.cmd` wrappers, so sending a message no longer flashes a command-prompt window. Interactive sign-in remains visible on purpose.
+- **Rift reads the real ChatGPT account.** Providers and AI Health now show the signed-in plan, email, available models, enabled skills, live usage windows, reset times, reset credits, and local Codex runtime from the official App Server.
+- **The ChatGPT route is complete and billing-safe.** Each conversation pins either the subscription route or the separately billed API route on its first turn and fails clearly if that route disappears instead of silently switching billing paths.
+- **ChatGPT gets equal product treatment.** Settings, status, onboarding, model selection, commands, alerts, conversation history, Workspace, and help text now follow the active provider. ChatGPT models and reasoning levels come from the live account, while Claude Free remains limited to Sonnet and Haiku.
+- **Voice cleanup is provider-neutral.** Transcript cleanup prefers the connected ChatGPT subscription in a locked-down headless process, falls back to Claude when available, and preserves the original transcript on any failure.
+- **Verified on the real subscription path.** A fresh GPT Sol 5.6 turn and same-thread continuation completed with the expected text, no WebView errors, and no visible helper window; Providers, AI Health, menus, and narrow layouts were visually checked.
+
 ## v0.151.0 — ChatGPT subscription turns and a calmer Rift
 
 - **ChatGPT subscriptions now work inside Rift.** The signed-in Codex CLI supplies the live account model catalog, and Rift runs turns through the official local App Server with streaming text, reasoning, tools, approvals, questions, usage, cancellation, and resumable thread IDs.

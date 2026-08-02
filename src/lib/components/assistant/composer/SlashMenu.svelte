@@ -2,8 +2,8 @@
   // C6 (per docs/design/composer-split.md) — the `/command` popover. Render +
   // click only: the keyboard nav index and open/filter state stay owned by the
   // parent's onKey. Redesigned 2026-07-09: glass panel + header strip + sticky
-  // group labels + styled scrollbar; custom entries (user's Claude Code
-  // skills/commands) carry source badges, argument hints, fuzzy highlight.
+  // group labels + styled scrollbar; provider-native skills/commands carry
+  // source badges, argument hints, and fuzzy highlight.
   import {
     Plus, Eraser, Cpu, RotateCcw, Copy, StopCircle,
     Wrench, Coins, Gauge, BarChart3, Terminal, ClipboardCopy, HelpCircle,
@@ -15,7 +15,9 @@
   type SlashCmd = {
     name: string;
     desc: string;
-    custom?: { source: "user" | "project" | "plugin" | "cli"; kind: "skill" | "command"; hint?: string };
+    prefix?: "/" | "$";
+    provider?: "claude";
+    custom?: { source: "user" | "project" | "plugin" | "cli" | "codex"; kind: "skill" | "command"; hint?: string };
   };
 
   let {
@@ -55,6 +57,7 @@
       ? c.custom.source === "project" ? "Project skills"
       : c.custom.source === "plugin" ? "Plugin skills"
       : c.custom.source === "cli" ? "Claude Code"
+      : c.custom.source === "codex" ? "ChatGPT skills"
       : "Your skills"
       : META[c.name]?.group ?? "Commands";
   const iconOf = (c: SlashCmd): Icon =>
@@ -73,7 +76,7 @@
   });
 </script>
 
-<div class="rift-menu slash-menu" role="menu" aria-label="Slash commands">
+<div class="rift-menu slash-menu" role="menu" aria-label="Commands and skills">
   <header class="sm-head">
     <span class="sm-head-icon"><SquareSlash size={12} /></span>
     <span class="sm-head-title">Commands</span>
@@ -82,7 +85,7 @@
   </header>
   {#if commands.length > 0}
     <div class="sm-list" bind:this={listEl}>
-      {#each commands as c, i (c.name)}
+      {#each commands as c, i (`${c.prefix ?? "/"}${c.name}`)}
         {@const Icon = iconOf(c)}
         {#if grouped && (i === 0 || groupOf(c) !== groupOf(commands[i - 1]))}
           <div class="sm-group" role="separator"><span>{groupOf(c)}</span><i></i></div>
@@ -100,9 +103,9 @@
           <span class="sm-icon" data-skill={c.custom?.kind === "skill"}><Icon size={13} /></span>
           <span class="sm-body">
             <span class="sm-line">
-              <span class="sm-cmd mono">/{#each slashMatchSegments(c.name, query) as seg, si (si)}{#if seg.hit}<b>{seg.text}</b>{:else}{seg.text}{/if}{/each}</span>
+              <span class="sm-cmd mono">{c.prefix ?? "/"}{#each slashMatchSegments(c.name, query) as seg, si (si)}{#if seg.hit}<b>{seg.text}</b>{:else}{seg.text}{/if}{/each}</span>
               {#if c.custom?.hint}<span class="sm-hint mono">{c.custom.hint}</span>{/if}
-              {#if !grouped && c.custom}<span class="sm-badge" data-src={c.custom.source}>{c.custom.source === "project" ? "project" : c.custom.source === "plugin" ? "plugin" : c.custom.source === "cli" ? "cli" : "yours"}</span>{/if}
+              {#if !grouped && c.custom}<span class="sm-badge" data-src={c.custom.source}>{c.custom.source === "project" ? "project" : c.custom.source === "plugin" ? "plugin" : c.custom.source === "cli" ? "cli" : c.custom.source === "codex" ? "ChatGPT" : "yours"}</span>{/if}
             </span>
             <span class="sm-desc">{c.desc}</span>
           </span>

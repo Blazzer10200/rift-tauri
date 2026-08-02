@@ -3,11 +3,12 @@
   // abstract icon. Pure markup — all styling + keyframes live in
   // $lib/styles/onboarding.css (loaded globally by OnboardingFlow).
   import {
-    FolderOpen, FileCode2, FileJson2, BookText, KeyRound, ShieldCheck, Sparkles,
+    FolderOpen, FileCode2, FileJson2, BookText, AppWindow, Orbit, ShieldCheck,
+    Sparkles, Terminal,
   } from "lucide-svelte";
 
   type Kind = "welcome" | "claude" | "openai" | "project" | "defaults";
-  let { kind, caption }: { kind: Kind; caption?: string } = $props();
+  let { kind, caption, modelLabel }: { kind: Kind; caption?: string; modelLabel?: string } = $props();
 </script>
 
 <div class="ob-stage" aria-hidden="true">
@@ -34,14 +35,16 @@
       <div class="ob-mcl-pill"><i></i>Connected — your auth, your billing</div>
     </div>
   {:else if kind === "openai"}
-    <!-- secure API route: keychain → GPT model → Responses API ready -->
+    <!-- primary ChatGPT route: account → standalone Codex CLI → local App Server -->
     <div class="ob-mini ob-mini-api">
       <div class="ob-ma-route">
-        <span><KeyRound size={13} /> Keychain</span>
+        <span><Orbit size={13} /> ChatGPT</span>
         <i></i>
-        <span><Sparkles size={13} /> GPT 5.6</span>
+        <span><Terminal size={13} /> Codex CLI</span>
+        <i></i>
+        <span><AppWindow size={13} /> App Server</span>
       </div>
-      <div class="ob-ma-pill"><i></i>Stateless Responses API</div>
+      <div class="ob-ma-pill"><i></i>Your account · local connection</div>
     </div>
   {:else if kind === "project"}
     <!-- workspace scope: a real folder, scanned -->
@@ -55,7 +58,7 @@
   {:else}
     <!-- composer controls in miniature: model · effort dial · working style -->
     <div class="ob-mini ob-mini-def">
-      <span class="ob-md-pill"><Sparkles size={12} /> Opus 5</span>
+      <span class="ob-md-pill"><Sparkles size={12} /> {modelLabel ?? "Selected model"}</span>
       <span class="ob-md-dial"><i class="d1"></i><i class="d2"></i><i class="d3"></i><i class="d4"></i></span>
       <span class="ob-md-pill perm"><ShieldCheck size={12} /> Balanced</span>
     </div>

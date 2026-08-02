@@ -3,7 +3,13 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 // Inert IPC — scheduleSave/flushAllAwait tests exercise scheduling logic only.
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
-import { buildSaveRecord, scheduleSave, flushAllAwait } from "./persistence";
+import {
+  buildSaveRecord,
+  flushAllAwait,
+  inferChatGptRoute,
+  resolveChatGptRoute,
+  scheduleSave,
+} from "./persistence";
 import { invoke } from "@tauri-apps/api/core";
 
 const mockInvoke = vi.mocked(invoke);
@@ -58,6 +64,42 @@ describe("buildSaveRecord — workspaceRoot resolution", () => {
   });
 });
 
+describe("persisted ChatGPT route", () => {
+  it("serializes the route pinned by the conversation", () => {
+    const rec = buildSaveRecord(host({ model: "gpt-5.6-sol" }), "c1", tab({
+      modelOverride: "gpt-5.6-sol",
+      chatGptRoute: "codex",
+    }));
+    expect(rec.chatGptRoute).toBe("codex");
+  });
+
+  it("infers legacy routes from provider-owned continuation state", () => {
+    expect(inferChatGptRoute(undefined, "thread-1", [])).toBe("codex");
+    expect(inferChatGptRoute(undefined, null, [{ role: "user" }])).toBe("openai");
+    // A Codex thread proves the original subscription route even if an old
+    // build later accumulated API history through the unsafe fallback.
+    expect(inferChatGptRoute(undefined, "thread-1", [{ role: "user" }])).toBe("codex");
+    expect(inferChatGptRoute(undefined, null, [])).toBeNull();
+  });
+
+  it("honors an explicit persisted route over legacy evidence", () => {
+    expect(inferChatGptRoute("openai", "thread-1", [])).toBe("openai");
+    expect(inferChatGptRoute("codex", null, [{ role: "user" }])).toBe("codex");
+  });
+
+  it("never falls back when a pinned route becomes unavailable", () => {
+    expect(resolveChatGptRoute("codex", false, true)).toBeNull();
+    expect(resolveChatGptRoute("openai", true, false)).toBeNull();
+    expect(resolveChatGptRoute("openai", true, true)).toBe("openai");
+  });
+
+  it("prefers the subscription route only before the chat is pinned", () => {
+    expect(resolveChatGptRoute(null, true, true)).toBe("codex");
+    expect(resolveChatGptRoute(null, false, true)).toBe("openai");
+    expect(resolveChatGptRoute(null, false, false)).toBeNull();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // v0.131.0 incident regressions: debounce starvation + pre-exit awaited flush.
 
@@ -75,8 +117,8 @@ function liveTab(messages = 1) {
     convoCreatedAt: 1000,
     lastActivityAt: 2000,
     cliSessionId: "sess",
-    titleGenerated: true, // pre-claimed → maybeGenerateTitle no-ops
-    modelOverride: null,
+    titleGenerated: true as boolean, // pre-claimed → maybeGenerateTitle no-ops
+    modelOverride: null as string | null,
     lastTurnUsage: null,
     workspaceRoot: null,
   };
@@ -162,5 +204,28 @@ describe("flushAllAwait (pre-exit awaited flush)", () => {
     expect(saveCalls().length).toBe(1);
     await vi.advanceTimersByTimeAsync(2000);
     expect(saveCalls().length).toBe(1);
+  });
+});
+
+describe("provider-safe conversation titles", () => {
+  beforeEach(() => {
+    mockInvoke.mockReset();
+    mockInvoke.mockResolvedValue([]);
+  });
+
+  it("never sends a ChatGPT conversation through the Claude title helper", async () => {
+    const chat = liveTab(0);
+    chat.messages = [
+      { id: "u1", role: "user", blocks: [{ type: "text", text: "Fix the provider picker" }] },
+      { id: "a1", role: "assistant", blocks: [{ type: "text", text: "Done." }] },
+    ];
+    chat.titleGenerated = false;
+    chat.modelOverride = "gpt-5.6-sol";
+    const h = liveHost({ chat });
+
+    scheduleSave(h, true, "chat");
+
+    await vi.waitFor(() => expect(chat.titleGenerated).toBe(true));
+    expect(mockInvoke.mock.calls.some(([command]) => command === "assistant_generate_title")).toBe(false);
   });
 });

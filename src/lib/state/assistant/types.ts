@@ -77,6 +77,11 @@ export type CodexStatus = {
   summary: string;
 };
 
+/** Per-conversation transport for ChatGPT turns. Once the first GPT turn
+ *  chooses one, the chat stays on it so subscription work can never drift onto
+ *  separately billed API access (or vice versa) after an availability change. */
+export type ChatGptRoute = "codex" | "openai";
+
 export type CodexModel = {
   id: `gpt-${string}`;
   label: string;
@@ -85,6 +90,50 @@ export type CodexModel = {
   defaultReasoningEffort: string;
   supportedReasoningEfforts: string[];
   imageInput: boolean;
+};
+
+export type CodexRateWindow = {
+  usedPercent: number;
+  windowDurationMins: number | null;
+  resetsAt: number | null;
+};
+
+export type CodexRateLimit = {
+  id: string;
+  name: string | null;
+  planType: string | null;
+  primary: CodexRateWindow | null;
+  secondary: CodexRateWindow | null;
+  reachedType: string | null;
+};
+
+export type CodexUsageSummary = {
+  lifetimeTokens: number | null;
+  peakDailyTokens: number | null;
+  longestRunningTurnSec: number | null;
+  currentStreakDays: number | null;
+  longestStreakDays: number | null;
+};
+
+export type CodexSkill = {
+  name: string;
+  description: string;
+  path: string;
+  enabled: boolean;
+};
+
+export type CodexAccountOverview = {
+  models: CodexModel[];
+  skills: CodexSkill[];
+  authType: string | null;
+  email: string | null;
+  planType: string | null;
+  requiresOpenaiAuth: boolean;
+  rateLimits: CodexRateLimit[];
+  rateLimitsError: string | null;
+  resetCreditsAvailable: number | null;
+  usage: CodexUsageSummary | null;
+  usageError: string | null;
 };
 
 export type OpenAiModel = {
@@ -333,6 +382,9 @@ export type ConversationRecord = {
   openAiHistory?: unknown[];
   /** Opaque thread owned and persisted by the signed-in Codex App Server. */
   codexThreadId?: string;
+  /** ChatGPT transport pinned on the first GPT send. Optional for legacy
+   *  records; load infers it from provider-owned continuation state. */
+  chatGptRoute?: ChatGptRoute | null;
   /** Per-project scope: workspace folder active when this convo's turns run.
    *  Stamped on save so the sidebar can filter to the open project. */
   workspaceRoot?: string | null;

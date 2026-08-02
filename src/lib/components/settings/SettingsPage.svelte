@@ -32,6 +32,7 @@
   import PageHero from "../shared/PageHero.svelte";
   import { MODEL_OPTIONS } from "../assistant/composer/modelMatrix";
   import { CHATGPT } from "$lib/state/assistant/providerDisplay";
+  import { isOpenAIModel } from "$lib/state/assistant/helpers";
 
   const DENSITIES = ["compact", "regular", "comfy"] as const;
   const NARRATIONS = [
@@ -56,6 +57,7 @@
   ];
 
   let activeSec = $state<Section>("appearance");
+  let providerFocus = $state<"chatgpt" | "claude">("chatgpt");
   let scrollEl = $state<HTMLDivElement>();
   let tabEls = $state<Partial<Record<Section, HTMLButtonElement>>>({});
 
@@ -88,7 +90,8 @@
     { tab: "about",      anchor: "card-admin",     card: "Administrator access", title: "Always run as administrator", kw: "admin elevated elevation uac no prompt scheduled task startup" },
     { tab: "claude",     anchor: "card-api",       card: "API key & spending", title: "API-key fallback",   kw: "anthropic console token sk-ant billing keychain" },
     { tab: "claude",     anchor: "card-api",       card: "API key & spending", title: "Per-turn cost cap",  kw: "budget dollar limit spend guard" },
-    { tab: "claude",     anchor: "card-chatgpt",   card: "ChatGPT", title: "ChatGPT connection", kw: "chatgpt codex openai gpt api key billing responses account cli app server subscription login" },
+    { tab: "claude",     anchor: "card-codex",     card: "ChatGPT", title: "ChatGPT subscription", kw: "chatgpt codex account cli app server subscription login plan limits usage" },
+    { tab: "claude",     anchor: "card-chatgpt",   card: "ChatGPT", title: "ChatGPT API access", kw: "chatgpt openai gpt api key billing responses optional" },
     { tab: "speech",     anchor: "card-engine",    card: "Engine",             title: "Speech-to-text",     kw: "voice mic dictation stt enable" },
     { tab: "speech",     anchor: "card-engine",    card: "Engine",             title: "Recognition engine", kw: "web speech whisper parakeet on-device azure" },
     { tab: "speech",     anchor: "card-engine",    card: "Web Speech",         title: "Language",           kw: "english spanish french german locale bcp-47" },
@@ -144,6 +147,9 @@
   function jumpTo(e: SearchEntry) {
     searchQ = "";
     activeSec = e.tab;
+    if (e.tab === "claude") {
+      providerFocus = e.anchor === "card-codex" || e.anchor === "card-chatgpt" ? "chatgpt" : "claude";
+    }
     // Two frames: one for the tab's cards to mount, one for layout to settle.
     requestAnimationFrame(() => requestAnimationFrame(() => {
       const el = scrollEl?.querySelector<HTMLElement>(`#${e.anchor}`);
@@ -222,6 +228,7 @@
     const req = commandPalette.targetSettingsSection;
     if (req) {
       activeSec = req;
+      if (req === "claude") providerFocus = isOpenAIModel(assistantStore.effectiveModel) ? "chatgpt" : "claude";
       requestAnimationFrame(() => scrollEl?.scrollTo({ top: 0 }));
       untrack(() => commandPalette.clearSettingsSection());
     }
@@ -414,6 +421,20 @@
       && !assistantStore.openAiModelsError && openAiSupportedCount > 0,
   );
   const codexConnected = $derived(assistantStore.codexStatus?.ready === true && !assistantStore.codexChecking);
+  const claudeConnected = $derived(
+    assistantStore.auth?.cliPresent === true
+      && (assistantStore.auth.pill === "green" || assistantStore.auth.pill === "yellow"),
+  );
+  const chatGptActive = $derived(isOpenAIModel(assistantStore.effectiveModel));
+  const providerNeedsAttention = $derived(
+    chatGptActive
+      ? !codexConnected && !openAiConnected && !assistantStore.codexChecking && !assistantStore.openAiChecking
+      : !claudeConnected && !assistantStore.authChecking,
+  );
+  const codexPlanLabel = $derived.by(() => {
+    const plan = assistantStore.codexAccount?.planType?.trim();
+    return plan ? `${plan[0].toUpperCase()}${plan.slice(1)} plan` : "ChatGPT plan";
+  });
   function fmtAgo(ts: number, now: number): string {
     const s = Math.max(0, Math.round((now - ts) / 1000));
     if (s < 10) return "just now";
@@ -556,10 +577,9 @@
         <div class="tabnav" role="tablist">
           {#each ST_SECTIONS as s (s.id)}
             {@const Icon = s.icon}
-            <!-- Dot is an ALERT, not a status lamp: a permanent green dot next
-                 to "Claude" read as noise, so it only renders when the session
-                 needs attention. -->
-            {@const dot = s.id === "claude" ? (assistantDot === "warn" ? "warn" as const : undefined) : s.dot}
+            <!-- Dot is an alert for the route the current chat actually uses,
+                 not a permanent Claude status lamp. -->
+            {@const dot = s.id === "claude" ? (providerNeedsAttention ? "warn" as const : undefined) : s.dot}
             <button
               class="snav"
               class:on={activeSec === s.id}
@@ -572,7 +592,7 @@
               onkeydown={(ev) => onTabKey(ev, s.id)}
               onclick={() => selectSec(s.id)}
               type="button"
-              title={dot === "warn" ? "Claude session needs attention" : dot === "ok" ? "Claude session connected" : undefined}
+              title={dot === "warn" ? `${chatGptActive ? "ChatGPT" : "Claude"} connection needs attention` : undefined}
             >
               <Icon size={15} strokeWidth={1.75} />
               <span>{s.label}</span>
@@ -868,8 +888,26 @@
     {#if activeSec === "claude"}
       <div class="set-surface"><div class="set-col">
         <div class="provider-section-head">
-          <span>Claude</span>
-          <p>Your Claude Code connection and Claude-only preferences.</p>
+          <span>AI connections</span>
+          <p>Keep each account, plan, and connection in one clear place.</p>
+        </div>
+        <div class="provider-switcher" role="tablist" aria-label="AI providers">
+          <button type="button" class="provider-switch" class:on={providerFocus === "chatgpt"} role="tab" aria-selected={providerFocus === "chatgpt"} onclick={() => (providerFocus = "chatgpt")}>
+            <span class="provider-switch-ic"><MessageSquare size={17} /></span>
+            <span class="provider-switch-copy"><b>ChatGPT</b><small>{codexConnected ? `${codexPlanLabel} · ${assistantStore.codexModels?.length ?? 0} models` : assistantStore.codexChecking ? "Checking account…" : "Connect your account"}</small></span>
+            <span class="st-pill" class:ok={codexConnected} class:warn={!codexConnected}><span class="dot"></span>{codexConnected ? "Connected" : "Set up"}</span>
+          </button>
+          <button type="button" class="provider-switch" class:on={providerFocus === "claude"} role="tab" aria-selected={providerFocus === "claude"} onclick={() => (providerFocus = "claude")}>
+            <span class="provider-switch-ic"><Sparkles size={17} /></span>
+            <span class="provider-switch-copy"><b>Claude</b><small>{claudeConnected ? `${assistantStore.plan === "free" ? "Free · 200K profile" : "Expanded · 1M profile"}` : assistantStore.authChecking ? "Checking account…" : "Connect Claude Code"}</small></span>
+            <span class="st-pill" class:ok={claudeConnected} class:warn={!claudeConnected}><span class="dot"></span>{claudeConnected ? "Connected" : "Set up"}</span>
+          </button>
+        </div>
+
+        {#if providerFocus === "claude"}
+        <div class="provider-section-head provider-section-head--runtime">
+          <span>Claude setup</span>
+          <p>Claude Code connection, session behavior, and optional API billing.</p>
         </div>
         <!-- session status promoted to a hero banner — auth + CLI version share one surface -->
         <div class="sb-status {assistantDot ?? 'ok'}" id="card-claude">
@@ -879,9 +917,9 @@
             </div>
             <div class="sb-status-main">
               <b>{assistantStore.auth ? assistantStore.auth.summary : assistantStore.authChecking ? "Checking session…" : "Session unknown"}</b>
-              <div class="sub">Every turn runs through your own Claude Code CLI.{#if !assistantStore.auth && !assistantStore.authChecking}{' '}Not signed in? Run <code>claude login</code> in a terminal, then re-probe.{/if}</div>
+              <div class="sub">Every turn runs through your own Claude Code CLI.{#if !assistantStore.auth && !assistantStore.authChecking}{' '}Not signed in? Run <code>claude login</code> in a terminal, then check again.{/if}</div>
               {#if cliVersionUnknown}
-                <div class="sub st-cli-warn" use:tooltip={"`claude --version` failed or timed out, so Rift can't tell how new this CLI is. To stay safe it treats it as an old version and turns newer features off. Re-probe after an update, or check the install is healthy."}>⚠ Couldn't read this CLI's version — newer features are off until it's readable.</div>
+                <div class="sub st-cli-warn" use:tooltip={"`claude --version` failed or timed out, so Rift can't tell how new this CLI is. To stay safe it treats it as an old version and turns newer features off. Check again after an update, or verify the install is healthy."}>⚠ Couldn't read this CLI's version — newer features are off until it's readable.</div>
               {:else if cliBelowFeatureFloor && !cliNewer}
                 <div class="sub st-cli-note" use:tooltip={`Your CLI can run every Rift turn, but a couple of spawn-time options only exist on Claude Code ≥ ${CLI_RECOMMENDED_VERSION}. Updating turns them on automatically — nothing's broken in the meantime.`}>Some features need Claude Code ≥ <code>{CLI_RECOMMENDED_VERSION}</code> — update to enable them all.</div>
               {/if}
@@ -901,9 +939,9 @@
               <span class="st-pill ok" use:tooltip={cliIsNative ? "Native install — auto-updates in the background; Rift can also apply updates on demand" : "Rift checks npm for newer releases and can update it for you"}><span class="dot"></span>CLI up to date</span>
             {/if}
             {#if assistantStore.authLastProbed && !assistantStore.authChecking}
-              <span class="st-stamp" use:tooltip={"Time since the last CLI session probe"}>checked {fmtAgo(assistantStore.authLastProbed, asstNowTick)}</span>
+              <span class="st-stamp" use:tooltip={"Time since the last connection check"}>checked {fmtAgo(assistantStore.authLastProbed, asstNowTick)}</span>
             {/if}
-            <button class="st-btn" type="button" onclick={reprobeAll} disabled={assistantStore.authChecking || assistantStore.openAiChecking || assistantStore.codexChecking}><RefreshCw size={14} /> Re-probe</button>
+            <button class="st-btn" type="button" onclick={reprobeAll} disabled={assistantStore.authChecking || assistantStore.openAiChecking || assistantStore.codexChecking}><RefreshCw size={14} /> Check again</button>
           </div>
           {#if cliInstalls.length > 1}
             <div class="st-cli-installs" use:tooltip={"Multiple Claude CLIs found — Rift runs the newest and updates them all so their versions can't drift apart."}>
@@ -1034,33 +1072,48 @@
             {/if}
           </details>
 
+          <button class="set-expand set-reset" type="button" onclick={() => void resetTab("claude")}><RotateCcw size={13} /> Reset Claude preferences</button>
+        {:else}
           <div class="provider-section-head provider-section-head--runtime">
-            <span>ChatGPT</span>
-            <p>Use your ChatGPT account with Codex. API access is optional and separately billed.</p>
+            <span>ChatGPT setup</span>
+            <p>Your ChatGPT subscription is the primary route. API-key access stays optional and separately billed.</p>
           </div>
 
           <div class="card provider-card" id="card-codex">
-            <div class="card-tt">ChatGPT subscription</div>
-            <div class="card-sub">Your ChatGPT account connects through the local Codex CLI. Rift never reads or copies your credentials.</div>
+            <div class="card-tt">ChatGPT account</div>
+            <div class="card-sub">Subscription turns run through the official local Codex App Server. Rift never reads, copies, or exports your credentials.</div>
             <div class="route" aria-hidden="true">
-              <span class="route-node" class:on={assistantStore.codexStatus?.cliPresent}>Codex CLI</span>
+              <span class="route-node" class:on={codexConnected}>ChatGPT sign-in</span>
               <span class="route-arrow">→</span>
-              <span class="route-note">{assistantStore.codexChecking ? "Checking Codex…" : assistantStore.codexError ?? assistantStore.codexStatus?.summary ?? "Checking Codex…"}</span>
+              <span class="route-node" class:on={codexConnected}>Codex App Server</span>
+              <span class="route-arrow">→</span>
+              <span class="route-note">{assistantStore.codexChecking ? "Checking account…" : codexConnected ? "Ready for Rift chats" : assistantStore.codexError ?? assistantStore.codexStatus?.summary ?? "Checking account…"}</span>
             </div>
             <div class="ctl-row tight no-line">
               <div>
-                <div class="ctl-t">ChatGPT sign-in</div>
-                <div class="ctl-s">Uses the CLI’s own browser flow and local App Server. This is separate from ChatGPT API billing.</div>
+                <div class="ctl-t">{codexConnected ? codexPlanLabel : "ChatGPT sign-in"}</div>
+                <div class="ctl-s">{assistantStore.codexAccount?.email ?? "Uses the CLI's own browser sign-in."}{#if assistantStore.codexAccount} · {assistantStore.codexAccount.models.length} models · {assistantStore.codexAccount.skills.filter((skill) => skill.enabled).length} skills{/if}</div>
               </div>
               <div class="ctl-actions">
                 <span class="st-pill" class:ok={codexConnected} class:warn={!codexConnected}><span class="dot"></span>{assistantStore.codexChecking ? "Checking" : codexConnected ? "Connected" : assistantStore.codexStatus?.cliPresent ? "Sign in needed" : "CLI needed"}</span>
-                {#if assistantStore.codexStatus?.cliPresent}
-                  <button class="st-btn primary" type="button" disabled={assistantStore.codexChecking || codexConnected} onclick={() => void assistantStore.startCodexLogin()}>{codexConnected ? "Connected" : "Connect"}</button>
+                {#if assistantStore.codexStatus?.cliPresent && !codexConnected}
+                  <button class="st-btn primary" type="button" disabled={assistantStore.codexChecking} onclick={() => void assistantStore.startCodexLogin()}>Connect</button>
                 {/if}
-                <button class="st-btn" type="button" disabled={assistantStore.codexChecking} onclick={() => void assistantStore.refreshCodexStatus()}>Re-probe</button>
+                <button class="st-btn" type="button" disabled={assistantStore.codexChecking} onclick={() => void assistantStore.refreshCodexStatus()}>Check again</button>
               </div>
             </div>
-            {#if assistantStore.codexStatus?.cliVersion}<div class="st-note">Codex CLI {assistantStore.codexStatus.cliVersion}</div>{/if}
+            {#if assistantStore.codexAccount?.rateLimits.length}
+              <div class="provider-limit-snapshot" aria-label="ChatGPT plan usage">
+                {#each assistantStore.codexAccount.rateLimits.slice(0, 2) as limit (limit.id)}
+                  {@const window = limit.primary}
+                  {#if window}
+                    <div><span>{limit.name ?? (limit.id === "codex" ? "Coding" : limit.id)}</span><b>{Math.round(window.usedPercent)}% used</b></div>
+                  {/if}
+                {/each}
+              </div>
+            {/if}
+            {#if assistantStore.codexStatus?.cliVersion}<div class="st-note">Local runtime: {assistantStore.codexStatus.cliVersion}</div>{/if}
+            {#if assistantStore.codexAccount?.rateLimitsError}<div class="st-note warn">Plan limits unavailable: {assistantStore.codexAccount.rateLimitsError}</div>{/if}
             {#if assistantStore.codexError}<div class="st-note warn">Rift couldn't inspect Codex: {assistantStore.codexError}</div>{/if}
           </div>
 
@@ -1094,14 +1147,14 @@
               </div>
             </div>
             {#if openAiApiKeyMsg}<div class="st-note">{openAiApiKeyMsg}</div>{/if}
-            {#if assistantStore.openAiModelsError}<div class="st-note warn">Rift couldn't verify model access: {assistantStore.openAiModelsError}. Use Re-probe above to try again.</div>{/if}
+            {#if assistantStore.openAiModelsError}<div class="st-note warn">Rift couldn't verify model access: {assistantStore.openAiModelsError}. Use Check again above to retry.</div>{/if}
             {#if openAiOtherCount > 0}<div class="st-note">{openAiOtherCount} additional account model{openAiOtherCount === 1 ? " is" : "s are"} visible to the API but not yet supported by Rift.</div>{/if}
             {#if assistantStore.openAiStatus?.envApiKeyPresent && !assistantStore.hasOpenAiApiKey}
               <div class="st-note">A system <code>OPENAI_API_KEY</code> exists, but Rift deliberately ignores environment keys. Paste it above to opt in explicitly.</div>
             {/if}
           </details>
 
-          <button class="set-expand set-reset" type="button" onclick={() => void resetTab("claude")}><RotateCcw size={13} /> Reset Claude preferences</button>
+        {/if}
       </div></div>
     {/if}
 
@@ -1247,8 +1300,8 @@
                 </div>
               </div>
               <div class="ctl-row tight">
-                <div><div class="ctl-t">Clean up transcript</div><div class="ctl-s">Polishes the final transcript with Claude — fixes punctuation, capitalizes proper nouns. Adds a short tail after you stop.</div></div>
-                <button class="rift-toggle" class:on={stt.config.cleanup_enabled} role="switch" aria-checked={stt.config.cleanup_enabled} aria-label="Clean up transcript with Claude" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ cleanup_enabled: !stt.config.cleanup_enabled })}><span class="rift-toggle-knob"></span></button>
+                <div><div class="ctl-t">Clean up transcript</div><div class="ctl-s">Uses ChatGPT when connected, with Claude as a fallback, to fix punctuation and proper nouns. No API key required.</div></div>
+                <button class="rift-toggle" class:on={stt.config.cleanup_enabled} role="switch" aria-checked={stt.config.cleanup_enabled} aria-label="Clean up transcript with a connected AI account" disabled={!stt.config.enabled} type="button" onclick={() => void stt.setConfig({ cleanup_enabled: !stt.config.cleanup_enabled })}><span class="rift-toggle-knob"></span></button>
               </div>
               {#if stt.config.engine === "whisper"}
                 <div class="ctl-row tight">
@@ -1429,7 +1482,7 @@
             {#if environment.installError}
               <div class="st-note">⚠ {environment.installError}</div>
             {:else if Object.values(environment.installing).some(Boolean)}
-              <div class="st-note">An install console opened — finish there; Rift re-checks every few seconds. Impatient? <button class="link-btn" type="button" onclick={() => void environment.refresh()}>Re-probe now</button>.</div>
+              <div class="st-note">An install console opened — finish there; Rift checks every few seconds. <button class="link-btn" type="button" onclick={() => void environment.refresh()}>Check again now</button>.</div>
             {/if}
           </div>
 
@@ -1523,6 +1576,16 @@
   .provider-section-head > span { display: block; color: var(--fg); font-size: 11px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; }
   .provider-section-head > p { margin: 5px 0 0; color: var(--fg-subtle); font-size: 11.5px; line-height: 1.5; }
   .provider-section-head--runtime { margin-top: 26px; }
+  .provider-switcher { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 20px; }
+  .provider-switch { min-width: 0; min-height: 66px; display: flex; align-items: center; gap: 11px; padding: 11px 12px; border-radius: var(--r-card); border: 1px solid var(--border); background: var(--surface); color: var(--fg); font: inherit; text-align: left; cursor: pointer; transition: border-color var(--dur-fast), background var(--dur-fast), box-shadow var(--dur-fast); }
+  .provider-switch:hover { border-color: var(--border-strong); background: var(--surface-hover); }
+  .provider-switch.on { border-color: color-mix(in oklab, var(--accent) 46%, var(--border)); background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 7%, var(--surface)), var(--surface)); box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 8%, transparent); }
+  .provider-switch-ic { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 9px; color: var(--fg-muted); background: var(--field); border: 1px solid var(--field-border); }
+  .provider-switch.on .provider-switch-ic { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in oklab, var(--accent) 24%, transparent); }
+  .provider-switch-copy { flex: 1; min-width: 0; }
+  .provider-switch-copy b, .provider-switch-copy small { display: block; }
+  .provider-switch-copy b { font-size: 13px; font-weight: 650; }
+  .provider-switch-copy small { margin-top: 3px; color: var(--fg-subtle); font-size: 10.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .provider-card { border-color: color-mix(in oklab, var(--accent) 22%, var(--island-border)); }
   .provider-advanced > summary { cursor: pointer; list-style: none; }
   .provider-advanced > summary::-webkit-details-marker { display: none; }
@@ -1530,6 +1593,9 @@
   .provider-advanced[open] > summary::after { content: "Hide"; }
   .provider-advanced[open] > summary { margin-bottom: 6px; }
   .provider-model-count { margin-left: auto; color: var(--ok); font-size: 10px; font-weight: 650; }
+  .provider-limit-snapshot { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
+  .provider-limit-snapshot > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--bg-inset); border: 1px solid var(--border); font-size: 10.5px; color: var(--fg-subtle); }
+  .provider-limit-snapshot b { color: var(--fg-2); font-weight: 650; }
   .set-col > .card { margin-bottom: 16px; animation: blockIn var(--dur-base) var(--ease-page) both; }
   .set-col > .card:last-child { margin-bottom: 0; }
   /* Gentle top-down stagger so a section's cards assemble in order rather than
@@ -1853,4 +1919,28 @@
   .admin-live { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); font-weight: 600;
     color: var(--accent); white-space: nowrap; }
   .admin-live :global(svg) { color: var(--accent); }
+
+  @media (max-width: 900px) {
+    .tabrow { flex-wrap: wrap; gap: 6px; padding-bottom: 8px; }
+    .tabnav { order: 1; flex: 1 1 100%; justify-content: space-between; gap: 0; }
+    .snav { flex: 0 0 auto; min-width: 0; margin-inline: 0; padding-inline: 4px; }
+    .snav :global(svg) { display: none; }
+    .sset-search, .sset-search:focus-within { order: 2; width: 100%; margin: 0; }
+    .sset-results { left: 0; right: auto; width: min(330px, 100%); }
+    .set-surface { padding: 20px 22px 36px; }
+    .provider-switcher { grid-template-columns: minmax(0, 1fr); }
+    .sb-status-r { flex: 1 1 100%; margin-left: 52px; flex-wrap: wrap; }
+    .ctl-row { align-items: flex-start; flex-wrap: wrap; }
+    .ctl-actions { margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
+    .provider-limit-snapshot { grid-template-columns: minmax(0, 1fr); }
+  }
+
+  @media (max-width: 560px) {
+    .set-surface { padding-inline: 16px; }
+    .snav { padding-inline: 2px; font-size: 12px; }
+    .provider-switch .st-pill { display: none; }
+    .sb-status-r { margin-left: 0; }
+    .ctl-actions { width: 100%; margin-left: 0; justify-content: flex-start; }
+    .set-pick-grid-2, .set-pick-grid-3 { grid-template-columns: minmax(0, 1fr); }
+  }
 </style>

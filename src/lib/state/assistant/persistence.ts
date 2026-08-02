@@ -14,10 +14,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { notify } from "../toast.svelte";
-import { asModelSel } from "./helpers";
+import { asModelSel, isOpenAIModel } from "./helpers";
 import type {
   AgentSpawn,
   ChatMessage,
+  ChatGptRoute,
   ConversationMeta,
   ConversationRecord,
   ModelSel,
@@ -26,6 +27,34 @@ import type {
   QueueItem,
   ThinkingEffort,
 } from "./types";
+
+/** Restore a legacy ChatGPT route from provider-owned continuation state.
+ *  A Codex thread wins if both exist: it proves the chat began on the signed-in
+ *  subscription route, and choosing it prevents a prior accidental API
+ *  fallback from becoming the new billing default. */
+export function inferChatGptRoute(
+  stored: unknown,
+  codexThreadId: unknown,
+  openAiHistory: unknown,
+): ChatGptRoute | null {
+  if (stored === "codex" || stored === "openai") return stored;
+  if (typeof codexThreadId === "string" && codexThreadId.trim().length > 0) return "codex";
+  if (Array.isArray(openAiHistory) && openAiHistory.length > 0) return "openai";
+  return null;
+}
+
+/** Route choice policy shared by the store/send gate. A pinned route either
+ *  remains available or resolves to null — never to the other transport. */
+export function resolveChatGptRoute(
+  pinned: ChatGptRoute | null,
+  codexAvailable: boolean,
+  openAiAvailable: boolean,
+): ChatGptRoute | null {
+  if (pinned === "codex") return codexAvailable ? "codex" : null;
+  if (pinned === "openai") return openAiAvailable ? "openai" : null;
+  if (codexAvailable) return "codex";
+  return openAiAvailable ? "openai" : null;
+}
 
 /** Subset of TabState fields the save plumbing reads/writes. Structural —
  *  no class import, matches the live $state fields declared on TabState. */
@@ -44,6 +73,7 @@ type SaveableTab = {
   lastTurnUsage: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
   openAiHistory?: unknown[];
   codexThreadId?: string | null;
+  chatGptRoute: ChatGptRoute | null;
   // Per-project scope: the folder this tab's turns run in. Stamped onto the
   // saved record so the sidebar can filter chats to the open project.
   workspaceRoot: string | null;
@@ -217,6 +247,7 @@ export function buildSaveRecord(
     // validates size/shape again before it leaves the device.
     openAiHistory: tab.openAiHistory?.length ? tab.openAiHistory : undefined,
     codexThreadId: tab.codexThreadId ?? undefined,
+    chatGptRoute: tab.chatGptRoute ?? undefined,
     // Scope the convo to the tab's OWN folder, else the GLOBAL workspace
     // default — never `host.activeRoot`, which is the focused pane's root and
     // would misfile a background/unfiled tab under an unrelated project (a
@@ -349,6 +380,13 @@ async function maybeGenerateTitle(
     .join("")
     .trim();
   if (!text) return;
+  // ChatGPT conversations keep the deterministic local title. The legacy
+  // one-shot title helper runs Claude/Sonnet, so invoking it here would make a
+  // ChatGPT chat silently depend on and bill a different provider.
+  if (isOpenAIModel(tab.modelOverride ?? host.model)) {
+    tab.titleGenerated = true;
+    return;
+  }
   // Claim the slot before awaiting so a save firing mid-flight no-ops here.
   tab.titleGenerated = true;
   try {
@@ -462,6 +500,10 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     tab.lastTurnUsage = convo.lastTurnUsage ?? null;
     tab.openAiHistory = Array.isArray(convo.openAiHistory) ? convo.openAiHistory : [];
     tab.codexThreadId = typeof convo.codexThreadId === "string" ? convo.codexThreadId : null;
+    const restoredModel = asModelSel(convo.model);
+    tab.chatGptRoute = isOpenAIModel(restoredModel)
+      ? inferChatGptRoute(convo.chatGptRoute, tab.codexThreadId, tab.openAiHistory)
+      : null;
     // The record's workspaceRoot was SAVED (buildSaveRecord) but never read
     // back — a restored convo silently lost its per-tab root, so turns ran
     // root-less (no workspace MCP tools, builtin reads against the wrong cwd;
@@ -499,7 +541,7 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     host.lastNotice = null;
     // ui-audit #5: the saved model scopes to THIS tab only — opening an old
     // chat must not rewrite the global new-chat default (or toast about it).
-    tab.modelOverride = asModelSel(convo.model);
+    tab.modelOverride = restoredModel;
     // Saved dial scopes to this tab too — like model, opening an old chat must
     // not rewrite the global defaults. Unknown/legacy values fall back to null.
     tab.effortOverride =
@@ -510,7 +552,7 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     // it as the switch-detection baseline (send() compares the next pick
     // against it) so the picker's "this chat" tag + the mid-chat switch
     // marker work on reopened chats too.
-    tab.pinnedModel = asModelSel(convo.model);
+    tab.pinnedModel = restoredModel;
   } catch (e) {
     // Toast, not just lastError: the ambient lastError setter routes to the
     // PREVIOUS activeTab (or storeLastError, which only WorkspacePage reads),

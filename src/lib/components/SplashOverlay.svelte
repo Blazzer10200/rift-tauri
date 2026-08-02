@@ -38,7 +38,7 @@
     ready ? { label: "ready", p: 1 }
     : assistant.configLoaded ? { label: "opening workspace", p: 0.88 }
     : assistant.auth != null ? { label: "starting session", p: 0.62 }
-    : { label: "checking claude cli", p: 0.3 },
+    : { label: "checking AI connections", p: 0.3 },
   );
 
   // Smooth percentage: fast pull to each real stage mark, then a slow creep

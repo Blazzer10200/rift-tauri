@@ -11,7 +11,6 @@
   import { invoke } from "@tauri-apps/api/core";
   import { commandPalette, type SettingsSection } from "../../state/command-palette.svelte";
   import { workspace, type WorkspaceId } from "../../state/workspace.svelte";
-  import { goHome } from "../../state/nav";
   import { assistant } from "../../state/assistant.svelte";
   import { projects } from "../../state/projects.svelte";
   import { relTime } from "../workspace/hubHelpers";
@@ -47,13 +46,10 @@
   const items = $derived.by<Item[]>(() => {
     const out: Item[] = [];
 
-    // Ctrl+number follows workspace.order in AppShell. Derive both the
-    // destination and its hint from that order so reordering cannot desync the
-    // palette. "projects" is migration-only and never gets a second Workspace
-    // entry. Ctrl+1's home behavior is deliberately the fresh-chat verb; the
-    // Workspace hub remains available as its own unbound destination below.
-    const navs: Record<Exclude<WorkspaceId, "projects">, { label: string; icon: Icon }> = {
-      home: { label: "Home", icon: Home },
+    // Ctrl+number follows workspace.order in AppShell. "projects" is
+    // migration-only, while "home" is a fresh-chat verb there rather than a
+    // user-facing page. The truthful Workspace surface gets one explicit row.
+    const navs: Record<Exclude<WorkspaceId, "projects" | "home">, { label: string; icon: Icon }> = {
       chat: { label: "Chat", icon: MessageSquare },
       settings: { label: "Settings", icon: SettingsIcon },
       "ai-health": { label: "AI Health", icon: Sparkles },
@@ -68,7 +64,7 @@
       run: () => workspace.setActive("home"),
     });
     for (const [idx, id] of workspace.order.entries()) {
-      if (id === "projects") continue;
+      if (id === "projects" || id === "home") continue;
       const n = navs[id];
       out.push({
         id: `nav:${id}`,
@@ -77,7 +73,7 @@
         group: "Go to",
         icon: n.icon,
         keywords: `workspace pane home ${id}`,
-        run: () => id === "home" ? goHome() : workspace.setActive(id),
+        run: () => workspace.setActive(id),
       });
     }
 
@@ -85,9 +81,9 @@
     const sects: { id: SettingsSection; label: string; icon: Icon; kw?: string }[] = [
       { id: "appearance", label: "Appearance", icon: Palette },
       { id: "chat",       label: "Chat",       icon: MessageSquare, kw: "rendering stream accessibility reading comfort dyslexia" },
-      { id: "claude",     label: "Claude",     icon: Sparkles, kw: "assistant session keys cost plan api cli" },
-      { id: "speech",     label: "Speech",     icon: Mic },
-      { id: "about",      label: "About",      icon: Info, kw: "shortcuts keyboard tools help diagnostics" },
+      { id: "claude",     label: "Providers",  icon: Sparkles, kw: "claude chatgpt assistant session keys cost plan api cli" },
+      { id: "speech",     label: "Voice",      icon: Mic, kw: "speech dictation microphone" },
+      { id: "about",      label: "System",     icon: Info, kw: "about shortcuts keyboard tools help diagnostics" },
     ];
     for (const s of sects) {
       out.push({

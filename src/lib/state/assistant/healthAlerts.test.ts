@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ctxAlertTransition } from "./healthAlerts";
+import { ctxAlertTransition, healthPresentationForModel } from "./healthAlerts";
 
 describe("ctxAlertTransition", () => {
   it("stays quiet below the warn threshold", () => {
@@ -21,5 +21,21 @@ describe("ctxAlertTransition", () => {
     expect(ctxAlertTransition(31, true)).toEqual({ fire: false, latched: false });
     // next climb past 85 fires again
     expect(ctxAlertTransition(86, false)).toEqual({ fire: true, latched: true });
+  });
+});
+
+describe("healthPresentationForModel", () => {
+  it("keeps Claude's manual compaction action available", () => {
+    expect(healthPresentationForModel("sonnet")).toEqual({
+      label: "Claude",
+      canManualCompact: true,
+    });
+  });
+
+  it("uses ChatGPT naming and removes the manual compaction action", () => {
+    expect(healthPresentationForModel("gpt-5.6-sol")).toEqual({
+      label: "ChatGPT",
+      canManualCompact: false,
+    });
   });
 });

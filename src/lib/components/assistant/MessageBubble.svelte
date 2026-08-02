@@ -169,6 +169,7 @@
   }
 
   const modelLabel = $derived(message.model ? shortModel(message.model) : null);
+  const turnProvider = $derived(message.model ? modelProviderLabel(message.model) : null);
   const isOpenAiModel = $derived(!!message.model && /^gpt-/i.test(message.model));
   // Local-LLM turns run neither a Claude nor OpenAI model.
   // Label them "Local model" so the header identity matches what the model
@@ -423,7 +424,7 @@
           <ToolChip tool={b} variant={isUser ? "card" : "timeline"} {caption} />
           <PermissionBar toolUseId={b.id} toolName={b.name} />
         {:else if b.type === "steer"}
-          <div class="steer-note" title="Sent while Claude was working — read mid-turn">
+          <div class="steer-note" title={`Sent while ${turnProvider ?? "the assistant"} was working — read mid-turn`}>
             <CornerDownRight size={11} />
             <span class="steer-body">
               {b.text}
@@ -446,7 +447,7 @@
         {:else if b.type === "unknown"}
           <!-- #98.3: newer-CLI content this build can't render — honest marker
                instead of a silent gap. Update Rift to see it. -->
-          <div class="unknown-note" title="This Claude Code version sent a content type Rift doesn't support yet — update Rift to render it.">
+          <div class="unknown-note" title="The assistant sent a content type Rift doesn't support yet — update Rift to render it.">
             <span class="unknown-tag mono">{b.blockType}</span>
             <span>unsupported content skipped</span>
           </div>

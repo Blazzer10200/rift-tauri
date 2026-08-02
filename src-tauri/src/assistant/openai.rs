@@ -939,6 +939,11 @@ async fn tool_run_command(
     let mut process = if cfg!(windows) {
         let mut process = tokio::process::Command::new("powershell");
         process.args(["-NoProfile", "-NonInteractive", "-Command", command]);
+        #[cfg(windows)]
+        {
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            process.creation_flags(CREATE_NO_WINDOW);
+        }
         process
     } else {
         let mut process = tokio::process::Command::new("sh");

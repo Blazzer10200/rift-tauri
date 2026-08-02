@@ -14,7 +14,8 @@
   import { tooltip } from "$lib/actions/tooltip";
   import {
     MODEL_OPTIONS, currentModels, legacyModels, modelWindowSuffix, isFreeClaudeModel,
-    dialStopsFor, dialIdxFor, clampEffortIdx, effortCapsFor, modelAccessFor, providerStatusFor,
+    chatGptModelsFor, dialStopsFor, dialIdxFor, clampEffortIdx, clampEffortForCaps,
+    effortCapsFor, modelAccessFor, providerStatusFor,
     type ModelOpt, type SettingsRow,
   } from "./modelMatrix";
 
@@ -79,7 +80,11 @@
   });
 
   const paneModel = $derived(assistant.modelFor(tab));
-  const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === paneModel));
+  const currentOpenAiModels = $derived(chatGptModelsFor(assistant.codexModels));
+  const currentModel = $derived(
+    currentOpenAiModels.find((m) => m.id === paneModel)
+      ?? MODEL_OPTIONS.find((m) => m.id === paneModel),
+  );
   const providerAccess = $derived({
     claudeReady: assistant.auth?.cliPresent === true
       && (assistant.auth.pill === "green" || assistant.auth.pill === "yellow"),
@@ -97,18 +102,21 @@
   });
   const openAiProviderStatus = $derived(providerStatusFor("openai", providerAccess));
   const claudeProviderStatus = $derived(providerStatusFor("claude", providerAccess));
-  const selectableModels = $derived(MODEL_OPTIONS.filter((m) => modelAccessFor(m, providerAccess).enabled));
+  // Keep the established digit mapping truthful until the parent Composer also
+  // consumes live rows. Unknown live models remain fully clickable, but do not
+  // advertise a digit shortcut that would still target a curated fallback row.
+  const shortcutModels = $derived(MODEL_OPTIONS.filter((m) => modelAccessFor(m, providerAccess).enabled));
   const currentModelAccess = $derived(currentModel ? modelAccessFor(currentModel, providerAccess) : null);
   const sessionPinnedModel = $derived(tab?.pinnedModel ?? null);
   const sessionModelDiverged = $derived(sessionPinnedModel !== null && sessionPinnedModel !== paneModel);
   function shortcutFor(m: ModelOpt): number | null {
-    const i = selectableModels.findIndex((candidate) => candidate.id === m.id);
+    const i = shortcutModels.findIndex((candidate) => candidate.id === m.id);
     return i >= 0 && i < 9 ? i + 1 : null;
   }
-  const currentOpenAiModels = currentModels.filter((m) => m.provider === "openai");
   const currentClaudeModels = $derived(currentModels.filter((m) =>
     m.provider === "claude" && (assistant.plan !== "free" || isFreeClaudeModel(m.id))
   ));
+  const pickerModels = $derived([...currentOpenAiModels, ...currentClaudeModels, ...legacyModels]);
   // Fast mode — surfaces only on fast-eligible (Opus-family) rows. The stored
   // global pref survives on other models but is inert there (send.ts gates it).
   const fastApplies = $derived(currentModelAccess?.enabled === true && !!currentModel && fastEligible(currentModel.id));
@@ -122,6 +130,26 @@
   const dialApplies = $derived(currentModelAccess?.enabled === true && effortStops.length > 0); // a connected model with effort
   const effortIdx = $derived(dialIdxFor(effortStops, assistant.thinkingOnFor(tab), assistant.effortFor(tab)));
   const currentEffort = $derived(effortStops[effortIdx] ?? effortStops[0]);
+  function alignLiveEffort(model: ModelOpt | undefined) {
+    if (model?.provider !== "openai" || model.supportedEfforts === undefined) return;
+    const stored = assistant.thinkingOnFor(tab) ? assistant.effortFor(tab) : "none";
+    const clamped = clampEffortForCaps(stored, model);
+    if (clamped === stored) return;
+    if (clamped === "none") assistant.setThinkingDial(false, undefined, tab);
+    else assistant.setThinkingDial(true, clamped, tab);
+  }
+  // App Server advertises an exact supported set, not merely a ceiling. If a
+  // newly selected live model cannot honor the stored tier, move to the nearest
+  // supported tier before the next send. Claude keeps its existing clamp path.
+  $effect(() => {
+    alignLiveEffort(currentModel);
+  });
+  function pickModel(m: ModelOpt) {
+    // Clamp before the parent closes this menu so a newly picked live model can
+    // never inherit an unsupported tier for its first turn.
+    alignLiveEffort(m);
+    onPickModel(m);
+  }
   function setEffortByIdx(i: number) {
     const s = effortStops[clampEffortIdx(effortStops, i)];
     if (!s) return;
@@ -228,6 +256,7 @@
     {@const lim = modelLimitFor(m)}
     {@const access = modelAccessFor(m, providerAccess)}
     {@const shortcut = shortcutFor(m)}
+    {@const apiBilled = access.enabled && access.tag === "API · separately billed"}
     <!-- Dense one-line row (Claude-Desktop density): name + inline tags left,
          meta + ✓/hotkey right. The blurb/tagline lives in the tooltip. -->
     <button
@@ -240,12 +269,15 @@
       class:limited={m.limited}
       class:unavailable={!access.enabled}
       disabled={!access.enabled}
-      use:tooltip={access.enabled ? `${m.tagline} — ${m.blurb}` : access.detail}
-      onmousedown={(e) => { e.preventDefault(); if (access.enabled) onPickModel(m); }}
+      use:tooltip={access.enabled
+        ? `${m.tagline} — ${m.blurb}${apiBilled ? `\n${access.detail}` : ""}`
+        : access.detail}
+      onmousedown={(e) => { e.preventDefault(); if (access.enabled) pickModel(m); }}
     >
       <span class="pi-name">
         <span class="model-name">{m.label} {m.version}</span>
         {#if !access.enabled}<span class="pi-tag access-tag state-{access.state}">{access.tag}</span>
+        {:else if apiBilled}<span class="pi-tag api-billed">API · separately billed</span>
         {:else if m.id === sessionPinnedModel && sessionModelDiverged}<span class="pi-tag session">this chat</span>
         {:else if m.suffix}<span class="pi-tag">{modelWindowSuffix(m.id, assistant.planCap, tab?.reportedCtxWindow)}</span>{/if}
         {#if lim}<span
@@ -271,7 +303,10 @@
   {/each}
 
   <div class="provider-separator"></div>
-  <div class="rift-menu-head"><span>Claude Code</span><span class="provider-head-note state-{claudeProviderStatus.state}"><i></i>{claudeProviderStatus.tag}</span></div>
+  <div class="rift-menu-head">
+    <span class="provider-head-label">Claude <span class="provider-via">via Claude Code</span></span>
+    <span class="provider-head-note state-{claudeProviderStatus.state}"><i></i>{claudeProviderStatus.tag}</span>
+  </div>
   {#each currentClaudeModels as m (m.id)}
     {@render modelRow(m)}
   {/each}
@@ -308,7 +343,7 @@
   {/if}
 
   {#if sessionModelDiverged}
-    {@const pinned = MODEL_OPTIONS.find((m) => m.id === sessionPinnedModel)}
+    {@const pinned = pickerModels.find((m) => m.id === sessionPinnedModel)}
     {@const picked = currentModel}
     <div class="session-note" role="note">
       <span class="sn-text">
@@ -461,6 +496,14 @@
     font-size: 8.5px; letter-spacing: 0.05em; color: var(--fg-faint);
     text-transform: none;
   }
+  :global(.settings-menu .provider-head-label) {
+    display: inline-flex; align-items: baseline; gap: 5px;
+  }
+  :global(.settings-menu .provider-via) {
+    font-size: 8.5px; font-weight: 500; letter-spacing: 0.01em;
+    color: color-mix(in oklab, var(--fg-faint) 78%, transparent);
+    text-transform: none;
+  }
   :global(.settings-menu .provider-head-note i) {
     width: 5px; height: 5px; border-radius: 50%; background: currentColor;
   }
@@ -541,6 +584,9 @@
   :global(.settings-menu .pi-tag.access-tag.state-checking) { color: var(--accent); }
   :global(.settings-menu .pi-tag.access-tag.state-error),
   :global(.settings-menu .pi-tag.access-tag.state-unavailable) { color: var(--danger); }
+  :global(.settings-menu .pi-tag.api-billed) {
+    color: var(--warn); font-size: 9px; font-weight: 650;
+  }
   /* Live weekly-limit chip — % used of the account's model-scoped usage bucket
      (usage endpoint limits[]). Tinted by the shared limitZone thresholds so it
      agrees with the status bar + UsagePanel. Absent when no bucket matches. */
@@ -786,7 +832,7 @@
   :global(.settings-menu .effort-rail.dragging .er-track) { cursor: grabbing; }
   :global(.settings-menu .er-stop) {
     position: absolute; top: 0; z-index: 1;
-    width: 18px; height: 26px; padding: 0; margin: 0;
+    width: 24px; height: 26px; padding: 0; margin: 0;
     transform: translateX(-50%);
     display: grid; place-items: center;
     background: transparent; border: 0; cursor: pointer;

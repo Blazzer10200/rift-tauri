@@ -92,6 +92,7 @@
   transition: color var(--dur-fast) ease;
 }
 .ob-skip-link:hover { color: var(--fg); }
+.ob-skip-mobile { display: none; }
 
 /* ── Right pane ───────────────────────────────────────────────────────────── */
 .ob-main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
@@ -308,6 +309,14 @@
 .ob-hint--warn { color: var(--warn); }
 .ob-hint--warn :global(.lucide) { color: var(--warn); }
 
+.ob-route-note {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--r-card);
+  background: var(--bg-elev-1); color: var(--fg-muted); font-size: 11.5px; line-height: 1.5;
+}
+.ob-route-note :where(.lucide) { flex: none; margin-top: 2px; color: var(--fg-subtle); }
+.ob-route-note strong { color: var(--fg-2); font-weight: 600; }
+
 /* green "connected" bar w/ pulsing dot — Claude step success state */
 .ob-connbar { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: var(--r-card); font-size: 12px; font-weight: 540; background: var(--ok-soft); color: var(--ok); }
 .ob-connbar .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
@@ -334,16 +343,16 @@
 .ob-statrow--summary { justify-content: flex-start; }
 .ob-statrow--summary .v { color: var(--fg-muted); font-weight: 400; line-height: 1.5; }
 
-/* OpenAI connection miniature — a deliberately different scene from the CLI route. */
+/* ChatGPT account connection miniature — Codex CLI + its local App Server. */
 .ob-mini-api { display: flex; flex-direction: column; align-items: center; gap: 13px; width: min(390px, 88%); }
-.ob-ma-route { width: 100%; display: flex; align-items: center; gap: 10px; }
+.ob-ma-route { width: 100%; display: flex; align-items: center; gap: 7px; }
 .ob-ma-route > span {
   display: inline-flex; align-items: center; justify-content: center; gap: 7px; flex: 1;
-  min-width: 0; height: 34px; padding: 0 12px; border-radius: 9px;
+  min-width: 0; height: 34px; padding: 0 8px; border-radius: 9px;
   color: var(--fg-2); background: var(--bg-elev-2); border: 1px solid var(--border-strong);
-  font-family: var(--font-mono); font-size: 10.5px; font-weight: 600;
+  font-family: var(--font-mono); font-size: 9.5px; font-weight: 600; white-space: nowrap;
 }
-.ob-ma-route > i { width: 28px; height: 1px; flex: none; background: linear-gradient(90deg, var(--border-strong), var(--accent)); position: relative; }
+.ob-ma-route > i { width: 18px; height: 1px; flex: none; background: linear-gradient(90deg, var(--border-strong), var(--accent)); position: relative; }
 .ob-ma-route > i::after { content: ""; position: absolute; right: -1px; top: -2px; width: 5px; height: 5px; border-top: 1px solid var(--accent); border-right: 1px solid var(--accent); transform: rotate(45deg); }
 .ob-ma-route :where(.lucide) { color: var(--accent); }
 .ob-ma-pill { display: inline-flex; align-items: center; gap: 7px; color: var(--ok); font-size: 11px; font-weight: 600; }
@@ -527,6 +536,7 @@
   .ob-step-wrap { gap: 20px; padding: 28px 0 24px; margin: 0; }
   .ob-stage { min-height: 140px; }
   .ob-foot { padding: 13px 18px; }
+  .ob-skip-mobile { display: inline-flex; }
 }
 
 @media (max-width: 440px) {

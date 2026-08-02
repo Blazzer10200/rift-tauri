@@ -51,6 +51,10 @@ export type ModelOpt = {
   //                  xhigh and stopped at deep. Haiku rejects effort entirely.
   effort: boolean;
   maxEffort: ThinkingEffort;
+  /** Exact Rift effort tiers advertised by a live model source. Omitted for
+   *  curated Claude/API fallback rows, which continue to use maxEffort as a
+   *  contiguous ceiling. */
+  supportedEfforts?: readonly ThinkingEffort[];
 };
 // Flat single-column list (Claude-Code-Desktop layout): current models first,
 // legacy generations grouped below. `opus` is the alias → newest Opus (5,
@@ -80,6 +84,85 @@ export const MODEL_OPTIONS: ModelOpt[] = [
   { id: "claude-sonnet-4-6", label: "Sonnet", version: "4.6", tagline: "Previous-generation Sonnet — balanced speed + smarts",     blurb: "Previous-generation Sonnet", ctx: "1M ctx", suffix: "1M context",   legacy: true,  effort: true,  maxEffort: MODEL_MAX_EFFORT["claude-sonnet-4-6"], icon: Feather, provider: "claude" },
   { id: "claude-sonnet-4-5", label: "Sonnet", version: "4.5", tagline: "Classic Sonnet — everyday workhorse, 200K context",        blurb: "Classic Sonnet generation", ctx: "200K ctx", suffix: "200K context", legacy: true, effort: true,  maxEffort: MODEL_MAX_EFFORT["claude-sonnet-4-5"], icon: Feather, provider: "claude" },
 ];
+
+const CODEX_TO_RIFT_EFFORT: Readonly<Record<string, ThinkingEffort>> = {
+  low: "none",
+  medium: "smart",
+  high: "deep",
+  xhigh: "ultra",
+};
+
+/** Translate App Server effort names into Rift's stored tiers. Unknown future
+ *  values stay hidden until Rift knows how to send them; known values are
+ *  de-duplicated and returned in low→high order. */
+export function codexReasoningEffortsFor(model: Pick<CodexModel, "supportedReasoningEfforts">): ThinkingEffort[] {
+  const mapped = new Set(
+    model.supportedReasoningEfforts
+      .map((effort) => CODEX_TO_RIFT_EFFORT[effort.trim().toLowerCase()])
+      .filter((effort): effort is ThinkingEffort => effort !== undefined),
+  );
+  return EFFORT_OPTIONS.map((effort) => effort.id).filter((effort) => mapped.has(effort));
+}
+
+function fallbackCodexLabel(model: CodexModel): string {
+  const liveLabel = model.label.trim();
+  if (liveLabel && liveLabel.toLowerCase() !== model.id.toLowerCase()) return liveLabel;
+  return model.id
+    .split("-")
+    .map((part) => part.toLowerCase() === "gpt"
+      ? "GPT"
+      : part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function liveCodexModelOpt(model: CodexModel, curated: readonly ModelOpt[]): ModelOpt {
+  const match = curated.find((candidate) => candidate.id === model.id);
+  const supportedEfforts = codexReasoningEffortsFor(model);
+  const maxEffort = supportedEfforts[supportedEfforts.length - 1] ?? "none";
+  if (match) {
+    return {
+      ...match,
+      tagline: model.description.trim() || match.tagline,
+      effort: supportedEfforts.length > 0,
+      maxEffort,
+      supportedEfforts,
+    };
+  }
+
+  const label = fallbackCodexLabel(model);
+  return {
+    id: model.id,
+    label,
+    version: "",
+    tagline: model.description.trim() || `${label} is available through your ChatGPT account`,
+    blurb: model.imageInput ? "Text, vision & tools" : "Text & tools",
+    ctx: "Account",
+    suffix: "",
+    legacy: false,
+    icon: model.id.includes("codex") ? Code2 : Orbit,
+    provider: "openai",
+    effort: supportedEfforts.length > 0,
+    maxEffort,
+    supportedEfforts,
+  };
+}
+
+/** Picker-ready ChatGPT rows. App Server is the live source when connected;
+ *  curated rows supply polished metadata for known ids and remain appended as
+ *  the separately billed API fallback. Unknown future live ids still receive
+ *  a complete, selectable row. */
+export function chatGptModelsFor(codexModels: readonly CodexModel[] | null): ModelOpt[] {
+  const curated = MODEL_OPTIONS.filter((model) => model.provider === "openai" && !model.legacy);
+  if (codexModels === null) return curated;
+
+  const seen = new Set<string>();
+  const live = codexModels.flatMap((model) => {
+    if (seen.has(model.id)) return [];
+    seen.add(model.id);
+    return [liveCodexModelOpt(model, curated)];
+  });
+  return [...live, ...curated.filter((model) => !seen.has(model.id))];
+}
 // 1-based number shortcut → model id (digit keys pick directly in the menu).
 export const modelShortcut = (id: ModelSel) => MODEL_OPTIONS.findIndex((m) => m.id === id) + 1;
 
@@ -123,7 +206,12 @@ export function modelAccessFor(m: ModelOpt, ctx: ProviderAccessContext): ModelAc
 
   const codexModel = ctx.codexModels?.find((model) => model.id === m.id);
   if (ctx.codexReady && codexModel) {
-    return { state: "ready", enabled: true, tag: "Connected", detail: codexModel.description || m.tagline };
+    return {
+      state: "ready",
+      enabled: true,
+      tag: "Subscription",
+      detail: `${codexModel.description || m.tagline} Available through your signed-in ChatGPT subscription.`,
+    };
   }
 
   if (ctx.codexChecking && !ctx.openAiConfigured) {
@@ -144,7 +232,12 @@ export function modelAccessFor(m: ModelOpt, ctx: ProviderAccessContext): ModelAc
   if (!accountModel?.available) {
     return { state: "unavailable", enabled: false, tag: "No access", detail: `${m.label} ${m.version} isn't available through ${CHATGPT.apiAccess}.` };
   }
-  return { state: "ready", enabled: true, tag: "Connected", detail: m.tagline };
+  return {
+    state: "ready",
+    enabled: true,
+    tag: "API · separately billed",
+    detail: `${m.tagline} ${CHATGPT.apiBilling}`,
+  };
 }
 
 export function isFreeClaudeModel(id: ModelSel): boolean {
@@ -152,7 +245,9 @@ export function isFreeClaudeModel(id: ModelSel): boolean {
 }
 
 export function providerStatusFor(provider: ModelOpt["provider"], ctx: ProviderAccessContext): ModelAccess {
-  const models = currentModels.filter((m) => m.provider === provider);
+  const models = provider === "openai"
+    ? chatGptModelsFor(ctx.codexModels)
+    : currentModels.filter((m) => m.provider === provider);
   const access = models.map((m) => modelAccessFor(m, ctx));
   return access.find((item) => item.enabled)
     ?? access.find((item) => item.state === "checking")
@@ -164,8 +259,9 @@ export function providerStatusFor(provider: ModelOpt["provider"], ctx: ProviderA
  * Honor that instead of rendering an effort dial the API will ignore. */
 export function effortCapsFor(m: ModelOpt | undefined, models: readonly OpenAiModel[] | null): EffortCaps | undefined {
   if (!m || m.provider !== "openai") return m;
+  if (m.supportedEfforts !== undefined) return m;
   const live = models?.find((model) => model.id === m.id);
-  return live?.reasoning === false ? { effort: false, maxEffort: "none" } : m;
+  return live?.reasoning === false ? { effort: false, maxEffort: "none", supportedEfforts: [] } : m;
 }
 
 /** The context-window tag shown beside a model in the picker, HONEST under the
@@ -226,18 +322,35 @@ const DIAL_STOPS: DialStop[] = [
 ];
 
 /** Minimal capability shape the ladder derives from — a full ModelOpt. */
-export type EffortCaps = Pick<ModelOpt, "effort" | "maxEffort">;
+export type EffortCaps = Pick<ModelOpt, "effort" | "maxEffort" | "supportedEfforts">;
 
 /** The ladder rungs a model supports. Haiku (no effort capability) gets an
  *  empty list — the panel hides the ladder entirely. Otherwise rungs truncate
  *  at the model's effort ceiling; the Low rung is always present. */
 export function dialStopsFor(m: EffortCaps | undefined): DialStop[] {
   if (!m?.effort) return [];
+  if (m.supportedEfforts !== undefined) {
+    const supported = new Set(m.supportedEfforts);
+    return DIAL_STOPS.filter((stop) => supported.has(stop.effort ?? "none"));
+  }
   const capIdx = EFFORT_OPTIONS.findIndex((e) => e.id === m.maxEffort);
   return DIAL_STOPS.filter(
     (s) => s.effort === null
       || (capIdx >= 0 && EFFORT_OPTIONS.findIndex((e) => e.id === s.effort) <= capIdx),
   );
+}
+
+/** Clamp a stored tier to an exact live capability set. Static Claude rows do
+ *  not call this helper; their established max-effort clamp remains unchanged. */
+export function clampEffortForCaps(effort: ThinkingEffort, caps: EffortCaps): ThinkingEffort {
+  const supported = caps.supportedEfforts;
+  if (!caps.effort || supported === undefined || supported.length === 0) return "none";
+  if (supported.includes(effort)) return effort;
+  const effortIdx = EFFORT_OPTIONS.findIndex((option) => option.id === effort);
+  const lower = supported.filter(
+    (candidate) => EFFORT_OPTIONS.findIndex((option) => option.id === candidate) <= effortIdx,
+  );
+  return lower[lower.length - 1] ?? supported[0];
 }
 
 /** Project the store pair (thinkingEnabled, thinkingEffort) onto a rung index.

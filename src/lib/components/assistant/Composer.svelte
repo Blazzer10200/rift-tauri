@@ -25,6 +25,7 @@
   import PermMenu from "./composer/PermMenu.svelte";
   import {
     MODEL_OPTIONS, MODE_OPTIONS,
+    chatGptModelsFor,
     dialStopsFor, dialIdxFor, clampEffortIdx, effortCapsFor, modelAccessFor, permToneFor,
     settingsRowsFor, type SettingsRow,
     type ModelOpt, type ModeOpt,
@@ -119,6 +120,12 @@
   // pane's pill / settings highlight / data-model showed the FOCUSED pane's
   // model. Read this pane's own tab override, falling back to the global model.
   const paneEffectiveModel = $derived(tab?.modelOverride ?? assistant.model);
+  const paneChatGpt = $derived(isOpenAIModel(paneEffectiveModel));
+  const paneChatGptRoute = $derived(
+    paneChatGpt
+      ? assistant.chatGptRouteFor(paneEffectiveModel, tab?.chatGptRoute ?? null)
+      : null,
+  );
 
   // Pending rail (queue chips + clear) extracted to composer/QueueRail.svelte (C3).
 
@@ -136,34 +143,37 @@
   type SlashCmd = {
     name: string;
     desc: string;
+    prefix?: "/" | "$";
+    provider?: "claude";
+    chatGpt?: "api-only";
     // Present on entries discovered from the user's Claude Code setup
     // (`~/.claude` + `<root>/.claude` skills/commands, installed plugins) or
     // reported by the CLI itself (source "cli" — the init frame's
-    // slash_commands[]). These aren't run by runSlash — they ride to the CLI
-    // as `/name`, where its own skill resolution takes over.
-    custom?: { source: "user" | "project" | "plugin" | "cli"; kind: "skill" | "command"; hint?: string };
+    // slash_commands[]). ChatGPT account skills use source "codex" and ride
+    // to App Server as `$name` instead of Claude's `/name` invocation.
+    custom?: { source: "user" | "project" | "plugin" | "cli" | "codex"; kind: "skill" | "command"; hint?: string };
   };
   // Grouped: conversation lifecycle → model + composition → flow control → info.
   const SLASH_COMMANDS: SlashCmd[] = [
     { name: "new",       desc: "Start a new conversation (saves current)" },
     { name: "clear",     desc: "Clear this chat in place (saves current to History)" },
-    { name: "compact",   desc: "Summarize older turns to free context" },
+    { name: "compact",   desc: "Summarize older turns to free context", provider: "claude" },
     { name: "model",     desc: "Switch model — opens picker" },
     { name: "retry",     desc: "Re-fire the last prompt" },
     { name: "copy",      desc: "Copy last response to clipboard" },
     { name: "stop",      desc: "Halt the current turn" },
     { name: "tools",     desc: "List available workspace tools" },
-    { name: "mcp",       desc: "MCP server status for this session" },
-    { name: "cost",      desc: "Show session cost" },
-    { name: "usage",     desc: "Plan limits — 5-hour & weekly windows" },
+    { name: "mcp",       desc: "Claude MCP server status for this session", provider: "claude" },
+    { name: "cost",      desc: "Show metered session cost", chatGpt: "api-only" },
+    { name: "usage",     desc: "Show plan limits" },
     { name: "stats",     desc: "Session telemetry summary (inline)" },
-    { name: "openincli", desc: "Print the claude --resume command for this session" },
+    { name: "openincli", desc: "Print the claude --resume command for this session", provider: "claude" },
     { name: "diag",      desc: "Copy full telemetry JSON to clipboard" },
     { name: "help",      desc: "List slash commands" },
     // CLI passthrough (Claude Design) — runSlash doesn't match these, so they
     // ride straight to the Claude CLI as skills. Listed here for discoverability.
-    { name: "design-sync",  desc: "Sync this workspace with a claude.ai/design project" },
-    { name: "design-login", desc: "Authorize Claude Design access (terminal sessions only)" },
+    { name: "design-sync",  desc: "Sync this workspace with a claude.ai/design project", provider: "claude" },
+    { name: "design-login", desc: "Authorize Claude Design access (terminal sessions only)", provider: "claude" },
   ];
 
   // Model picker rows — version + tagline + context window. The CLI takes
@@ -374,11 +384,17 @@
       !draft.includes(" ") &&
       draft.length >= 1,
   );
+  const builtinSlash = $derived(SLASH_COMMANDS.filter((c) => {
+    if (!paneChatGpt) return true;
+    if (c.provider === "claude") return false;
+    return c.chatGpt !== "api-only" || paneChatGptRoute === "openai";
+  }));
   // Custom skills/commands ride the CLI's own config resolution: local-LLM
   // (--bare) strips them all; sandbox mode (useFullConfig off) drops the
   // `user` setting source, so personal entries can't run — hide accordingly.
   // Builtins always win a name collision.
   const customSlash = $derived.by<SlashCmd[]>(() => {
+    if (paneChatGpt) return [];
     const seen = new Set(SLASH_COMMANDS.map((c) => c.name));
     const out: SlashCmd[] = [];
     for (const c of assistant.customCommands) {
@@ -400,7 +416,7 @@
   // the same name win above, so this section is purely the not-otherwise-known
   // tail. Sandbox mode spawns with `--disable-slash-commands` → hide there.
   const cliSlash = $derived.by<SlashCmd[]>(() => {
-    if (!assistant.useFullConfig) return [];
+    if (paneChatGpt || !assistant.useFullConfig) return [];
     const seen = new Set([...SLASH_COMMANDS.map((c) => c.name), ...customSlash.map((c) => c.name)]);
     const out: SlashCmd[] = [];
     for (const name of cliCommands.names) {
@@ -409,9 +425,29 @@
     }
     return out;
   });
+  // App Server exposes the skills available to the signed-in ChatGPT account.
+  // Keep `/` as the discovery gesture, but render and send these with their
+  // real `$skill-name` syntax. Claude disk/CLI commands never cross providers.
+  const chatGptSkills = $derived.by<SlashCmd[]>(() => {
+    if (!paneChatGpt) return [];
+    const out: SlashCmd[] = [];
+    const seen = new Set<string>();
+    for (const skill of assistant.codexAccount?.skills ?? []) {
+      const name = skill.name.trim();
+      if (!skill.enabled || !name || /[\s/\\$]/.test(name) || seen.has(name)) continue;
+      seen.add(name);
+      out.push({
+        name,
+        prefix: "$",
+        desc: skill.description.trim() || "ChatGPT skill",
+        custom: { source: "codex", kind: "skill" },
+      });
+    }
+    return out;
+  });
   const slashFiltered = $derived.by(() => {
     const q = draft.slice(1).toLowerCase();
-    const all = [...SLASH_COMMANDS, ...customSlash, ...cliSlash];
+    const all = [...builtinSlash, ...customSlash, ...cliSlash, ...chatGptSkills];
     if (!q) return all;
     return all
       .map((c) => ({ c, s: slashScore(c.name, q) }))
@@ -430,11 +466,25 @@
   // this is edge detection, not render state.
   let slashScanLatch = false;
   $effect(() => {
-    if (slashOpen && !slashScanLatch) void assistant.loadCustomCommands();
+    if (slashOpen && !slashScanLatch) {
+      if (paneChatGpt) {
+        if (!assistant.codexAccount && !assistant.codexChecking) void assistant.refreshCodexStatus();
+      } else {
+        void assistant.loadCustomCommands();
+      }
+    }
     slashScanLatch = slashOpen;
   });
+  // App Server's live ChatGPT rows replace the curated GPT portion while
+  // preserving the unified picker order. This same list drives arrow/digit
+  // navigation, so an account-only model never renders without being pickable.
+  const composerModels = $derived([
+    ...chatGptModelsFor(assistant.codexModels),
+    ...MODEL_OPTIONS.filter((m) => m.provider !== "openai"),
+  ]);
   // Current model row — drives the composer's bottom-right pill label.
-  const currentModel = $derived(MODEL_OPTIONS.find((m) => m.id === paneEffectiveModel));
+  const currentModel = $derived(composerModels.find((m) => m.id === paneEffectiveModel));
+  const claudePromptImprove = $derived(currentModel?.provider === "claude");
   const providerAccess = $derived({
     claudeReady: assistant.auth?.cliPresent === true
       && (assistant.auth.pill === "green" || assistant.auth.pill === "yellow"),
@@ -451,7 +501,7 @@
     openAiError: assistant.openAiModelsError,
   });
   const currentModelAccess = $derived(currentModel ? modelAccessFor(currentModel, providerAccess) : null);
-  const selectableModels = $derived(MODEL_OPTIONS.filter((m) => modelAccessFor(m, providerAccess).enabled));
+  const selectableModels = $derived(composerModels.filter((m) => modelAccessFor(m, providerAccess).enabled));
 
   // Reasoning-ladder derives the parent still needs (pill label, settingsRows,
   // onKey ←/→) — same matrix helpers SettingsMenu uses, so they can't drift.
@@ -523,11 +573,11 @@
     else { settingsOpen = false; void tick().then(() => ta?.focus()); }
   }
 
-  // Tab (or picking a command that wants arguments): insert `/name ` into the
-  // draft instead of firing, so the user can type args — the trailing space
-  // closes the menu (slashOpen requires a space-free draft) and Enter sends.
+  // Tab (or picking a command that wants arguments): insert its real invocation
+  // into the draft instead of firing. Claude uses `/name`; ChatGPT skills use
+  // `$name`. The trailing space closes the slash discovery menu.
   function fillSlash(c: SlashCmd) {
-    const text = `/${c.name} `;
+    const text = `${c.prefix ?? "/"}${c.name} `;
     setDraft(text);
     stt.consume();
     void tick().then(() => {
@@ -535,6 +585,52 @@
       ta?.setSelectionRange(text.length, text.length);
       autosize();
     });
+  }
+
+  /** Consume commands whose implementation is Claude-specific before they can
+   *  fall through as literal ChatGPT prompt text. Also owns provider-aware
+   *  local help/tool copy, since send.ts's legacy text describes Claude CLI. */
+  function handleChatGptSlash(input: string): boolean {
+    if (!paneChatGpt) return false;
+    const match = /^\/([^\s]+)/.exec(input);
+    if (!match) return false;
+    const name = match[1].toLowerCase();
+    if (name === "help") {
+      const metered = paneChatGptRoute === "openai" ? " · /cost" : "";
+      assistant.lastNotice =
+        `ChatGPT commands: /new · /clear · /model · /retry · /copy · /stop · /tools · /usage${metered} · /stats · /diag · /diag-clear · /help. ` +
+        "ChatGPT manages compaction automatically. Enabled ChatGPT skills appear in the / menu and run as $skill-name.";
+      return true;
+    }
+    if (name === "tools") {
+      assistant.lastNotice =
+        "ChatGPT can use the workspace tools granted to this chat. The transcript shows every actual tool call and permission request as it happens.";
+      return true;
+    }
+    if (name === "usage") {
+      assistant.lastNotice =
+        "ChatGPT plan limits and reset times are live in AI Health. The 7d and Spark indicators above open the same account data.";
+      return true;
+    }
+    const builtin = SLASH_COMMANDS.find((c) => c.name === name);
+    const discoveredClaudeCommand =
+      assistant.customCommands.some((c) => c.name.toLowerCase() === name) ||
+      cliCommands.names.some((n) => n.toLowerCase() === name);
+    if (builtin?.provider !== "claude" && !discoveredClaudeCommand) return false;
+    if (name === "compact") {
+      notify.info("ChatGPT compacts conversations automatically", {
+        detail: "Manual /compact wasn't sent as chat text. Start a new chat if you want a clean context immediately.",
+      });
+    } else if (name === "mcp") {
+      notify.info("/mcp is a Claude command", {
+        detail: "That panel reports Claude Code servers, so it isn't shown for ChatGPT.",
+      });
+    } else {
+      notify.info(`/${name} is only available with Claude`, {
+        detail: "Switch to a Claude model to run this Claude Code command.",
+      });
+    }
+    return true;
   }
 
   function pickSlash(c: SlashCmd) {
@@ -551,10 +647,12 @@
       fillSlash(c);
       return;
     }
-    // Direct-fire commands skip the textarea round-trip entirely.
+    // Direct-fire commands skip the textarea round-trip entirely. ChatGPT
+    // account skills keep their real `$name` prefix for App Server.
     setDraft("");
     stt.consume();
-    onsubmit(`/${c.name}`);
+    const invocation = `${c.prefix ?? "/"}${c.name}`;
+    if (!handleChatGptSlash(invocation)) onsubmit(invocation);
     void tick().then(autosize);
   }
 
@@ -605,6 +703,14 @@
     const text = out.trim();
     // Allow attachments-only sends (paste-and-go); only block if both empty.
     if (!text && attachments.length === 0) return;
+    // A manually typed Claude-only slash command must not become ChatGPT prompt
+    // text. Keep local provider-aware help/tools usable without a backend turn.
+    if (text && handleChatGptSlash(text)) {
+      setDraft("");
+      stt.consume();
+      void tick().then(autosize);
+      return;
+    }
     // A pending ask_user card blocks the turn — a typed send ANSWERS it
     // instead of queueing for the next turn, so the answer gets the full
     // composer path (autocorrect, dictation). Attachments fall through to
@@ -642,7 +748,7 @@
     void tick().then(autosize);
   }
 
-  // ── Prompt enhancer (wand) ───────────────────────────────────────────────
+  // ── Claude prompt enhancer (wand) ────────────────────────────────────────
   // One-shot Sonnet rewrite of the current draft into a clearer prompt. Result
   // shows as an editable preview above the composer — Accept drops it into the
   // textarea, Discard dismisses. Never auto-sends, never overwrites silently.
@@ -704,6 +810,7 @@
     return parts.length ? parts.join("\n\n") : undefined;
   }
   async function runEnhance(directive?: string) {
+    if (!claudePromptImprove) return;
     const text = (enhanceOriginal ?? draft).trim();
     if (!text || enhancing) return;
     if (enhanceOriginal === null) {
@@ -790,6 +897,16 @@
     clearTimeout(undoTimer);
     void tick().then(() => { autosize(); ta?.focus(); });
   }
+  // A model switch must never leave a Claude rewrite running behind a ChatGPT
+  // composer. Cancel the request and discard provider-specific preview state.
+  $effect(() => {
+    if (claudePromptImprove) return;
+    if (enhancing || enhancedPreview !== null || enhanceError !== null) dismissEnhanced();
+    if (undoDraft !== null) {
+      undoDraft = null;
+      clearTimeout(undoTimer);
+    }
+  });
 
   // ── Dictation integration ───────────────────────────────────────────────
   // Hold-Space push-to-talk (CC CLI style): empty composer + plain Space held
@@ -1036,10 +1153,17 @@
       undoDraft = null;
       return;
     }
-    // Ctrl/Cmd+E — full keyboard loop: enhance the draft; with the preview
-    // settled, accept it.
+    // Ctrl/Cmd+E — Claude-only full keyboard loop: enhance the draft; with the
+    // preview settled, accept it. Never silently route a ChatGPT draft through
+    // Sonnet.
     if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "e") {
       e.preventDefault();
+      if (!claudePromptImprove) {
+        notify.info("Prompt improvement is available with Claude", {
+          detail: "Switch to a Claude model to rewrite this draft with Sonnet.",
+        });
+        return;
+      }
       if (enhancing) return;
       if (enhancedPreview) acceptEnhanced();
       else void runEnhance();
@@ -1317,23 +1441,25 @@
         </div>
       </div>
     {/if}
-    <EnhanceBar
-      {enhancing}
-      {enhancedPreview}
-      {enhanceError}
-      {enhanceOriginal}
-      {enhanceStatus}
-      {enhanceMeta}
-      {groundEnhance}
-      hasWorkspace={!!assistant.workspace.current}
-      undoAvailable={undoDraft !== null}
-      onToggleGround={toggleGround}
-      onAccept={acceptEnhanced}
-      onDismiss={dismissEnhanced}
-      onRefine={(directive) => void runEnhance(directive)}
-      onEditPreview={(text) => (enhancedPreview = text)}
-      onUndo={undoEnhanced}
-    />
+    {#if claudePromptImprove}
+      <EnhanceBar
+        {enhancing}
+        {enhancedPreview}
+        {enhanceError}
+        {enhanceOriginal}
+        {enhanceStatus}
+        {enhanceMeta}
+        {groundEnhance}
+        hasWorkspace={!!assistant.workspace.current}
+        undoAvailable={undoDraft !== null}
+        onToggleGround={toggleGround}
+        onAccept={acceptEnhanced}
+        onDismiss={dismissEnhanced}
+        onRefine={(directive) => void runEnhance(directive)}
+        onEditPreview={(text) => (enhancedPreview = text)}
+        onUndo={undoEnhanced}
+      />
+    {/if}
 
     {#if slashOpen}
       <SlashMenu commands={slashFiltered} activeIdx={slashIdx} query={draft.slice(1).toLowerCase()} onPick={pickSlash} />
@@ -1616,15 +1742,15 @@
             {/if}
           </button>
           {/if}
-          {#if hasDraft}
+          {#if hasDraft && claudePromptImprove}
           <button
             class="cbtn ic enhance wandbtn reveal"
             class:enhancing
             type="button"
             onclick={() => runEnhance()}
             disabled={enhancing}
-            use:tooltip={enhancing ? "Enhancing…" : "Improve prompt — clean up & clarify (Ctrl+E)"}
-            aria-label="Improve prompt"
+            use:tooltip={enhancing ? "Improving with Claude…" : "Improve with Claude — clean up & clarify (Ctrl+E)"}
+            aria-label="Improve prompt with Claude"
           >
             <Wand2 size={15} />
           </button>

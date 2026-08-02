@@ -17,7 +17,7 @@
     <span class="boundary-line" aria-hidden="true"></span>
     <span
       class="boundary-pill"
-      use:tooltip={"Claude Code automatically summarized older messages to free up the context window. The conversation continues normally — nothing on screen was deleted."}
+      use:tooltip={"Older messages were automatically summarized to free up the context window. The conversation continues normally — nothing on screen was deleted."}
     >
       <Sparkles size={11} />
       <span>Conversation compacted{boundaryBlock.trigger === "manual" ? " · manual" : ""}</span>

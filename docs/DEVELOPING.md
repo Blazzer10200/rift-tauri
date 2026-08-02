@@ -45,7 +45,7 @@ Rift self-updates via Velopack. It checks on launch + every ~6h; when a build is
 ### Trouble?
 
 - Claude unavailable → install/sign in to `claude` (§4) or add an Anthropic key in Settings.
-- ChatGPT subscription unavailable → install/sign in to the standalone Codex CLI, then re-probe Settings → Providers. API-only failures stay under the optional API disclosure (§3).
+- ChatGPT subscription unavailable → install/sign in to the standalone Codex CLI, then choose **Check again** in Settings → Providers. API-only failures stay under the optional API disclosure (§3).
 - CLI logs/auth live under `~/.claude/`. Rift's own config is managed in-app via Settings.
 
 ---
@@ -188,12 +188,14 @@ When dependencies change, regenerate the bundled license notices: `python script
 
 `release.ps1` drives `tauri build` → Velopack pack (`vpk`, delta baseline pulled from the R2 feed) → publish **feed-first**: Cloudflare R2 (the live update feed installed clients read) then the GitHub release on this repo (human download page, retried 3×; single-repo — the separate `rift` releases repo was retired when the source went public). **The `vpk` CLI version MUST equal the `velopack` crate version** (both pinned `=1.2.0`) — bump them together (`dotnet tool update -g vpk` + the Cargo pin).
 
+For a packaged smoke test, never launch `rift-tauri.exe` directly from the raw Cargo `release` directory. `CARGO_TARGET_DIR` may be shared across projects, and Windows can load an unrelated adjacent DLL before the system copy. Use the clean allowlisted staging directory that `release.ps1` creates (app exe plus explicitly required ONNX/DirectML sidecars); unexpected DLLs are reported and excluded.
+
 ### Ship flow + guard rails
 
 The tag-driven `release.yml` **runs pinned Rust 1.97/Clippy plus the full test suite (`cargo test` + `svelte-check` + `vitest`) before it builds/publishes**. The same toolchain is pinned locally by `rust-toolchain.toml`, preventing local/CI lint drift. Two optional helpers around a ship:
 
 - `pwsh scripts/smoke-turn.ps1 -Model haiku` — **before** tagging, prove a real Claude turn still completes end-to-end (spawns `claude` with Rift's exact turn flags against a throwaway folder; ~a cent of quota). Covers the live-turn check that CDP can't.
-- `pwsh scripts/ship-watch.ps1 <tag>` — **after** pushing the annotated tag, blocks on that release run and reports green/red (exit status mirrors the run). Replaces the manual "confirm CI landed next session" step.
+- `pwsh scripts/ship-watch.ps1 <tag>` — **after** pushing the annotated tag, polls that release run and reports green/red. `-TimeoutSeconds` is enforced; a timeout exits `124` instead of leaving an agent blocked indefinitely. Replaces the manual "confirm CI landed next session" step.
 
 CI runs on a self-hosted runner. When a tagged release sits `queued` and never starts, or the **Verify published** step red-X's a release that actually shipped, the run usually just needs a cancel + rerun once the runner service is back.
 

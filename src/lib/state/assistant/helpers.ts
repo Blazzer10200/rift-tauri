@@ -148,7 +148,7 @@ export function migrateClaudeModelPinsTo(next: ModelSel) {
     }
     for (const key of keys) {
       const current = localStorage.getItem(key);
-      if (current && !isOpenAIModel(current)) localStorage.setItem(key, next);
+      if (!current || !isOpenAIModel(current)) localStorage.setItem(key, next);
     }
   } catch {
     /* storage disabled */

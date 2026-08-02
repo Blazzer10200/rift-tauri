@@ -17,13 +17,47 @@ import { invoke } from "@tauri-apps/api/core";
 import { accessibility } from "../accessibility.svelte";
 import { notify } from "../toast.svelte";
 import type { AssistantStore, TabState } from "../assistant.svelte";
-import type { Block, ChatMessage, ModelSel, QueueItem, TurnRecord } from "./types";
+import type { Block, ChatGptRoute, ChatMessage, ModelSel, QueueItem, TurnRecord } from "./types";
 import { effortToFlag, fableAvailable, fastEligible, haikuAvailable, isOpenAIModel, FABLE_SUNSET_MS } from "./helpers";
 import { mcpPanel } from "../mcp-panel.svelte";
 import { appendSteerBlock, finalizeInflightBlocks, removeSteerBlock } from "./streaming";
 
 // One-shot per app session — the sunset warning shouldn't nag on every send.
 let fableSunsetNoticed = false;
+
+function unavailableChatGptRouteCopy(route: ChatGptRoute | null): { title: string; detail: string } {
+  if (route === "codex") {
+    return {
+      title: "ChatGPT subscription unavailable",
+      detail:
+        "This chat is pinned to your ChatGPT subscription. Reconnect ChatGPT in Settings → AI to continue. Rift will not switch it to separately billed API access.",
+    };
+  }
+  if (route === "openai") {
+    return {
+      title: "ChatGPT API access unavailable",
+      detail:
+        "This chat is pinned to separately billed ChatGPT API access. Restore its API key and model access in Settings → AI to continue. Rift will not switch it to the subscription route.",
+    };
+  }
+  return {
+    title: "ChatGPT isn't set up",
+    detail: "This model isn't available through a connected ChatGPT route. Open Settings → AI to reconnect or choose an available model.",
+  };
+}
+
+function reportUnavailableChatGptRoute(
+  store: AssistantStore,
+  tab: TabState | null,
+  route: ChatGptRoute | null,
+) {
+  const copy = unavailableChatGptRouteCopy(route);
+  if (tab) tab.lastError = copy.detail;
+  notify.danger(copy.title, { detail: copy.detail });
+  if (route === "codex") void store.refreshCodexStatus();
+  else if (route === "openai") void store.refreshOpenAiStatus();
+  else void Promise.all([store.refreshCodexStatus(), store.refreshOpenAiStatus()]);
+}
 
 /** Attachments threaded explicitly through a send — queue drains pass the
  *  drained item's snapshot here instead of restoring it onto tab state, so a
@@ -64,14 +98,15 @@ export async function send(
   // dies as "claude exited with 1"; block it, re-probe (state may be stale),
   // and surface the reason. Slash commands above are local, so they still run.
   if (!store.authReadyFor(liveTab)) {
-    const openai = isOpenAIModel(liveTab?.modelOverride ?? store.model);
-    notify.danger(openai ? "ChatGPT isn't set up" : "Claude isn't set up", {
-      detail: openai
-        ? store.codexStatus?.summary ?? store.openAiStatus?.summary ?? "Open Settings → Providers and connect ChatGPT."
-        : store.auth?.summary ?? "Open Settings to sign in or add an API key.",
-    });
-    if (openai) void Promise.all([store.refreshCodexStatus(), store.refreshOpenAiStatus()]);
-    else void store.refreshAuth();
+    const chatGpt = isOpenAIModel(liveTab?.modelOverride ?? store.model);
+    if (chatGpt) {
+      reportUnavailableChatGptRoute(store, liveTab, liveTab?.chatGptRoute ?? null);
+    } else {
+      notify.danger("Claude isn't set up", {
+        detail: store.auth?.summary ?? "Open Settings to sign in or add an API key.",
+      });
+      void store.refreshAuth();
+    }
     return;
   }
   // Already streaming on this tab → STEER first (inject into the live turn so
@@ -117,6 +152,26 @@ export async function send(
   const tab = store.ensureTab(convoId, convoId);
   // The model THIS tab's turns run on — per-tab override, else the global pick.
   const effModel = tab.modelOverride ?? store.model;
+  const chatGptRoute = isOpenAIModel(effModel)
+    ? store.chatGptRouteFor(effModel, tab.chatGptRoute)
+    : null;
+  // Fail closed on a pinned route. In particular, a subscription chat must
+  // never start billing the separately configured API because Codex briefly
+  // disappeared from a status probe.
+  if (isOpenAIModel(effModel) && !chatGptRoute) {
+    reportUnavailableChatGptRoute(store, tab, tab.chatGptRoute);
+    return;
+  }
+  // First GPT send chooses the transport once. The user-message save later in
+  // this function persists it before the turn leaves the renderer.
+  if (chatGptRoute && tab.chatGptRoute === null) {
+    tab.chatGptRoute = chatGptRoute;
+    if (chatGptRoute === "openai") {
+      notify.warn("Using separately billed ChatGPT API access", {
+        detail: "This chat is now pinned to API access and will not switch routes automatically.",
+      });
+    }
+  }
   const isFirstTurn = !tab.convoCreatedAt;
   if (!tab.cliSessionId) {
     tab.cliSessionId = convoId;
@@ -330,10 +385,6 @@ export async function send(
     ? (trimmed ? `${textBlocks}\n\n${trimmed}` : textBlocks)
     : trimmed;
   try {
-    const chatGptRoute = isOpenAIModel(effModel) ? store.chatGptRouteFor(effModel) : null;
-    if (isOpenAIModel(effModel) && !chatGptRoute) {
-      throw new Error("This ChatGPT model is not available on the connected account.");
-    }
     const command = chatGptRoute === "codex"
       ? "assistant_codex_send"
       : chatGptRoute === "openai"

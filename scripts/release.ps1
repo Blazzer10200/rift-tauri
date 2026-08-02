@@ -260,6 +260,8 @@ if (-not (Test-Path $exePath)) { throw "exe not produced: $exePath" }
 # vpk packs every file in -p verbatim. Copy ONLY the exe + window icon +
 # third-party license notices (OSS notice obligation for shipped binaries;
 # regenerate via scripts/gen-third-party-notices.py when deps change).
+# This allowlist also prevents Windows DLL-search contamination from a shared
+# CARGO_TARGET_DIR: never launch or pack the raw release dir as a candidate.
 # If a future Tauri release bundles a WebView2 redistributable, sidecar, or
 # any *.dll next to the exe, IT MUST BE ADDED HERE or it'll be missing on
 # installed clients.
@@ -275,6 +277,11 @@ Copy-Item 'THIRD-PARTY-NOTICES.md' $staging
 # they must ship or parakeet model load fails on installed clients.
 $ortDlls = Get-ChildItem (Join-Path $targetRoot 'release') -File -Filter '*.dll' |
     Where-Object { $_.Name -match '^(onnxruntime.*|DirectML.*)\.dll$' }
+$unexpectedDlls = Get-ChildItem (Join-Path $targetRoot 'release') -File -Filter '*.dll' |
+    Where-Object { $_.Name -notmatch '^(onnxruntime.*|DirectML.*)\.dll$' }
+foreach ($dll in $unexpectedDlls) {
+    Write-Host "  ignoring unexpected adjacent DLL: $($dll.Name) (not staged)" -ForegroundColor Yellow
+}
 foreach ($dll in $ortDlls) {
     Write-Host "  staging ort dll: $($dll.Name)" -ForegroundColor DarkGray
     Copy-Item $dll.FullName $staging

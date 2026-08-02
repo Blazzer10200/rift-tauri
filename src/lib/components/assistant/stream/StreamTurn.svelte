@@ -16,7 +16,8 @@
   import { messageToTurn, groupBlocks, fmtDur, classifySay, VERB_ING, VERB_PAST, tasksToPlanItems, type StreamTool } from "./streamModel";
   import { assistant, type ChatMessage, type TabState } from "$lib/state/assistant.svelte";
   import { uiPrefs } from "$lib/state/ui-prefs.svelte";
-  import { fmtTokens } from "$lib/state/assistant/helpers";
+  import { fmtTokens, isOpenAIModel } from "$lib/state/assistant/helpers";
+  import { modelProviderLabel } from "$lib/state/assistant/providerDisplay";
   import AnimatedCount from "./AnimatedCount.svelte";
   import { tooltip } from "$lib/actions/tooltip";
 
@@ -28,6 +29,12 @@
   let { message, streaming = false, isLast = false, tab = null }:
     { message: ChatMessage; streaming?: boolean; isLast?: boolean; tab?: TabState | null } = $props();
   const liveTab = $derived(tab ?? assistant.activeTab);
+  const turnModel = $derived(message.model ?? liveTab?.lastModelId ?? liveTab?.modelOverride ?? null);
+  const turnProvider = $derived(turnModel ? modelProviderLabel(turnModel) : null);
+  const chatGptTurn = $derived(isOpenAIModel(turnModel));
+  const providerSubject = $derived(turnProvider ?? "The assistant");
+  const providerInline = $derived(turnProvider ?? "the assistant");
+  const providerPossessive = $derived(turnProvider ? `${turnProvider}'s` : "the assistant's");
 
   const turn = $derived(messageToTurn(message));
   const groups = $derived(groupBlocks(turn.blocks));
@@ -131,7 +138,7 @@
   // Manual /compact turn: the CLI compacts natively — no tools, no text, just
   // silence until the compact_boundary lands — so the generic "Working…" read
   // as a hang. Dedicated status + progress card below keep it honest.
-  const manualCompacting = $derived(streaming && !!liveTab?.compactingTurn);
+  const manualCompacting = $derived(streaming && !chatGptTurn && !!liveTab?.compactingTurn);
 
   // Live footer meta — spec's `Unfurling… 5s · 312 tokens`. 1s ticker drives
   // elapsed + tokens; both pull from the assistant store (turnStartedAt +
@@ -241,7 +248,7 @@
   const idleVerb = $derived(reasoningNow ? "Thinking" : "Working");
   // Stall watchdog: the turn is live but NOTHING has come back — no tool in
   // flight, no output tokens. A short wait is normal model latency (first token
-  // ~4s); a long silence can be the model OR a wedged local Claude process. We
+  // ~4s); a long silence can be the model OR a wedged local provider process. We
   // DON'T claim to know which — the old copy asserted "it's the Anthropic API",
   // which was a guess that read as a lie when the real cause was a stuck CLI.
   // The backend watchdog (STREAM_NO_PROGRESS_SECS=180s in turn.rs) auto-ends a
@@ -358,7 +365,7 @@
         </div>
       {/if}
     {:else if g.type === "steer"}
-      <div class="ssteer" class:has-imgs={g.imgs.length > 0} use:tooltip={"Sent while Claude was working — read mid-turn"}>
+      <div class="ssteer" class:has-imgs={g.imgs.length > 0} use:tooltip={`Sent while ${providerInline} was working — read mid-turn`}>
         <CornerDownRight size={11} />
         <span class="ssteer-body">
           <span class="ssteer-text">{g.text}</span>
@@ -449,11 +456,11 @@
         </div>
         <div class="scompact-note">
           {#if autoCompacting}
-            This chat filled up Claude's working memory, so it's making a quick recap of the
+            This chat filled up {providerPossessive} working memory, so {providerInline} is making a quick recap of the
             older messages to clear some room. That usually takes a minute or two, and the turn
             picks back up on its own when it's done. Everything you see here stays put.
           {:else}
-            Claude is rolling the older messages into a short recap to free up room. The full
+            {providerSubject} is rolling the older messages into a short recap to free up room. The full
             chat stays on screen, and things pick up right where they left off once the recap
             is ready.
           {/if}
@@ -461,8 +468,8 @@
       </div>
     {:else if stallLevel >= 3}
       <div class="sstall-note">
-        No output yet after a long wait — this can be a slow response or a stuck
-        local Claude process. Rift will end the turn automatically if nothing
+        No output yet after a long wait — {providerInline} may be slow, or its local
+        connection may be stuck. Rift will end the turn automatically if nothing
         arrives shortly. You can press Stop now and try again.
       </div>
     {:else if stallLevel > 0}

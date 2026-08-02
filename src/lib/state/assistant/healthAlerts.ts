@@ -7,6 +7,8 @@ import { toast } from "../toast.svelte";
 import { workspace } from "../workspace.svelte";
 import type { AssistantStore, TabState } from "../assistant.svelte";
 import type { TurnRecord } from "./types";
+import { isOpenAIModel } from "./helpers";
+import { modelProviderLabel } from "./providerDisplay";
 
 // One-shot-per-app-session latches for the health warnings — each fires as a
 // hint once, not a nag (same pattern as send.ts's fableSunsetNoticed).
@@ -23,6 +25,15 @@ const ctxWarned = new Map<string, boolean>();
 export function ctxAlertTransition(pct: number, latched: boolean): { fire: boolean; latched: boolean } {
   if (latched) return { fire: false, latched: pct >= CTX_REARM_PCT };
   return pct >= CTX_WARN_PCT ? { fire: true, latched: true } : { fire: false, latched: false };
+}
+
+/** Provider identity plus the one presentation capability health alerts need.
+ *  ChatGPT compacts automatically; never offer it Claude's manual `/compact`. */
+export function healthPresentationForModel(model: string | null | undefined) {
+  return {
+    label: modelProviderLabel(model),
+    canManualCompact: !isOpenAIModel(model),
+  } as const;
 }
 
 // MCP statuses that mean the rift server is genuinely dead. "pending" (still
@@ -85,9 +96,12 @@ export function askUserStaleNudge(store: AssistantStore, tab: TabState) {
     typeof document !== "undefined" && !document.hidden &&
     workspace.activeId === "chat" && tabVisible;
   if (onScreen) return;
+  const provider = healthPresentationForModel(
+    tab.lastModelId ?? tab.pinnedModel ?? tab.modelOverride ?? store.model,
+  );
   toast.push({
     severity: "info",
-    title: "Claude is waiting on your answer",
+    title: `${provider.label} is waiting on your answer`,
     detail: tabTitle(tab),
     action: convoId
       ? {
@@ -106,6 +120,9 @@ export function askUserStaleNudge(store: AssistantStore, tab: TabState) {
  *  post-compaction). */
 export function checkTurnHealth(store: AssistantStore, tab: TabState, convoId: string | undefined) {
   const rec = convoId ? lastTurnFor(store, convoId) : null;
+  const provider = healthPresentationForModel(
+    rec?.modelId ?? rec?.model ?? tab.lastModelId ?? tab.pinnedModel ?? tab.modelOverride ?? store.model,
+  );
 
   // Context nearing the point where the CLI will auto-compact mid-turn
   // without warning. Measured against the USER's effective auto-compact
@@ -129,12 +146,18 @@ export function checkTurnHealth(store: AssistantStore, tab: TabState, convoId: s
           ? `Context is ${Math.round(pct)}% of the way to auto-compact`
           : `Context is ${Math.round(pct)}% full`,
         detail: trigger != null
-          ? "Claude will auto-compact soon. Compacting at a natural break keeps the recap cleaner."
-          : "Auto-compact is disabled — compact at a natural break to keep headroom.",
-        action: {
-          label: "Compact",
-          onClick: () => void store.send("/compact", convoId),
-        },
+          ? provider.canManualCompact
+            ? `${provider.label} will auto-compact soon. Compacting at a natural break keeps the recap cleaner.`
+            : `${provider.label} will compact this chat automatically soon. The full conversation stays visible.`
+          : provider.canManualCompact
+            ? "Auto-compact is disabled — compact at a natural break to keep headroom."
+            : `Manual compaction isn't available for ${provider.label} — start a fresh chat at a natural break to keep headroom.`,
+        action: provider.canManualCompact
+          ? {
+              label: "Compact",
+              onClick: () => void store.send("/compact", convoId),
+            }
+          : undefined,
       });
     }
   }
@@ -180,7 +203,7 @@ export function checkTurnHealth(store: AssistantStore, tab: TabState, convoId: s
         severity: "warn",
         title: "Slow turn start",
         detail: egregious
-          ? `${Math.round(deadWait / 1000)}s before first output — the Anthropic API was slow (or silently retrying), not Rift.`
+          ? `${Math.round(deadWait / 1000)}s before first output — ${provider.label} was slow (or silently retrying), not Rift.`
           : `${Math.round(deadWait / 1000)}s passed before first output (spawn/prefill/queue stall).`,
       });
     }

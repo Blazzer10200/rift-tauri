@@ -13,7 +13,7 @@
   import ClaudeConnect from "$lib/components/onboarding/ClaudeConnect.svelte";
   import OpenAiConnect from "$lib/components/onboarding/OpenAiConnect.svelte";
   import { isOpenAIModel } from "$lib/state/assistant/helpers";
-  import { CHATGPT } from "$lib/state/assistant/providerDisplay";
+  import { CHATGPT, modelProviderLabel } from "$lib/state/assistant/providerDisplay";
   import { leafName, shortPath } from "$lib/components/shell/tabsbar/helpers";
   import { greeting, fmtAgo } from "$lib/components/workspace/welcomeShared";
   import Skeleton from "$lib/components/shell/Skeleton.svelte";
@@ -116,18 +116,22 @@
   let newToRiftHidden = $state(localStorage.getItem("rift.newToRift.hidden") === "1");
   function hideNewToRift() { localStorage.setItem("rift.newToRift.hidden", "1"); newToRiftHidden = true; }
 
-  // "Jump back in" — the 3 most recently active conversations for THIS pane's
-  // root (same root-key normalization the sidebar scope filter uses).
+  // One latest conversation for THIS pane's root. The sidebar/history already
+  // owns the full list; the central welcome keeps a single resume affordance.
   const rootKey = (r: string | null | undefined) =>
     (r ?? "").replace(/[/\\]+$/, "").replace(/[/\\]/g, "/").toLowerCase();
   const resumables = $derived.by(() => {
     if (!paneRoot) return [];
     const key = rootKey(paneRoot);
     return assistant.conversations
-      .filter((c) => rootKey(c.workspaceRoot) === key)
+      .filter(
+        (c) =>
+          rootKey(c.workspaceRoot) === key &&
+          isOpenAIModel(c.model) === openAiTab,
+      )
       .slice()
       .sort((a, b) => (b.lastActivityAt ?? b.updatedAt) - (a.lastActivityAt ?? a.updatedAt))
-      .slice(0, 6);
+      .slice(0, 1);
   });
 
 </script>
@@ -185,14 +189,14 @@
         <GhPopover anchor={ghAnchor} onClose={() => (ghOpen = false)} />
       {/if}
 
-      <!-- Jump back in — the project's freshest threads, one click to resume.
+      <!-- Continue latest — one central resume action; the sidebar owns history.
            During boot the conversation list is still loading, so show skeleton
            rows in the strip's exact footprint instead of letting it pop in late. -->
       {#if bootLoad.showSkeleton}
         <div class="resume">
-          <div class="wo-label">Jump back in</div>
+          <div class="wo-label">Continue latest</div>
           <div class="resume-list">
-            {#each [0, 1, 2] as i (i)}
+            {#each [0] as i (i)}
               <div class="resume-skel">
                 <Skeleton w="13px" h="13px" radius="4px" delay={i * 90} />
                 <Skeleton w="{58 - i * 9}%" h="12px" radius="5px" delay={i * 90 + 40} />
@@ -203,14 +207,17 @@
         </div>
       {:else if resumables.length > 0}
         <div class="resume">
-          <div class="wo-label">Jump back in</div>
+          <div class="wo-label">Continue latest</div>
           <div class="resume-list">
             {#each resumables as c (c.id)}
               {@const title = c.title ?? "Untitled chat"}
-              <button class="resume-item" type="button" onclick={() => void assistant.openTab(c.id)} use:tooltip={title}>
+              {@const provider = modelProviderLabel(c.model)}
+              <button class="resume-item" type="button" aria-label={`Continue latest ${provider} chat: ${title}`} onclick={() => void assistant.openTab(c.id)} use:tooltip={title}>
                 <MessageSquare size={13} />
                 <span class="ri-t">{title}</span>
+                <span class="ri-provider">{provider}</span>
                 <span class="ri-m">{fmtAgo(c.lastActivityAt ?? c.updatedAt)}</span>
+                <span class="ri-act">Continue</span>
                 <ChevronRight size={13} class="ri-go" />
               </button>
             {/each}
@@ -438,9 +445,8 @@
   .greet-switch:hover { background: var(--surface-hover); color: var(--fg-2); border-color: var(--border-strong); }
   .greet-switch :global(svg) { color: var(--fg-faint); }
 
-  /* jump back in — compact list rows (Claude-Desktop density), not cards:
-     title-led, time right-aligned, resume arrow revealed on hover. The section
-     itself rides a quiet tint tile (island dialect, no shadow — one level max). */
+  /* Continue latest — one title-led row, not a second history list. The section
+     rides a quiet tint tile (island dialect, no shadow — one level max). */
   .resume { display: flex; flex-direction: column; gap: 8px; margin-top: 22px;
     padding: 12px 10px 10px; border-radius: 12px;
     border: 1px solid var(--island-border);
@@ -458,8 +464,11 @@
   .resume-skel > :global(:nth-child(2)) { flex: 1; }
   .ri-t { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 500;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ri-provider { flex: none; padding: 1px 6px; border: 1px solid var(--border); border-radius: 999px;
+    background: var(--bg-elev-2); color: var(--fg-subtle); font-size: 9.5px; font-weight: 600; line-height: 1.4; }
   .ri-m { flex: none; font-size: 10.5px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
-  :global(.resume-item .ri-go) { flex: none; color: var(--accent); opacity: 0; transition: opacity var(--dur-fast); }
+  .ri-act { flex: none; font-size: 10.5px; font-weight: 600; color: var(--accent); }
+  :global(.resume-item .ri-go) { flex: none; color: var(--accent); opacity: 0.55; transition: opacity var(--dur-fast); }
   .resume-item:hover :global(.ri-go) { opacity: 1; }
 
   /* new to rift? — collapsible orientation footer, dismissible for good */

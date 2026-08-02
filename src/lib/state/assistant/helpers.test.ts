@@ -2,12 +2,36 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   FABLE_DISABLED, FABLE_SUNSET_MS, clampEffort, effortToFlag, fableAvailable,
   fastEligible, flattenToolResult, isStaleTurnEpoch, loadEffort,
-  migrateThinkingPins, modelFamily, previewToolInput, ctxWindowForModelId,
+  migrateClaudeModelPinsTo, migrateThinkingPins, modelFamily, previewToolInput, ctxWindowForModelId,
   modelNativeWindow, planContextCap, autoCompactTriggerTokens, planDecision,
   partialPlanMd,
 } from "./helpers";
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
+describe("ChatGPT default migration", () => {
+  it("fills a missing baseline, replaces legacy Claude pins, and preserves ChatGPT choices", () => {
+    const entries = new Map<string, string>([
+      ["rift.assistant.model::C:/legacy", "sonnet"],
+      ["rift.assistant.model::C:/chatgpt", "gpt-5.6-terra"],
+    ]);
+    vi.stubGlobal("localStorage", {
+      get length() { return entries.size; },
+      key: (index: number) => [...entries.keys()][index] ?? null,
+      getItem: (key: string) => entries.get(key) ?? null,
+      setItem: (key: string, value: string) => entries.set(key, value),
+    });
+
+    migrateClaudeModelPinsTo("gpt-5.6-sol");
+
+    expect(entries.get("rift.assistant.model")).toBe("gpt-5.6-sol");
+    expect(entries.get("rift.assistant.model::C:/legacy")).toBe("gpt-5.6-sol");
+    expect(entries.get("rift.assistant.model::C:/chatgpt")).toBe("gpt-5.6-terra");
+  });
+});
 
 describe("planDecision (plan-card action → answer_permission payload)", () => {
   it("build/ask approve and carry the Rift-private return mode", () => {
@@ -340,4 +364,3 @@ describe("partialPlanMd — live plan extraction from a forming tool input", () 
     expect(partialPlanMd('{"pl')).toBe("");
   });
 });
-

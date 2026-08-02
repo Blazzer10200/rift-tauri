@@ -10,6 +10,7 @@
   import PageHero from "../shared/PageHero.svelte";
   import { usage, type LimitWindow, type AdviceApply } from "../../state/usage.svelte";
   import { assistant, type ModelSel } from "../../state/assistant.svelte";
+  import { isOpenAIModel } from "../../state/assistant/helpers";
   import { summarizeSession } from "../../state/assistant/telemetry";
   import {
     summarize, perModel, streaks, topModel, type ConvoStat,
@@ -20,6 +21,26 @@
   // session has many turns.
   let stats = $state<ConvoStat[] | null>(null);
   let statsError = $state<string | null>(null);
+  const chatGptActive = $derived(isOpenAIModel(assistant.effectiveModel));
+  const chatGptAccount = $derived(assistant.codexAccount);
+
+  function titleCase(value: string | null | undefined, fallback: string): string {
+    const clean = value?.trim();
+    return clean ? `${clean[0].toUpperCase()}${clean.slice(1)}` : fallback;
+  }
+  function rateWindowLabel(minutes: number | null, fallback: string): string {
+    if (minutes === 300) return "5-hour window";
+    if (minutes === 10_080) return "Weekly window";
+    if (minutes && minutes % 1_440 === 0) return `${minutes / 1_440}-day window`;
+    if (minutes && minutes % 60 === 0) return `${minutes / 60}-hour window`;
+    return fallback;
+  }
+  function fmtCodexReset(seconds: number | null): string {
+    if (!seconds) return "reset time unavailable";
+    const date = new Date(seconds * 1000);
+    if (!Number.isFinite(date.getTime())) return "reset time unavailable";
+    return `resets ${date.toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}`;
+  }
 
   // B2 — cross-session turn-perf aggregate from the persisted turns.ndjson:
   // p50/p90 latency, cache-hit rate, cost-by-day. Absent until the first turn
@@ -103,7 +124,10 @@
   const STAGE_FLOOR: Record<string, number> = { thinking: 3, writing: 4 };
 
   onMount(() => {
-    const poll = () => void usage.refreshRateLimits(assistant.auth?.cliVersion ?? null);
+    const poll = () => {
+      if (chatGptActive) void assistant.refreshCodexStatus();
+      else void usage.refreshRateLimits(assistant.auth?.cliVersion ?? null);
+    };
     poll();
     void invoke<ConvoStat[]>("assistant_stats")
       .then((s) => { stats = s; })
@@ -684,6 +708,107 @@
 </script>
 
 <div class="sb-main">
+  {#if chatGptActive}
+    <PageHero
+      eyebrow="AI Health"
+      title="ChatGPT Health"
+      desc="Live account status, plan windows, usage, and the ChatGPT capabilities available inside Rift."
+    >
+      {#snippet chip()}
+        <span class="ah-chip" class:good={assistant.codexStatus?.ready === true}>
+          <span class="dot"></span>{assistant.codexStatus?.ready ? titleCase(chatGptAccount?.planType, "Connected") : "Needs attention"}
+        </span>
+      {/snippet}
+    </PageHero>
+
+    <div class="ah-scroll">
+      <div class="ah-wrap ah-chatgpt">
+        <section class="ah-card ah-account-card">
+          <div class="ah-card-h"><HeartPulse size={15} strokeWidth={1.9} />Account &amp; runtime
+            <button class="ah-refresh" type="button" disabled={assistant.codexChecking} onclick={() => void assistant.refreshCodexStatus()}>
+              {#if assistant.codexChecking}<Loader2 size={13} class="ah-spin" />Checking…{:else}Refresh{/if}
+            </button>
+          </div>
+          {#if assistant.codexChecking && !chatGptAccount}
+            <p class="ah-muted">Reading your ChatGPT account through the local Codex App Server…</p>
+          {:else if assistant.codexAccountError || assistant.codexError}
+            <p class="ah-advice-err"><AlertTriangle size={15} />{assistant.codexAccountError ?? assistant.codexError}</p>
+          {:else if chatGptAccount}
+            <div class="ah-tiles">
+              <div class="ah-tile"><div class="ah-tile-v ah-tile-sm">{titleCase(chatGptAccount.planType, "ChatGPT")}</div><div class="ah-tile-k">current plan</div></div>
+              <div class="ah-tile"><div class="ah-tile-v">{chatGptAccount.models.length}</div><div class="ah-tile-k">available models</div></div>
+              <div class="ah-tile"><div class="ah-tile-v">{chatGptAccount.skills.filter((skill) => skill.enabled).length}</div><div class="ah-tile-k">available skills</div></div>
+              <div class="ah-tile"><div class="ah-tile-v ah-tile-sm">{assistant.codexStatus?.cliVersion ?? "Ready"}</div><div class="ah-tile-k">local Codex runtime</div></div>
+            </div>
+            {#if chatGptAccount.email}<p class="ah-attrib subtle"><Check size={13} />Signed in as {chatGptAccount.email}. Rift never reads or stores the account credentials.</p>{/if}
+          {:else}
+            <p class="ah-muted">Connect ChatGPT in Settings → Providers to see account health here.</p>
+          {/if}
+        </section>
+
+        <section class="ah-card">
+          <div class="ah-card-h"><Gauge size={15} strokeWidth={1.9} />Plan limits</div>
+          {#if chatGptAccount?.rateLimitsError}
+            <p class="ah-muted">Rift couldn't read the current ChatGPT limit windows: {chatGptAccount.rateLimitsError}</p>
+          {:else if !chatGptAccount}
+            <p class="ah-muted">Connect ChatGPT to load the plan windows tied to this account.</p>
+          {:else if chatGptAccount.rateLimits.length === 0}
+            <p class="ah-muted">This account did not report a metered ChatGPT limit window.</p>
+          {:else}
+            <p class="ah-card-sub">Live usage from the same ChatGPT account Rift uses for turns. Bars refill automatically at the listed reset time.</p>
+            <div class="ah-bars">
+              {#each chatGptAccount.rateLimits as limit (limit.id)}
+                {#if limit.primary}
+                  {@const used = Math.round(limit.primary.usedPercent)}
+                  <div class="ah-bar-row">
+                    <div class="ah-bar-top"><span class="ah-bar-k">{limit.name ?? rateWindowLabel(limit.primary.windowDurationMins, limit.id === "codex" ? "Coding window" : limit.id)}</span><span class="ah-bar-v">{used}%<span class="ah-bar-reset">{fmtCodexReset(limit.primary.resetsAt)}</span></span></div>
+                    <div class="ah-track"><div class="ah-fill {zone(used)}" style:width="{Math.min(100, used)}%"></div></div>
+                  </div>
+                {/if}
+                {#if limit.secondary}
+                  {@const used = Math.round(limit.secondary.usedPercent)}
+                  <div class="ah-bar-row">
+                    <div class="ah-bar-top"><span class="ah-bar-k">{rateWindowLabel(limit.secondary.windowDurationMins, `${limit.name ?? limit.id} secondary`)}</span><span class="ah-bar-v">{used}%<span class="ah-bar-reset">{fmtCodexReset(limit.secondary.resetsAt)}</span></span></div>
+                    <div class="ah-track"><div class="ah-fill {zone(used)}" style:width="{Math.min(100, used)}%"></div></div>
+                  </div>
+                {/if}
+              {/each}
+            </div>
+            {#if chatGptAccount.resetCreditsAvailable}
+              <p class="ah-attrib"><Sparkles size={13} />{chatGptAccount.resetCreditsAvailable} earned rate-limit reset credit{chatGptAccount.resetCreditsAvailable === 1 ? "" : "s"} available in your account.</p>
+            {/if}
+          {/if}
+        </section>
+
+        <section class="ah-card half">
+          <div class="ah-card-h"><Wrench size={15} strokeWidth={1.9} />ChatGPT usage</div>
+          {#if chatGptAccount?.usage}
+            <div class="ah-tiles sm">
+              <div class="ah-tile"><div class="ah-tile-v">{fmtNum(chatGptAccount.usage.lifetimeTokens ?? 0)}</div><div class="ah-tile-k">lifetime tokens</div></div>
+              <div class="ah-tile"><div class="ah-tile-v">{fmtNum(chatGptAccount.usage.peakDailyTokens ?? 0)}</div><div class="ah-tile-k">peak daily tokens</div></div>
+              <div class="ah-tile"><div class="ah-tile-v">{chatGptAccount.usage.currentStreakDays ?? 0}d</div><div class="ah-tile-k">current streak</div></div>
+              <div class="ah-tile"><div class="ah-tile-v">{chatGptAccount.usage.longestStreakDays ?? 0}d</div><div class="ah-tile-k">longest streak</div></div>
+            </div>
+          {:else if chatGptAccount?.usageError}
+            <p class="ah-muted">ChatGPT usage history is unavailable: {chatGptAccount.usageError}</p>
+          {:else}
+            <p class="ah-muted">Usage history will appear after the account reports it.</p>
+          {/if}
+        </section>
+
+        <section class="ah-card half">
+          <div class="ah-card-h"><Plug size={15} strokeWidth={1.9} />Available in Rift</div>
+          <div class="ah-cap-list">
+            <span><Check size={13} />Live account models and reasoning levels</span>
+            <span><Check size={13} />Images, streaming, and resumable chats</span>
+            <span><Check size={13} />Workspace tools with approvals</span>
+            <span><Check size={13} />Plan mode, cancellation, and compaction</span>
+            <span><Check size={13} />Questions and local Codex skills</span>
+          </div>
+        </section>
+      </div>
+    </div>
+  {:else}
   <PageHero
     eyebrow="Experimental"
     title="Claude Usage & Health"
@@ -1087,6 +1212,7 @@
 
     </div>
   </div>
+  {/if}
 </div>
 
 <style>
@@ -1125,6 +1251,8 @@
 
   .ah-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--fg-muted); box-shadow: inset 0 0 0 1px var(--ghost-border); }
   .ah-chip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg-subtle); }
+  .ah-chip.good { color: var(--ok); background: var(--ok-soft); }
+  .ah-chip.good .dot { background: var(--ok); }
   .ah-chip.ok .dot { background: var(--accent); }
   .ah-chip.warn .dot { background: var(--warn); }
   .ah-chip.hot .dot { background: var(--danger); }
@@ -1291,6 +1419,12 @@
   .ah-card { border-radius: var(--radius-xl); padding: 15px 20px; background: var(--surface); box-shadow: inset 0 0 0 1px var(--border); }
   .ah-card-h { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 660; letter-spacing: -0.01em; margin-bottom: 12px; color: var(--fg); }
   .ah-card-h :global(svg) { color: var(--accent); }
+  .ah-refresh { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--field); color: var(--fg-muted); font: inherit; font-size: 11px; cursor: pointer; }
+  .ah-refresh:hover:not(:disabled) { color: var(--fg); border-color: var(--border-strong); }
+  .ah-refresh:disabled { opacity: 0.6; cursor: wait; }
+  .ah-cap-list { display: grid; gap: 8px; }
+  .ah-cap-list > span { display: flex; align-items: center; gap: 8px; color: var(--fg-muted); font-size: 12px; line-height: 1.4; }
+  .ah-cap-list :global(svg) { flex: none; color: var(--ok); }
   /* intro line under a card header — plain-English context before the numbers */
   .ah-card-sub { font-size: var(--fs-sm); color: var(--fg-muted); margin: -6px 0 13px; line-height: 1.5; }
   .ah-asof { margin-left: auto; font-size: 11.5px; font-weight: 500; color: var(--fg-subtle); font-variant-numeric: tabular-nums; }

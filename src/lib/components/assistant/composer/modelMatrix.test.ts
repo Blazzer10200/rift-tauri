@@ -3,6 +3,9 @@
 // contract; a drift here desyncs cursor from pixels.
 import { describe, it, expect } from "vitest";
 import {
+  chatGptModelsFor,
+  clampEffortForCaps,
+  codexReasoningEffortsFor,
   dialStopsFor,
   effortCapsFor,
   modelAccessFor,
@@ -69,6 +72,40 @@ describe("model access", () => {
     expect(modelAccessFor(openai, openAiOnly).enabled).toBe(true);
   });
 
+  it("distinguishes subscription models from separately billed API fallback", () => {
+    const codexOnly: ProviderAccessContext = {
+      ...disconnected,
+      codexReady: true,
+      codexModels: [{
+        id: openai.id as `gpt-${string}`,
+        label: openai.label,
+        description: "Subscription model",
+        isDefault: true,
+        defaultReasoningEffort: "medium",
+        supportedReasoningEfforts: ["low", "medium"],
+        imageInput: true,
+      }],
+    };
+    expect(modelAccessFor(openai, codexOnly)).toMatchObject({
+      enabled: true,
+      tag: "Subscription",
+    });
+
+    const apiOnly: ProviderAccessContext = {
+      ...disconnected,
+      openAiConfigured: true,
+      openAiModels: [{
+        id: openai.id, label: openai.label, family: "gpt", contextWindow: null,
+        reasoning: true, imageInput: true, available: true,
+      }],
+    };
+    expect(modelAccessFor(openai, apiOnly)).toMatchObject({
+      enabled: true,
+      tag: "API · separately billed",
+    });
+    expect(modelAccessFor(openai, apiOnly).detail).toContain("billed separately");
+  });
+
   it("distinguishes account denial from a failed model probe", () => {
     const denied = {
       ...disconnected,
@@ -92,5 +129,78 @@ describe("effort capability", () => {
       reasoning: false, imageInput: true, available: true,
     }]);
     expect(dialStopsFor(caps)).toEqual([]);
+  });
+
+  it("maps the exact live Codex capability set into Rift tiers", () => {
+    const live = {
+      id: "gpt-6-codex" as const,
+      label: "GPT-6 Codex",
+      description: "Future coding model",
+      isDefault: false,
+      defaultReasoningEffort: "medium",
+      supportedReasoningEfforts: ["xhigh", "low", "medium", "future", "medium"],
+      imageInput: true,
+    };
+    expect(codexReasoningEffortsFor(live)).toEqual(["none", "smart", "ultra"]);
+
+    const model = chatGptModelsFor([live]).find((candidate) => candidate.id === live.id)!;
+    expect(model).toMatchObject({ effort: true, maxEffort: "ultra", supportedEfforts: ["none", "smart", "ultra"] });
+    expect(dialStopsFor(model).map((stop) => stop.label)).toEqual(["Low", "Medium", "X-High"]);
+    expect(clampEffortForCaps("deep", model)).toBe("smart");
+  });
+});
+
+describe("live ChatGPT model rows", () => {
+  it("creates a complete row for an unknown live model and retains API fallbacks", () => {
+    const live = {
+      id: "gpt-6-codex-neo" as const,
+      label: "GPT-6 Codex Neo",
+      description: "Newest account coding model",
+      isDefault: true,
+      defaultReasoningEffort: "high",
+      supportedReasoningEfforts: ["low", "high"],
+      imageInput: true,
+    };
+    const models = chatGptModelsFor([live]);
+    expect(models[0]).toMatchObject({
+      id: live.id,
+      label: live.label,
+      version: "",
+      tagline: live.description,
+      blurb: "Text, vision & tools",
+      provider: "openai",
+      legacy: false,
+      effort: true,
+      maxEffort: "deep",
+      supportedEfforts: ["none", "deep"],
+    });
+    expect(models[0].icon).toBeDefined();
+    expect(models.filter((model) => model.id === live.id)).toHaveLength(1);
+    for (const fallback of MODEL_OPTIONS.filter((model) => model.provider === "openai")) {
+      expect(models.some((model) => model.id === fallback.id)).toBe(true);
+    }
+  });
+
+  it("overlays curated presentation metadata while honoring live capabilities", () => {
+    const live = {
+      id: openai.id as `gpt-${string}`,
+      label: "Uncurated backend label",
+      description: "Live account description",
+      isDefault: true,
+      defaultReasoningEffort: "medium",
+      supportedReasoningEfforts: ["low", "medium"],
+      imageInput: false,
+    };
+    const model = chatGptModelsFor([live]).find((candidate) => candidate.id === openai.id)!;
+    expect(model).toMatchObject({
+      id: openai.id,
+      label: openai.label,
+      version: openai.version,
+      icon: openai.icon,
+      tagline: live.description,
+      maxEffort: "smart",
+      supportedEfforts: ["none", "smart"],
+    });
+    expect(dialStopsFor(model).map((stop) => stop.label)).toEqual(["Low", "Medium"]);
   });
 });

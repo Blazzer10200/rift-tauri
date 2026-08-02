@@ -30,6 +30,8 @@ import type {
   OpenAiModel,
   CodexModel,
   CodexStatus,
+  CodexAccountOverview,
+  ChatGptRoute,
   AgentSpawn,
   ChatMessage,
   ConversationMeta,
@@ -136,6 +138,7 @@ import {
   loadConversation as persistLoad,
   deleteConversation as persistDelete,
   deleteAllConversations as persistDeleteAll,
+  resolveChatGptRoute as persistResolveChatGptRoute,
 } from "./assistant/persistence";
 // M6 split (2026-05-27): tab lifecycle + split-pane management in
 // `./assistant/tabs`. The TabState registry (ensureTab/dropTab/wireTab/
@@ -233,6 +236,9 @@ export class TabState {
   openAiHistory = $state<unknown[]>([]);
   /** Opaque App Server continuation id for ChatGPT subscription turns. */
   codexThreadId = $state<string | null>(null);
+  /** ChatGPT transport chosen by this conversation's first GPT send. Persisted
+   *  so availability changes can fail closed instead of changing billing. */
+  chatGptRoute = $state<ChatGptRoute | null>(null);
   streaming = $state(false);
   /** True while the in-flight turn is a manual /compact — the CLI compacts
    *  natively with no tools/text until the boundary lands, so without this the
@@ -501,7 +507,9 @@ class AssistantStore {
   openAiModelsError = $state<string | null>(null);
   codexStatus = $state<CodexStatus | null>(null);
   codexModels = $state<CodexModel[] | null>(null);
+  codexAccount = $state<CodexAccountOverview | null>(null);
   codexModelsError = $state<string | null>(null);
+  codexAccountError = $state<string | null>(null);
   codexChecking = $state(false);
   codexError = $state<string | null>(null);
   authChecking = $state(false);
@@ -514,7 +522,11 @@ class AssistantStore {
     return this.authReadyFor(this.activeTab);
   }
   authReadyFor(tab: TabState | null): boolean {
-    return this.authReadyForModel(this.modelFor(tab));
+    const model = this.modelFor(tab);
+    if (isOpenAIModel(model) && tab?.chatGptRoute) {
+      return this.chatGptRouteFor(model, tab.chatGptRoute) !== null;
+    }
+    return this.authReadyForModel(model);
   }
   authReadyForModel(model: ModelSel): boolean {
     if (isOpenAIModel(model)) return this.chatGptModelAvailable(model);
@@ -1107,9 +1119,12 @@ class AssistantStore {
     return this.codexModelAvailable(id) || this.openAiModelAvailable(id);
   }
 
-  chatGptRouteFor(id: ModelSel): "codex" | "openai" | null {
-    if (this.codexModelAvailable(id)) return "codex";
-    return this.openAiModelAvailable(id) ? "openai" : null;
+  chatGptRouteFor(id: ModelSel, pinned: ChatGptRoute | null = null): ChatGptRoute | null {
+    return persistResolveChatGptRoute(
+      pinned,
+      this.codexModelAvailable(id),
+      this.openAiModelAvailable(id),
+    );
   }
 
   setThinkingEffort(v: ThinkingEffort, tab: TabState | null = this.activeTab) {
@@ -1969,22 +1984,28 @@ class AssistantStore {
     this.codexChecking = true;
     this.codexError = null;
     this.codexModelsError = null;
+    this.codexAccountError = null;
     try {
       this.codexStatus = await invoke<CodexStatus>("assistant_codex_status");
       if (this.codexStatus.ready) {
         try {
-          this.codexModels = await invoke<CodexModel[]>("assistant_codex_list_models");
+          this.codexAccount = await invoke<CodexAccountOverview>("assistant_codex_account_overview", { root: this.activeRoot });
+          this.codexModels = this.codexAccount.models;
           this.migrateToChatGptDefault();
         } catch (e) {
+          this.codexAccount = null;
           this.codexModels = null;
           this.codexModelsError = humanizeError(e);
+          this.codexAccountError = humanizeError(e);
         }
       } else {
+        this.codexAccount = null;
         this.codexModels = null;
       }
     } catch (e) {
       console.warn("assistant_codex_status failed", e);
       this.codexStatus = null;
+      this.codexAccount = null;
       this.codexModels = null;
       this.codexError = humanizeError(e);
     } finally {
@@ -1995,7 +2016,7 @@ class AssistantStore {
   private migrateToChatGptDefault() {
     const next = this.codexModels?.find((model) => model.isDefault)?.id;
     if (!next || typeof localStorage === "undefined") return;
-    const migrationKey = "rift.assistant.chatgptDefault.v4";
+    const migrationKey = "rift.assistant.chatgptDefault.v5";
     if (localStorage.getItem(migrationKey)) return;
     localStorage.setItem(migrationKey, "done");
     migrateClaudeModelPinsTo(next);

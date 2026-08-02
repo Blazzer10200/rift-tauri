@@ -14,6 +14,7 @@
   import { updates } from "$lib/state/updates.svelte";
   import { cliUpdate } from "$lib/state/cliUpdate.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
+  import { isOpenAIModel } from "$lib/state/assistant/helpers";
   import { workspace } from "$lib/state/workspace.svelte";
 
   const reducedMotion =
@@ -38,6 +39,10 @@
   const cliCheckFailed = $derived(cliUpdate.checkFailedPersistently);
   let unreadableDismissed = $state(false);
   let checkFailDismissed = $state(false);
+  // Passive Claude maintenance should not interrupt an active ChatGPT route.
+  // Once an update starts, keep its progress visible across route switches;
+  // restartReady is the completed result and remains global until handled.
+  const claudeRouteActive = $derived(!isOpenAIModel(assistant.effectiveModel));
 
   // ── App update ─────────────────────────────────────────────────────────
   const appBusy = $derived(updates.state === "downloading" || updates.state === "installing");
@@ -99,7 +104,7 @@
         onAct: () => void cliUpdate.restartNow(),
         onDismiss: () => (cliUpdate.restartReady = false),
       });
-    } else if (cliAvailable) {
+    } else if (cliAvailable && (claudeRouteActive || cliUpdate.updating)) {
       out.push({
         key: "cli",
         kind: "cli",
@@ -117,7 +122,7 @@
         onAct: async () => { if (await cliUpdate.runUpdate()) await assistant.refreshAuth(); },
         onDismiss: () => cliUpdate.dismiss(cliTarget),
       });
-    } else if (cliVersionUnreadable && !unreadableDismissed) {
+    } else if (claudeRouteActive && cliVersionUnreadable && !unreadableDismissed) {
       // A real update row outranks the quiet states; at most ONE quiet CLI row.
       out.push({
         key: "cli-unreadable",
@@ -132,7 +137,7 @@
         onAct: () => workspace.setActive("settings"),
         onDismiss: () => (unreadableDismissed = true),
       });
-    } else if (cliCheckFailed && !checkFailDismissed) {
+    } else if (claudeRouteActive && cliCheckFailed && !checkFailDismissed) {
       out.push({
         key: "cli-checkfail",
         kind: "cli",

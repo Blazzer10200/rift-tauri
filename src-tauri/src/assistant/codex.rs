@@ -9,6 +9,9 @@ use std::process::Stdio;
 use serde::Serialize;
 use tokio::process::Command;
 
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CodexStatus {
@@ -39,6 +42,12 @@ fn is_runnable(path: &Path) -> bool {
     )
 }
 
+fn is_batch_wrapper(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
+}
+
 fn codex_candidates() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(path) = std::env::var_os("CODEX_CLI_PATH").map(PathBuf::from) {
@@ -46,7 +55,11 @@ fn codex_candidates() -> Vec<PathBuf> {
     }
     #[cfg(windows)]
     {
-        if let Ok(output) = std::process::Command::new("where.exe").arg("codex").output() {
+        use std::os::windows::process::CommandExt;
+
+        let mut where_command = std::process::Command::new("where.exe");
+        where_command.arg("codex").creation_flags(CREATE_NO_WINDOW);
+        if let Ok(output) = where_command.output() {
             candidates.extend(
                 String::from_utf8_lossy(&output.stdout)
                     .lines()
@@ -70,27 +83,39 @@ pub(super) fn resolve_codex_cli() -> Option<PathBuf> {
     codex_candidates().into_iter().next()
 }
 
-pub(super) fn command_for(exe: &Path, args: &[&str]) -> Command {
-    #[cfg(windows)]
-    if matches!(exe.extension().and_then(|ext| ext.to_str()), Some("cmd") | Some("bat")) {
-        let mut command = Command::new("cmd.exe");
-        command.args(["/d", "/s", "/c"]);
-        // Keep the command path and its arguments separate. Pre-quoting this
-        // into one `/c` string makes Windows escape the inner quotes, so a
-        // space-free `codex.cmd --version` is treated as a literal command.
-        command.arg(exe).args(args);
-        command.kill_on_drop(true);
-        return command;
+#[cfg(windows)]
+fn windows_command_plan(
+    exe: &Path,
+    args: &[&str],
+) -> (std::ffi::OsString, Vec<std::ffi::OsString>, u32) {
+    if is_batch_wrapper(exe) {
+        let mut wrapper_args = vec!["/d".into(), "/s".into(), "/c".into(), exe.as_os_str().into()];
+        wrapper_args.extend(args.iter().map(std::ffi::OsString::from));
+        return ("cmd.exe".into(), wrapper_args, CREATE_NO_WINDOW);
     }
 
-    let mut command = Command::new(exe);
-    command.args(args).kill_on_drop(true);
+    (exe.as_os_str().into(), args.iter().map(std::ffi::OsString::from).collect(), CREATE_NO_WINDOW)
+}
+
+pub(super) fn command_for(exe: &Path, args: &[&str]) -> Command {
     #[cfg(windows)]
     {
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
+        let (program, planned_args, creation_flags) = windows_command_plan(exe, args);
+        let mut command = Command::new(program);
+        // Keep the wrapper path and its arguments separate. Pre-quoting this
+        // into one `/c` string makes Windows escape the inner quotes, so a
+        // space-free `codex.cmd --version` is treated as a literal command.
+        command.args(planned_args).kill_on_drop(true);
+        command.creation_flags(creation_flags);
+        command
     }
-    command
+
+    #[cfg(not(windows))]
+    {
+    let mut command = Command::new(exe);
+    command.args(args).kill_on_drop(true);
+        command
+    }
 }
 
 async fn output_for(exe: &Path, args: &[&str]) -> Option<std::process::Output> {
@@ -155,7 +180,7 @@ pub fn assistant_codex_open_login() -> Result<(), String> {
     {
         use std::os::windows::process::CommandExt;
         const CREATE_NEW_CONSOLE: u32 = 0x0000_0010;
-        if matches!(exe.extension().and_then(|ext| ext.to_str()), Some("cmd") | Some("bat")) {
+        if is_batch_wrapper(&exe) {
             std::process::Command::new("cmd.exe")
                 .args(["/d", "/s", "/c"])
                 .arg(format!("\"\"{}\" login\"", exe.display()))
@@ -190,5 +215,28 @@ mod tests {
     #[test]
     fn packaged_windowsapps_helpers_are_never_accepted() {
         assert!(is_windowsapps_path(Path::new("C:\\Program Files\\WindowsApps\\OpenAI.Codex\\codex.exe")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn batch_wrapper_plan_is_headless_and_preserves_separate_arguments() {
+        use super::{windows_command_plan, CREATE_NO_WINDOW};
+        use std::ffi::OsString;
+
+        let (program, args, flags) =
+            windows_command_plan(Path::new("C:\\Program Files\\Codex\\codex.CMD"), &["app-server"]);
+
+        assert_eq!(program, OsString::from("cmd.exe"));
+        assert_eq!(
+            args,
+            vec![
+                OsString::from("/d"),
+                OsString::from("/s"),
+                OsString::from("/c"),
+                OsString::from("C:\\Program Files\\Codex\\codex.CMD"),
+                OsString::from("app-server"),
+            ]
+        );
+        assert_eq!(flags, CREATE_NO_WINDOW);
     }
 }

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { AlertCircle, CheckCircle2, Loader2, RefreshCw, Terminal } from "lucide-svelte";
+  import { AlertCircle, CheckCircle2, KeyRound, Loader2, RefreshCw, Terminal } from "lucide-svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import "$lib/styles/onboarding.css";
 
@@ -9,7 +9,8 @@
 
   let checking = $state(false);
   let error = $state<string | null>(null);
-  const connected = $derived(assistant.codexStatus?.ready === true || assistant.openAiStatus?.ready === true);
+  const connected = $derived(assistant.codexStatus?.ready === true);
+  const apiConfigured = $derived(assistant.openAiStatus?.ready === true);
 
   $effect(() => onConnectedChange?.(connected));
   onMount(() => void refresh());
@@ -32,12 +33,12 @@
 <header class="ob-head">
   {#if !standalone}<span class="ob-eyebrow">Step 2 · Connect ChatGPT</span>{/if}
   <h1 class="ob-title">Connect ChatGPT</h1>
-  <p class="ob-sub">Sign in with your ChatGPT account through the official Codex CLI. Rift uses its local App Server and never reads or copies your credentials.</p>
+  <p class="ob-sub">Connect your ChatGPT account through the official Codex CLI and its local App Server. Rift never reads or copies your credentials.</p>
 </header>
 
 <div class="ob-statcard">
   <div class="ob-statrow">
-    <span class="k"><Terminal size={15} /> ChatGPT account</span>
+    <span class="k"><Terminal size={15} /> ChatGPT account → Codex App Server</span>
     {#if connected}
       <span class="v ok"><CheckCircle2 size={14} /> connected</span>
     {:else}
@@ -50,7 +51,7 @@
 </div>
 
 {#if connected}
-  <div class="ob-connbar"><span class="dot"></span> ChatGPT is connected and your available GPT models are ready.</div>
+  <div class="ob-connbar"><span class="dot"></span> Your ChatGPT account is connected through the local Codex App Server.</div>
 {:else}
   {#if assistant.codexStatus?.cliPresent}
     <div class="ob-input-row">
@@ -61,8 +62,12 @@
   {:else}
     <p class="ob-hint ob-hint--warn"><AlertCircle size={14} /><span>Install the standalone Codex CLI first: <code>npm install -g @openai/codex</code></span></p>
   {/if}
-  <p class="ob-hint"><span>An API key is optional and separately billed. Add one later under Settings → Providers only if you need that route.</span></p>
 {/if}
+
+<div class="ob-route-note">
+  <KeyRound size={14} />
+  <span><strong>Optional API access is separate.</strong> {apiConfigured ? "An OpenAI API key is configured" : "No OpenAI API key is configured"}; this route is billed per use and managed in Settings → Providers.</span>
+</div>
 
 {#if error}<span class="ob-error"><AlertCircle size={14} /> {error}</span>{/if}
 

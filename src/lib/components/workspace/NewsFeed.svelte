@@ -128,7 +128,7 @@
       </div>
     {:else if news.digest.length > 0}
       <div class="digest-head">
-        <span class="dg-label"><Sparkles size={12} /> AI digest</span>
+        <span class="dg-label"><Sparkles size={12} /> Claude digest</span>
         {#if news.digestAt}<span class="dg-when">· {fmtAgo(news.digestAt, now)}</span>{/if}
         <button class="dg-redo" type="button" use:tooltip={"Runs one Claude turn"} onclick={() => void news.summarize()}>Refresh</button>
       </div>
