@@ -1,7 +1,7 @@
 // Optional host-tool presence (git/node/npm/cargo/code). Rift runs without
 // these; individual features need them. Probed once via the `environment_check`
 // backend command and cached — read reactively to hide dead affordances (e.g.
-// "Open in VS Code" when `code` isn't on PATH) and surfaced in Settings → About.
+// "Open in VS Code" when `code` isn't on PATH) and surfaced in Settings → System.
 
 import { invoke } from "@tauri-apps/api/core";
 

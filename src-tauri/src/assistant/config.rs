@@ -1,5 +1,5 @@
 //! Assistant config — `AssistantConfig` + all get/set command pairs.
-//! Extracted from `mod.rs` as R2 of the hot-file split (see `docs/design/assistant-mod-split.md`).
+//! Assistant configuration; see `docs/ARCHITECTURE.md#backend-map`.
 
 use std::path::PathBuf;
 
@@ -155,7 +155,9 @@ pub(super) const DEFAULT_MODEL: &str = "sonnet";
 pub(super) const FABLE_FALLBACK_MODEL: &str = "opus";
 
 /// Effort tiers low→high. Mirrors `EFFORT_ORDER` in state/assistant/helpers.ts.
-pub(super) const EFFORT_ORDER: [&str; 4] = ["none", "smart", "deep", "ultra"];
+pub(super) const EFFORT_ORDER: [&str; 7] = [
+    "none", "low", "smart", "deep", "ultra", "max", "agentic",
+];
 
 /// Fold retired legacy tier ids into their modern equivalent BEFORE validation/
 /// clamping. `"quick"` (retired 2026-07-03 — sent the same medium flag as
@@ -199,13 +201,15 @@ pub(super) fn clamp_effort<'a>(effort: &'a str, model: &str) -> &'a str {
 /// only sees a valid tier or a stale string the ladder doesn't define.
 pub(super) fn effort_tier_to_flag(tier: &str) -> &'static str {
     match tier {
-        "none" => "low",
+        "none" | "low" => "low",
         // "smart" = the responsive interactive default (Anthropic's recommended
         // medium). "quick" is the retired legacy alias — normalize_effort_tier
         // folds it first; the arm stays as defense in depth so a stray legacy
         // value can never degrade to high.
         "quick" | "smart" => "medium",
         "ultra" => "xhigh",
+        "max" => "max",
+        "agentic" => "ultra",
         _ /* "deep" or unknown */ => "high",
     }
 }
@@ -628,6 +632,8 @@ mod tests {
         assert_eq!(clamp_effort("bogus", "sonnet"), "bogus");
         assert!(!is_valid_effort_tier("bogus"));
         assert!(is_valid_effort_tier("ultra"));
+        assert!(is_valid_effort_tier("max"));
+        assert!(is_valid_effort_tier("agentic"));
     }
 
     // TC-001 (mega-audit cont.228): the tier→flag mapping was an untested inline
@@ -642,6 +648,8 @@ mod tests {
         assert_eq!(effort_tier_to_flag("smart"), "medium");
         assert_eq!(effort_tier_to_flag("deep"), "high");
         assert_eq!(effort_tier_to_flag("ultra"), "xhigh");
+        assert_eq!(effort_tier_to_flag("max"), "max");
+        assert_eq!(effort_tier_to_flag("agentic"), "ultra");
         // A stale/unknown tier (clamp passes it through) falls back to high(deep).
         assert_eq!(effort_tier_to_flag("bogus"), "high");
     }

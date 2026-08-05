@@ -1,5 +1,5 @@
 <script lang="ts">
-  // C2 (per docs/design/composer-split.md) — staged-attachment chips + the
+  // Staged-attachment chips and the composer drop-target state; see docs/ARCHITECTURE.md#frontend-map.
   // attach-error pill, lifted verbatim from Composer.svelte 2026-06-09.
   // Paste/drop/file-pick handlers stay in the parent (they write tab state);
   // this child renders + reports clicks only.

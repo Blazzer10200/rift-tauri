@@ -1,5 +1,5 @@
 <script lang="ts">
-  // C7 (per docs/design/composer-split.md) — the unified model / fast-mode /
+  // Unified model, effort, and permission settings; see docs/ARCHITECTURE.md#frontend-map.
   // effort settings popover, lifted verbatim from Composer.svelte 2026-06-10.
   // Keyboard nav stays parent-owned (onKey drives settingsIdx/activeKind and
   // ←/→ effort nudges); this child renders, handles clicks, and owns the
@@ -8,14 +8,13 @@
   import { Check, ChevronRight, HelpCircle, LoaderCircle, LockKeyhole, Plus, Zap } from "lucide-svelte";
   import { tick } from "svelte";
   import { assistant, type TabState } from "../../../state/assistant.svelte";
-  import { fastEligible } from "../../../state/assistant/helpers";
   import { usage, limitZone, type ScopedLimit } from "../../../state/usage.svelte";
   import { portal } from "$lib/actions/portal";
   import { tooltip } from "$lib/actions/tooltip";
   import {
     MODEL_OPTIONS, currentModels, legacyModels, modelWindowSuffix, isFreeClaudeModel,
     chatGptModelsFor, dialStopsFor, dialIdxFor, clampEffortIdx, clampEffortForCaps,
-    effortCapsFor, modelAccessFor, providerStatusFor,
+    effortCapsFor, fastModeInfoFor, modelAccessFor, providerStatusFor,
     type ModelOpt, type SettingsRow,
   } from "./modelMatrix";
 
@@ -80,7 +79,7 @@
   });
 
   const paneModel = $derived(assistant.modelFor(tab));
-  const currentOpenAiModels = $derived(chatGptModelsFor(assistant.codexModels));
+  const currentOpenAiModels = $derived(chatGptModelsFor(assistant.codexModels, assistant.openAiModels));
   const currentModel = $derived(
     currentOpenAiModels.find((m) => m.id === paneModel)
       ?? MODEL_OPTIONS.find((m) => m.id === paneModel),
@@ -105,8 +104,37 @@
   // Keep the established digit mapping truthful until the parent Composer also
   // consumes live rows. Unknown live models remain fully clickable, but do not
   // advertise a digit shortcut that would still target a curated fallback row.
-  const shortcutModels = $derived(MODEL_OPTIONS.filter((m) => modelAccessFor(m, providerAccess).enabled));
-  const currentModelAccess = $derived(currentModel ? modelAccessFor(currentModel, providerAccess) : null);
+  const pinnedPickerRoute = $derived(tab?.chatGptRoute ?? null);
+  function accessFor(m: ModelOpt) {
+    return modelAccessFor(m, providerAccess, m.provider === "openai" ? pinnedPickerRoute : null);
+  }
+  const shortcutModels = $derived(MODEL_OPTIONS.filter((m) => accessFor(m).enabled));
+  const currentModelAccess = $derived(currentModel ? accessFor(currentModel) : null);
+  const currentChatGptRoute = $derived(currentModel?.provider === "openai"
+    ? assistant.chatGptRouteFor(currentModel.id, tab?.chatGptRoute ?? null)
+    : null);
+  const currentApiModel = $derived(
+    currentModel?.provider === "openai"
+      ? assistant.openAiModels?.find((model) => model.id === currentModel.id) ?? null
+      : null,
+  );
+  const currentRouteLabel = $derived(currentModel?.provider === "claude"
+    ? "Claude Code"
+    : currentChatGptRoute === "codex"
+      ? "ChatGPT subscription"
+      : currentChatGptRoute === "openai"
+        ? "OpenAI API"
+        : "ChatGPT");
+  const currentDefaultEffort = $derived(
+    currentChatGptRoute === "codex"
+      ? currentModel?.defaultReasoningEffort ?? null
+      : currentChatGptRoute === "openai"
+        ? currentApiModel?.defaultReasoningEffort ?? null
+        : null,
+  );
+  const currentImageInput = $derived(currentModel?.provider === "claude"
+    || currentModel?.inputModalities?.includes("image") === true
+    || currentApiModel?.imageInput === true);
   const sessionPinnedModel = $derived(tab?.pinnedModel ?? null);
   const sessionModelDiverged = $derived(sessionPinnedModel !== null && sessionPinnedModel !== paneModel);
   function shortcutFor(m: ModelOpt): number | null {
@@ -117,23 +145,30 @@
     m.provider === "claude" && (assistant.plan !== "free" || isFreeClaudeModel(m.id))
   ));
   const pickerModels = $derived([...currentOpenAiModels, ...currentClaudeModels, ...legacyModels]);
-  // Fast mode — surfaces only on fast-eligible (Opus-family) rows. The stored
-  // global pref survives on other models but is inert there (send.ts gates it).
-  const fastApplies = $derived(currentModelAccess?.enabled === true && !!currentModel && fastEligible(currentModel.id));
+  const fastInfo = $derived(fastModeInfoFor(
+    currentModel,
+    currentChatGptRoute,
+    assistant.codexModels,
+    assistant.openAiModels,
+  ));
+  const fastApplies = $derived(currentModelAccess?.enabled === true && fastInfo !== null);
   // ── Reasoning: ONE ladder ─────────────────────────────────────────────────
   // The old Thinking toggle + effort slider were two knobs over one wire lever
   // (see modelMatrix DIAL_STOPS). The ladder is the honest control: rung 0 =
   // fastest (thinking off, `--effort low`); each higher rung sends its flag.
   // Writes go through assistant.setThinkingDial so both backing fields flip
   // atomically (one cache-bust hint, not two).
-  const effortStops = $derived(dialStopsFor(effortCapsFor(currentModel, assistant.openAiModels)));
+  const currentEffortCaps = $derived(effortCapsFor(currentModel, assistant.openAiModels, currentChatGptRoute));
+  const effortStops = $derived(dialStopsFor(currentEffortCaps));
   const dialApplies = $derived(currentModelAccess?.enabled === true && effortStops.length > 0); // a connected model with effort
   const effortIdx = $derived(dialIdxFor(effortStops, assistant.thinkingOnFor(tab), assistant.effortFor(tab)));
   const currentEffort = $derived(effortStops[effortIdx] ?? effortStops[0]);
   function alignLiveEffort(model: ModelOpt | undefined) {
-    if (model?.provider !== "openai" || model.supportedEfforts === undefined) return;
+    if (model?.provider !== "openai") return;
+    const caps = effortCapsFor(model, assistant.openAiModels, assistant.chatGptRouteFor(model.id, tab?.chatGptRoute ?? null));
+    if (!caps?.supportedEfforts) return;
     const stored = assistant.thinkingOnFor(tab) ? assistant.effortFor(tab) : "none";
-    const clamped = clampEffortForCaps(stored, model);
+    const clamped = clampEffortForCaps(stored, caps);
     if (clamped === stored) return;
     if (clamped === "none") assistant.setThinkingDial(false, undefined, tab);
     else assistant.setThinkingDial(true, clamped, tab);
@@ -254,7 +289,7 @@
   {#snippet modelRow(m: ModelOpt)}
     {@const sel = m.id === paneModel}
     {@const lim = modelLimitFor(m)}
-    {@const access = modelAccessFor(m, providerAccess)}
+    {@const access = accessFor(m)}
     {@const shortcut = shortcutFor(m)}
     {@const apiBilled = access.enabled && access.tag === "API · separately billed"}
     <!-- Dense one-line row (Claude-Desktop density): name + inline tags left,
@@ -360,27 +395,44 @@
     </div>
   {/if}
 
+  {#if currentModel && currentModelAccess?.enabled}
+    <div class="model-brief" role="note" aria-label="Selected model details">
+      <div class="mb-top">
+        <span class="mb-name">{currentModel.label} {currentModel.version}</span>
+        <span class="mb-route">{currentRouteLabel}</span>
+      </div>
+      <p>{currentModel.tagline}</p>
+      <div class="mb-chips">
+        <span>{currentModel.suffix || currentModel.ctx}</span>
+        <span>{currentImageInput ? "Text + image" : "Text only"}</span>
+        {#if currentDefaultEffort}<span>Default: {currentDefaultEffort}</span>{/if}
+        <span>{fastInfo ? "Fast available" : "Standard speed"}</span>
+      </div>
+      {#if currentModel.upgradeModel}
+        <div class="mb-upgrade">Recommended for new work: {currentModel.upgradeModel}</div>
+      {/if}
+    </div>
+  {/if}
+
   {#if fastApplies}
     <div class="rift-menu-divider"></div>
-    <!-- Fast mode — Opus fast output. Row matches the model-row anatomy; the
-         per-turn "fast" chip in the transcript is the honest confirmation.
-         BILLING: pay-per-use (usage credits, NOT plan limits) — the cost line
-         + amber ON treatment are the consent surface, mirroring the CLI's own
-         "Fast mode ON · Draws from usage credits" disclosure. Don't quiet it. -->
+    <!-- Provider-specific Fast mode. The catalog/API metadata controls whether
+         this row exists; the transcript chip appears only after the backend
+         confirms higher-speed processing. Amber remains the cost disclosure. -->
     <button
       type="button"
       role="menuitemcheckbox"
       aria-checked={assistant.fastMode}
       class="pop-item rich fast-row"
-      use:tooltip={"Fast mode — quicker Opus output, billed from your usage credits (pay-per-use, NOT your plan limits). Applies from your next message."}
-      onmousedown={(e) => { e.preventDefault(); assistant.setFastMode(!assistant.fastMode); }}
+      use:tooltip={fastInfo?.tooltip ?? "Fast mode"}
+      onmousedown={(e) => { e.preventDefault(); if (fastInfo) assistant.setFastMode(!assistant.fastMode, fastInfo.notice); }}
     >
       <span class="fast-glyph" class:on={assistant.fastMode} aria-hidden="true"><Zap size={13} /></span>
       <span class="pi-text">
         <span class="pi-name"><span class="model-name">Fast mode</span>
-          {#if assistant.fastMode}<span class="pi-tag warn-tag">pay-per-use</span>{/if}
+          {#if assistant.fastMode}<span class="pi-tag warn-tag">{fastInfo?.tag}</span>{/if}
         </span>
-        <span class="pi-sub">Quicker Opus replies — <span class="fast-cost">draws from usage credits, not plan limits</span></span>
+        <span class="pi-sub">{fastInfo?.summary} <span class="fast-cost">{fastInfo?.avoid}</span></span>
       </span>
       <span class="fast-switch" class:on={assistant.fastMode} aria-hidden="true"><i></i></span>
     </button>
@@ -641,6 +693,31 @@
   .session-note .sn-action:hover {
     background: color-mix(in oklab, var(--accent) 28%, transparent);
     color: color-mix(in oklab, var(--accent) 98%, white);
+  }
+  :global(.settings-menu .model-brief) {
+    margin: 7px 8px 2px; padding: 9px 10px;
+    border: 1px solid color-mix(in oklab, var(--fg) 10%, transparent);
+    border-radius: 9px;
+    background: color-mix(in oklab, var(--fg) 3%, transparent);
+  }
+  :global(.settings-menu .mb-top) { display: flex; align-items: baseline; gap: 8px; }
+  :global(.settings-menu .mb-name) { font-size: 11.5px; font-weight: 650; color: var(--fg-2); }
+  :global(.settings-menu .mb-route) {
+    margin-left: auto; font-size: 9px; font-weight: 650; letter-spacing: 0.05em;
+    text-transform: uppercase; color: var(--fg-faint);
+  }
+  :global(.settings-menu .model-brief p) {
+    margin: 4px 0 7px; font-size: 10.5px; line-height: 1.4; color: var(--fg-muted);
+  }
+  :global(.settings-menu .mb-chips) { display: flex; flex-wrap: wrap; gap: 4px; }
+  :global(.settings-menu .mb-chips span) {
+    padding: 2px 6px; border-radius: 999px;
+    font-size: 9px; line-height: 1.3; color: var(--fg-faint);
+    background: color-mix(in oklab, var(--fg) 6%, transparent);
+    border: 1px solid color-mix(in oklab, var(--fg) 10%, transparent);
+  }
+  :global(.settings-menu .mb-upgrade) {
+    margin-top: 7px; font-size: 10px; line-height: 1.35; color: var(--warn);
   }
   /* Blurb wraps to two lines instead of a hard ellipsis — the wider panel fits
      every current blurb on one line, but wrapping guarantees nothing is ever

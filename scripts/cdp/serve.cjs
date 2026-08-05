@@ -49,22 +49,9 @@ const API_PORT = Number(process.env.RIFT_CDP_API_PORT || 9223);
 const TMP_DIR = path.join(__dirname, '.tmp');
 const TMP_KEEP = Number(process.env.RIFT_CDP_TMP_KEEP || 20);
 const LOG_KEEP = Number(process.env.RIFT_CDP_LOG_KEEP || 200);
-// --- Vision-aware capture (rebuilt 2026-06-25) ---
-// Claude's vision model is PATCH-based, not megapixel-based: it tiles the image
-// into 28×28-px patches (one "visual token" each), so an image costs
-// ⌈w/28⌉ × ⌈h/28⌉ tokens. Each model has a native ceiling — long edge AND token
-// count — above which the API resizes server-side BEFORE the model sees it:
-//   Opus 4.7 / 4.8 / Fable 5 / Mythos 5: 2576 px long edge, 4784 tokens.
-//   Every older model:                   1568 px long edge, 1568 tokens.
-// The previous tool hard-clamped to 1280 px @ deviceScaleFactor=1 under a stale
-// "≤1568 px / ≤1.15 MP" assumption that predates the Opus-4.7 high-res bump — so
-// on Opus 4.8 it shipped 1280×800 = 1334 visual tokens when the model accepts up
-// to 4784 (≈3.5× the detail), and pinning DSF=1 re-rasterized the HiDPI surface
-// at 1× CSS density (the lowest-fidelity option WebView2 offers → soft text).
-// Rebuild: render at a supersampled DSF for crisp text, then clip+scale to the
-// LARGEST aspect-preserving size that lands EXACTLY inside the model's envelope —
-// max detail, zero server-side resize. Defaults target Opus 4.7+/Fable; override
-// RIFT_CDP_MAX_EDGE / RIFT_CDP_MAX_TOKENS for an older model.
+// Vision-aware capture bounds. Whole-page screenshots render at supersampled
+// density, then scale to a configurable edge and patch budget. Defaults favor
+// readable UI text; override them for the consuming model when needed.
 const MAX_EDGE = Number(process.env.RIFT_CDP_MAX_EDGE || 2576);
 const MAX_TOKENS = Number(process.env.RIFT_CDP_MAX_TOKENS || 4784);
 const PATCH = 28;

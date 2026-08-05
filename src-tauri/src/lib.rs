@@ -287,7 +287,6 @@ pub fn run() {
             commands::assistant_openai_list_models,
             commands::assistant_codex_status,
             commands::assistant_codex_open_login,
-            commands::assistant_codex_list_models,
             commands::assistant_codex_account_overview,
             commands::assistant_autocompact_config,
             commands::assistant_get_use_full_config,

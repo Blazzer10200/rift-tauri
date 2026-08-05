@@ -26,6 +26,14 @@ const ASK_USER_EVENT: &str = "assistant://ask-user";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CodexServiceTier {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CodexModel {
     pub id: String,
     pub label: String,
@@ -33,6 +41,12 @@ pub struct CodexModel {
     pub is_default: bool,
     pub default_reasoning_effort: String,
     pub supported_reasoning_efforts: Vec<String>,
+    pub service_tiers: Vec<CodexServiceTier>,
+    pub default_service_tier: Option<String>,
+    pub upgrade_model: Option<String>,
+    pub upgrade_copy: Option<String>,
+    pub input_modalities: Vec<String>,
+    pub supports_personality: bool,
     pub image_input: bool,
 }
 
@@ -243,24 +257,6 @@ pub fn cancel_all_codex_turns() {
     for token in tokens {
         token.cancel();
     }
-}
-
-#[tauri::command]
-pub async fn assistant_codex_list_models() -> Result<Vec<CodexModel>, String> {
-    let mut server = AppServer::spawn().await?;
-    let result = server
-        .request(
-            "model/list",
-            json!({ "includeHidden": false, "limit": 100 }),
-        )
-        .await;
-    server.shutdown().await;
-    let result = result?;
-    let models = result
-        .get("data")
-        .and_then(Value::as_array)
-        .ok_or("Codex returned an invalid model list")?;
-    Ok(models.iter().filter_map(parse_model).collect())
 }
 
 #[tauri::command]
@@ -481,7 +477,43 @@ fn parse_model(value: &Value) -> Option<CodexModel> {
                 .collect()
         })
         .unwrap_or_default();
-    let modalities = value.get("inputModalities").and_then(Value::as_array);
+    let input_modalities: Vec<String> = value
+        .get("inputModalities")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_else(|| vec!["text".into(), "image".into()]);
+    let service_tiers = value
+        .get("serviceTiers")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    let id = item.get("id").and_then(Value::as_str)?.to_string();
+                    Some(CodexServiceTier {
+                        name: item
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .unwrap_or(&id)
+                            .to_string(),
+                        description: item
+                            .get("description")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                        id,
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let upgrade = value.get("upgrade").or_else(|| value.get("upgradeInfo"));
     Some(CodexModel {
         id,
         label: value
@@ -504,8 +536,29 @@ fn parse_model(value: &Value) -> Option<CodexModel> {
             .unwrap_or("medium")
             .to_string(),
         supported_reasoning_efforts: efforts,
-        image_input: modalities
-            .is_none_or(|items| items.iter().any(|item| item.as_str() == Some("image"))),
+        service_tiers,
+        default_service_tier: value
+            .get("defaultServiceTier")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        upgrade_model: upgrade
+            .and_then(|item| item.get("model").or_else(|| item.get("modelId")))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        upgrade_copy: upgrade
+            .and_then(|item| {
+                item.get("migrationMarkdown")
+                    .or_else(|| item.get("copy"))
+                    .or_else(|| item.get("description"))
+            })
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        supports_personality: value
+            .get("supportsPersonality")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
+        image_input: input_modalities.iter().any(|item| item == "image"),
+        input_modalities,
     })
 }
 
@@ -521,6 +574,7 @@ pub async fn assistant_codex_send(
     attachments: Option<Vec<AssistantAttachment>>,
     thinking_effort: Option<String>,
     thinking_enabled: Option<bool>,
+    fast_mode: Option<bool>,
     turn_epoch: Option<u64>,
     permission_mode: Option<String>,
     root: Option<String>,
@@ -559,6 +613,7 @@ pub async fn assistant_codex_send(
         &attachments,
         thinking_enabled.unwrap_or(false),
         thinking_effort.as_deref(),
+        fast_mode.unwrap_or(false),
         &permission_mode,
         root.as_deref(),
         &cancel,
@@ -613,6 +668,7 @@ async fn run_turn(
     attachments: &[AssistantAttachment],
     thinking_enabled: bool,
     thinking_effort: Option<&str>,
+    fast_mode: bool,
     permission_mode: &str,
     root: Option<&str>,
     cancel: &CancellationToken,
@@ -623,35 +679,35 @@ async fn run_turn(
         "on-request"
     };
     let roots = root.map(|value| vec![value]).unwrap_or_default();
+    let service_tier = requested_fast_tier(server, model, fast_mode).await?;
     let thread_result = if let Some(thread_id) = prior_thread.filter(|id| !id.trim().is_empty()) {
+        let mut params = json!({
+            "threadId": thread_id,
+            "cwd": root,
+            "model": model,
+            "approvalPolicy": approval_policy,
+            "runtimeWorkspaceRoots": roots,
+        });
+        insert_service_tier(&mut params, service_tier.as_deref());
         server
-            .request(
-                "thread/resume",
-                json!({
-                    "threadId": thread_id,
-                    "cwd": root,
-                    "model": model,
-                    "approvalPolicy": approval_policy,
-                    "runtimeWorkspaceRoots": roots,
-                }),
-            )
+            .request("thread/resume", params)
             .await?
     } else {
+        let mut params = json!({
+            "cwd": root,
+            "model": model,
+            "approvalPolicy": approval_policy,
+            "approvalsReviewer": "user",
+            "runtimeWorkspaceRoots": roots,
+            "serviceName": "rift",
+            "ephemeral": false,
+        });
+        insert_service_tier(&mut params, service_tier.as_deref());
         server
-            .request(
-                "thread/start",
-                json!({
-                    "cwd": root,
-                    "model": model,
-                    "approvalPolicy": approval_policy,
-                    "approvalsReviewer": "user",
-                    "runtimeWorkspaceRoots": roots,
-                    "serviceName": "rift",
-                    "ephemeral": false,
-                }),
-            )
+            .request("thread/start", params)
             .await?
     };
+    let fast_active = thread_confirmed_fast(&thread_result, service_tier.is_some());
     let thread_id = thread_result
         .pointer("/thread/id")
         .and_then(Value::as_str)
@@ -702,23 +758,20 @@ async fn run_turn(
     } else {
         Value::Null
     };
-    let turn = server
-        .request(
-            "turn/start",
-            json!({
-                "threadId": thread_id,
-                "input": input,
-                "cwd": root,
-                "model": model,
-                "effort": effort,
-                "summary": "concise",
-                "approvalPolicy": approval_policy,
-                "sandboxPolicy": sandbox,
-                "collaborationMode": collaboration,
-                "runtimeWorkspaceRoots": roots,
-            }),
-        )
-        .await?;
+    let mut turn_params = json!({
+        "threadId": thread_id,
+        "input": input,
+        "cwd": root,
+        "model": model,
+        "effort": effort,
+        "summary": "concise",
+        "approvalPolicy": approval_policy,
+        "sandboxPolicy": sandbox,
+        "collaborationMode": collaboration,
+        "runtimeWorkspaceRoots": roots,
+    });
+    insert_service_tier(&mut turn_params, service_tier.as_deref());
+    let turn = server.request("turn/start", turn_params).await?;
     let turn_id = turn
         .pointer("/turn/id")
         .and_then(Value::as_str)
@@ -733,6 +786,7 @@ async fn run_turn(
         &thread_id,
         &turn_id,
         model,
+        fast_active,
         permission_mode,
         cancel,
     )
@@ -744,11 +798,64 @@ fn effort_name(thinking_enabled: bool, effort: Option<&str>) -> &'static str {
         return "low";
     }
     match effort {
+        Some("agentic") => "ultra",
+        Some("max") => "max",
         Some("ultra") => "xhigh",
         Some("deep") => "high",
-        Some("none") => "low",
+        Some("none" | "low") => "low",
         _ => "medium",
     }
+}
+
+fn is_fast_tier(value: &str) -> bool {
+    value.eq_ignore_ascii_case("priority") || value.eq_ignore_ascii_case("fast")
+}
+
+fn insert_service_tier(params: &mut Value, service_tier: Option<&str>) {
+    if let (Some(map), Some(tier)) = (params.as_object_mut(), service_tier) {
+        map.insert("serviceTier".into(), Value::String(tier.to_string()));
+    }
+}
+
+fn thread_confirmed_fast(thread_result: &Value, requested: bool) -> bool {
+    requested
+        && thread_result
+            .pointer("/thread/serviceTier")
+            .and_then(Value::as_str)
+            .is_some_and(is_fast_tier)
+}
+
+async fn requested_fast_tier(
+    server: &mut AppServer,
+    model: &str,
+    requested: bool,
+) -> Result<Option<String>, String> {
+    if !requested {
+        return Ok(None);
+    }
+    let result = server
+        .request(
+            "model/list",
+            json!({ "includeHidden": false, "limit": 100 }),
+        )
+        .await?;
+    let tier = result
+        .get("data")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(parse_model)
+        .find(|candidate| candidate.id == model)
+        .and_then(|candidate| {
+            candidate
+                .service_tiers
+                .into_iter()
+                .find(|tier| is_fast_tier(&tier.id))
+                .map(|tier| tier.id)
+        });
+    tier.map(Some).ok_or_else(|| {
+        format!("Fast mode is not available for {model} through this ChatGPT account")
+    })
 }
 
 fn sandbox_policy(mode: &str, root: Option<&str>) -> Value {
@@ -779,6 +886,7 @@ async fn stream_turn(
     thread_id: &str,
     turn_id: &str,
     model: &str,
+    fast_active: bool,
     permission_mode: &str,
     cancel: &CancellationToken,
 ) -> Result<(), String> {
@@ -953,6 +1061,7 @@ async fn stream_turn(
                         status,
                         error,
                         usage: state.usage.as_ref(),
+                        fast_active,
                     },
                 );
                 emit_done(
@@ -1289,6 +1398,7 @@ struct CodexResult<'a> {
     status: &'a str,
     error: Option<&'a str>,
     usage: Option<&'a Value>,
+    fast_active: bool,
 }
 
 fn emit_result(app: &AppHandle, window: &str, session: &str, epoch: u64, result: CodexResult<'_>) {
@@ -1298,6 +1408,7 @@ fn emit_result(app: &AppHandle, window: &str, session: &str, epoch: u64, result:
         status,
         error,
         usage,
+        fast_active,
     } = result;
     let last = usage
         .and_then(|value| value.get("last"))
@@ -1337,6 +1448,7 @@ fn emit_result(app: &AppHandle, window: &str, session: &str, epoch: u64, result:
             "is_error":status == "failed", "errors":error.into_iter().collect::<Vec<_>>(),
             "result":"", "usage":rift_usage(&total), "provider":"codex",
             "codex_thread_id":thread_id,
+            "fast_mode_state":if fast_active {Value::String("on".into())} else {Value::Null},
             "modelUsage":context.map(|window| json!({(model):{"contextWindow":window}})).unwrap_or_else(|| json!({})),
         }),
     );
@@ -1367,8 +1479,8 @@ fn emit_done(app: &AppHandle, window: &str, session: &str, epoch: u64, exit_code
 #[cfg(test)]
 mod tests {
     use super::{
-        codex_answers, effort_name, leading_skill_name, parse_account_overview, parse_model,
-        sandbox_policy,
+        codex_answers, effort_name, insert_service_tier, leading_skill_name,
+        parse_account_overview, parse_model, sandbox_policy, thread_confirmed_fast,
     };
     use serde_json::json;
 
@@ -1378,13 +1490,19 @@ mod tests {
             "model":"gpt-5.6-sol", "displayName":"GPT-5.6 Sol", "description":"Agentic",
             "hidden":false, "isDefault":true, "defaultReasoningEffort":"low",
             "supportedReasoningEfforts":[{"reasoningEffort":"low"},{"reasoningEffort":"high"}],
-            "inputModalities":["text","image"]
+            "serviceTiers":[{"id":"priority","name":"Fast","description":"1.5x speed"}],
+            "defaultServiceTier":"default",
+            "upgrade":{"model":"gpt-5.6-terra","migrationMarkdown":"Move to Terra"},
+            "inputModalities":["text","image"], "supportsPersonality":true
         }))
         .unwrap();
         assert_eq!(model.id, "gpt-5.6-sol");
         assert!(model.is_default);
         assert!(model.image_input);
         assert_eq!(model.supported_reasoning_efforts, ["low", "high"]);
+        assert_eq!(model.service_tiers[0].id, "priority");
+        assert_eq!(model.upgrade_model.as_deref(), Some("gpt-5.6-terra"));
+        assert!(model.supports_personality);
     }
 
     #[test]
@@ -1399,7 +1517,28 @@ mod tests {
             "dangerFullAccess"
         );
         assert_eq!(effort_name(true, Some("ultra")), "xhigh");
+        assert_eq!(effort_name(true, Some("max")), "max");
+        assert_eq!(effort_name(true, Some("agentic")), "ultra");
         assert_eq!(effort_name(false, Some("ultra")), "low");
+    }
+
+    #[test]
+    fn fast_tier_uses_camel_case_and_requires_provider_confirmation() {
+        let mut params = json!({ "threadId": "thread-1" });
+        insert_service_tier(&mut params, Some("priority"));
+        assert_eq!(params["serviceTier"], "priority");
+        assert!(thread_confirmed_fast(
+            &json!({ "thread": { "serviceTier": "priority" } }),
+            true
+        ));
+        assert!(!thread_confirmed_fast(
+            &json!({ "thread": { "serviceTier": "default" } }),
+            true
+        ));
+        assert!(!thread_confirmed_fast(
+            &json!({ "thread": { "serviceTier": "priority" } }),
+            false
+        ));
     }
 
     #[test]

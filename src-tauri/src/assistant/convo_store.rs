@@ -1,5 +1,5 @@
-//! R3 (per `docs/design/assistant-mod-split.md`) — conversation persistence:
-//! the on-disk convo JSON store (list/load/save/delete/export), the per-session
+//! Conversation persistence; see `docs/ARCHITECTURE.md#backend-map`:
+//! the on-disk convo JSON store (list/load/save/delete), the per-session
 //! cwd + model sidecars, session-id validation, and the retired-JSONL
 //! housekeeping sweep. Lifted verbatim from `assistant/mod.rs` 2026-06-09.
 //! `dirs_home` + model-name validation stay on the parent, reached via `super::`.

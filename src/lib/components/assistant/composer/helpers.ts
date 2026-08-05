@@ -1,4 +1,4 @@
-// Pure helpers extracted from Composer.svelte (#20 C1 — composer-split.md).
+// Pure helpers extracted from Composer.svelte; see docs/ARCHITECTURE.md#frontend-map.
 // Zero DOM-state/store deps beyond the args passed in; unit-tested in helpers.test.ts.
 
 // Light fuzzy match with three tiers: literal substring in basename,

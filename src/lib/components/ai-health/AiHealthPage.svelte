@@ -625,7 +625,8 @@
   // track the composer's reasoning ladder (rung names = the CLI flag each tier
   // sends).
   const EFFORT_LABEL: Record<string, string> = {
-    none: "Low", smart: "Medium", deep: "High", ultra: "X-High",
+    none: "Low", low: "Low", smart: "Medium", deep: "High", ultra: "X-High",
+    max: "Max", agentic: "Ultra",
   };
   const MODEL_LABEL: Record<string, string> = {
     opus: "Opus", sonnet: "Sonnet", haiku: "Haiku", fable: "Fable",

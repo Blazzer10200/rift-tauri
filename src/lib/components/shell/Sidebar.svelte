@@ -21,7 +21,7 @@
   const footNav = $derived(
     workspace.order.filter(
       // Diagnostics is a support surface, not a daily destination. It remains
-      // one keystroke away through the command palette and Settings → About,
+      // one keystroke away through the command palette and Settings → System,
       // while this dock stays legible as Workspace · Chat · AI Health.
       (id) => id !== "settings" && id !== "projects" && id !== "diagnostics" && !WORKSPACES[id].disabled,
     ),

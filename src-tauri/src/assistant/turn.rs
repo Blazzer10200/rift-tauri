@@ -2,7 +2,7 @@
 //! Session registry (per-session child PIDs, stop flags),
 //! the `assistant://*` event consts, user-envelope build, control-response +
 //! permission-request plumbing, and the `assistant_send` / `assistant_stop`
-//! commands. See docs/design/assistant-mod-split.md R8.
+//! commands. See `docs/ARCHITECTURE.md#backend-map`.
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;

@@ -1,5 +1,5 @@
 <script lang="ts">
-  // C6 (per docs/design/composer-split.md) — the `@file` mention popover,
+  // The `@file` mention popover; see docs/ARCHITECTURE.md#frontend-map.
   // lifted verbatim from Composer.svelte 2026-06-10. Render + click only:
   // caret detection, the nav index, and the insert-into-draft logic stay
   // owned by the parent (they bind the textarea + tab state).

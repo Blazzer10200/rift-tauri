@@ -1,4 +1,4 @@
-//! R5 (per `docs/design/assistant-mod-split.md`) — environment observation:
+//! Environment observation; see `docs/ARCHITECTURE.md#backend-map`.
 //! optional host-tool PATH checks. Lifted verbatim from `assistant/mod.rs`
 //! 2026-06-09. Config load/save stays on the parent (R2) — reached via `super::`.
 
@@ -74,7 +74,7 @@ fn which_on_path(program: &str) -> bool {
 
 /// Which optional host tools resolve on PATH. Rift works without these, but
 /// individual features need them: the git tools need `git`; the "Open in VS
-/// Code" affordance needs `code`. Surfaced in Settings → About → Local tools
+/// Code" affordance needs `code`. Surfaced in Settings → System → Local tools
 /// and used to hide dead affordances.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -4,7 +4,7 @@
   // 48-char generic peek. Pending (the approval moment) = always open; settled
   // history = collapsed to a one-line summary with a toggle.
   //
-  // The card is ALSO the approval gate (docs/design/plan-mode.md §1b): while
+  // The card is ALSO the approval gate (see docs/ARCHITECTURE.md#frontend-map): while
   // the backend's `can_use_tool` ask is parked (`kind:"plan"` in
   // permissionPrompts) the action bar answers it live — Approve & build flips
   // the mode and the SAME turn rolls into execution. If the ask never

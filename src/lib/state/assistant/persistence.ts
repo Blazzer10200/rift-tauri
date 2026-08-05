@@ -545,7 +545,9 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     // Saved dial scopes to this tab too — like model, opening an old chat must
     // not rewrite the global defaults. Unknown/legacy values fall back to null.
     tab.effortOverride =
-      convo.effort === "none" || convo.effort === "smart" || convo.effort === "deep" || convo.effort === "ultra"
+      convo.effort === "none" || convo.effort === "low" || convo.effort === "smart"
+        || convo.effort === "deep" || convo.effort === "ultra"
+        || convo.effort === "max" || convo.effort === "agentic"
         ? convo.effort : null;
     tab.thinkingOverride = typeof convo.thinkingOn === "boolean" ? convo.thinkingOn : null;
     // The saved model is the model the chat's turns were running on — hydrate

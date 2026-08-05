@@ -52,7 +52,7 @@ bash scripts/cdp/c.sh inspect ".settings-page"
 bash scripts/cdp/c.sh map
 bash scripts/cdp/c.sh map ".settings-page"
 bash scripts/cdp/c.sh find "Settings"
-bash scripts/cdp/c.sh text ".chat"
+bash scripts/cdp/c.sh text ".assistant"
 bash scripts/cdp/c.sh measure ".sidebar"
 bash scripts/cdp/c.sh act click '[aria-label="Settings"]'
 bash scripts/cdp/c.sh act key "Ctrl+4" ".sb-main"

@@ -105,10 +105,6 @@ function savePersonal() {
   }
 }
 
-export function personalWords(): string[] {
-  return [...personal()].sort();
-}
-
 export function addPersonalWord(word: string) {
   const w = word.toLowerCase().trim();
   if (!w || !/^[a-z][a-z']*$/.test(w)) return;

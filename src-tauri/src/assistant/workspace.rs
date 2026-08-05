@@ -1,4 +1,4 @@
-//! R7 (per `docs/design/assistant-mod-split.md`) — workspace root state:
+//! Workspace root state; see `docs/ARCHITECTURE.md#backend-map`.
 //! open/clear/recent folder management, the `@`-mention file enumeration, and
 //! the git-branch probe for the Welcome context strip. Lifted verbatim from
 //! `assistant/mod.rs` 2026-06-09. Config load/save + RECENT_ROOTS_MAX stay on

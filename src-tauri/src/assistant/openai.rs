@@ -77,7 +77,11 @@ pub struct OpenAiModel {
     pub label: String,
     pub family: String,
     pub context_window: Option<u64>,
+    pub description: String,
     pub reasoning: bool,
+    pub default_reasoning_effort: Option<String>,
+    pub supported_reasoning_efforts: Vec<String>,
+    pub fast_mode: bool,
     pub image_input: bool,
     pub available: bool,
 }
@@ -129,19 +133,30 @@ pub fn assistant_set_openai_api_key(api_key: Option<String>) -> Result<(), Strin
 
 fn curated_models() -> Vec<OpenAiModel> {
     [
-        ("gpt-5.6", "GPT-5.6", "gpt-5.6", 1_050_000),
-        ("gpt-5.6-sol", "GPT-5.6 Sol", "gpt-5.6", 1_050_000),
-        ("gpt-5.6-terra", "GPT-5.6 Terra", "gpt-5.6", 1_050_000),
-        ("gpt-5.6-luna", "GPT-5.6 Luna", "gpt-5.6", 1_050_000),
-        ("gpt-5.3-codex", "GPT-5.3 Codex", "gpt-5.3", 400_000),
+        ("gpt-5.6", "GPT-5.6", "gpt-5.6", 1_050_000, "Current GPT-5.6 family alias"),
+        ("gpt-5.6-sol", "GPT-5.6 Sol", "gpt-5.6", 1_050_000, "Frontier model for complex, open-ended work and maximum polish"),
+        ("gpt-5.6-terra", "GPT-5.6 Terra", "gpt-5.6", 1_050_000, "Balanced everyday workhorse for intelligence and cost"),
+        ("gpt-5.6-luna", "GPT-5.6 Luna", "gpt-5.6", 1_050_000, "Efficient model for repeatable, high-volume work"),
+        ("gpt-5.5", "GPT-5.5", "gpt-5.5", 1_050_000, "Previous-generation general reasoning model"),
+        ("gpt-5.4", "GPT-5.4", "gpt-5.4", 1_050_000, "Established reasoning model for existing workflows"),
+        ("gpt-5.4-mini", "GPT-5.4 mini", "gpt-5.4", 400_000, "Compact previous-generation reasoning model"),
+        ("gpt-5.3-codex", "GPT-5.3 Codex", "gpt-5.3", 400_000, "Coding-focused reasoning model"),
     ]
     .into_iter()
-    .map(|(id, label, family, context)| OpenAiModel {
+    .map(|(id, label, family, context, description)| OpenAiModel {
         id: id.into(),
         label: label.into(),
         family: family.into(),
         context_window: Some(context),
+        description: description.into(),
         reasoning: true,
+        default_reasoning_effort: default_reasoning_effort(id).map(str::to_string),
+        supported_reasoning_efforts: supported_reasoning_efforts(id)
+            .unwrap_or_default()
+            .iter()
+            .map(|effort| (*effort).to_string())
+            .collect(),
+        fast_mode: api_fast_supported(id),
         image_input: true,
         available: false,
     })
@@ -185,8 +200,12 @@ pub async fn assistant_openai_list_models() -> Result<Vec<OpenAiModel>, String> 
             label: id.clone(),
             family: id.split('-').take(3).collect::<Vec<_>>().join("-"),
             context_window: None,
-            reasoning: true,
-            image_input: true,
+            description: "Available to this API project; capabilities are not yet cataloged by Rift".into(),
+            reasoning: false,
+            default_reasoning_effort: None,
+            supported_reasoning_efforts: Vec::new(),
+            fast_mode: false,
+            image_input: false,
             available: true,
         });
     }
@@ -274,16 +293,61 @@ fn validated_history(history: Vec<Value>) -> Result<Vec<Value>, String> {
     Ok(out)
 }
 
-fn reasoning_effort(enabled: bool, tier: Option<&str>) -> &'static str {
-    if !enabled {
-        return "none";
+fn supported_reasoning_efforts(model: &str) -> Option<&'static [&'static str]> {
+    match model {
+        "gpt-5.6" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" => {
+            Some(&["none", "low", "medium", "high", "xhigh", "max"])
+        }
+        "gpt-5.5" | "gpt-5.4" | "gpt-5.4-mini" => {
+            Some(&["none", "low", "medium", "high", "xhigh"])
+        }
+        "gpt-5.3-codex" => Some(&["low", "medium", "high", "xhigh"]),
+        _ => None,
     }
-    match tier {
-        Some("none") => "low",
-        Some("smart") => "medium",
-        Some("ultra") => "xhigh",
-        _ => "high",
+}
+
+fn default_reasoning_effort(model: &str) -> Option<&'static str> {
+    match model {
+        "gpt-5.4" | "gpt-5.4-mini" => Some("none"),
+        "gpt-5.3-codex" => None,
+        value if supported_reasoning_efforts(value).is_some() => Some("medium"),
+        _ => None,
     }
+}
+
+fn api_fast_supported(model: &str) -> bool {
+    matches!(
+        model,
+        "gpt-5.6" | "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna"
+    )
+}
+
+fn reasoning_effort(
+    model: &str,
+    enabled: bool,
+    tier: Option<&str>,
+) -> Result<Option<&'static str>, String> {
+    let Some(supported) = supported_reasoning_efforts(model) else {
+        return Ok(None);
+    };
+    let effort = if !enabled {
+        if supported.contains(&"none") { "none" } else { "low" }
+    } else {
+        match tier {
+            Some("none") => if supported.contains(&"none") { "none" } else { "low" },
+            Some("low") => "low",
+            Some("smart") => "medium",
+            Some("deep") => "high",
+            Some("ultra") => "xhigh",
+            Some("max") => "max",
+            Some("agentic") => "ultra",
+            _ => "medium",
+        }
+    };
+    if !supported.contains(&effort) {
+        return Err(format!("{model} does not support {effort} reasoning effort through the OpenAI API"));
+    }
+    Ok(Some(effort))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -298,6 +362,7 @@ pub async fn assistant_openai_send(
     history: Option<Vec<Value>>,
     thinking_effort: Option<String>,
     thinking_enabled: Option<bool>,
+    fast_mode: Option<bool>,
     turn_epoch: Option<u64>,
     permission_mode: Option<String>,
     root: Option<String>,
@@ -320,6 +385,15 @@ pub async fn assistant_openai_send(
     if !super::is_valid_model_name(&model) {
         return Err("invalid OpenAI model id".into());
     }
+    let fast_requested = fast_mode.unwrap_or(false);
+    if fast_requested && !api_fast_supported(&model) {
+        return Err(format!("Fast API processing is not available for {model}"));
+    }
+    let effort = reasoning_effort(
+        &model,
+        thinking_enabled.unwrap_or(false),
+        thinking_effort.as_deref(),
+    )?;
     let cfg = super::config::load_config();
     let permission_mode = permission_mode
         .filter(|mode| super::config::is_valid_permission_mode(mode))
@@ -350,7 +424,7 @@ pub async fn assistant_openai_send(
             emit_done(&app, &window_label, &session_id, epoch, -1);
             return Ok(());
         }
-        let body = json!({
+        let mut body = json!({
             "model": model,
             "instructions": instructions,
             "input": input,
@@ -366,11 +440,9 @@ pub async fn assistant_openai_send(
             // Server-side compaction stays compatible with `store:false`. The
             // returned opaque compaction item is persisted with the rest of the
             // local continuation state and automatically reduces the next input.
-            "context_management": [{ "type": "compaction", "compact_threshold": 180_000 }],
-            "reasoning": {
-                "effort": reasoning_effort(thinking_enabled.unwrap_or(false), thinking_effort.as_deref())
-            }
+            "context_management": [{ "type": "compaction", "compact_threshold": 180_000 }]
         });
+        apply_response_options(&mut body, effort, fast_requested);
         let round = match stream_response(
             &app,
             &window_label,
@@ -1115,6 +1187,7 @@ fn emit_usage_and_result(
         "cache_read_input_tokens": completed.totals.cached,
         "cache_creation_input_tokens": 0,
     });
+    let fast_active = response_used_fast(completed.response);
     emit_line(
         app,
         window,
@@ -1134,16 +1207,38 @@ fn emit_usage_and_result(
             "usage": total_rift_usage,
             "modelUsage": context_window(model).map(|window| json!({ (model): { "contextWindow": window } })).unwrap_or_else(|| json!({})),
             "provider": "openai",
+            "fast_mode_state": if fast_active { Value::String("on".into()) } else { Value::Null },
             "response_id": completed.response.get("id").cloned().unwrap_or(Value::Null),
             "openai_history": completed.continuation,
         }),
     );
 }
 
+fn apply_response_options(body: &mut Value, effort: Option<&str>, fast_requested: bool) {
+    let map = body
+        .as_object_mut()
+        .expect("Responses body is always an object");
+    if let Some(effort) = effort {
+        map.insert("reasoning".into(), json!({ "effort": effort }));
+    }
+    if fast_requested {
+        map.insert("service_tier".into(), Value::String("fast".into()));
+    }
+}
+
+fn response_used_fast(response: &Value) -> bool {
+    response
+        .get("service_tier")
+        .and_then(Value::as_str)
+        .is_some_and(|tier| {
+            tier.eq_ignore_ascii_case("fast") || tier.eq_ignore_ascii_case("priority")
+        })
+}
+
 fn context_window(model: &str) -> Option<u64> {
-    if model.starts_with("gpt-5.6") {
+    if model.starts_with("gpt-5.6") || model == "gpt-5.5" || model == "gpt-5.4" {
         Some(1_050_000)
-    } else if model.starts_with("gpt-5.3-codex") {
+    } else if model == "gpt-5.4-mini" || model.starts_with("gpt-5.3-codex") {
         Some(400_000)
     } else {
         // `/v1/models` does not expose model limits. Omit an unknown model's
@@ -1272,9 +1367,24 @@ mod tests {
 
     #[test]
     fn effort_mapping_is_provider_specific() {
-        assert_eq!(reasoning_effort(false, Some("ultra")), "none");
-        assert_eq!(reasoning_effort(true, Some("smart")), "medium");
-        assert_eq!(reasoning_effort(true, Some("ultra")), "xhigh");
+        assert_eq!(reasoning_effort("gpt-5.6-sol", false, Some("ultra")).unwrap(), Some("none"));
+        assert_eq!(reasoning_effort("gpt-5.6-sol", true, Some("low")).unwrap(), Some("low"));
+        assert_eq!(reasoning_effort("gpt-5.6-sol", true, Some("smart")).unwrap(), Some("medium"));
+        assert_eq!(reasoning_effort("gpt-5.6-sol", true, Some("ultra")).unwrap(), Some("xhigh"));
+        assert_eq!(reasoning_effort("gpt-5.6-sol", true, Some("max")).unwrap(), Some("max"));
+        assert!(reasoning_effort("gpt-5.6-sol", true, Some("agentic")).is_err());
+        assert_eq!(reasoning_effort("gpt-5.3-codex", false, None).unwrap(), Some("low"));
+        assert_eq!(reasoning_effort("gpt-future", true, Some("deep")).unwrap(), None);
+    }
+
+    #[test]
+    fn fast_request_and_result_confirmation_are_independent() {
+        let mut body = json!({ "model": "gpt-5.6-sol" });
+        apply_response_options(&mut body, Some("max"), true);
+        assert_eq!(body["reasoning"]["effort"], "max");
+        assert_eq!(body["service_tier"], "fast");
+        assert!(response_used_fast(&json!({ "service_tier": "priority" })));
+        assert!(!response_used_fast(&json!({ "service_tier": "default" })));
     }
 
     #[test]
@@ -1291,6 +1401,8 @@ mod tests {
     #[test]
     fn context_windows_are_only_reported_when_known() {
         assert_eq!(context_window("gpt-5.6"), Some(1_050_000));
+        assert_eq!(context_window("gpt-5.5"), Some(1_050_000));
+        assert_eq!(context_window("gpt-5.4-mini"), Some(400_000));
         assert_eq!(context_window("gpt-5.3-codex"), Some(400_000));
         assert_eq!(context_window("gpt-unlisted-preview"), None);
     }

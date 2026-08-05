@@ -1,217 +1,173 @@
-# Developing + running Rift
+# Developing and running Rift
 
-One doc for everything between "I want to use this" and "I want to contribute." Sections:
+This is the practical guide for installation, local development, provider
+boundaries, and releases. System topology lives in
+[`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-1. [End-user install (Onboarding)](#1-end-user-install-onboarding)
-2. [Building from source (Contributing)](#2-building-from-source-contributing)
-3. [ChatGPT API access](#3-chatgpt-api-access)
-4. [Claude Code w/ Rift on the Pro plan](#4-claude-code-w-rift-on-the-pro-plan)
-5. [Releases](#5-releases)
-6. [Configuration & environment variables](#6-configuration--environment-variables)
+## End-user setup
 
----
+1. Run the latest `Rift-win-Setup.exe`. Rift installs per user and does not
+   require administrator access.
+2. If SmartScreen appears, choose **More info → Run anyway**. Public builds are
+   not code-signed.
+3. Open **Settings → Providers** and connect at least one route:
+   - **ChatGPT subscription:** install the standalone Codex CLI with
+     `npm install -g @openai/codex`, then use Rift's ChatGPT sign-in/check flow.
+   - **Claude:** install Claude Code with
+     `npm install -g @anthropic-ai/claude-code`, then complete its login.
+   - **Optional API access:** save an Anthropic or OpenAI API key in the matching
+     provider card. OpenAI API usage is separate from ChatGPT subscription
+     billing.
+4. Open a local folder and start a conversation. File, search, Git, and GitHub
+   tools remain scoped to that workspace and the selected permission mode.
 
-## 1. End-user install (Onboarding)
+If a newly installed CLI is not detected, restart Rift first. Windows GUI apps
+can inherit an older PATH; signing out or rebooting refreshes it when needed.
 
-For someone handed a `Setup.exe` who wants to use Claude, ChatGPT, or both against a local folder.
+Rift checks for app updates on launch and periodically afterward. A user accepts
+an update once; Velopack downloads it in the background and applies it on the
+next restart.
 
-### Install
-
-- Run `Rift-win-Setup.exe`. Per-user install, no admin required. Lands at `%LOCALAPPDATA%\Rift\rift-tauri.exe` w/ a Start-menu shortcut.
-- SmartScreen flag → **More info → Run anyway** (no code-signing cert yet).
-
-### Connect a provider
-
-At least one provider must be connected:
-
-- **Claude:** install Claude Code (`npm install -g @anthropic-ai/claude-code`), run `claude` once, and complete browser login (Pro/Max/Team)—see §4.
-- Or add an `ANTHROPIC_API_KEY` in **Settings → Providers → Optional Claude API access**; Rift passes it to the CLI per turn.
-- **ChatGPT:** sign in through the Codex CLI for subscription-backed access, or add a key from the OpenAI API platform under **Settings → Providers → Optional ChatGPT API access**—see §3. Subscription and API billing are separate.
-- Provider status appears in Settings and the model picker disables models whose provider is not ready.
-
-### Pick a workspace + chat
-
-- **Open a folder** in the workspace picker. Provider tools are scoped to that folder.
-- Type in the composer and send. Both routes can use `read_file` / `list_dir` / `grep` and local git tools (`git_status` / `diff` / `log` / `pull` / `commit` / `push`). Network access occurs for the selected provider and any external tool action you approve.
-- **GitHub (optional):** if the folder's `origin` is a GitHub repo and the [`gh` CLI](https://cli.github.com) is signed in, the branch chip shows CI/PR state and the assistant receives matching `gh_*` tools. Rift stores no GitHub token; calls use your existing `gh` login and stay pinned to `origin`.
-- **Per-turn controls** sit on the composer: provider/model, permission mode, and reasoning effort. ChatGPT API model rows come from the account-visible OpenAI model list with Rift defaults as a fallback.
-- **Permission modes** — ask-before-edits, edit-automatically, plan, auto, or bypass. In the asking modes a gated tool surfaces an Allow/Deny bar before it runs.
-- **Tabs / panes** — open multiple concurrent chats; each carries its own model + permission mode + effort.
-
-### Updates
-
-Rift self-updates via Velopack. It checks on launch + every ~6h; when a build is available you click **Update** once to consent, then it downloads in the background and applies on the next restart — unattended from there.
-
-### Trouble?
-
-- Claude unavailable → install/sign in to `claude` (§4) or add an Anthropic key in Settings.
-- ChatGPT subscription unavailable → install/sign in to the standalone Codex CLI, then choose **Check again** in Settings → Providers. API-only failures stay under the optional API disclosure (§3).
-- CLI logs/auth live under `~/.claude/`. Rift's own config is managed in-app via Settings.
-
----
-
-## 2. Building from source (Contributing)
+## Build from source
 
 ### Prerequisites
 
-- **Windows 11** (primary target). macOS / Linux build but aren't packaged.
-- **Rust** via [rustup](https://rustup.rs/). The repository's `rust-toolchain.toml` pins the same compiler and Clippy component used by CI, so local and release gates cannot drift onto different lint sets.
-- **Node.js** 20+ via [`nvm-windows`](https://github.com/coreybutler/nvm-windows).
-- **`npm`** — *not* pnpm (lockfile is npm).
-- **Git Bash** for shell scripts.
+- Windows 11 for the supported packaged target.
+- Node.js 20+ and npm.
+- Rust via rustup. `rust-toolchain.toml` pins the compiler and Clippy component
+  used by CI.
+- Git Bash for the CDP shell helper.
 
-### Clone + bootstrap
-
-```bash
+```powershell
 git clone https://github.com/Blazzer10200/rift-tauri.git
-cd rift-tauri
+Set-Location rift-tauri
 npm install
 ```
 
-First `cargo` build is a few minutes cold (Tauri + WebView2 toolchain). Incremental: seconds.
+### Run development
 
-### Run dev
-
-```bash
-scripts/run-dev.bat        # red-tinted icon, separate WebView2 profile from installed Rift; also exposes CDP on localhost:9222
-# or
-npm run tauri dev
+```powershell
+npm run cdp:dev
 ```
 
-Dev watches `src/` + `src-tauri/src/` and hot-reloads. **Don't run `cargo check` while dev is alive** — it collides with dev's incremental rebuild and kills the running dev process. Quit dev first, or rely on the dev console (it IS the Rust verifier while running).
+This is the supported launcher for a debuggable app: it keeps the development
+WebView profile separate from installed Rift and waits for CDP. `npm run tauri
+dev` remains available when CDP is unnecessary.
 
-### Project layout
+Do not run Cargo checks while Tauri development is active; both write the same
+incremental build state. The dev console is the Rust feedback loop until the app
+is stopped.
 
-| Where | What |
+### Project map
+
+| Location | Purpose |
 |---|---|
-| `src/` | SvelteKit frontend (Svelte 5 runes, Tailwind 4) |
-| `src-tauri/src/` | Rust backend — `assistant/` (Claude CLI, OpenAI Responses API, shared tools + local git), `browser/`, `commands/`, `diagnostics/`, `state/`, `stt/`, plus `lib.rs` / `update_service.rs` / `secrets.rs` |
-| `src-tauri/capabilities/` | Tauri 2 permission grants |
-| `docs/` | Architecture, security model, release history |
-| `scripts/` | Dev launcher + release pipeline + CDP helpers |
+| `src/` | SvelteKit/Svelte 5 frontend |
+| `src/lib/state/assistant/` | send, streaming, persistence, tabs, provider display |
+| `src/lib/components/assistant/` | chat, composer, stream, and persisted block UI |
+| `src-tauri/src/assistant/` | Claude, Codex App Server, OpenAI API, tools, conversations |
+| `src-tauri/src/stt/` | microphone, VAD, Parakeet, and optional Whisper |
+| `src-tauri/capabilities/` | Tauri WebView permission grants |
+| `design-system/` | static visual reference and token mirror |
+| `scripts/cdp/` | local WebView inspection bridge |
+| `docs/` | architecture, security, current changelog, local handoff/issues |
 
-### Before opening a PR
+For task-specific entrypoints, use the fast-navigation table in
+[`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-- `npm run check` clean
-- `cargo check --manifest-path src-tauri/Cargo.toml` clean (dev quit first)
-- `cargo test` if you touched anything testable
-- Or run `npm run verify` for the complete local gate. During live UI work, use `npm run verify:frontend`; `npm run verify` deliberately refuses to collide with an active Tauri dev process.
-- `npm run doctor` reports the repo, toolchain, provider CLIs, Tauri dev, and CDP health without reading or printing credentials.
-- Don't hand-edit version files independently. Maintainers use `pwsh scripts/bump.ps1 <version>` to keep `package.json`, `Cargo.toml`, `tauri.conf.json`, and the generated `Cargo.lock` aligned before tagging.
+### Verification
 
----
-
-## 3. ChatGPT API access
-
-Rift uses OpenAI's API directly; it does not automate the ChatGPT website and does not consume a ChatGPT Plus/Pro subscription.
-
-1. Create an API key in the OpenAI platform and make sure the API account has billing/access configured.
-2. Open **Settings → Providers → Optional ChatGPT API access**, paste the key, and save. Rift validates the key shape, stores it in Windows Credential Manager, and never returns it to the WebView.
-3. Refresh models or open the composer model picker. Rift combines its supported GPT defaults with the GPT chat/reasoning models visible to that API account.
-4. Select a GPT model for a conversation and send normally.
-
-OpenAI turns use `/v1/responses` with streaming and `store: false`. Rift owns conversation persistence locally and sends the prior canonical Responses items with the next turn, including opaque encrypted reasoning, tool, and compaction state that cannot be recreated from display text. Image attachments, reasoning effort, cancellation, usage reporting, and permission-gated workspace tools use the same UI contract as Claude. Environment `OPENAI_API_KEY` values are detected only to explain setup; they are deliberately ignored until the user explicitly saves a key in Rift.
-
-## 3.1 Codex / ChatGPT CLI connection
-
-Settings → Providers inspects a standalone `codex` CLI and launches its official `codex login` browser flow. This uses the ChatGPT subscription authorized for Codex; it is separate from API-key billing. Rift never reads or copies Codex’s auth cache, and rejects the packaged Windows Desktop helper because it is not a supported standalone CLI. Subscription turns use the local App Server (`initialize` → model list → thread start/resume → turn start); Rift maps streamed items, reasoning, approvals, questions, usage, cancellation, and completion into the same UI contract as Claude, while persisting only the Codex thread id.
-
-For a real pre-release check, use the dev app: save a test key, refresh the model list, send one plain text turn, run one read-only workspace tool, then cancel a streaming turn. Never place a test key in source, logs, screenshots, or shell output.
-
----
-
-## 4. Claude Code w/ Rift on the Pro plan
-
-Optional power-user setup — Rift works fine with a plain `claude` login and zero config. This section is a Pro-plan-optimized tuning pass for Claude Code (the CLI Rift drives via MCP). ~10 min.
-
-### Install + auth
-
-```bash
-npm install -g @anthropic-ai/claude-code
-claude  # first run: opens browser for Pro auth
+```powershell
+npm run doctor
+npm run check
+npm test
+cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-Verify: `claude --version` v2.1.111+ and `claude config` shows `model: claude-sonnet-5`. (The bare `sonnet` alias still resolves to Sonnet 4.6 on shipped CLIs — pin the explicit id.)
+`npm run verify` runs the complete frontend and Rust gate and refuses to collide
+with a running Tauri dev process. `npm run verify:frontend` and
+`npm run verify:rust` are the focused variants.
 
-### `~/.claude/settings.json`
+Do not hand-edit version files independently. `pwsh scripts/bump.ps1 X.Y.Z`
+keeps `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and
+`src-tauri/Cargo.lock` aligned.
 
-```json
-{
-  "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "model": "claude-sonnet-5",
-  "autoUpdatesChannel": "stable",
-  "effortLevel": "medium",
-  "env": {
-    "CLAUDE_CODE_GIT_BASH_PATH": "<your Git bash.exe, e.g. C:\\Program Files\\Git\\bin\\bash.exe>",
-    "CLAUDE_CODE_SUBAGENT_MODEL": "claude-haiku-4-5",
-    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "250000",
-    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "80"
-  },
-  "permissions": {
-    "deny": ["Read(./.env)", "Bash(curl *)"]
-  }
-}
-```
+## Provider routes
 
-**Why each line:**
-- Sonnet 5 default — handles 90%+ of coding at ~3× lower quota burn than Opus.
-- Haiku for subagents — recon/grep agents fire at ~5% of Sonnet cost.
-- `effortLevel: medium` — caps output ~2500 tok. Xhigh burns the 5-hour window ~3× faster.
-- `CLAUDE_CODE_AUTO_COMPACT_WINDOW: "250000"` + `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: "80"` — bound + trigger the CLI's own auto-compaction at 80% of a 250K window. Pro plan can't afford the 300K cliff. (This is the `claude` CLI's built-in compaction — Rift's in-app compaction UI was removed in the 2026-06-12 minimal-core strip.)
-- `autoUpdatesChannel: stable` — avoids regression releases (v2.1.89+ caused 3-50x quota burn for some).
-- Opus on-demand only — every Opus turn competes w/ your Sonnet budget. `/model claude-opus-4-8` per-session, then `/model claude-sonnet-5` back.
+See [`CHATGPT.md`](CHATGPT.md) for the current model, exact effort, Fast-mode,
+and billing-route contracts.
 
-### Usage tracking
+### ChatGPT subscription
 
-- In-CLI: `/status` shows remaining allocation for the current 5-hour window.
-- Web: `https://claude.ai/settings` → Usage (browser chat + CLI share the same pool).
-- Limit resets on rolling 5-hour windows, NOT weekly.
+Rift discovers a runnable standalone `codex`, launches the CLI's official login
+flow, and reads account/model/skill/usage information through the local App
+Server. Turns use `initialize`, thread start/resume, and turn start. Rift maps
+streamed text, reasoning, tools, approvals, questions, usage, and cancellation
+into its shared UI while persisting only the Codex thread ID. Rift never reads
+or copies Codex credential files. Model capabilities come from live
+`model/list`; never replace them with a static guessed effort or Fast table.
 
-### Rift + Claude integration
+### OpenAI API
 
-Rift's Assistant shells `claude` with `--mcp-config <rift.mcp.json>` + `--allowed-tools mcp__rift__*`, so Claude inherits `$HOME` and the Pro login works automatically. Per-turn it passes `--session-id` (first turn) / `--resume` (thereafter) so the CLI owns conversation state.
+The optional API route uses `/v1/responses` with streaming and `store: false`.
+Its key lives in Windows Credential Manager. Rift owns the canonical Responses
+history locally, including opaque items required for continuation. Environment
+`OPENAI_API_KEY` values are not silently adopted.
 
-**Session resume:** auto-recovers from "No conversation found with session ID" — you'll see "Session was lost — retrying as a fresh start," that's expected.
+API model capabilities are reviewed metadata because `/v1/models` reports
+access but not context windows, effort ranges, or Priority-processing support.
+Unknown account-visible models keep unverified capabilities disabled until the
+registry is updated from official model docs.
 
-### Common pitfalls
+Each GPT conversation pins one of these two routes on its first turn. If that
+route later becomes unavailable, Rift fails visibly instead of switching billing
+paths.
 
-- Shared quota: claude.ai browser eats the same pool as the CLI.
-- Silent fallback: over-limit may downgrade silently — check `/status` if output quality drops.
+### Claude
 
----
+Claude turns use the official CLI with Rift's workspace-scoped stdio MCP server.
+The prompt travels over stdin, and the CLI owns continuation through session IDs.
+An optional Anthropic key saved in Rift is isolated from the OpenAI key slot.
 
-## 5. Releases
+## Releases
 
-Maintainers only. Run `pwsh scripts/bump.ps1 <version>` before `scripts/release.ps1`; it updates `package.json`, `Cargo.toml`, and `tauri.conf.json` together, while Cargo refreshes `Cargo.lock`. Preflight bails on any mismatch or dirty tree.
+Releases are tag-driven CI. Do not run `scripts/release.ps1` locally for a normal
+ship.
 
-When dependencies change, regenerate the bundled license notices: `python scripts/gen-third-party-notices.py` rewrites `THIRD-PARTY-NOTICES.md` (shipped inside the installer next to the exe) — commit the result.
+1. Stop the repo-scoped development stack and run `npm run verify`.
+2. Run `pwsh scripts/bump.ps1 X.Y.Z`, update `docs/CHANGELOG.md`, review, and
+   create a signed commit.
+3. Create a signed annotated `vX.Y.Z` tag.
+4. Push the tag first, then `main`.
+5. Monitor with `pwsh scripts/ship-watch.ps1 vX.Y.Z -TimeoutSeconds 1800`.
+6. Independently verify the public R2 feed/packages and the GitHub release
+   assets. A source push or a single green endpoint is not a completed release.
 
-`release.ps1` drives `tauri build` → Velopack pack (`vpk`, delta baseline pulled from the R2 feed) → publish **feed-first**: Cloudflare R2 (the live update feed installed clients read) then the GitHub release on this repo (human download page, retried 3×; single-repo — the separate `rift` releases repo was retired when the source went public). **The `vpk` CLI version MUST equal the `velopack` crate version** (both pinned `=1.2.0`) — bump them together (`dotnet tool update -g vpk` + the Cargo pin).
+The self-hosted Windows runner tests, builds, and packages once. Publication is
+feed-first: R2 is the installed-client source; GitHub is the human download
+page.
 
-For a packaged smoke test, never launch `rift-tauri.exe` directly from the raw Cargo `release` directory. `CARGO_TARGET_DIR` may be shared across projects, and Windows can load an unrelated adjacent DLL before the system copy. Use the clean allowlisted staging directory that `release.ps1` creates (app exe plus explicitly required ONNX/DirectML sidecars); unexpected DLLs are reported and excluded.
+The `vpk` CLI version must equal the pinned `velopack` crate version. When
+dependencies change, regenerate `THIRD-PARTY-NOTICES.md` with
+`python scripts/gen-third-party-notices.py`.
 
-### Ship flow + guard rails
+For packaged smoke tests, never launch `rift-tauri.exe` from a shared raw Cargo
+release directory. Use a clean allowlisted staging directory containing only the
+app and explicitly required runtime sidecars; Windows can otherwise load an
+unrelated adjacent DLL.
 
-The tag-driven `release.yml` **runs pinned Rust 1.97/Clippy plus the full test suite (`cargo test` + `svelte-check` + `vitest`) before it builds/publishes**. The same toolchain is pinned locally by `rust-toolchain.toml`, preventing local/CI lint drift. Two optional helpers around a ship:
+## Local paths and environment
 
-- `pwsh scripts/smoke-turn.ps1 -Model haiku` — **before** tagging, prove a real Claude turn still completes end-to-end (spawns `claude` with Rift's exact turn flags against a throwaway folder; ~a cent of quota). Covers the live-turn check that CDP can't.
-- `pwsh scripts/ship-watch.ps1 <tag>` — **after** pushing the annotated tag, polls that release run and reports green/red. `-TimeoutSeconds` is enforced; a timeout exits `124` instead of leaving an agent blocked indefinitely. Replaces the manual "confirm CI landed next session" step.
+End users need no environment variables. Rift stores app configuration under
+`~/.rift/`, speech models under `~/.rift/models/`, and provider API keys in the
+OS keychain.
 
-CI runs on a self-hosted runner. When a tagged release sits `queued` and never starts, or the **Verify published** step red-X's a release that actually shipped, the run usually just needs a cancel + rerun once the runner service is back.
+Development-only variables include:
 
----
-
-## 6. Configuration & environment variables
-
-**End users need zero environment variables.** Rift is self-contained: Anthropic and OpenAI API keys live in separate OS-keychain slots via Settings, never in config files or the WebView; app config is written to `~/.rift/`; downloaded speech models land in `~/.rift/models/`. Nothing reads a machine-specific path or port at runtime.
-
-Every variable below is **optional** and scoped to development or release tooling:
-
-| Variable | Scope | Purpose |
-|---|---|---|
-| `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` | dev | Set by `scripts/run-dev.bat` to expose CDP on `localhost:9222` for live-UI verification. Not used in prod. |
-| `WEBVIEW2_USER_DATA_FOLDER` | dev | Isolates the dev WebView2 profile from an installed Rift so the two don't share cookies/state. |
-| `RIFT_CDP_MAX_EDGE` | dev | Overrides the 2576px screenshot long-edge clamp in `scripts/cdp/serve.cjs`. Cosmetic. |
-| `RIFT_MCP_SERVER` | internal | Set by Rift on itself when it re-spawns as the stdio MCP child for a turn. **Do not set manually.** |
-
-CLI-side knobs (`CLAUDE_CODE_*`, `ANTHROPIC_API_KEY`) belong to the `claude` CLI, not Rift—see §4. Rift actively **strips** `ANTHROPIC_API_KEY` from the CLI environment on every turn so the in-app keychain key (or the CLI browser login) is the single source of Claude auth. The native OpenAI route likewise ignores `OPENAI_API_KEY` from the process environment; the explicit keychain value is its only credential source.
+| Variable | Purpose |
+|---|---|
+| `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` | Enables local WebView CDP |
+| `WEBVIEW2_USER_DATA_FOLDER` | Separates development and installed profiles |
+| `RIFT_CDP_MAX_EDGE`, `RIFT_CDP_MAX_TOKENS` | Adjust screenshot bounds |
+| `RIFT_CDP_SS_FACTOR` | Adjust screenshot supersampling |
+| `RIFT_MCP_SERVER` | Internal child-process marker; never set manually |

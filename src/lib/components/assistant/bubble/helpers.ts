@@ -1,4 +1,4 @@
-// Pure helpers extracted from MessageBubble.svelte (#20 H0 — messagebubble-split.md).
+// Pure helpers extracted from MessageBubble.svelte; see docs/ARCHITECTURE.md#frontend-map.
 // Zero DOM/store deps beyond the args passed in; unit-tested in helpers.test.ts.
 import type { Block, ThinkingBlock } from "../../../state/assistant.svelte";
 import { diffArrays } from "diff";

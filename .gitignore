@@ -36,6 +36,7 @@ scratch/
 # Session state — overnight plans, audit logs, transient agent notes. Local only.
 # Anchored to root so it doesn't swallow src/lib/state/ (Svelte 5 store dir).
 /state/
+/.rift-tmp/
 scripts/cdp/.audit/
 
 # Ruff cache — stray when something Python ran in-tree.

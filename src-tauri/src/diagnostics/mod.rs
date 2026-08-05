@@ -310,14 +310,10 @@ static EVENTS_LOG_BYTES: AtomicU64 = AtomicU64::new(0);
 const EVENTS_LOG_MAX_BYTES: u64 = 5 * 1024 * 1024;
 /// events.ndjson lines dropped because the disk-writer channel was full (the
 /// writer fell behind a burst). Bounded backpressure — the live console + bus
-/// stay complete; only the on-disk NDJSON mirror skips lines. Surfaced via the
-/// getter + a one-time warn so a lagging disk is never silently lossy.
+/// stay complete; only the on-disk NDJSON mirror skips lines. A one-time warn
+/// keeps a lagging disk from becoming silently lossy.
 static DISK_SINK_DROPPED: AtomicU64 = AtomicU64::new(0);
 const DISK_SINK_CAP: usize = 4096;
-/// Count of events.ndjson lines skipped under disk-writer backpressure.
-pub fn disk_sink_dropped() -> u64 {
-    DISK_SINK_DROPPED.load(Ordering::Relaxed)
-}
 
 /// `<appLogDir>/events.ndjson` — beside `rift.log` (mirrors `turns_log_path`).
 pub fn events_log_path() -> Option<std::path::PathBuf> {

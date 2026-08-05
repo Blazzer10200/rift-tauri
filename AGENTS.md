@@ -41,20 +41,38 @@ scratch data; remove only confirmed generated files.
 
 ## Provider Work
 
-Rift has two production assistant routes: Claude through the official CLI and
-OpenAI through the native Responses API. Keep provider work additive and
+Rift has three production assistant routes. Keep them distinct and
 provider-neutral:
+
+- Claude through the official Claude Code CLI.
+- ChatGPT subscriptions through the signed-in standalone Codex CLI's official
+  local App Server.
+- Optional, separately billed OpenAI API access through the native Responses
+  API adapter.
 
 - Keep existing Claude behavior working while extracting shared contracts.
 - Treat model names, capabilities, auth, streaming events, tool calls, usage,
   and conversation metadata as provider data rather than UI constants.
 - Preserve existing conversations and settings through migrations.
-- OpenAI uses an API key, not a ChatGPT subscription. Keep that distinction
-  explicit in product copy and diagnostics.
+- Never silently switch a conversation between ChatGPT subscription and
+  OpenAI API billing. Preserve its pinned route or fail visibly.
+- Codex owns ChatGPT authentication and thread history; Rift stores only the
+  thread ID and never reads Codex credential files.
 - Preserve `store: false`, local history ownership, OS-keychain secrets, and
   shared workspace/permission enforcement on the OpenAI route.
-- Do not label a provider feature verified until its real authenticated path is
-  tested; distinguish automated contract coverage from a live account call.
+- Do not label any provider feature verified until its real authenticated path
+  is tested; distinguish automated contract coverage from a live account call.
+
+## Load-bearing Guardrails
+
+- Keep the AI Health advisor prompt's apply-action enum in lockstep with
+  `normalizeApply()`; changing either side without the other breaks actions.
+- Tauri capabilities are scoped by `webviews`, not `windows`, because Rift uses
+  child WebViews.
+- Keep the Fable and Haiku branches behind their independent reversible flags;
+  `scripts/fable-watch.ps1` is the manual upstream probe.
+- Preserve updater-child reaping. A detached updater that inherits Rift's job
+  can be killed before installation starts.
 
 ## Continuity
 

@@ -49,7 +49,7 @@
 - **Permission modes** — ask-before-edits, auto-edit, plan-first, or bypass — switchable per turn.
 - **Voice dictation** — push-to-talk speech-to-text plus a prompt-enhance wand.
 - **Browser dock** — the assistant can open docs or your local dev server in an in-app pane beside the chat.
-- **ChatGPT subscription + API support** — Codex App Server turns use the signed-in ChatGPT account; the optional OpenAI Responses API route supports separately billed keys. Both stream reasoning, tools, images, usage, cancellation, and local conversation continuity.
+- **ChatGPT subscription + API support** — Codex App Server turns use the signed-in ChatGPT account; the optional OpenAI Responses API route supports separately billed keys. Both stream reasoning, tools, images, usage, cancellation, and local conversation continuity. Model-native effort and Fast behavior are documented in [`docs/CHATGPT.md`](docs/CHATGPT.md).
 - **Provider-aware setup** — Settings keeps Claude and ChatGPT connections in one place, explains subscription and optional API billing separately, and the model picker shows only models the connected routes can use.
 - **Compatible endpoints (experimental)** — connect supported Anthropic-compatible or local endpoints from Settings.
 - **Self-update** — Velopack checks on launch and every 6 hours; updates apply on restart.

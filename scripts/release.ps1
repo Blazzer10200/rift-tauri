@@ -206,7 +206,7 @@ foreach ($t in @('npm', 'vpk', 'gh')) {
 # missing these secrets would build + pack + publish to GitHub fully green while
 # the feed clients actually read goes stale and no update ever reaches them. Fail
 # loud here -- BEFORE the expensive build -- rather than skip silently at upload.
-# (mega-audit cont.228 F2; arc: git log -- docs/design/self-hosted-distribution.md)
+# See docs/DEVELOPING.md#releases.
 if ($Ci) {
     $missingR2 = @('R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_ENDPOINT') |
         Where-Object { -not (Get-Item "env:$_" -ErrorAction SilentlyContinue) }
@@ -361,7 +361,7 @@ if ($LASTEXITCODE -ne 0) { throw 'vpk pack failed' }
 # Fires only when R2 creds are present; in CI the preflight above hard-fails on
 # missing creds, so only a local (-Ci-less) run skips -- fine, local builds
 # aren't the shipped feed. Rerun-safe: re-uploading a version overwrites the
-# same objects. (arc: git log -- docs/design/self-hosted-distribution.md)
+# same objects. See docs/DEVELOPING.md#releases.
 $feedLive = $false
 if ($env:R2_ACCESS_KEY_ID -and $env:R2_SECRET_ACCESS_KEY -and $env:R2_ENDPOINT) {
     Write-Host '=== vpk upload s3 (Cloudflare R2 -- live feed) ===' -ForegroundColor Cyan

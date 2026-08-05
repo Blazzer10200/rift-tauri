@@ -1,5 +1,5 @@
 <script lang="ts">
-  // C5 (per docs/design/composer-split.md) — the prompt-enhancer preview panel,
+  // Prompt-enhancer preview panel; see docs/ARCHITECTURE.md#frontend-map.
   // lifted verbatim from Composer.svelte 2026-06-10. Presentational seam: the
   // enhance state machine (runEnhance/accept/dismiss + the enhanceSeq token)
   // stays in the parent — it's wired into the wand button, onKey Escape, and

@@ -1,5 +1,5 @@
 <script lang="ts">
-  // C3 (per docs/design/composer-split.md) — the pending rail: queued-message
+  // Pending queued-message rail; see docs/ARCHITECTURE.md#frontend-map.
   // chips + clear action docked to the composer's top lip. A message typed while
   // a turn is streaming is queued (send.ts) and fires automatically when the turn
   // finishes — the chips here let you edit, reorder, or drop a queued message

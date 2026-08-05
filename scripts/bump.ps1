@@ -1,9 +1,8 @@
-# Rift version bump -- writes the THREE lockstep files in one shot.
+# Rift version bump -- writes every source-manifest version in one shot.
 #
-# package.json + src-tauri/Cargo.toml + src-tauri/tauri.conf.json must always
-# match. `release.ps1`'s preflight bails on mismatch but doesn't fix it; this
-# is the fixer. Most-common ship-failure mode pre-this-script: bumping two of
-# three by hand and tripping the preflight on `vpk pack`.
+# package.json + package-lock.json + src-tauri/Cargo.toml +
+# src-tauri/tauri.conf.json must always match. `release.ps1`'s preflight bails
+# on mismatch but doesn't fix it; this is the fixer.
 #
 # Leaves CHANGELOG.md alone -- curated content is `/git-ship` territory.
 #
@@ -54,6 +53,16 @@ Bump-First -Path 'package.json' `
     -Replacement "`"version`": `"$Version`"" `
     -Label 'package.json top-level version'
 
+Bump-First -Path 'package-lock.json' `
+    -Pattern '(?m)^  "version":\s*"[^"]+",' `
+    -Replacement "  `"version`": `"$Version`"," `
+    -Label 'package-lock.json top-level version'
+
+Bump-First -Path 'package-lock.json' `
+    -Pattern '(?m)^      "version":\s*"[^"]+",' `
+    -Replacement "      `"version`": `"$Version`"," `
+    -Label 'package-lock.json root package version'
+
 Bump-First -Path 'src-tauri/Cargo.toml' `
     -Pattern '(?ms)(\[package\][^\[]*?^version\s*=\s*")[^"]+(")' `
     -Replacement "`${1}$Version`${2}" `
@@ -64,15 +73,19 @@ Bump-First -Path 'src-tauri/tauri.conf.json' `
     -Replacement "`"version`": `"$Version`"" `
     -Label 'tauri.conf.json top-level version'
 
-# Cross-check: re-read all three and confirm they match.
+# Cross-check: re-read every source manifest and confirm they match.
 $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+$pkgLock = Get-Content package-lock.json -Raw | ConvertFrom-Json -AsHashtable
+$pkgLockRoot = $pkgLock['packages']['']['version']
 $cargoText = Get-Content src-tauri/Cargo.toml -Raw
 $null = $cargoText -match '(?ms)\[package\][^\[]*?^version\s*=\s*"([^"]+)"'
 $cargoVer = $matches[1]
 $tauriCfg = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
-if ($pkg.version -ne $Version -or $cargoVer -ne $Version -or $tauriCfg.version -ne $Version) {
-    throw "Post-bump verify failed: pkg=$($pkg.version), cargo=$cargoVer, tauri=$($tauriCfg.version)"
+if ($pkg.version -ne $Version -or $pkgLock['version'] -ne $Version -or
+    $pkgLockRoot -ne $Version -or $cargoVer -ne $Version -or
+    $tauriCfg.version -ne $Version) {
+    throw "Post-bump verify failed: pkg=$($pkg.version), lock=$($pkgLock['version']), lockRoot=$pkgLockRoot, cargo=$cargoVer, tauri=$($tauriCfg.version)"
 }
 
-Write-Host "All three at $Version." -ForegroundColor Green
-Write-Host "Next: edit docs/CHANGELOG.md, then pwsh scripts/release.ps1" -ForegroundColor Cyan
+Write-Host "All source manifests at $Version." -ForegroundColor Green
+Write-Host "Next: edit docs/CHANGELOG.md, commit, then create the annotated release tag." -ForegroundColor Cyan

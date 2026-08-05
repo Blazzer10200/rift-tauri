@@ -1,7 +1,7 @@
 //! One-shot headless CLI spawns — prompt enhance + title generation. R6 split
 //! (2026-06-09) out of `assistant/mod.rs`; each command builds its own
 //! `Command` today (no shared spawn abstraction yet — see
-//! docs/design/assistant-mod-split.md R6).
+//! `docs/ARCHITECTURE.md#backend-map`).
 
 use std::collections::HashMap;
 use std::path::PathBuf;

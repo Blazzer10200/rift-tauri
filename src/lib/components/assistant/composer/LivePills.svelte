@@ -1,5 +1,5 @@
 <script lang="ts">
-  // C4 (per docs/design/composer-split.md) — the toolbar's middle slot, lifted
+  // Toolbar status pills; see docs/ARCHITECTURE.md#frontend-map.
   // verbatim from Composer.svelte 2026-06-10: live-activity pills while a turn
   // runs (elapsed · tok/s · agents · shells · tools · queued) and the ↵/⇧↵
   // keyboard hint while idle-focused. Talks to the assistant store directly

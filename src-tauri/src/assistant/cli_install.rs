@@ -1,4 +1,4 @@
-//! R1 (per `docs/design/assistant-mod-split.md`) — Claude CLI discovery:
+//! Claude CLI discovery; see `docs/ARCHITECTURE.md#backend-map`.
 //! locate every install on the machine, rank them, cache the active binary,
 //! and build the windowless spawn `Command`. Lifted verbatim from
 //! `assistant/mod.rs` 2026-06-09; only visibility changed (`pub(super)` on the

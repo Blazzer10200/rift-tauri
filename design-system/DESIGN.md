@@ -123,6 +123,13 @@ same session — dated, with the rule generalized. This is the app's accumulated
 seed rules below.
 
 - DO keep chrome quieter than content — stream text is the brightest thing on screen.
+- DO present one user-facing **ChatGPT** identity. Show Codex/App Server/OpenAI
+  only where runtime setup or separate API billing must be explained.
+- DO give Claude and ChatGPT provider cards the same anatomy, information
+  hierarchy, spacing, and health vocabulary; capability differences change the
+  content, not the visual quality.
+- DON'T repeat provider, model, plan, or connection status in multiple nearby
+  surfaces. One fact gets one clear home; secondary surfaces link back to it.
 - DO derive every new color from an existing token; extend the ladder in `app.css` +
   `styles.css` together if one is genuinely missing.
 - DON'T introduce a second chromatic accent, atmospheric gradients, or spotlight cards.

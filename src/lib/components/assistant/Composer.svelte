@@ -26,7 +26,7 @@
   import {
     MODEL_OPTIONS, MODE_OPTIONS,
     chatGptModelsFor,
-    dialStopsFor, dialIdxFor, clampEffortIdx, effortCapsFor, modelAccessFor, permToneFor,
+    dialStopsFor, dialIdxFor, clampEffortIdx, clampEffortForCaps, effortCapsFor, modelAccessFor, permToneFor,
     settingsRowsFor, type SettingsRow,
     type ModelOpt, type ModeOpt,
   } from "./composer/modelMatrix";
@@ -479,7 +479,7 @@
   // preserving the unified picker order. This same list drives arrow/digit
   // navigation, so an account-only model never renders without being pickable.
   const composerModels = $derived([
-    ...chatGptModelsFor(assistant.codexModels),
+    ...chatGptModelsFor(assistant.codexModels, assistant.openAiModels),
     ...MODEL_OPTIONS.filter((m) => m.provider !== "openai"),
   ]);
   // Current model row — drives the composer's bottom-right pill label.
@@ -500,15 +500,17 @@
     openAiModels: assistant.openAiModels,
     openAiError: assistant.openAiModelsError,
   });
-  const currentModelAccess = $derived(currentModel ? modelAccessFor(currentModel, providerAccess) : null);
-  const selectableModels = $derived(composerModels.filter((m) => modelAccessFor(m, providerAccess).enabled));
+  const pinnedPickerRoute = $derived(tab?.chatGptRoute ?? null);
+  const currentModelAccess = $derived(currentModel ? modelAccessFor(currentModel, providerAccess, pinnedPickerRoute) : null);
+  const selectableModels = $derived(composerModels.filter((m) => modelAccessFor(m, providerAccess, m.provider === "openai" ? pinnedPickerRoute : null).enabled));
 
   // Reasoning-ladder derives the parent still needs (pill label, settingsRows,
   // onKey ←/→) — same matrix helpers SettingsMenu uses, so they can't drift.
   // ONE ladder over the store pair (thinkingEnabled, thinkingEffort): rung 0 =
   // fastest (thinking off → wire `--effort low`), higher rungs reason at their
   // tier. See modelMatrix DIAL_STOPS for the wire-truth rationale.
-  const effortStops = $derived(dialStopsFor(effortCapsFor(currentModel, assistant.openAiModels)));
+  const currentEffortCaps = $derived(effortCapsFor(currentModel, assistant.openAiModels, paneChatGptRoute));
+  const effortStops = $derived(dialStopsFor(currentEffortCaps));
   const dialApplies = $derived(currentModelAccess?.enabled === true && effortStops.length > 0);
   const effortIdx = $derived(dialIdxFor(effortStops, assistant.thinkingOnFor(tab), assistant.effortFor(tab)));
   const currentEffort = $derived(effortStops[effortIdx] ?? effortStops[0]);
@@ -526,7 +528,9 @@
   // so a stops-membership check would false-positive on `none`.
   $effect(() => {
     if (!dialApplies) return;
-    const clamped = clampEffort(assistant.effortFor(tab), paneEffectiveModel);
+    const clamped = currentModel?.provider === "openai" && currentEffortCaps
+      ? clampEffortForCaps(assistant.effortFor(tab), currentEffortCaps)
+      : clampEffort(assistant.effortFor(tab), paneEffectiveModel);
     if (clamped !== assistant.effortFor(tab)) assistant.setThinkingEffort(clamped, tab);
   });
   // Caption + pointer-drag dial live in composer/SettingsMenu.svelte (C7).
@@ -657,7 +661,7 @@
   }
 
   function pickModel(m: ModelOpt) {
-    if (!modelAccessFor(m, providerAccess).enabled) return;
+    if (!modelAccessFor(m, providerAccess, m.provider === "openai" ? pinnedPickerRoute : null).enabled) return;
     void assistant.selectModel(m.id, tab);
     settingsOpen = false;
     void tick().then(() => ta?.focus());

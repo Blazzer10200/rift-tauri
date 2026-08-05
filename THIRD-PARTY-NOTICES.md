@@ -106,7 +106,7 @@ dependencies change. Do not edit by hand._
   - Copyright (c) Individual contributors
 - **anstyle-wincon** 3.0.11 (as MIT OR Apache-2.0)
   - Copyright (c) Individual contributors
-- **anyhow** 1.0.102 (as MIT OR Apache-2.0)
+- **anyhow** 1.0.103 (as MIT OR Apache-2.0)
   - Copyright the anyhow authors (David Tolnay <dtolnay@gmail.com>)
 - **arboard** 3.6.1 (as MIT OR Apache-2.0)
   - Copyright (c) 2022 The Arboard contributors
@@ -413,6 +413,8 @@ dependencies change. Do not edit by hand._
 - **normpath** 1.5.1 (as MIT OR Apache-2.0)
   - Copyright (c) 2020 dylni (https://github.com/dylni)
   - Copyright (c) 2020 Nikolai Vazquez
+- **ntapi** 0.4.3 (as Apache-2.0 OR MIT)
+  - Copyright the ntapi authors (MSxDOS <melcodos@gmail.com>)
 - **num-complex** 0.4.6 (as MIT OR Apache-2.0)
   - Copyright (c) 2014 The Rust Project Developers
 - **num-conv** 0.2.1 (as MIT OR Apache-2.0)
@@ -617,6 +619,8 @@ dependencies change. Do not edit by hand._
   - Copyright the syn authors (David Tolnay <dtolnay@gmail.com>)
 - **synstructure** 0.13.2
   - Copyright 2016 Nika Layzell
+- **sysinfo** 0.33.1
+  - Copyright (c) 2015 Guillaume Gomez
 - **tauri** 2.11.1 (as Apache-2.0 OR MIT)
   - Copyright (c) 2017 - Present Tauri Apps Contributors
 - **tauri-codegen** 2.6.1 (as Apache-2.0 OR MIT)
@@ -747,6 +751,8 @@ dependencies change. Do not edit by hand._
   - Copyright the webview2-com-macros authors
 - **webview2-com-sys** 0.38.2
   - Copyright the webview2-com-sys authors
+- **winapi** 0.3.9 (as MIT/Apache-2.0)
+  - Copyright (c) 2015-2018 The winapi-rs Developers
 - **winapi-util** 0.1.11 (as Unlicense OR MIT)
   - Copyright (c) 2017 Andrew Gallant
 - **window-vibrancy** 0.6.0 (as Apache-2.0 OR MIT)
@@ -910,7 +916,7 @@ dependencies change. Do not edit by hand._
   - Copyright 2020 A11yance
 - **axobject-query** 4.1.0
   - Copyright 2020 A11yance
-- **dompurify** 3.4.11 (as MPL-2.0 OR Apache-2.0)
+- **dompurify** 3.4.12 (as MPL-2.0 OR Apache-2.0)
   - Copyright the dompurify authors
 
 ### BSD-3-Clause

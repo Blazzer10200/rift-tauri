@@ -1,5 +1,5 @@
 <script lang="ts">
-  // C7 (per docs/design/composer-split.md) — the permission-mode popover,
+  // Permission-mode popover; see docs/ARCHITECTURE.md#frontend-map.
   // lifted verbatim from Composer.svelte 2026-06-10. Portals to <body> (like
   // the hint pop) so it escapes the composer's `overflow: hidden` +
   // backdrop-filter containing block; positions itself against the anchor

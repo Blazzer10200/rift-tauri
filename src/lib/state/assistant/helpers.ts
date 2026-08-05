@@ -2,7 +2,7 @@
 // of `src/lib/state/assistant.svelte.ts`. Zero state, zero IPC; only
 // localStorage prefs + pure transforms. Safe to import anywhere.
 
-import type { ModelFamily, ModelSel, PermissionMode, RiftPlan, ThinkingEffort } from "./types";
+import type { ChatGptRoute, CodexModel, ModelFamily, ModelSel, OpenAiModel, PermissionMode, RiftPlan, ThinkingEffort } from "./types";
 
 const MODEL_SELS: readonly ModelSel[] = [
   "sonnet", "opus", "claude-opus-4-8", "claude-opus-4-7", "haiku", "claude-fable-5",
@@ -176,7 +176,8 @@ export function loadEffort(ws?: string | null): ThinkingEffort {
       // read-side so old pins keep their wire behavior. Mirrors the backend's
       // normalize_effort_tier (config.rs).
       if (v === "quick") return "smart";
-      if (v === "none" || v === "smart" || v === "deep" || v === "ultra") return v;
+      if (v === "none" || v === "low" || v === "smart" || v === "deep"
+          || v === "ultra" || v === "max" || v === "agentic") return v;
     }
   } catch {
     /* SSR or storage disabled */
@@ -295,6 +296,27 @@ export function planDecision(
  *  derive this from modelFamily. Mirrors model_fast_eligible in config.rs. */
 export function fastEligible(model: string): boolean {
   return model === "opus" || model.startsWith("claude-opus-4-");
+}
+
+/** Route-specific Fast availability. ChatGPT subscription truth comes from
+ *  App Server's live service-tier catalog; API truth comes from Rift's
+ *  documented model metadata. Claude retains its CLI capability gate. */
+export function fastModeAvailable(
+  model: string,
+  route: ChatGptRoute | null,
+  codexModels: readonly CodexModel[] | null,
+  openAiModels: readonly OpenAiModel[] | null,
+): boolean {
+  if (!isOpenAIModel(model)) return fastEligible(model);
+  if (route === "codex") {
+    return codexModels
+      ?.find((candidate) => candidate.id === model)
+      ?.serviceTiers.some((tier) => tier.id === "priority" || tier.id === "fast") === true;
+  }
+  if (route === "openai") {
+    return openAiModels?.find((candidate) => candidate.id === model)?.fastMode === true;
+  }
+  return false;
 }
 
 /** Fast mode (Opus fast output) master switch. GLOBAL like permissionMode —
@@ -416,8 +438,8 @@ export function modelNativeWindow(model: string | null): number {
   if (!model) return 200_000;
   if (/\[1m\]/i.test(model)) return 1_000_000;
   const id = model.toLowerCase();
-  if (id.startsWith("gpt-5.6")) return 1_050_000;
-  if (id === "gpt-5.3-codex") return 400_000;
+  if (id.startsWith("gpt-5.6") || id === "gpt-5.5" || id === "gpt-5.4") return 1_050_000;
+  if (id === "gpt-5.4-mini" || id.startsWith("gpt-5.3-codex")) return 400_000;
   if (id.includes("haiku")) return 200_000;
   if (/^(opus|sonnet|fable)$/.test(id)) return 1_000_000;
   // Sonnet 4.6 / 5 are 1M (the backend appends `[1m]` to the CLI arg for them —
@@ -508,7 +530,7 @@ export function partialPlanMd(partial: string): string {
 
 /** Effort tiers low→high — canonical order for clamping + ladder UIs. */
 export const EFFORT_ORDER: readonly ThinkingEffort[] = [
-  "none", "smart", "deep", "ultra",
+  "none", "low", "smart", "deep", "ultra", "max", "agentic",
 ] as const;
 
 /** Highest effort tier each model honors server-side — the single source of
@@ -531,10 +553,14 @@ export const MODEL_MAX_EFFORT: Record<string, ThinkingEffort> = {
   "claude-sonnet-4-6": "ultra",
   "claude-sonnet-4-5": "ultra",
   haiku: "none",
-  "gpt-5.6": "ultra",
-  "gpt-5.6-sol": "ultra",
-  "gpt-5.6-terra": "ultra",
-  "gpt-5.6-luna": "ultra",
+  "gpt-5.6": "max",
+  "gpt-5.6-sol": "max",
+  "gpt-5.6-terra": "max",
+  "gpt-5.6-luna": "max",
+  "gpt-5.5": "ultra",
+  "gpt-5.4": "ultra",
+  "gpt-5.4-mini": "ultra",
+  "gpt-5.3-codex-spark": "ultra",
   "gpt-5.3-codex": "ultra",
 };
 
@@ -563,12 +589,14 @@ export function clampEffort(effort: ThinkingEffort, model: ModelSel): ThinkingEf
 export function effortToFlag(
   effort: ThinkingEffort,
   model: ModelSel,
-): "low" | "medium" | "high" | "xhigh" | null {
+): "low" | "medium" | "high" | "xhigh" | "max" | "ultra" | null {
   if (model === "haiku") return null;
   const e = clampEffort(effort, model);
-  if (e === "none") return "low";
+  if (e === "none" || e === "low") return "low";
   if (e === "smart") return "medium";
   if (e === "ultra") return "xhigh";
+  if (e === "max") return "max";
+  if (e === "agentic") return "ultra";
   return "high"; // "deep"
 }
 

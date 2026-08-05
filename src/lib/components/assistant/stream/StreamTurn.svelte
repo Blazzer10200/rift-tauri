@@ -499,7 +499,7 @@
         <span class="sapplied-meta">{turn.meta.time}</span>
         {#if turn.meta.tokens}<span class="sapplied-meta" use:tooltip={"Output tokens this turn generated"}>↑ {fmtTokens(turn.meta.tokens)} tokens</span>{/if}
         {#if turn.meta.cost}<span class="sapplied-cost" use:tooltip={"Total cost of this turn"}>{turn.meta.cost}</span>{/if}
-        {#if turn.meta.fast}<span class="sapplied-fast" use:tooltip={"This turn ran in fast mode — quicker Opus output, billed from your usage credits (pay-per-use)"}><Zap size={11} />fast</span>{/if}
+        {#if turn.meta.fast}<span class="sapplied-fast" use:tooltip={"This provider confirmed that the turn ran with higher-speed processing. Fast can use extra credits or premium API pricing."}><Zap size={11} />fast</span>{/if}
       {:else if turn.totalSecs >= 1}
         <span class="sapplied-meta">{fmtDur(turn.totalSecs)}</span>
       {/if}

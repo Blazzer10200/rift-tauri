@@ -20,8 +20,9 @@ assignees: ""
 
 **Environment**
 
-- Rift version (Settings → About):
+- Rift version (Settings → System):
 - Windows version:
-- Claude Code CLI version (`claude --version`):
+- Active provider/route (Claude, ChatGPT subscription, or OpenAI API):
+- Relevant CLI version (`claude --version` or `codex --version`):
 
 **Anything else** — screenshots, console output, what kind of folder was open

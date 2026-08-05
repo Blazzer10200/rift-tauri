@@ -1,4 +1,4 @@
-//! R4 (per `docs/design/assistant-mod-split.md`) — auth probe, in-app sign-in
+//! Auth probing and in-app sign-in; see `docs/ARCHITECTURE.md#backend-map`.
 //! spawn, and the multi-install CLI updater. Lifted verbatim from
 //! `assistant/mod.rs` 2026-06-09. The `AuthStatus` DTO + config/key access
 //! stay on the parent; CLI discovery comes from the sibling `cli_install`.

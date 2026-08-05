@@ -8,14 +8,47 @@ import {
   codexReasoningEffortsFor,
   dialStopsFor,
   effortCapsFor,
+  fastModeInfoFor,
   modelAccessFor,
+  openAiReasoningEffortsFor,
   settingsRowsFor,
   MODEL_OPTIONS,
   type ProviderAccessContext,
 } from "./modelMatrix";
+import type { CodexModel, OpenAiModel } from "../../../state/assistant/types";
 
 const claude = MODEL_OPTIONS.find((model) => model.provider === "claude")!;
 const openai = MODEL_OPTIONS.find((model) => model.provider === "openai")!;
+const apiModel = (overrides: Partial<OpenAiModel> = {}): OpenAiModel => ({
+  id: openai.id,
+  label: openai.label,
+  family: "gpt",
+  contextWindow: null,
+  description: "API model",
+  reasoning: true,
+  defaultReasoningEffort: "medium",
+  supportedReasoningEfforts: ["none", "low", "medium", "high", "xhigh", "max"],
+  fastMode: false,
+  imageInput: true,
+  available: true,
+  ...overrides,
+});
+const codexModel = (overrides: Partial<CodexModel> = {}): CodexModel => ({
+  id: openai.id as `gpt-${string}`,
+  label: openai.label,
+  description: "Subscription model",
+  isDefault: true,
+  defaultReasoningEffort: "medium",
+  supportedReasoningEfforts: ["low", "medium"],
+  serviceTiers: [],
+  defaultServiceTier: null,
+  upgradeModel: null,
+  upgradeCopy: null,
+  inputModalities: ["text", "image"],
+  supportsPersonality: false,
+  imageInput: true,
+  ...overrides,
+});
 const disconnected: ProviderAccessContext = {
   claudeReady: false,
   claudeChecking: false,
@@ -66,7 +99,7 @@ describe("model access", () => {
     const openAiOnly = {
       ...disconnected,
       openAiConfigured: true,
-      openAiModels: [{ id: openai.id, label: openai.label, family: "gpt", contextWindow: null, reasoning: true, imageInput: true, available: true }],
+      openAiModels: [apiModel()],
     };
     expect(modelAccessFor(claude, openAiOnly).enabled).toBe(false);
     expect(modelAccessFor(openai, openAiOnly).enabled).toBe(true);
@@ -76,15 +109,7 @@ describe("model access", () => {
     const codexOnly: ProviderAccessContext = {
       ...disconnected,
       codexReady: true,
-      codexModels: [{
-        id: openai.id as `gpt-${string}`,
-        label: openai.label,
-        description: "Subscription model",
-        isDefault: true,
-        defaultReasoningEffort: "medium",
-        supportedReasoningEfforts: ["low", "medium"],
-        imageInput: true,
-      }],
+      codexModels: [codexModel()],
     };
     expect(modelAccessFor(openai, codexOnly)).toMatchObject({
       enabled: true,
@@ -94,10 +119,7 @@ describe("model access", () => {
     const apiOnly: ProviderAccessContext = {
       ...disconnected,
       openAiConfigured: true,
-      openAiModels: [{
-        id: openai.id, label: openai.label, family: "gpt", contextWindow: null,
-        reasoning: true, imageInput: true, available: true,
-      }],
+      openAiModels: [apiModel()],
     };
     expect(modelAccessFor(openai, apiOnly)).toMatchObject({
       enabled: true,
@@ -110,11 +132,26 @@ describe("model access", () => {
     const denied = {
       ...disconnected,
       openAiConfigured: true,
-      openAiModels: [{ id: openai.id, label: openai.label, family: "gpt", contextWindow: null, reasoning: true, imageInput: true, available: false }],
+      openAiModels: [apiModel({ available: false })],
     };
     expect(modelAccessFor(openai, denied)).toMatchObject({ state: "unavailable", tag: "No access" });
     expect(modelAccessFor(openai, { ...denied, openAiModels: null, openAiError: "offline" }))
       .toMatchObject({ state: "error", tag: "Check failed" });
+  });
+
+  it("never crosses a chat's pinned billing route when selecting models", () => {
+    const subscriptionOnly: ProviderAccessContext = {
+      ...disconnected,
+      codexReady: true,
+      codexModels: [codexModel()],
+      openAiConfigured: true,
+      openAiModels: [apiModel({ available: false })],
+    };
+    expect(modelAccessFor(openai, subscriptionOnly, "codex").enabled).toBe(true);
+    expect(modelAccessFor(openai, subscriptionOnly, "openai")).toMatchObject({
+      enabled: false,
+      tag: "No API access",
+    });
   });
 });
 
@@ -124,15 +161,12 @@ describe("effort capability", () => {
   });
 
   it("hides effort when live OpenAI metadata says reasoning is unsupported", () => {
-    const caps = effortCapsFor(openai, [{
-      id: openai.id, label: openai.label, family: "gpt", contextWindow: null,
-      reasoning: false, imageInput: true, available: true,
-    }]);
+    const caps = effortCapsFor(openai, [apiModel({ reasoning: false, supportedReasoningEfforts: [] })], "openai");
     expect(dialStopsFor(caps)).toEqual([]);
   });
 
   it("maps the exact live Codex capability set into Rift tiers", () => {
-    const live = {
+    const live = codexModel({
       id: "gpt-6-codex" as const,
       label: "GPT-6 Codex",
       description: "Future coding model",
@@ -140,7 +174,7 @@ describe("effort capability", () => {
       defaultReasoningEffort: "medium",
       supportedReasoningEfforts: ["xhigh", "low", "medium", "future", "medium"],
       imageInput: true,
-    };
+    });
     expect(codexReasoningEffortsFor(live)).toEqual(["none", "smart", "ultra"]);
 
     const model = chatGptModelsFor([live]).find((candidate) => candidate.id === live.id)!;
@@ -148,11 +182,28 @@ describe("effort capability", () => {
     expect(dialStopsFor(model).map((stop) => stop.label)).toEqual(["Low", "Medium", "X-High"]);
     expect(clampEffortForCaps("deep", model)).toBe("smart");
   });
+
+  it("keeps API none and low distinct and exposes GPT max", () => {
+    const live = apiModel();
+    expect(openAiReasoningEffortsFor(live)).toEqual(["none", "low", "smart", "deep", "ultra", "max"]);
+    const caps = effortCapsFor(openai, [live], "openai")!;
+    expect(dialStopsFor(caps).map((stop) => stop.label)).toEqual(["None", "Low", "Medium", "High", "X-High", "Max"]);
+  });
+
+  it("exposes Codex max and ultra as separate top rungs", () => {
+    const live = codexModel({
+      supportedReasoningEfforts: ["low", "medium", "high", "xhigh", "max", "ultra"],
+    });
+    const model = chatGptModelsFor([live]).find((candidate) => candidate.id === live.id)!;
+    expect(codexReasoningEffortsFor(live)).toEqual(["none", "smart", "deep", "ultra", "max", "agentic"]);
+    expect(dialStopsFor({ ...model, offWireEffort: "low" }).map((stop) => stop.label))
+      .toEqual(["Low", "Medium", "High", "X-High", "Max", "Ultra"]);
+  });
 });
 
 describe("live ChatGPT model rows", () => {
   it("creates a complete row for an unknown live model and retains API fallbacks", () => {
-    const live = {
+    const live = codexModel({
       id: "gpt-6-codex-neo" as const,
       label: "GPT-6 Codex Neo",
       description: "Newest account coding model",
@@ -160,7 +211,7 @@ describe("live ChatGPT model rows", () => {
       defaultReasoningEffort: "high",
       supportedReasoningEfforts: ["low", "high"],
       imageInput: true,
-    };
+    });
     const models = chatGptModelsFor([live]);
     expect(models[0]).toMatchObject({
       id: live.id,
@@ -182,7 +233,7 @@ describe("live ChatGPT model rows", () => {
   });
 
   it("overlays curated presentation metadata while honoring live capabilities", () => {
-    const live = {
+    const live = codexModel({
       id: openai.id as `gpt-${string}`,
       label: "Uncurated backend label",
       description: "Live account description",
@@ -190,7 +241,8 @@ describe("live ChatGPT model rows", () => {
       defaultReasoningEffort: "medium",
       supportedReasoningEfforts: ["low", "medium"],
       imageInput: false,
-    };
+      inputModalities: ["text"],
+    });
     const model = chatGptModelsFor([live]).find((candidate) => candidate.id === openai.id)!;
     expect(model).toMatchObject({
       id: openai.id,
@@ -202,5 +254,17 @@ describe("live ChatGPT model rows", () => {
       supportedEfforts: ["none", "smart"],
     });
     expect(dialStopsFor(model).map((stop) => stop.label)).toEqual(["Low", "Medium"]);
+  });
+
+  it("uses live subscription tiers and API metadata for Fast availability", () => {
+    const subscription = codexModel({
+      id: "gpt-5.6-sol",
+      serviceTiers: [{ id: "priority", name: "Fast", description: "1.5x speed" }],
+    });
+    const sol = chatGptModelsFor([subscription]).find((candidate) => candidate.id === subscription.id)!;
+    expect(fastModeInfoFor(sol, "codex", [subscription], null)?.tag).toBe("2.5× credits");
+    expect(fastModeInfoFor(sol, "openai", [subscription], [apiModel({ id: subscription.id, fastMode: true })])?.tag)
+      .toBe("premium API");
+    expect(fastModeInfoFor(sol, "codex", [codexModel({ id: subscription.id })], null)).toBeNull();
   });
 });

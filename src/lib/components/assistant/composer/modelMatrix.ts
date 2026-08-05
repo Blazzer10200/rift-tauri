@@ -1,10 +1,10 @@
-// C7 (per docs/design/composer-split.md) — the model / effort / permission-mode
+// Model, effort, and permission-mode policy; see docs/ARCHITECTURE.md#frontend-map.
 // option tables + their pure derivation helpers, lifted from Composer.svelte
 // 2026-06-10 so the parent's onKey navigation and the SettingsMenu/PermMenu
 // children derive from one source and can never disagree.
 import { Hand, Code2, ClipboardList, Zap, Infinity as InfinityIcon, Gem, Feather, Sparkles, Rabbit, Orbit } from "lucide-svelte";
-import type { CodexModel, ModelSel, OpenAiModel, PermissionMode, ThinkingEffort } from "../../../state/assistant/types";
-import { fableAvailable, haikuAvailable, MODEL_MAX_EFFORT, ctxWindowForModelId } from "../../../state/assistant/helpers";
+import type { ChatGptRoute, CodexModel, ModelSel, OpenAiModel, PermissionMode, ThinkingEffort } from "../../../state/assistant/types";
+import { fableAvailable, fastEligible, haikuAvailable, MODEL_MAX_EFFORT, ctxWindowForModelId } from "../../../state/assistant/helpers";
 import { CHATGPT } from "../../../state/assistant/providerDisplay";
 import type { ModelSel as ModelSelType } from "../../../state/assistant/types";
 
@@ -23,9 +23,12 @@ type EffortOpt = { id: ThinkingEffort; label: string; hint: string };
 // 2026-07-03; stored "quick" folds into "smart" at loadEffort.)
 const EFFORT_OPTIONS: EffortOpt[] = [
   { id: "none",  label: "Low",    hint: "Low — minimal reasoning. Fastest answers for quick lookups and small edits." },
+  { id: "low",   label: "Low",    hint: "Low — light reasoning for quick, straightforward work." },
   { id: "smart", label: "Medium", hint: "Medium — balanced reasoning + fast responses. The recommended default for everyday work." },
   { id: "deep",  label: "High",   hint: "High — heavier reasoning and more thorough tool use, for complex tasks where quality matters more than speed." },
   { id: "ultra", label: "X-High", hint: "X-High — the model's deepest reasoning level. Slowest and most thorough for difficult, multi-step work." },
+  { id: "max", label: "Max", hint: "Max — maximum single-agent reasoning for the hardest tasks. Use only when lower levels miss important details." },
+  { id: "agentic", label: "Ultra", hint: "Ultra — Codex's multi-agent workflow level. Best for broad work that benefits from parallel agents; unnecessary for most tasks." },
 ];
 
 export type ModelOpt = {
@@ -55,6 +58,12 @@ export type ModelOpt = {
    *  curated Claude/API fallback rows, which continue to use maxEffort as a
    *  contiguous ceiling. */
   supportedEfforts?: readonly ThinkingEffort[];
+  defaultReasoningEffort?: string | null;
+  fastServiceTier?: { id: string; name: string; description: string } | null;
+  upgradeModel?: string | null;
+  upgradeCopy?: string | null;
+  inputModalities?: readonly string[];
+  supportsPersonality?: boolean;
 };
 // Flat single-column list (Claude-Code-Desktop layout): current models first,
 // legacy generations grouped below. `opus` is the alias → newest Opus (5,
@@ -64,14 +73,14 @@ export type ModelOpt = {
 // sunset date in helpers.ts). Owner call 2026-07-01: kept always-visible even
 // while the upstream access gate holds — hard-pull only (set FABLE_DISABLED).
 export const MODEL_OPTIONS: ModelOpt[] = [
-  { id: "gpt-5.6", label: "GPT", version: "5.6", tagline: "ChatGPT's general-purpose reasoning model", blurb: "ChatGPT default — text, vision & tools", ctx: "1.05M ctx", suffix: "1.05M context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.6"], icon: Orbit, provider: "openai" },
-  { id: "gpt-5.6-sol", label: "GPT Sol", version: "5.6", tagline: "Highest-capability GPT-5.6 variant", blurb: "Deep agentic reasoning", ctx: "1.05M ctx", suffix: "1.05M context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.6-sol"], icon: Orbit, provider: "openai" },
-  { id: "gpt-5.6-terra", label: "GPT Terra", version: "5.6", tagline: "Balanced GPT-5.6 variant", blurb: "Balanced capability and speed", ctx: "1.05M ctx", suffix: "1.05M context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.6-terra"], icon: Orbit, provider: "openai" },
-  { id: "gpt-5.6-luna", label: "GPT Luna", version: "5.6", tagline: "Fast GPT-5.6 variant", blurb: "Fast everyday responses", ctx: "1.05M ctx", suffix: "1.05M context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.6-luna"], icon: Orbit, provider: "openai" },
-  { id: "gpt-5.5", label: "GPT", version: "5.5", tagline: "Previous GPT generation available to this ChatGPT account", blurb: "General reasoning and tools", ctx: "Account", suffix: "", legacy: false, effort: true, maxEffort: "ultra", icon: Orbit, provider: "openai" },
-  { id: "gpt-5.4", label: "GPT", version: "5.4", tagline: "Established GPT reasoning model", blurb: "General reasoning and tools", ctx: "Account", suffix: "", legacy: false, effort: true, maxEffort: "ultra", icon: Orbit, provider: "openai" },
-  { id: "gpt-5.4-mini", label: "GPT Mini", version: "5.4", tagline: "Smaller, faster GPT model", blurb: "Fast coding and everyday tasks", ctx: "Account", suffix: "", legacy: false, effort: true, maxEffort: "ultra", icon: Orbit, provider: "openai" },
-  { id: "gpt-5.3-codex-spark", label: "GPT Codex Spark", version: "5.3", tagline: "Fast coding model from your ChatGPT account", blurb: "Focused coding and quick edits", ctx: "Account", suffix: "", legacy: false, effort: true, maxEffort: "ultra", icon: Code2, provider: "openai" },
+  { id: "gpt-5.6", label: "GPT", version: "5.6", tagline: "Current GPT-5.6 family alias", blurb: "Current general-purpose GPT", ctx: "1.05M ctx", suffix: "1.05M context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.6"], icon: Orbit, provider: "openai" },
+  { id: "gpt-5.6-sol", label: "GPT Sol", version: "5.6", tagline: "Frontier model for complex, open-ended work and maximum polish", blurb: "Highest capability and detail", ctx: "1.05M ctx", suffix: "1.05M context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.6-sol"], icon: Orbit, provider: "openai" },
+  { id: "gpt-5.6-terra", label: "GPT Terra", version: "5.6", tagline: "Balanced everyday workhorse for coding and general tasks", blurb: "Best capability/speed balance", ctx: "1.05M ctx", suffix: "1.05M context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.6-terra"], icon: Orbit, provider: "openai" },
+  { id: "gpt-5.6-luna", label: "GPT Luna", version: "5.6", tagline: "Efficient model for repeatable, high-volume, cost-sensitive work", blurb: "Fastest and most economical 5.6", ctx: "1.05M ctx", suffix: "1.05M context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.6-luna"], icon: Orbit, provider: "openai" },
+  { id: "gpt-5.5", label: "GPT", version: "5.5", tagline: "Previous-generation general reasoning model", blurb: "Use when an existing workflow needs 5.5", ctx: "1.05M ctx", suffix: "1.05M context", legacy: false, effort: true, maxEffort: "ultra", icon: Orbit, provider: "openai" },
+  { id: "gpt-5.4", label: "GPT", version: "5.4", tagline: "Retiring ChatGPT model; move new work to Terra", blurb: "Compatibility for existing chats", ctx: "1.05M ctx", suffix: "1.05M context", legacy: false, effort: true, maxEffort: "ultra", icon: Orbit, provider: "openai" },
+  { id: "gpt-5.4-mini", label: "GPT Mini", version: "5.4", tagline: "Retiring compact model; move new work to Luna", blurb: "Compatibility for existing chats", ctx: "400K ctx", suffix: "400K context", legacy: false, effort: true, maxEffort: "ultra", icon: Orbit, provider: "openai" },
+  { id: "gpt-5.3-codex-spark", label: "GPT Codex Spark", version: "5.3", tagline: "Separate ultra-fast, text-only coding model; not Fast mode", blurb: "Quick focused coding work", ctx: "400K ctx", suffix: "400K context", legacy: false, effort: true, maxEffort: "ultra", icon: Code2, provider: "openai" },
   { id: "gpt-5.3-codex", label: "GPT Codex", version: "5.3", tagline: "ChatGPT's agentic coding model", blurb: "Coding-focused reasoning & tools", ctx: "400K ctx", suffix: "400K context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.3-codex"], icon: Code2, provider: "openai" },
   ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", tagline: "Anthropic's most capable model — limited run", blurb: "Most capable — limited run", ctx: "1M ctx", suffix: "1M context", legacy: false, limited: true, effort: true, maxEffort: MODEL_MAX_EFFORT["claude-fable-5"], icon: Sparkles, provider: "claude" as const }] : []),
   { id: "opus",            label: "Opus",   version: "5",   tagline: "Newest + most capable — complex reasoning & agentic coding", blurb: "Deep reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.opus, icon: Gem, provider: "claude" },
@@ -90,18 +99,40 @@ const CODEX_TO_RIFT_EFFORT: Readonly<Record<string, ThinkingEffort>> = {
   medium: "smart",
   high: "deep",
   xhigh: "ultra",
+  max: "max",
+  ultra: "agentic",
 };
+
+const API_TO_RIFT_EFFORT: Readonly<Record<string, ThinkingEffort>> = {
+  none: "none",
+  low: "low",
+  medium: "smart",
+  high: "deep",
+  xhigh: "ultra",
+  max: "max",
+};
+
+function mappedEfforts(
+  efforts: readonly string[],
+  mapping: Readonly<Record<string, ThinkingEffort>>,
+): ThinkingEffort[] {
+  const mapped = new Set(
+    efforts
+      .map((effort) => mapping[effort.trim().toLowerCase()])
+      .filter((effort): effort is ThinkingEffort => effort !== undefined),
+  );
+  return EFFORT_OPTIONS.map((effort) => effort.id).filter((effort) => mapped.has(effort));
+}
 
 /** Translate App Server effort names into Rift's stored tiers. Unknown future
  *  values stay hidden until Rift knows how to send them; known values are
  *  de-duplicated and returned in low→high order. */
 export function codexReasoningEffortsFor(model: Pick<CodexModel, "supportedReasoningEfforts">): ThinkingEffort[] {
-  const mapped = new Set(
-    model.supportedReasoningEfforts
-      .map((effort) => CODEX_TO_RIFT_EFFORT[effort.trim().toLowerCase()])
-      .filter((effort): effort is ThinkingEffort => effort !== undefined),
-  );
-  return EFFORT_OPTIONS.map((effort) => effort.id).filter((effort) => mapped.has(effort));
+  return mappedEfforts(model.supportedReasoningEfforts, CODEX_TO_RIFT_EFFORT);
+}
+
+export function openAiReasoningEffortsFor(model: Pick<OpenAiModel, "supportedReasoningEfforts">): ThinkingEffort[] {
+  return mappedEfforts(model.supportedReasoningEfforts, API_TO_RIFT_EFFORT);
 }
 
 function fallbackCodexLabel(model: CodexModel): string {
@@ -126,6 +157,12 @@ function liveCodexModelOpt(model: CodexModel, curated: readonly ModelOpt[]): Mod
       effort: supportedEfforts.length > 0,
       maxEffort,
       supportedEfforts,
+      defaultReasoningEffort: model.defaultReasoningEffort,
+      fastServiceTier: model.serviceTiers.find((tier) => tier.id === "priority" || tier.id === "fast") ?? null,
+      upgradeModel: model.upgradeModel,
+      upgradeCopy: model.upgradeCopy,
+      inputModalities: model.inputModalities,
+      supportsPersonality: model.supportsPersonality,
     };
   }
 
@@ -144,6 +181,12 @@ function liveCodexModelOpt(model: CodexModel, curated: readonly ModelOpt[]): Mod
     effort: supportedEfforts.length > 0,
     maxEffort,
     supportedEfforts,
+    defaultReasoningEffort: model.defaultReasoningEffort,
+    fastServiceTier: model.serviceTiers.find((tier) => tier.id === "priority" || tier.id === "fast") ?? null,
+    upgradeModel: model.upgradeModel,
+    upgradeCopy: model.upgradeCopy,
+    inputModalities: model.inputModalities,
+    supportsPersonality: model.supportsPersonality,
   };
 }
 
@@ -151,20 +194,44 @@ function liveCodexModelOpt(model: CodexModel, curated: readonly ModelOpt[]): Mod
  *  curated rows supply polished metadata for known ids and remain appended as
  *  the separately billed API fallback. Unknown future live ids still receive
  *  a complete, selectable row. */
-export function chatGptModelsFor(codexModels: readonly CodexModel[] | null): ModelOpt[] {
+export function chatGptModelsFor(
+  codexModels: readonly CodexModel[] | null,
+  openAiModels: readonly OpenAiModel[] | null = null,
+): ModelOpt[] {
   const curated = MODEL_OPTIONS.filter((model) => model.provider === "openai" && !model.legacy);
-  if (codexModels === null) return curated;
-
   const seen = new Set<string>();
-  const live = codexModels.flatMap((model) => {
+  const live = (codexModels ?? []).flatMap((model) => {
     if (seen.has(model.id)) return [];
     seen.add(model.id);
     return [liveCodexModelOpt(model, curated)];
   });
-  return [...live, ...curated.filter((model) => !seen.has(model.id))];
+  const fallback = curated.filter((model) => {
+    if (seen.has(model.id)) return false;
+    seen.add(model.id);
+    return true;
+  });
+  const apiOnly = (openAiModels ?? []).flatMap((model) => {
+    if (!model.available || seen.has(model.id)) return [];
+    seen.add(model.id);
+    const supportedEfforts = openAiReasoningEffortsFor(model);
+    const label = model.label.trim() || model.id;
+    return [{
+      id: model.id as ModelSel,
+      label,
+      version: "",
+      tagline: model.description,
+      blurb: model.imageInput ? "Text, vision & tools" : "Text & tools",
+      ctx: model.contextWindow ? `${Math.round(model.contextWindow / 1000)}K ctx` : "API account",
+      suffix: model.contextWindow ? `${Math.round(model.contextWindow / 1000)}K context` : "",
+      legacy: false,
+      icon: model.id.includes("codex") ? Code2 : Orbit,
+      provider: "openai" as const,
+      effort: model.reasoning && supportedEfforts.length > 0,
+      maxEffort: supportedEfforts[supportedEfforts.length - 1] ?? "none",
+    }];
+  });
+  return [...live, ...fallback, ...apiOnly];
 }
-// 1-based number shortcut → model id (digit keys pick directly in the menu).
-export const modelShortcut = (id: ModelSel) => MODEL_OPTIONS.findIndex((m) => m.id === id) + 1;
 
 export type ProviderAccessContext = {
   claudeReady: boolean;
@@ -193,7 +260,11 @@ export type ModelAccess = {
  * gate. A stored key is only configuration; ChatGPT API models become selectable
  * after the account model probe confirms the exact id. Claude requires the
  * CLI because every Claude turn still routes through it. */
-export function modelAccessFor(m: ModelOpt, ctx: ProviderAccessContext): ModelAccess {
+export function modelAccessFor(
+  m: ModelOpt,
+  ctx: ProviderAccessContext,
+  pinnedRoute: ChatGptRoute | null = null,
+): ModelAccess {
   if (m.provider === "claude") {
     if (ctx.claudeFree && !isFreeClaudeModel(m.id)) {
       return { state: "unavailable", enabled: false, tag: "Paid plan", detail: `${m.label} isn't included in Claude Free.` };
@@ -205,6 +276,35 @@ export function modelAccessFor(m: ModelOpt, ctx: ProviderAccessContext): ModelAc
   }
 
   const codexModel = ctx.codexModels?.find((model) => model.id === m.id);
+  const apiModel = ctx.openAiModels?.find((model) => model.id === m.id);
+  if (pinnedRoute === "codex") {
+    if (ctx.codexChecking) return { state: "checking", enabled: false, tag: "Checking", detail: "Checking your pinned ChatGPT subscription route." };
+    if (ctx.codexReady && codexModel) return {
+      state: "ready", enabled: true, tag: "Subscription",
+      detail: `${codexModel.description || m.tagline} Available through this chat's pinned ChatGPT subscription route.`,
+    };
+    return {
+      state: ctx.codexError ? "error" : "unavailable",
+      enabled: false,
+      tag: ctx.codexError ? "Check failed" : "Not in plan",
+      detail: ctx.codexError ?? `${m.label} ${m.version} is not available through this chat's pinned ChatGPT subscription route.`,
+    };
+  }
+  if (pinnedRoute === "openai") {
+    if (ctx.openAiChecking) return { state: "checking", enabled: false, tag: "Checking", detail: "Checking this chat's pinned OpenAI API route." };
+    if (ctx.openAiError || !ctx.openAiModels) return {
+      state: "error", enabled: false, tag: "Check failed",
+      detail: ctx.openAiError ?? "Rift could not verify this chat's pinned OpenAI API route.",
+    };
+    if (ctx.openAiConfigured && apiModel?.available) return {
+      state: "ready", enabled: true, tag: "API · separately billed",
+      detail: `${m.tagline} This chat remains on separately billed OpenAI API access.`,
+    };
+    return {
+      state: "unavailable", enabled: false, tag: "No API access",
+      detail: `${m.label} ${m.version} is not available through this chat's pinned OpenAI API route.`,
+    };
+  }
   if (ctx.codexReady && codexModel) {
     return {
       state: "ready",
@@ -228,8 +328,7 @@ export function modelAccessFor(m: ModelOpt, ctx: ProviderAccessContext): ModelAc
   if (ctx.openAiError || !ctx.openAiModels) {
     return { state: "error", enabled: false, tag: "Check failed", detail: ctx.openAiError ?? "Rift couldn't verify this model. Re-probe AI connections in Settings." };
   }
-  const accountModel = ctx.openAiModels.find((model) => model.id === m.id);
-  if (!accountModel?.available) {
+  if (!apiModel?.available) {
     return { state: "unavailable", enabled: false, tag: "No access", detail: `${m.label} ${m.version} isn't available through ${CHATGPT.apiAccess}.` };
   }
   return {
@@ -246,7 +345,7 @@ export function isFreeClaudeModel(id: ModelSel): boolean {
 
 export function providerStatusFor(provider: ModelOpt["provider"], ctx: ProviderAccessContext): ModelAccess {
   const models = provider === "openai"
-    ? chatGptModelsFor(ctx.codexModels)
+    ? chatGptModelsFor(ctx.codexModels, ctx.openAiModels)
     : currentModels.filter((m) => m.provider === provider);
   const access = models.map((m) => modelAccessFor(m, ctx));
   return access.find((item) => item.enabled)
@@ -257,11 +356,95 @@ export function providerStatusFor(provider: ModelOpt["provider"], ctx: ProviderA
 
 /** OpenAI's live model metadata can turn reasoning off for a supported id.
  * Honor that instead of rendering an effort dial the API will ignore. */
-export function effortCapsFor(m: ModelOpt | undefined, models: readonly OpenAiModel[] | null): EffortCaps | undefined {
+export function effortCapsFor(
+  m: ModelOpt | undefined,
+  models: readonly OpenAiModel[] | null,
+  route: ChatGptRoute | null = null,
+): EffortCaps | undefined {
   if (!m || m.provider !== "openai") return m;
-  if (m.supportedEfforts !== undefined) return m;
+  if (route === "codex") return { ...m, offWireEffort: "low" };
   const live = models?.find((model) => model.id === m.id);
-  return live?.reasoning === false ? { effort: false, maxEffort: "none", supportedEfforts: [] } : m;
+  if (!live || !live.reasoning) {
+    return { effort: false, maxEffort: "none", supportedEfforts: [], offWireEffort: "none" };
+  }
+  const supportedEfforts = openAiReasoningEffortsFor(live);
+  return {
+    effort: supportedEfforts.length > 0,
+    maxEffort: supportedEfforts[supportedEfforts.length - 1] ?? "none",
+    supportedEfforts,
+    offWireEffort: supportedEfforts.includes("none") ? "none" : "low",
+  };
+}
+
+export type FastModeInfo = {
+  tag: string;
+  summary: string;
+  avoid: string;
+  tooltip: string;
+  notice: { key: string; title: string; detail: string };
+};
+
+/** Fast is a provider route, not a model-family guess. Subscription support is
+ *  taken from the connected App Server catalog; API support is taken from the
+ *  native adapter metadata; Claude retains its established Opus gate. */
+export function fastModeInfoFor(
+  m: ModelOpt | undefined,
+  route: ChatGptRoute | null,
+  codexModels: readonly CodexModel[] | null,
+  openAiModels: readonly OpenAiModel[] | null,
+): FastModeInfo | null {
+  if (!m) return null;
+  if (m.provider === "claude") {
+    if (!fastEligible(m.id)) return null;
+    return {
+      tag: "extra credits",
+      summary: "Quicker Opus output using higher-speed processing.",
+      avoid: "Skip when latency is not worth extra credits.",
+      tooltip: "Fast mode — quicker Opus output, billed from usage credits rather than plan limits. Applies from your next message.",
+      notice: {
+        key: "claude",
+        title: "Fast mode uses extra credits",
+        detail: "Fast Opus turns draw from usage credits beyond plan limits. The ⚡ chip marks turns that actually ran fast.",
+      },
+    };
+  }
+  if (route === "codex") {
+    const model = codexModels?.find((candidate) => candidate.id === m.id);
+    const tier = model?.serviceTiers.find((candidate) => candidate.id === "priority" || candidate.id === "fast");
+    if (!tier) return null;
+    const multiplier = m.id.startsWith("gpt-5.6") || m.id === "gpt-5.5"
+      ? "2.5× credits"
+      : m.id === "gpt-5.4"
+        ? "2× credits"
+        : "increased credits";
+    return {
+      tag: multiplier,
+      summary: `${tier.description || "About 1.5× faster output"} · ${multiplier}.`,
+      avoid: "Skip long or background work.",
+      tooltip: `ChatGPT Fast mode — ${tier.description || "about 1.5× faster"}, using ${multiplier}. Applies from your next message.`,
+      notice: {
+        key: "chatgpt-subscription",
+        title: `ChatGPT Fast uses ${multiplier}`,
+        detail: "Fast is best for interactive work where latency matters. Leave it off for long, background, or credit-sensitive tasks. The ⚡ chip confirms turns that ran fast.",
+      },
+    };
+  }
+  if (route === "openai") {
+    const model = openAiModels?.find((candidate) => candidate.id === m.id);
+    if (!model?.fastMode) return null;
+    return {
+      tag: "premium API",
+      summary: "Up to 2.5× faster · premium API rates.",
+      avoid: "Skip batch or background work.",
+      tooltip: "Fast API processing — up to 2.5× faster at premium token rates. Applies from your next message; capacity can fall back to standard processing.",
+      notice: {
+        key: "openai-api",
+        title: "Fast uses premium API pricing",
+        detail: "Use Fast for high-value, latency-sensitive interactive work. Leave it off for batch, background, or cost-sensitive tasks. The ⚡ chip appears only when the API confirms priority processing.",
+      },
+    };
+  }
+  return null;
 }
 
 /** The context-window tag shown beside a model in the picker, HONEST under the
@@ -303,7 +486,7 @@ export const legacyModels = MODEL_OPTIONS.filter((m) => m.legacy);
 // thinkingEnabled=true + their tier atomically (assistant.setThinkingDial).
 // (The legacy `quick` tier is coerced to `smart` at loadEffort — a rung here
 // never sees it.)
-type DialId = "low" | "medium" | "high" | "xhigh";
+type DialId = "none" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra";
 export type DialStop = {
   id: DialId;
   label: string;
@@ -314,30 +497,43 @@ export type DialStop = {
 };
 // Labels track the real CLI `--effort` flag each rung sends (vanilla flag
 // names, no marketing labels — standing owner call).
-const DIAL_STOPS: DialStop[] = [
-  { id: "low",    label: "Low",    effort: null,    hint: "Low — replies immediately with minimal reasoning. Fastest for chat, quick lookups, and small edits." },
+const REASONING_STOPS: DialStop[] = [
+  { id: "low",    label: "Low",    effort: "low",  hint: "Low — light reasoning for quick, straightforward work." },
   { id: "medium", label: "Medium", effort: "smart", hint: "Medium — balanced reasoning at a responsive pace. The recommended default for everyday work." },
   { id: "high",   label: "High",   effort: "deep",  hint: "High — reasons before replying and works more thoroughly, for complex tasks where quality matters more than speed." },
   { id: "xhigh",  label: "X-High", effort: "ultra", hint: "X-High — the model's deepest reasoning level. Slowest and most thorough for difficult, multi-step work." },
+  { id: "max", label: "Max", effort: "max", hint: "Max — maximum single-agent reasoning for the hardest tasks. Use only when X-High is not enough." },
+  { id: "ultra", label: "Ultra", effort: "agentic", hint: "Ultra — multi-agent workflow depth for broad tasks that benefit from parallel work. Most tasks do not need it." },
 ];
 
 /** Minimal capability shape the ladder derives from — a full ModelOpt. */
-export type EffortCaps = Pick<ModelOpt, "effort" | "maxEffort" | "supportedEfforts">;
+export type EffortCaps = Pick<ModelOpt, "effort" | "maxEffort" | "supportedEfforts"> & {
+  offWireEffort?: "none" | "low";
+};
 
 /** The ladder rungs a model supports. Haiku (no effort capability) gets an
  *  empty list — the panel hides the ladder entirely. Otherwise rungs truncate
  *  at the model's effort ceiling; the Low rung is always present. */
 export function dialStopsFor(m: EffortCaps | undefined): DialStop[] {
   if (!m?.effort) return [];
+  const offWireEffort = m.offWireEffort ?? "low";
+  const off: DialStop = offWireEffort === "none"
+    ? { id: "none", label: "None", effort: null, hint: "None — no reasoning budget. Best for direct transformations and the lowest latency." }
+    : { id: "low", label: "Low", effort: null, hint: "Low — minimal reasoning. Fastest for chat, quick lookups, and small edits." };
   if (m.supportedEfforts !== undefined) {
     const supported = new Set(m.supportedEfforts);
-    return DIAL_STOPS.filter((stop) => supported.has(stop.effort ?? "none"));
+    const enabled = REASONING_STOPS.filter((stop) => supported.has(stop.effort ?? "none"));
+    if (offWireEffort === "low") {
+      return [off, ...enabled.filter((stop) => stop.effort !== "low")];
+    }
+    return [off, ...enabled];
   }
   const capIdx = EFFORT_OPTIONS.findIndex((e) => e.id === m.maxEffort);
-  return DIAL_STOPS.filter(
-    (s) => s.effort === null
-      || (capIdx >= 0 && EFFORT_OPTIONS.findIndex((e) => e.id === s.effort) <= capIdx),
-  );
+  return [off, ...REASONING_STOPS.filter(
+    (s) => s.effort !== "low"
+      && capIdx >= 0
+      && EFFORT_OPTIONS.findIndex((e) => e.id === s.effort) <= capIdx,
+  )];
 }
 
 /** Clamp a stored tier to an exact live capability set. Static Claude rows do

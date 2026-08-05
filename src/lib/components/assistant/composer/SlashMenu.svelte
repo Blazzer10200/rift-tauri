@@ -1,5 +1,5 @@
 <script lang="ts">
-  // C6 (per docs/design/composer-split.md) — the `/command` popover. Render +
+  // The `/command` popover; see docs/ARCHITECTURE.md#frontend-map. Render +
   // click only: the keyboard nav index and open/filter state stay owned by the
   // parent's onKey. Redesigned 2026-07-09: glass panel + header strip + sticky
   // group labels + styled scrollbar; provider-native skills/commands carry

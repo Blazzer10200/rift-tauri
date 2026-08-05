@@ -3,12 +3,12 @@
 #   bash scripts/cdp/c.sh health
 #   bash scripts/cdp/c.sh targets                        # list main + browser targets
 #   bash scripts/cdp/c.sh look                           # VERIFY PRIMITIVE: state+errors+shot in ONE call
-#   bash scripts/cdp/c.sh look ".chat"                   # same, screenshot clipped to a selector
+#   bash scripts/cdp/c.sh look ".assistant"              # same, screenshot clipped to a selector
 #   bash scripts/cdp/c.sh peek                           # look WITHOUT the shot (state+errors, 0 img tokens)
 #   bash scripts/cdp/c.sh inspect                        # state+errors+AX tree in ONE image-free call
 #   bash scripts/cdp/c.sh map                            # every visible actionable control + verified selector
 #   bash scripts/cdp/c.sh find "Send"                    # locate elements by TEXT/aria — returns robust selectors
-#   bash scripts/cdp/c.sh text ".chat"                   # rendered text content, exact (no shot, no ax caps)
+#   bash scripts/cdp/c.sh text ".assistant"              # rendered text content, exact (no shot, no ax caps)
 #   bash scripts/cdp/c.sh errors                         # console errors, CURRENT page-gen only (--all incl. stale)
 #   bash scripts/cdp/c.sh eval "document.title"
 #   bash scripts/cdp/c.sh type ".assistant textarea" "hello world" Enter
@@ -21,16 +21,15 @@
 #   bash scripts/cdp/c.sh ax                             # image-FREE a11y structure (what's on screen + clickable)
 #   bash scripts/cdp/c.sh ax ".ah-wrap"                  # scope to a selector subtree
 #   bash scripts/cdp/c.sh shot                           # jpeg q65, prints path only
-#     (whole-page shots target the model's vision envelope: 2419x1512 / 4698 visual
-#      tokens on a 16:10 window — largest size Opus 4.7/4.8 ingests w/o server resize,
+#     (whole-page shots use a configurable high-detail patch budget and are
 #      supersampled for crisp text. Knobs: RIFT_CDP_MAX_EDGE/MAX_TOKENS/SS_FACTOR)
 #   bash scripts/cdp/c.sh shot png 0                     # png lossless
 #   bash scripts/cdp/c.sh shot jpeg 65 --json            # full JSON response
-#   bash scripts/cdp/c.sh shot-sel ".tabs-rail"          # clip to a selector
-#   bash scripts/cdp/c.sh shot-sel ".chat" jpeg 65
+#   bash scripts/cdp/c.sh shot-sel ".composer-wrap"      # clip to a selector
+#   bash scripts/cdp/c.sh shot-sel ".assistant" jpeg 65
 #   bash scripts/cdp/c.sh batch '<json>'                 # raw batch body
-#   bash scripts/cdp/c.sh nav settings                   # jump to a workspace (chat/home/settings/ai-health/models) + look
-#   bash scripts/cdp/c.sh tour chat home ai-health settings   # visit N surfaces + shot EACH in ONE round-trip (no nav→shot→nav)
+#   bash scripts/cdp/c.sh nav settings                   # jump to a surface (home/chat/settings/ai-health) + look
+#   bash scripts/cdp/c.sh tour chat home ai-health settings   # visit N surfaces + shot EACH in ONE round-trip
 #   bash scripts/cdp/c.sh ready                          # block until app mounted + idle (no settle guessing)
 #   bash scripts/cdp/c.sh doctor                         # diagnose WHY CDP is down (wrapper/port/ELEVATION) + print the fix
 #   bash scripts/cdp/c.sh reap                           # kill ORPHANED dev procs (webview/MCP leak), keep the live instance
@@ -470,20 +469,19 @@ case "$cmd" in
       end'
     ;;
   nav)
-    # nav <home|chat|settings|ai-health|local-llm|workspace> — jump to a workspace
+    # nav <home|chat|settings|ai-health|workspace> — jump to a surface
     # in ONE call (click the sidebar nav button by aria-label) + settle + look.
     # No selector-hunting. Names are the friendly ids; aliased to the aria titles.
     # Settle default 250ms: workspace switches are near-instant (measured — 150ms
     # already lands correctly; 250 is a safe margin). For capturing SEVERAL
     # surfaces, use `tour` instead — one round-trip for all of them.
     dest="${1:-}"; lookSel="${2:-}"; settle="${3:-250}"
-    if [ -z "$dest" ]; then echo "usage: $0 nav <home|chat|settings|ai-health|models> [lookSel] [settleMs]" >&2; exit 2; fi
+    if [ -z "$dest" ]; then echo "usage: $0 nav <home|chat|settings|ai-health> [lookSel] [settleMs]" >&2; exit 2; fi
     case "$dest" in
       home|workspace|projects) label="Workspace" ;;
       chat)                    label="Chat" ;;
       settings)                label="Settings" ;;
       ai-health|health|aihealth) label="AI Health" ;;
-      models|local-llm|local|llm) label="Models" ;;
       *) label="$dest" ;;  # pass a literal aria-label through
     esac
     sel="[aria-label=\"$label\"]"
@@ -507,7 +505,7 @@ case "$cmd" in
     while [ $# -gt 0 ]; do
       case "$1" in --settle) settle="${2:-250}"; shift 2 ;; *) args+=("$1"); shift ;; esac
     done
-    [ ${#args[@]} -eq 0 ] && { echo "usage: $0 tour <ws1> <ws2> ... [--settle N]   (ws: home|chat|settings|ai-health|models)" >&2; exit 2; }
+    [ ${#args[@]} -eq 0 ] && { echo "usage: $0 tour <ws1> <ws2> ... [--settle N]   (ws: home|chat|settings|ai-health)" >&2; exit 2; }
     # Build one batch: per surface -> click nav button, sleep settle, screenshot.
     labels=""
     ops="$(jq -nc '[]')"
@@ -517,7 +515,6 @@ case "$cmd" in
         chat) label="Chat" ;;
         settings) label="Settings" ;;
         ai-health|health|aihealth) label="AI Health" ;;
-        models|local-llm|local|llm) label="Models" ;;
         *) label="$ws" ;;
       esac
       labels="$labels $ws"

@@ -899,9 +899,8 @@ class AssistantStore {
   // to assistant_send so the CLI uses sonnet/opus/haiku per their choice.
   // Initialized from localStorage so the choice survives reloads.
   model = $state<ModelSel>(loadModel());
-  // Extended-thinking effort tier (CLI `--effort` ladder): "none"→low ·
-  // "smart"→medium (default) · "deep"→high · "ultra"→xhigh + ultracode.
-  // Haiku ignores this server-side. Persisted to localStorage.
+  // Provider-neutral effort tier. Legacy values retain their wire meaning;
+  // GPT routes additionally use distinct low, max, and App Server ultra tiers.
   thinkingEffort = $state<ThinkingEffort>(clampEffort(loadEffort(), this.model));
   // Extended-thinking master switch. On (default) = current behavior; off routes
   // the cloud turn through the no-think shim for fastest TTFT. Persisted, per-ws.
@@ -917,9 +916,9 @@ class AssistantStore {
   /** Dial snapshot taken when plan mode floors the active tab's thinking —
    *  restored on exit unless the user moved the dial themselves meanwhile. */
   private planEffortRestore: { tab: TabState; enabled: boolean; effort: ThinkingEffort } | null = null;
-  // Fast mode (Opus fast output) — rides `--settings {"fastMode":true}` on
-  // fast-eligible models. Global, persisted, default off. The backend re-gates
-  // by model family + CLI version, so this can be sent unconditionally.
+  // Fast mode is a global speed preference. Each provider/model route gates it
+  // independently at send time, and result badges appear only after the
+  // backend confirms higher-speed processing actually ran.
   fastMode = $state<boolean>(loadFastMode());
   // Composer typing-time autocorrect (word-finish boundary). Opt-in, global,
   // persisted. Pure-FE — never touches the spawn key.
@@ -1209,25 +1208,25 @@ class AssistantStore {
     this.setThinkingDial(snap.enabled, snap.effort, snap.tab);
   }
 
-  /** Latched once per session — the enable-side billing disclosure below. */
-  private fastModeCostWarned = false;
-  setFastMode(v: boolean) {
+  /** Latched by billing route so subscription, API, and Claude disclosures each
+   *  appear once per session when the user first enables them. */
+  private fastModeCostWarned = new Set<string>();
+  setFastMode(v: boolean, notice?: { key: string; title: string; detail: string }) {
     if (this.fastMode === v) return;
     this.fastMode = v;
     saveFastMode(v);
     this.telemetry.event("fast_mode.change", { to: v });
-    // BILLING DISCLOSURE (owner incident 2026-07-14): fast mode is PAY-PER-USE
-    // — the CLI bills it from usage credits, NOT plan limits (its own TUI shows
-    // "Fast mode ON · Draws from usage credits"). Rift must say so at the
-    // moment of consent, every enable path, not bury it in a tooltip.
-    if (v && !this.fastModeCostWarned) {
-      this.fastModeCostWarned = true;
+    const disclosure = notice ?? {
+      key: "claude",
+      title: "Fast mode uses extra credits",
+      detail: "Fast turns use higher-speed processing at increased usage. The ⚡ chip marks turns that actually ran fast.",
+    };
+    if (v && !this.fastModeCostWarned.has(disclosure.key)) {
+      this.fastModeCostWarned.add(disclosure.key);
       toast.push({
         severity: "warn",
-        title: "Fast mode is pay-per-use",
-        detail:
-          "Fast Opus turns draw from your usage credits (extra usage) — real billing beyond your plan limits. " +
-          "The ⚡ chip marks each turn that actually ran fast. Turn the toggle off to stop.",
+        title: disclosure.title,
+        detail: disclosure.detail,
       });
     }
     // Mid-conversation flip changes the SpawnKey (fastMode is baked into
@@ -1800,7 +1799,7 @@ class AssistantStore {
   /** Send-shaped fallback for a SETTLED plan card — the ask never round-tripped
    *  (old CLI, race, timeout already denied) or was denied/discarded. Approve =
    *  flip the mode + auto-send the execute prompt as a fresh turn on the plan's
-   *  own tab. One card, two transports (see docs/design/plan-mode.md §1b). */
+   *  own tab. One card, two transports; see `docs/ARCHITECTURE.md#frontend-map`. */
   approvePlanFallback(tab: TabState, planMd: string): void {
     const mode = this.planReturnMode ?? "acceptEdits";
     this.setPermissionMode(mode);

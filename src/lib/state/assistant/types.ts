@@ -82,6 +82,12 @@ export type CodexStatus = {
  *  separately billed API access (or vice versa) after an availability change. */
 export type ChatGptRoute = "codex" | "openai";
 
+export type CodexServiceTier = {
+  id: string;
+  name: string;
+  description: string;
+};
+
 export type CodexModel = {
   id: `gpt-${string}`;
   label: string;
@@ -89,6 +95,12 @@ export type CodexModel = {
   isDefault: boolean;
   defaultReasoningEffort: string;
   supportedReasoningEfforts: string[];
+  serviceTiers: CodexServiceTier[];
+  defaultServiceTier: string | null;
+  upgradeModel: string | null;
+  upgradeCopy: string | null;
+  inputModalities: string[];
+  supportsPersonality: boolean;
   imageInput: boolean;
 };
 
@@ -141,7 +153,11 @@ export type OpenAiModel = {
   label: string;
   family: string;
   contextWindow: number | null;
+  description: string;
   reasoning: boolean;
+  defaultReasoningEffort: string | null;
+  supportedReasoningEfforts: string[];
+  fastMode: boolean;
   imageInput: boolean;
   available: boolean;
 };
@@ -445,14 +461,18 @@ export type StreamEnvelope =
   // elapsed seconds). Pure liveness signal — blocks tick elapsed locally.
   | { type: "tool_progress"; tool_use_id?: string; tool_name?: string; parent_tool_use_id?: string | null; [k: string]: unknown };
 
-/** Extended-thinking tier, mirroring the CLI's effort ladder: none→low ·
- *  smart→medium (interactive default) · deep→high · ultra = ultracode: xhigh
- *  effort + autonomous dynamic-workflow orchestration via the CLI's `ultracode`
- *  settings key (see assistant_send in turn.rs). Haiku rejects the effort flag
- *  server-side, so it gets none. The legacy "quick" tier (retired 2026-07-03,
- *  also sent medium) is coerced to "smart" at every read boundary — loadEffort
- *  (FE), normalize_effort_tier (BE), normalizeApply (AI Health). */
-export type ThinkingEffort = "none" | "smart" | "deep" | "ultra";
+/** Provider-neutral stored effort tiers. Existing values keep their wire
+ *  meaning: none→minimum/off, smart→medium, deep→high, ultra→xhigh. `low`
+ *  distinguishes API low from API none; `max` is the GPT max level; `agentic`
+ *  represents Codex App Server's separate ultra level. */
+export type ThinkingEffort =
+  | "none"
+  | "low"
+  | "smart"
+  | "deep"
+  | "ultra"
+  | "max"
+  | "agentic";
 
 /** Model selection — stored value IS the string handed to the CLI's `--model`,
  *  so it flows through `assistant_send` untouched. `opus` is the short alias
@@ -529,7 +549,7 @@ export type TurnRecord = {
   model: ModelSel;
   effort: ThinkingEffort;
   /** Actual `--effort` flag the CLI is invoked with (mirrors mod.rs mapping). */
-  effortFlag: "low" | "medium" | "high" | "xhigh" | null;
+  effortFlag: "low" | "medium" | "high" | "xhigh" | "max" | "ultra" | null;
   // Input
   promptLen: number;
   promptPreview: string;

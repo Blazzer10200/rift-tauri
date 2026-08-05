@@ -20,7 +20,7 @@
 //! spawns a new one. All per-turn streaming/permission plumbing stays
 //! exactly where it was — see `turn.rs::run_turn_loop`.
 //!
-//! Red-team blockers handled (see docs/design/warm-cli-process.md):
+//! Load-bearing blockers (see `docs/ARCHITECTURE.md#load-bearing-invariants`):
 //! - B1/B3: stdin owned by the long-lived reader task, never dropped between
 //!   turns; the WarmChild mutex is NEVER held across an await (reuse only locks
 //!   it to read the turn-tx + signature, releases before sending).
