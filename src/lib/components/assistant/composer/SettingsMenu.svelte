@@ -113,28 +113,6 @@
   const currentChatGptRoute = $derived(currentModel?.provider === "openai"
     ? assistant.chatGptRouteFor(currentModel.id, tab?.chatGptRoute ?? null)
     : null);
-  const currentApiModel = $derived(
-    currentModel?.provider === "openai"
-      ? assistant.openAiModels?.find((model) => model.id === currentModel.id) ?? null
-      : null,
-  );
-  const currentRouteLabel = $derived(currentModel?.provider === "claude"
-    ? "Claude Code"
-    : currentChatGptRoute === "codex"
-      ? "ChatGPT subscription"
-      : currentChatGptRoute === "openai"
-        ? "OpenAI API"
-        : "ChatGPT");
-  const currentDefaultEffort = $derived(
-    currentChatGptRoute === "codex"
-      ? currentModel?.defaultReasoningEffort ?? null
-      : currentChatGptRoute === "openai"
-        ? currentApiModel?.defaultReasoningEffort ?? null
-        : null,
-  );
-  const currentImageInput = $derived(currentModel?.provider === "claude"
-    || currentModel?.inputModalities?.includes("image") === true
-    || currentApiModel?.imageInput === true);
   const sessionPinnedModel = $derived(tab?.pinnedModel ?? null);
   const sessionModelDiverged = $derived(sessionPinnedModel !== null && sessionPinnedModel !== paneModel);
   function shortcutFor(m: ModelOpt): number | null {
@@ -145,6 +123,33 @@
     m.provider === "claude" && (assistant.plan !== "free" || isFreeClaudeModel(m.id))
   ));
   const pickerModels = $derived([...currentOpenAiModels, ...currentClaudeModels, ...legacyModels]);
+  // Keep the first view useful instead of dumping every live, retiring, and
+  // unavailable model into one tall list. Provider metadata marks models with
+  // an upgrade target; unavailable fallbacks also live behind Other models.
+  const primaryOpenAiModels = $derived.by(() => {
+    // The App Server returns models in preference order. Three visible choices
+    // cover the current family without letting compatibility rows take over the
+    // panel; the selected model is always promoted if it sits outside that set.
+    const primary = currentOpenAiModels.filter((m) => accessFor(m).enabled && !m.upgradeModel).slice(0, 3);
+    if (currentModel?.provider === "openai" && !primary.some((m) => m.id === currentModel.id)) {
+      primary.unshift(currentModel);
+    }
+    return primary.length > 0 ? primary : currentOpenAiModels.slice(0, 3);
+  });
+  const primaryOpenAiIds = $derived(new Set(primaryOpenAiModels.map((m) => m.id)));
+  const otherOpenAiModels = $derived(currentOpenAiModels.filter((m) => !primaryOpenAiIds.has(m.id)));
+  type PickerProvider = "openai" | "claude";
+  let providerView = $state<PickerProvider>("openai");
+  let previousCursor = $state<ModelOpt["id"] | null>(null);
+  // Arrow navigation still spans the shared parent-owned row list. Switch the
+  // visible provider only when that cursor actually crosses providers; a mouse
+  // click on a provider tab must not immediately snap back to the old cursor.
+  $effect(() => {
+    if (activeModelId === previousCursor) return;
+    previousCursor = activeModelId;
+    const cursorModel = pickerModels.find((m) => m.id === activeModelId);
+    if (cursorModel) providerView = cursorModel.provider;
+  });
   const fastInfo = $derived(fastModeInfoFor(
     currentModel,
     currentChatGptRoute,
@@ -249,26 +254,13 @@
     const ls = usage.rateLimits?.limits ?? [];
     return ls.find((l) => (l.scope?.model?.displayName ?? "").toLowerCase().includes(fam)) ?? null;
   }
-  // "More models" flyout — previous-generation models live behind this submenu
-  // (matches the desktop picker) instead of a permanently-expanded Legacy block.
-  // Opens on hover/focus of the trigger row; the active model being a legacy one
-  // surfaces it (accent dot + auto-open) so the current pick is never hidden.
-  const activeIsLegacy = $derived(legacyModels.some((m) => m.id === paneModel));
-  // Keep the flyout open whenever the active model OR the keyboard cursor lands
-  // on a legacy row — otherwise arrowing onto Opus 4.7 highlights nothing.
-  const cursorIsLegacy = $derived(legacyModels.some((m) => m.id === activeModelId));
-  // Transient open-drivers: mouse hover + an explicit pin via the "More models"
-  // click. `legacyOpen` is fully derived so it auto-CLOSES when the keyboard
-  // cursor arrows back off a legacy row (no hover/pin) — the old one-way $effect
-  // left it stuck open for keyboard users.
-  let legacyHover = $state(false);
-  let legacyPinned = $state(false);
-  // Hover grace: a short leave-delay so grazing the row's edge doesn't snap the
-  // flyout shut mid-reach — the fast open/close flicker read as broken.
-  let legacyLeaveTimer: ReturnType<typeof setTimeout> | undefined;
-  function legacyEnter() { clearTimeout(legacyLeaveTimer); legacyHover = true; }
-  function legacyLeave() { legacyLeaveTimer = setTimeout(() => (legacyHover = false), 260); }
-  const legacyOpen = $derived(activeIsLegacy || cursorIsLegacy || legacyHover || legacyPinned);
+  const otherModels = $derived(providerView === "openai" ? otherOpenAiModels : legacyModels);
+  const activeIsOther = $derived(otherModels.some((m) => m.id === paneModel));
+  const cursorIsOther = $derived(otherModels.some((m) => m.id === activeModelId));
+  let moreOpen = $state(false);
+  $effect(() => {
+    if (activeIsOther || cursorIsOther) moreOpen = true;
+  });
 </script>
 
 <!-- Root-level mousedown preventDefault: a click on panel padding/dividers/
@@ -332,50 +324,62 @@
     </button>
   {/snippet}
 
-  <div class="rift-menu-head"><span>ChatGPT</span><span class="provider-head-note state-{openAiProviderStatus.state}"><i></i>{openAiProviderStatus.tag}</span></div>
-  {#each currentOpenAiModels as m (m.id)}
-    {@render modelRow(m)}
-  {/each}
-
-  <div class="provider-separator"></div>
-  <div class="rift-menu-head">
-    <span class="provider-head-label">Claude <span class="provider-via">via Claude Code</span></span>
-    <span class="provider-head-note state-{claudeProviderStatus.state}"><i></i>{claudeProviderStatus.tag}</span>
+  <div class="model-tabs" role="tablist" aria-label="Model provider">
+    <button
+      type="button"
+      role="tab"
+      aria-selected={providerView === "openai"}
+      class:on={providerView === "openai"}
+      onmousedown={(e) => { e.preventDefault(); providerView = "openai"; moreOpen = false; }}
+      use:tooltip={`ChatGPT · ${openAiProviderStatus.tag}`}
+    ><i class="state-{openAiProviderStatus.state}"></i><span>ChatGPT</span></button>
+    <button
+      type="button"
+      role="tab"
+      aria-selected={providerView === "claude"}
+      class:on={providerView === "claude"}
+      onmousedown={(e) => { e.preventDefault(); providerView = "claude"; moreOpen = false; }}
+      use:tooltip={`Claude Code · ${claudeProviderStatus.tag}`}
+    ><i class="state-{claudeProviderStatus.state}"></i><span>Claude</span></button>
   </div>
-  {#each currentClaudeModels as m (m.id)}
-    {@render modelRow(m)}
-  {/each}
 
-  {#if assistant.plan !== "free" && legacyModels.length > 0 && (claudeProviderStatus.enabled || activeIsLegacy)}
-    <div
-      class="legacy-zone"
-      role="presentation"
-      onmouseenter={legacyEnter}
-      onmouseleave={legacyLeave}
-    >
+  <div class="model-list" role="group" aria-label={providerView === "openai" ? "ChatGPT models" : "Claude models"}>
+    {#if providerView === "openai"}
+      {#each primaryOpenAiModels as m (m.id)}
+        {@render modelRow(m)}
+      {/each}
+    {:else}
+      {#each currentClaudeModels as m (m.id)}
+        {@render modelRow(m)}
+      {/each}
+    {/if}
+
+    {#if otherModels.length > 0 && (providerView === "openai" || assistant.plan !== "free")}
+      <div class="legacy-zone" role="presentation">
       <button
         type="button"
         class="pop-item more-row"
-        class:expanded={legacyOpen}
-        class:sel={activeIsLegacy}
-        aria-expanded={legacyOpen}
-        onmousedown={(e) => { e.preventDefault(); legacyPinned = !legacyOpen; }}
-        use:tooltip={"Previous-generation models"}
+        class:expanded={moreOpen}
+        class:sel={activeIsOther}
+        aria-expanded={moreOpen}
+        onmousedown={(e) => { e.preventDefault(); moreOpen = !moreOpen; }}
       >
-        <span class="pi-name"><span class="model-name more-name">More models</span>
-          {#if activeIsLegacy}<span class="pi-tag accent">Active</span>{/if}
+        <span class="pi-name"><span class="model-name more-name">Other models</span>
+          <span class="pi-tag">{otherModels.length}</span>
+          {#if activeIsOther}<span class="pi-tag accent">Active</span>{/if}
         </span>
         <ChevronRight size={14} class="more-chev" />
       </button>
-      {#if legacyOpen}
+      {#if moreOpen}
         <div class="legacy-flyout">
-          {#each legacyModels as m (m.id)}
+          {#each otherModels as m (m.id)}
             {@render modelRow(m)}
           {/each}
         </div>
       {/if}
-    </div>
-  {/if}
+      </div>
+    {/if}
+  </div>
 
   {#if sessionModelDiverged}
     {@const pinned = pickerModels.find((m) => m.id === sessionPinnedModel)}
@@ -395,27 +399,12 @@
     </div>
   {/if}
 
-  {#if currentModel && currentModelAccess?.enabled}
-    <div class="model-brief" role="note" aria-label="Selected model details">
-      <div class="mb-top">
-        <span class="mb-name">{currentModel.label} {currentModel.version}</span>
-        <span class="mb-route">{currentRouteLabel}</span>
-      </div>
-      <p>{currentModel.tagline}</p>
-      <div class="mb-chips">
-        <span>{currentModel.suffix || currentModel.ctx}</span>
-        <span>{currentImageInput ? "Text + image" : "Text only"}</span>
-        {#if currentDefaultEffort}<span>Default: {currentDefaultEffort}</span>{/if}
-        <span>{fastInfo ? "Fast available" : "Standard speed"}</span>
-      </div>
-      {#if currentModel.upgradeModel}
-        <div class="mb-upgrade">Recommended for new work: {currentModel.upgradeModel}</div>
-      {/if}
-    </div>
+  {#if fastApplies || dialApplies}
+    <div class="rift-menu-divider"></div>
+    <div class="response-head"><span>Response</span><span>{currentModel?.label} {currentModel?.version}</span></div>
   {/if}
 
   {#if fastApplies}
-    <div class="rift-menu-divider"></div>
     <!-- Provider-specific Fast mode. The catalog/API metadata controls whether
          this row exists; the transcript chip appears only after the backend
          confirms higher-speed processing. Amber remains the cost disclosure. -->
@@ -440,7 +429,6 @@
 
 
   {#if dialApplies}
-    <div class="rift-menu-divider"></div>
     <!-- Effort — Faster↔Smarter DETENT SLIDER (owner call 2026-07-22, Claude-
          Desktop anatomy): a row of dot detents under a blocky machined thumb.
          Drag free-follows, release spring-snaps; same DIAL_STOPS wire mechanics
@@ -511,9 +499,10 @@
      LOCKSTEP w/ PermMenu — keep the two recipes identical. */
   :global(.rift-menu.settings-menu) {
     position: fixed;
-    width: 296px; min-width: 280px;
-    max-height: min(calc(100vh - 24px), 690px);
-    overflow-y: auto;
+    width: 276px; min-width: 260px;
+    max-height: min(calc(100vh - 24px), 520px);
+    overflow: hidden;
+    display: flex; flex-direction: column;
     z-index: 9998;
     padding: 5px; border-radius: 12px;
     transform-origin: bottom right;
@@ -537,35 +526,37 @@
     --sm-meta: 10px;       /* context tag */
     --sm-mono: 10px;       /* hotkey digits */
   }
-  /* Section head — uppercase eyebrow, consistent with PermMenu's `.pop-label`. */
-  :global(.settings-menu .rift-menu-head) {
-    display: flex; align-items: center; gap: 7px;
-    font-size: var(--sm-eyebrow); font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
-    color: var(--fg-faint); padding: 9px 9px 6px;
+  /* Provider switcher — one model family at a time. This keeps the picker a
+     decision surface instead of a catalog dump while preserving both routes. */
+  :global(.settings-menu .model-tabs) {
+    flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 3px;
+    margin: 1px 1px 4px; padding: 3px;
+    border-radius: 9px;
+    background: color-mix(in oklab, var(--fg) 5%, transparent);
   }
-  :global(.settings-menu .provider-head-note) {
-    margin-left: auto; display: inline-flex; align-items: center; gap: 5px;
-    font-size: 8.5px; letter-spacing: 0.05em; color: var(--fg-faint);
-    text-transform: none;
+  :global(.settings-menu .model-tabs button) {
+    min-width: 0; height: 28px; padding: 0 9px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    border: 0; border-radius: 7px; background: transparent;
+    color: var(--fg-faint); font: inherit; font-size: 11px; font-weight: 600;
+    cursor: pointer; transition: color var(--dur-fast), background var(--dur-fast);
   }
-  :global(.settings-menu .provider-head-label) {
-    display: inline-flex; align-items: baseline; gap: 5px;
+  :global(.settings-menu .model-tabs button:hover) { color: var(--fg-muted); }
+  :global(.settings-menu .model-tabs button.on) {
+    color: var(--fg); background: color-mix(in oklab, var(--bg-elev-3) 92%, transparent);
+    box-shadow: 0 1px 3px oklch(0 0 0 / 0.24), inset 0 1px 0 oklch(1 0 0 / 0.04);
   }
-  :global(.settings-menu .provider-via) {
-    font-size: 8.5px; font-weight: 500; letter-spacing: 0.01em;
-    color: color-mix(in oklab, var(--fg-faint) 78%, transparent);
-    text-transform: none;
+  :global(.settings-menu .model-tabs i) {
+    width: 5px; height: 5px; border-radius: 50%; background: var(--fg-faint);
   }
-  :global(.settings-menu .provider-head-note i) {
-    width: 5px; height: 5px; border-radius: 50%; background: currentColor;
-  }
-  :global(.settings-menu .provider-head-note.state-ready) { color: var(--ok); }
-  :global(.settings-menu .provider-head-note.state-checking) { color: var(--accent); }
-  :global(.settings-menu .provider-head-note.state-setup) { color: var(--warn); }
-  :global(.settings-menu .provider-head-note.state-error),
-  :global(.settings-menu .provider-head-note.state-unavailable) { color: var(--danger); }
-  :global(.settings-menu .provider-separator) {
-    height: 1px; margin: 5px 9px 1px; background: color-mix(in oklab, var(--border) 80%, transparent);
+  :global(.settings-menu .model-tabs i.state-ready) { background: var(--ok); }
+  :global(.settings-menu .model-tabs i.state-checking) { background: var(--accent); }
+  :global(.settings-menu .model-tabs i.state-setup) { background: var(--warn); }
+  :global(.settings-menu .model-tabs i.state-error),
+  :global(.settings-menu .model-tabs i.state-unavailable) { background: var(--danger); }
+  :global(.settings-menu .model-list) {
+    flex: 0 1 auto; min-height: 0; max-height: 244px; overflow-y: auto;
+    padding: 0 1px; scrollbar-width: thin;
   }
   /* "More models" flyout — legacy generations fold behind this trigger row
      (desktop-picker parity). The flyout expands in-flow below the trigger with
@@ -601,7 +592,7 @@
   :global(.settings-menu .pop-item) {
     position: relative;
     display: flex; align-items: center; gap: 8px; width: 100%;
-    min-height: 30px; padding: 0 9px; border-radius: 8px; border: 0; background: transparent;
+    min-height: 28px; padding: 0 8px; border-radius: 7px; border: 0; background: transparent;
     color: var(--fg-2); cursor: pointer; font: inherit; text-align: left;
     transition: background var(--dur-fast), color var(--dur-fast);
   }
@@ -610,7 +601,7 @@
     background: var(--surface-hover); color: var(--fg);
   }
   /* Fast row is the ONE two-line row — its cost disclosure needs the space. */
-  :global(.settings-menu .fast-row) { padding: 6px 9px; }
+  :global(.settings-menu .fast-row) { padding: 5px 8px; }
   :global(.settings-menu .pi-text) { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   :global(.settings-menu .pi-name) {
     flex: 1; min-width: 0;
@@ -694,30 +685,15 @@
     background: color-mix(in oklab, var(--accent) 28%, transparent);
     color: color-mix(in oklab, var(--accent) 98%, white);
   }
-  :global(.settings-menu .model-brief) {
-    margin: 7px 8px 2px; padding: 9px 10px;
-    border: 1px solid color-mix(in oklab, var(--fg) 10%, transparent);
-    border-radius: 9px;
-    background: color-mix(in oklab, var(--fg) 3%, transparent);
+  :global(.settings-menu .response-head) {
+    display: flex; align-items: center; gap: 8px; padding: 6px 9px 2px;
+    color: var(--fg-faint); font-size: var(--sm-eyebrow); font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase;
   }
-  :global(.settings-menu .mb-top) { display: flex; align-items: baseline; gap: 8px; }
-  :global(.settings-menu .mb-name) { font-size: 11.5px; font-weight: 650; color: var(--fg-2); }
-  :global(.settings-menu .mb-route) {
-    margin-left: auto; font-size: 9px; font-weight: 650; letter-spacing: 0.05em;
-    text-transform: uppercase; color: var(--fg-faint);
-  }
-  :global(.settings-menu .model-brief p) {
-    margin: 4px 0 7px; font-size: 10.5px; line-height: 1.4; color: var(--fg-muted);
-  }
-  :global(.settings-menu .mb-chips) { display: flex; flex-wrap: wrap; gap: 4px; }
-  :global(.settings-menu .mb-chips span) {
-    padding: 2px 6px; border-radius: 999px;
-    font-size: 9px; line-height: 1.3; color: var(--fg-faint);
-    background: color-mix(in oklab, var(--fg) 6%, transparent);
-    border: 1px solid color-mix(in oklab, var(--fg) 10%, transparent);
-  }
-  :global(.settings-menu .mb-upgrade) {
-    margin-top: 7px; font-size: 10px; line-height: 1.35; color: var(--warn);
+  :global(.settings-menu .response-head span:last-child) {
+    margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    color: var(--fg-muted); font-size: 9px; font-weight: 600;
+    letter-spacing: 0.02em; text-transform: none; white-space: nowrap;
   }
   /* Blurb wraps to two lines instead of a hard ellipsis — the wider panel fits
      every current blurb on one line, but wrapping guarantees nothing is ever
@@ -835,7 +811,7 @@
      continuous. */
   :global(.settings-menu .effort-head) {
     display: flex; align-items: baseline; gap: 8px;
-    padding: 10px 9px 4px;
+    padding: 7px 9px 2px;
     color: var(--fg-muted);
   }
   /* "EFFORT" eyebrow — identical treatment to the MODEL section head. */
@@ -855,7 +831,7 @@
   }
   :global(.settings-menu .effort-help:hover) { color: var(--fg-muted); }
   :global(.settings-menu .effort-rail) {
-    margin: 0 8px 4px; padding: 4px 3px 6px;
+    margin: 0 8px 2px; padding: 3px 3px 4px;
     border-radius: 8px; outline: none;
     transition: box-shadow var(--dur-fast) ease;
   }
@@ -965,8 +941,10 @@
   /* Plain-language "what you're getting" line under the rung cards. Amber on
      the X-High tier to flag its higher cost / autonomous behavior. */
   :global(.settings-menu .model-caption) {
-    margin: 10px 10px 4px; padding: 0;
-    font-size: var(--sm-sub); font-weight: 450; line-height: 1.45; color: var(--fg-muted);
+    margin: 5px 10px 4px; padding: 0;
+    font-size: 10px; font-weight: 450; line-height: 1.35; color: var(--fg-muted);
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+    overflow: hidden;
     transition: color var(--dur-fast) ease;
   }
   :global(.settings-menu .model-caption.warn) { color: var(--warn); }

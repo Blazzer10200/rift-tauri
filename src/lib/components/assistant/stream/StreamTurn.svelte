@@ -197,16 +197,9 @@
     return left > 8 ? `~${fmtDur(left)} left` : "wrapping up…";
   });
 
-  // The head is the TURN-level status: "Working…" live, "Worked for Xs" done.
-  // EXCEPTION — a thinking block that's active before any tool/text lands: Opus
-  // omits thinking text, so that 6-8s gap otherwise shows only "Working…" with
-  // no signal of what's happening → reads as a hang ("everything is slow"). Say
-  // "Thinking…" plainly here so the gap reads as the model reasoning. Once a tool
-  // or token lands, `thinkingNow` falls false and the head returns to "Working…"
-  // (the footer verb + work rows take over). The done collapsible "Thought for
-  // Xs" is still the StreamThinking block below.
-  // When the live pass streams visible text, the StreamThinking block below owns
-  // the "Thinking…" word — the head saying it too would double the label.
+  // The head is reserved for turn-wide states that have no transcript block.
+  // Thinking always stays in StreamThinking below, including text-less passes,
+  // so a pass gaining plaintext never swaps one top status row for another.
   const thinkingNow = $derived(
     streaming && !!turn.thinking?.active && !turn.thinking?.text && !liveTool && liveTokens == null,
   );
@@ -217,9 +210,7 @@
         ? "Waiting for you"
         : compacting
           ? (autoCompacting ? "Auto-compacting conversation…" : "Compacting conversation…")
-          : thinkingNow
-            ? (liveSecs != null ? `Thinking… ${fmtDur(liveSecs)}` : "Thinking…")
-            : "Working…"
+          : "Working…"
   );
   // Completed-turn hover timestamp — `message.ts` stamped at send (2026-07-02+);
   // absent on older convos, hidden while live (the head already ticks then).
@@ -261,8 +252,8 @@
     // token count), leaving liveTokens null for the whole think. Without this
     // guard the watchdog escalated to "Waiting on the model" while the head was
     // still showing "Thinking…" — the model was working, but the footer read as
-    // a 45s hang. thinkingNow gates the head; gate the stall on it too so the
-    // two never contradict.
+    // a 45s hang. Gate the stall on that same text-less pass so the two never
+    // contradict.
     // Compaction is a legitimately silent turn (summary runs CLI-side, nothing
     // streams until the boundary) — the watchdog copy would call it a stall.
     if (!streaming || liveTool || liveTokens != null || liveSecs == null || reasoningNow || compacting) return 0;
@@ -334,11 +325,9 @@
 </script>
 
 <div class="sturn">
-  <!-- The head earns its row ONLY when it says something the footer can't:
-       a text-less thinking pause, an awaiting-input park, a compaction. Plain
-       "Working…" liveness lives in the footer (comp: no top status bar), and
-       done-state lives in the receipt below. -->
-  {#if streaming && (thinkingNow || awaitingInput || compacting)}
+  <!-- The head earns its row only for awaiting-input or compaction states.
+       StreamThinking owns reasoning from first signal through completion. -->
+  {#if streaming && (awaitingInput || compacting)}
   <div class="sturn-head live" class:awaiting-head={awaitingInput}>
     <span class="sh-dot"></span>
     <span class="sh-label">{headLabel}</span>
@@ -346,9 +335,8 @@
   {/if}
 
   <div class="sturn-body" class:railed class:live={streaming}>
-  <!-- Live pass WITH text streams open in place (word-reveal); a text-less live
-       pass (Opus omits thinking plaintext) keeps the head-only "Thinking…". -->
-  {#if turn.thinking && (!turn.thinking.active || turn.thinking.text)}
+  <!-- One stable reasoning row. Plaintext stays collapsed until requested. -->
+  {#if turn.thinking}
     <StreamThinking active={turn.thinking.active} durSecs={turn.thinking.durSecs} text={turn.thinking.text} />
   {/if}
 
@@ -421,9 +409,8 @@
   </div>
 
   {#if streaming && (compacting || !thinkingNow)}
-    <!-- While a pure reasoning pass is live the HEAD already shows "Thinking… Xs"
-         — the footer would just duplicate it (and there's no action/tokens to
-         report yet), so it's suppressed until a tool or token lands. -->
+    <!-- While a pure reasoning pass is live StreamThinking already owns the
+         status, so the footer stays suppressed until a tool or token lands. -->
     <div class="sfooter" class:stalled={stallLevel > 0} class:awaiting={awaitingInput}>
       <span class="sf-dot" aria-hidden="true"></span>
       {#key footerVerbShown ?? idleTrail}<span class="sf-verb-wrap">{#if footerVerbShown}<span class="sf-verb">{footerVerbShown}</span>{/if}{#if footerCap}<span class="sf-cap" class:sf-lead={!footerVerbShown}>{footerCap}</span>{:else if idleTrail}<span class="sf-cap sf-last" class:sf-lead={!footerVerbShown}>{footerVerbShown ? "· " : ""}{idleTrail}</span>{/if}</span>{/key}

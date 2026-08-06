@@ -184,7 +184,7 @@
             class="rl sb-btn"
             type="button"
             data-zone={l.z}
-            onclick={() => openAi ? workspace.setActive("ai-health") : (usageOpen = !usageOpen)}
+            onclick={() => (usageOpen = !usageOpen)}
             aria-expanded={usageOpen}
             use:tooltip={`${l.label} — ${l.u}% used${fmtReset(l.r)}`}
           >
@@ -192,8 +192,14 @@
             <span class="rl-bar"><i style="width:{l.u}%"></i></span>
           </button>
         {/each}
-        {#if usageOpen && !openAi}
-          <UsagePanel tab={assistant.activeTab} anchor="statusbar" ignoreSel=".sb-usage" onClose={() => (usageOpen = false)} />
+        {#if usageOpen}
+          <UsagePanel
+            tab={assistant.activeTab}
+            provider={openAi ? "chatgpt" : "claude"}
+            anchor="statusbar"
+            ignoreSel=".sb-usage"
+            onClose={() => (usageOpen = false)}
+          />
         {/if}
       </span>
     {/if}
@@ -203,7 +209,7 @@
 <style>
   /* Rides inside the main island as its footer — hairline separator only, fill
      comes from the island (no second surface). */
-  .statusbar { flex: none; height: 27px; display: flex; align-items: center; gap: 13px; padding: 0 16px; overflow: hidden;
+  .statusbar { flex: none; height: 27px; display: flex; align-items: center; gap: 13px; padding: 0 16px; overflow: visible;
     border-top: 1px solid var(--border); background: transparent;
     font-size: 11px; color: var(--fg-subtle); position: relative; z-index: 1; }
   .sb-item { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }

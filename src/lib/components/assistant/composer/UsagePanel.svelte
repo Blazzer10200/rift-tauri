@@ -11,10 +11,11 @@
   import { fmtTokens, isOpenAIModel } from "../../../state/assistant/helpers";
   import { MODEL_OPTIONS } from "./modelMatrix";
 
-  let { onClose, tab = null, anchor = "composer", ignoreSel = ".ctxring", mode = "full" }: {
+  let { onClose, tab = null, anchor = "composer", ignoreSel = ".ctxring", mode = "full", provider = "auto" }: {
     onClose: () => void; tab?: TabState | null;
     anchor?: "composer" | "statusbar"; ignoreSel?: string;
     mode?: "ctx" | "full";
+    provider?: "auto" | "claude" | "chatgpt";
   } = $props();
   let el = $state<HTMLDivElement | undefined>();
 
@@ -36,6 +37,7 @@
   // compact turn targets THIS pane's tab, not whichever pane holds focus.
   const convoKey = $derived(assistant.liveTabs.find((e) => e.tab === tab)?.convoId ?? null);
   const openAiConversation = $derived(isOpenAIModel(tab?.lastModelId ?? tab?.modelOverride ?? assistant.model));
+  const chatGptUsage = $derived(provider === "chatgpt" || (provider === "auto" && openAiConversation));
   function ctxZone(u: number): string {
     return u < 75 ? "ok" : u < 90 ? "warn" : "hot";
   }
@@ -47,8 +49,8 @@
     if (model) return `Weekly · ${model}`;
     return l.group === "weekly" ? "Weekly" : (l.kind ?? "Limit");
   }
-  type Row = { k: string; w: LimitWindow; active: boolean; severity: string | null };
-  const rows = $derived.by(() => {
+  type Row = { k: string; label: string; utilization: number; resetsAt: string | null; active: boolean; severity: string | null };
+  const claudeRows = $derived.by(() => {
     const rl = usage.rateLimits;
     if (!rl) return [] as Row[];
     // Prefer the endpoint's newer generic limits[] — model-scoped weeklies
@@ -56,14 +58,16 @@
     if (rl.limits?.length) {
       return rl.limits.map((l) => ({
         k: labelFor(l),
-        w: { utilization: l.percent, resetsAt: l.resetsAt },
+        label: labelFor(l),
+        utilization: l.percent,
+        resetsAt: l.resetsAt,
         active: l.isActive,
         severity: l.severity,
       }));
     }
     const out: Row[] = [];
     const legacy = (k: string, w: LimitWindow | null) => {
-      if (w) out.push({ k, w, active: false, severity: null });
+      if (w) out.push({ k, label: k, utilization: w.utilization, resetsAt: w.resetsAt, active: false, severity: null });
     };
     legacy("5-hour window", rl.fiveHour);
     legacy("Weekly · all models", rl.sevenDay);
@@ -71,6 +75,43 @@
     legacy("Weekly · Sonnet", rl.sevenDaySonnet);
     return out;
   });
+  function chatGptWindowLabel(minutes: number | null): string {
+    if (minutes === 300) return "5-hour window";
+    if (minutes === 10_080) return "Weekly window";
+    if (minutes && minutes % 1_440 === 0) return `${minutes / 1_440}-day window`;
+    if (minutes && minutes % 60 === 0) return `${minutes / 60}-hour window`;
+    return "Usage window";
+  }
+  function chatGptResetIso(seconds: number | null): string | null {
+    if (!seconds) return null;
+    const date = new Date(seconds * 1000);
+    return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+  }
+  const chatGptRows = $derived.by(() => {
+    const out: Row[] = [];
+    for (const limit of assistant.codexAccount?.rateLimits ?? []) {
+      const paired = !!(limit.primary && limit.secondary);
+      const rawName = limit.name?.trim() || limit.id;
+      const base = rawName.toLowerCase() === "codex" ? "ChatGPT" : rawName;
+      const add = (slot: "primary" | "secondary") => {
+        const window = limit[slot];
+        if (!window) return;
+        const windowLabel = chatGptWindowLabel(window.windowDurationMins);
+        out.push({
+          k: `${limit.id}-${slot}`,
+          label: paired ? `${base} · ${windowLabel}` : base,
+          utilization: window.usedPercent,
+          resetsAt: chatGptResetIso(window.resetsAt),
+          active: false,
+          severity: null,
+        });
+      };
+      add("primary");
+      add("secondary");
+    }
+    return out;
+  });
+  const rows = $derived(chatGptUsage ? chatGptRows : claudeRows);
   // Ticks every 30s so the countdowns + "updated Xs ago" stay honest while
   // the panel sits open; also bumped by a manual refresh.
   let nowTick = $state(Date.now());
@@ -78,11 +119,20 @@
   async function doRefresh() {
     if (refreshing) return;
     refreshing = true;
-    await usage.refreshRateLimits(assistant.auth?.cliVersion ?? null, true);
-    nowTick = Date.now();
-    refreshing = false;
+    try {
+      if (chatGptUsage) await assistant.refreshCodexStatus();
+      else await usage.refreshRateLimits(assistant.auth?.cliVersion ?? null, true);
+      nowTick = Date.now();
+    } finally {
+      refreshing = false;
+    }
   }
-  const updatedAgo = $derived.by(() => {
+  const panelMeta = $derived.by(() => {
+    if (chatGptUsage) {
+      if (refreshing || assistant.codexChecking) return "refreshing…";
+      const plan = assistant.codexAccount?.planType?.trim();
+      return plan ? `${plan.charAt(0).toUpperCase()}${plan.slice(1)} plan` : "ChatGPT account";
+    }
     const at = usage.rateLimits?.fetchedAt ?? 0;
     if (!at) return "claude.ai";
     const s = Math.max(0, Math.round((nowTick - at) / 1000));
@@ -90,7 +140,10 @@
   });
 
   // Extra-usage credits — the overflow wallet that kicks in past plan limits.
-  const extra = $derived(usage.rateLimits?.extraUsage ?? null);
+  const extra = $derived(chatGptUsage ? null : usage.rateLimits?.extraUsage ?? null);
+  const limitsError = $derived(chatGptUsage
+    ? assistant.codexAccount?.rateLimitsError ?? assistant.codexAccountError
+    : usage.rateLimitsError);
   const extraPct = $derived.by(() => {
     if (!extra?.isEnabled) return 0;
     if (extra.utilization != null) return Math.max(0, Math.min(100, extra.utilization));
@@ -118,7 +171,8 @@
 
   onMount(() => {
     if (mode === "ctx") return;
-    void usage.refreshRateLimits(assistant.auth?.cliVersion ?? null);
+    if (chatGptUsage) void assistant.refreshCodexStatus();
+    else void usage.refreshRateLimits(assistant.auth?.cliVersion ?? null);
     const t = setInterval(() => (nowTick = Date.now()), 30_000);
     return () => clearInterval(t);
   });
@@ -135,13 +189,13 @@
   }}
 />
 
-<div class="rift-menu usage-pop" class:statusbar={anchor === "statusbar"} class:ctx={mode === "ctx"} role="dialog" aria-label={mode === "ctx" ? "Conversation context" : "Plan limits"} bind:this={el}>
+<div class="rift-menu usage-pop" class:from-statusbar={anchor === "statusbar"} class:ctx={mode === "ctx"} role="dialog" aria-label={mode === "ctx" ? "Conversation context" : chatGptUsage ? "ChatGPT plan limits" : "Claude plan limits"} bind:this={el}>
   <header class="up-head">
-    <span class="up-title"><Gauge size={13} /> {mode === "ctx" ? "This conversation" : "Plan limits"}</span>
+    <span class="up-title"><Gauge size={13} /> {mode === "ctx" ? "This conversation" : chatGptUsage ? "ChatGPT limits" : "Claude limits"}</span>
     {#if mode === "ctx"}
       <span class="up-meta">live</span>
     {:else}
-      <span class="up-meta">{usage.rateLimits ? updatedAgo : "claude.ai"}</span>
+      <span class="up-meta">{panelMeta}</span>
       <button class="up-x" class:spin={refreshing} type="button" onclick={() => void doRefresh()} aria-label="Refresh limits" disabled={refreshing}><RefreshCw size={12} /></button>
     {/if}
     <button class="up-x" type="button" onclick={onClose} aria-label="Close"><X size={13} /></button>
@@ -181,16 +235,19 @@
       {#each rows as r (r.k)}
         <div class="up-row" class:live={r.active}>
           <div class="up-top">
-            <span class="up-k">{r.k}{#if r.active}<span class="up-live">in use</span>{/if}</span>
-            <span class="up-pct mono" data-zone={limitZone(r.w.utilization, r.severity)}>{r.w.utilization.toFixed(0)}<span class="up-pct-u">%</span></span>
+            <span class="up-k">{r.label}{#if r.active}<span class="up-live">in use</span>{/if}</span>
+            <span class="up-pct mono" data-zone={limitZone(r.utilization, r.severity)}>{r.utilization.toFixed(0)}<span class="up-pct-u">%</span></span>
           </div>
           <div class="up-track">
-            <span class="up-fill" data-zone={limitZone(r.w.utilization, r.severity)} style="width:{Math.min(100, Math.max(2, r.w.utilization))}%"></span>
+            <span class="up-fill" data-zone={limitZone(r.utilization, r.severity)} style="width:{Math.min(100, Math.max(2, r.utilization))}%"></span>
           </div>
-          <div class="up-reset">{fmtReset(r.w.resetsAt)}</div>
+          <div class="up-reset">{fmtReset(r.resetsAt)}</div>
         </div>
       {/each}
     </div>
+    {#if chatGptUsage && assistant.codexAccount?.resetCreditsAvailable}
+      <div class="up-credit-note">{assistant.codexAccount.resetCreditsAvailable} reset credit{assistant.codexAccount.resetCreditsAvailable === 1 ? "" : "s"} available</div>
+    {/if}
     {#if extra?.isEnabled}
       <div class="up-sep up-sep-x" aria-hidden="true"></div>
       <div class="up-row">
@@ -204,8 +261,10 @@
         <div class="up-reset">covers overflow once plan limits fill</div>
       </div>
     {/if}
-  {:else if usage.rateLimitsError}
-    <div class="up-empty">Unavailable — {usage.rateLimitsError}</div>
+  {:else if limitsError}
+    <div class="up-empty">Unavailable — {limitsError}</div>
+  {:else if chatGptUsage && assistant.codexAccount}
+    <div class="up-empty">This ChatGPT account did not report a metered usage window.</div>
   {:else}
     <div class="up-empty">Checking plan limits…</div>
   {/if}
@@ -221,7 +280,7 @@
     z-index: 10;
     animation: usage-in var(--dur-fast) cubic-bezier(0.22, 1, 0.36, 1);
   }
-  .usage-pop.statusbar { left: auto; right: 0; width: min(380px, 92vw); }
+  .usage-pop.from-statusbar { left: auto; right: 0; width: min(380px, 92vw); }
   /* ctx mode — compact card, right-anchored so it hangs over the ring that opened it. */
   .usage-pop.ctx { left: auto; right: 0; width: min(290px, 100%); }
   .up-ctx.solo { margin-bottom: 0; }
@@ -238,6 +297,7 @@
   .up-ctx { margin-bottom: 10px; }
   .up-sep { height: 1px; background: var(--border); margin: 0 0 10px; }
   .up-rows { display: flex; flex-direction: column; gap: 10px; }
+  .usage-pop.from-statusbar .up-rows { max-height: min(420px, 58vh); overflow-y: auto; padding-right: 2px; scrollbar-width: thin; }
   .up-row { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
   .up-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
   .up-k { font-size: var(--fs-xs); color: var(--fg-muted); }
@@ -260,6 +320,12 @@
     border: 1px solid color-mix(in oklab, var(--accent) 35%, transparent); border-radius: 999px; padding: 1px 6px;
     margin-left: 7px; background: color-mix(in oklab, var(--accent) 10%, transparent); vertical-align: 1px; }
   .up-sep-x { margin-top: 10px; }
+  .up-credit-note {
+    margin-top: 10px; padding: 6px 8px; border-radius: 7px;
+    font-size: 10px; color: var(--fg-muted); text-align: center;
+    background: color-mix(in oklab, var(--accent) 8%, transparent);
+    border: 1px solid color-mix(in oklab, var(--accent) 18%, transparent);
+  }
   .up-money { font-size: 13px; font-weight: 700; letter-spacing: -0.01em; color: var(--fg); font-variant-numeric: tabular-nums; line-height: 1; }
   .up-of { font-size: 10px; font-weight: 600; color: var(--fg-subtle); }
   .up-fill-credits { background: linear-gradient(90deg, color-mix(in oklab, var(--fg) 30%, transparent), color-mix(in oklab, var(--fg) 50%, transparent)); }

@@ -94,6 +94,11 @@ The UI shows provider-native names and never merges distinct levels:
 | Max | Hardest single-agent work; avoid as a global default |
 | Ultra | Codex multi-agent workflow depth; use only when parallel agent work materially helps |
 
+Higher effort can take longer before visible output because the model is doing
+more reasoning. Rift presents that work in one stable **Thinking…** row; the
+row does not pulse or auto-expand, and its optional plaintext opens only when
+selected. The UI treatment itself does not change provider latency.
+
 Turning the lowest rung off maps to the provider's actual floor: `none` on API
 models that support it, otherwise `low`. Existing stored Rift values retain
 their old meaning, so an old `ultra` preference still means X-High; Codex Ultra
@@ -103,6 +108,11 @@ uses a separate stored tier and cannot reinterpret old conversations.
 
 Fast changes processing priority, not model intelligence or effort. The model
 and effort stay independently selectable.
+
+The status bar shows the active ChatGPT account's compact usage windows. Select
+either window to open the in-chat limits popover with all reported account and
+model-scoped windows, reset times, and any available reset credits. This does
+not leave or replace the current conversation.
 
 Use Fast for interactive, high-value work where response latency matters:
 pairing, short feedback loops, live debugging, or a user waiting on the answer.

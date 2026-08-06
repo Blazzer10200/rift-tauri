@@ -177,10 +177,10 @@
 /* Empty thinking block (no plaintext reasoning): a static label, not a button —
    no pointer, no hover feedback (CC-UI ref §3). */
 .sthink-row.bare { cursor: default; }
-/* live pass — the label breathes while reasoning streams below it */
+/* Live reasoning is deliberately static. Pulsing opacity made the status look
+   like it was repeatedly mounting/unmounting during long reasoning passes. */
 .sthink-row.live { color: var(--fg-muted); }
-.sthink-row.live > span { animation: sthinkBreathe 2.2s ease-in-out infinite; }
-@keyframes sthinkBreathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+.sthink-row.live svg:first-child { color: var(--accent); }
 .sthink-chev { transition: transform var(--dur-fast); }
 .sthink-chev.open { transform: rotate(180deg); }
 /* Thinking body — Markdown now (parity w/ MessageBubble's thinking block), in
