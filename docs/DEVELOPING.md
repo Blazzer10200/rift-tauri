@@ -150,6 +150,16 @@ ship.
 6. Independently verify the public R2 feed/packages and the GitHub release
    assets. A source push or a single green endpoint is not a completed release.
 
+If GitHub accepts both refs but does not create the tag-push run, keep the
+signed tag unchanged and dispatch it explicitly:
+
+```powershell
+gh workflow run release.yml --ref main -f tag=vX.Y.Z
+```
+
+The fallback checks out that existing tag, applies the same inline quality
+gates, and preserves the normal version/tag guard before publishing.
+
 The self-hosted Windows runner tests, builds, and packages once. Publication is
 feed-first: R2 is the installed-client source; GitHub is the human download
 page.

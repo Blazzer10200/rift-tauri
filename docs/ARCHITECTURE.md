@@ -150,7 +150,10 @@ below are relative to that directory.
 A pushed `v*` tag starts `.github/workflows/release.yml`. The self-hosted Windows
 runner verifies, builds, and packages once, then publishes feed-first: R2 is the
 client update source; GitHub is the human download page. A release is complete
-only after both public locations are checked independently.
+only after both public locations are checked independently. The workflow also
+supports an explicit existing-tag dispatch when GitHub accepts a push but does
+not create its run; that recovery path checks out the requested signed tag and
+uses the same gates and publication order.
 
 Removed SFTP/sync/server/RCON, cost-cockpit, compaction, swarm, and old SDK
 abstractions stay removed. Git history is the archive; do not recreate them as
