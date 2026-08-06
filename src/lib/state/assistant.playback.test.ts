@@ -249,6 +249,24 @@ describe("playback — tool_use → tool_result lifecycle", () => {
     expect(rec.toolUses[0].isError).toBe(true);
   });
 
+  it("shows command output deltas while the process is still running", () => {
+    const tab = freshTab();
+    beginTurn(tab);
+    const id = tab.streamingMsgId!;
+    feed(tab, [
+      toolUseEnv("cmd-live", "Bash", { command: "npm test" }),
+      { type: "tool_progress", tool_use_id: "cmd-live", output_delta: "running\n" },
+      { type: "tool_progress", tool_use_id: "cmd-live", output_delta: "passed\n" },
+    ]);
+
+    const pending = textBlocks(tab, id).find((b) => b.type === "tool");
+    expect(pending).toMatchObject({ id: "cmd-live", status: "pending", result: "running\npassed\n" });
+
+    feed(tab, [toolResultEnv("cmd-live", "2 tests passed", false)]);
+    const completed = textBlocks(tab, id).find((b) => b.type === "tool");
+    expect(completed).toMatchObject({ id: "cmd-live", status: "done", result: "2 tests passed" });
+  });
+
   it("de-dupes a tool_use re-sent with the same id (stream + envelope overlap)", () => {
     const tab = freshTab();
     const rec = beginTurn(tab);

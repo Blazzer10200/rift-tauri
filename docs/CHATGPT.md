@@ -18,6 +18,28 @@ The first GPT turn pins one route to the conversation. Model switching cannot
 cross that route. If a model or route later becomes unavailable, the turn fails
 visibly; Rift never moves subscription work onto API billing or the reverse.
 
+## Subscription activity and commands
+
+Codex App Server items are normalized into Rift's provider-neutral activity
+stream instead of being rendered as raw protocol JSON:
+
+- command executions appear when they start and append output while still
+  running;
+- each added, updated, moved, or deleted path becomes its own file card with a
+  readable diff and accurate added/deleted line counts;
+- MCP and dynamic tools keep their arguments, progress, result, duration, and
+  real success state; a nullable App Server `error` field is not a failure;
+- plan, image, sleep, review, agent, and context-compaction items remain visible
+  through their shared Rift surfaces;
+- the completed item is authoritative and replaces any partial output or patch
+  accumulated during the turn.
+
+Typing `/` opens the route-aware command rail. Rift built-ins stay first in
+stable functional lanes; ChatGPT account skills follow alphabetically with
+their real `$skill-name` invocation. Search covers command names, descriptions,
+argument hints, and source labels. Selecting a ChatGPT skill inserts `$`, while
+Claude commands keep `/`; commands and skills never cross provider routes.
+
 ## Subscription model contract
 
 The signed-in App Server catalog is authoritative. Rift reads each model's
@@ -100,8 +122,9 @@ when credits/API cost matter more than latency.
 ## Verification boundary
 
 Automated tests cover model parsing, exact effort translation, route pinning,
-Fast capability gates, request fields, result confirmation, persistence, and
-the settings UI. A real subscription catalog and ephemeral Fast thread start
-were also verified on 2026-08-05. The separately billed live API matrix remains
-issue `#105` in [`ISSUES.md`](ISSUES.md) and requires a user-owned disposable
-key; automated coverage is not presented as a billed-account test.
+Fast capability gates, request fields, item/event normalization, live command
+output, file diffs, MCP/dynamic tool completion, command search, persistence,
+and the settings UI. A real subscription catalog and ephemeral Fast thread
+start were also verified on 2026-08-05. The separately billed live API matrix
+remains issue `#105` in [`ISSUES.md`](ISSUES.md) and requires a user-owned
+disposable key; automated coverage is not presented as a billed-account test.

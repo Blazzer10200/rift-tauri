@@ -102,10 +102,17 @@ and billing-route contracts.
 Rift discovers a runnable standalone `codex`, launches the CLI's official login
 flow, and reads account/model/skill/usage information through the local App
 Server. Turns use `initialize`, thread start/resume, and turn start. Rift maps
-streamed text, reasoning, tools, approvals, questions, usage, and cancellation
-into its shared UI while persisting only the Codex thread ID. Rift never reads
-or copies Codex credential files. Model capabilities come from live
-`model/list`; never replace them with a static guessed effort or Fast table.
+streamed text, reasoning, command output, file patches, tool progress, plans,
+approvals, questions, usage, and cancellation into its shared UI while
+persisting only the Codex thread ID. Multi-path file items must remain one card
+per path, and completed items must replace partial state. Rift never reads or
+copies Codex credential files. Model capabilities come from live `model/list`;
+never replace them with a static guessed effort or Fast table.
+
+When App Server event or item shapes change, update the adapter's focused Rust
+contracts plus the frontend playback/diff tests. Generate a fresh schema from
+the installed standalone Codex CLI for comparison; do not commit generated
+schemas or infer failure from nullable field presence.
 
 ### OpenAI API
 

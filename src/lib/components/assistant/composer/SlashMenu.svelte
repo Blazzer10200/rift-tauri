@@ -1,9 +1,8 @@
 <script lang="ts">
   // The `/command` popover; see docs/ARCHITECTURE.md#frontend-map. Render +
   // click only: the keyboard nav index and open/filter state stay owned by the
-  // parent's onKey. Redesigned 2026-07-09: glass panel + header strip + sticky
-  // group labels + styled scrollbar; provider-native skills/commands carry
-  // source badges, argument hints, and fuzzy highlight.
+  // parent's onKey. Provider-native skills/commands carry source badges,
+  // argument hints, and fuzzy highlight in one compact command rail.
   import {
     Plus, Eraser, Cpu, RotateCcw, Copy, StopCircle,
     Wrench, Coins, Gauge, BarChart3, Terminal, ClipboardCopy, HelpCircle,
@@ -24,11 +23,13 @@
     commands,
     activeIdx,
     query = "",
+    providerLabel,
     onPick,
   }: {
     commands: SlashCmd[];
     activeIdx: number;
     query?: string;
+    providerLabel: "ChatGPT" | "Claude";
     onPick: (c: SlashCmd) => void;
   } = $props();
 
@@ -79,9 +80,9 @@
 <div class="rift-menu slash-menu" role="menu" aria-label="Commands and skills">
   <header class="sm-head">
     <span class="sm-head-icon"><SquareSlash size={12} /></span>
-    <span class="sm-head-title">Commands</span>
-    {#if query}<span class="sm-head-query mono">“{query}”</span>{/if}
-    <span class="sm-head-count">{commands.length}</span>
+    <span class="sm-head-title">{providerLabel} commands &amp; skills</span>
+    {#if query}<span class="sm-head-query mono">/{query}</span>{/if}
+    <span class="sm-head-count mono">{commands.length}</span>
   </header>
   {#if commands.length > 0}
     <div class="sm-list" bind:this={listEl}>
@@ -96,7 +97,6 @@
           class="sm-item"
           data-active={i === activeIdx}
           data-idx={i}
-          style="--idx: {i}"
           onmousedown={(e) => { e.preventDefault(); onPick(c); }}
         >
           <span class="sm-bar"></span>
@@ -117,14 +117,13 @@
     <div class="sm-empty">
       <span class="sm-empty-icon"><SearchX size={16} /></span>
       <span class="sm-empty-title mono">/{query}</span>
-      <span class="sm-empty-sub">No matching command — <kbd class="sm-kbd">Esc</kbd> to dismiss, or add a space to send as chat</span>
+      <span class="sm-empty-sub">No matching command or skill</span>
     </div>
   {/if}
   <footer class="sm-foot">
-    <span><kbd class="sm-kbd">↑↓</kbd> select</span>
-    <span><kbd class="sm-kbd">↵</kbd> run</span>
-    <span><kbd class="sm-kbd">⇥</kbd> insert</span>
-    <span><kbd class="sm-kbd">Esc</kbd> cancel</span>
+    <span><kbd class="sm-kbd">↑↓</kbd> Navigate</span>
+    <span><kbd class="sm-kbd">↵</kbd> Run</span>
+    <span><kbd class="sm-kbd">⇥</kbd> Insert</span>
   </footer>
 </div>
 
@@ -345,6 +344,109 @@
   }
   .sm-foot span { display: inline-flex; align-items: center; gap: 5px; }
   .mono { font-family: var(--font-mono, ui-monospace, monospace); }
+
+  /* Compact command rail. One solid floating surface, stable source lanes,
+     restrained selection, and no per-row entrance choreography. */
+  .slash-menu {
+    bottom: calc(100% + 8px);
+    width: min(440px, 100%);
+    background: var(--surface);
+    backdrop-filter: none;
+    border-color: var(--border-strong);
+    border-radius: 12px;
+    box-shadow: 0 18px 42px oklch(0 0 0 / 0.42);
+    animation: slash-in var(--dur-fast) var(--ease-page, ease-out);
+  }
+  .sm-head {
+    min-height: 34px;
+    padding: 7px 10px;
+    gap: 7px;
+    background: var(--bg-elev-1);
+    border-bottom-color: var(--border);
+  }
+  .sm-head-icon {
+    width: 18px;
+    height: 18px;
+    background: transparent;
+    box-shadow: none;
+  }
+  .sm-head-title {
+    color: var(--fg-muted);
+    font-size: 10px;
+    letter-spacing: 0.07em;
+  }
+  .sm-head-query {
+    color: var(--fg-subtle);
+    font-size: 10px;
+  }
+  .sm-head-count {
+    padding: 0;
+    color: var(--fg-faint);
+    background: transparent;
+    box-shadow: none;
+  }
+  .sm-list {
+    max-height: 316px;
+    padding: 4px;
+    mask-image: none;
+  }
+  .sm-group {
+    position: static;
+    padding: 8px 8px 4px;
+    background: transparent;
+    font-size: 9px;
+  }
+  .sm-group i { background: var(--border); }
+  .sm-item {
+    min-height: 40px;
+    padding: 6px 9px 6px 10px;
+    gap: 8px;
+    border-radius: 8px;
+    animation: none;
+    transition: background 80ms ease;
+  }
+  .sm-item:hover { background: color-mix(in oklab, var(--fg) 4%, transparent); }
+  .sm-item[data-active="true"] {
+    background: color-mix(in oklab, var(--accent) 12%, var(--bg-elev-2));
+    box-shadow: none;
+  }
+  .sm-bar {
+    left: 2px;
+    width: 2px;
+    transition: height 80ms ease;
+  }
+  .sm-item[data-active="true"] .sm-bar {
+    height: 48%;
+    box-shadow: none;
+  }
+  .sm-icon {
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
+    background: transparent;
+    box-shadow: none;
+  }
+  .sm-item[data-active="true"] .sm-icon {
+    color: var(--accent);
+    box-shadow: none;
+  }
+  .sm-cmd b { text-shadow: none; }
+  .sm-desc { color: var(--fg-muted); }
+  .sm-foot {
+    justify-content: flex-end;
+    gap: 10px;
+    padding: 6px 10px;
+    background: var(--bg-elev-1);
+    border-top-color: var(--border);
+  }
+  .sm-foot .sm-kbd {
+    min-width: 16px;
+    height: 16px;
+    padding: 0 3px;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+  }
   @media (prefers-reduced-motion: reduce) {
     .slash-menu, .sm-item { animation: none; }
     .sm-bar { transition: none; }

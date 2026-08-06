@@ -459,7 +459,15 @@ export type StreamEnvelope =
   // CLI 2.1.214+: periodic progress heartbeat for long-running tool calls
   // (shape from the 2.1.217 exe: tool_use_id, tool_name, parent_tool_use_id,
   // elapsed seconds). Pure liveness signal — blocks tick elapsed locally.
-  | { type: "tool_progress"; tool_use_id?: string; tool_name?: string; parent_tool_use_id?: string | null; [k: string]: unknown };
+  | {
+      type: "tool_progress";
+      tool_use_id?: string;
+      tool_name?: string;
+      parent_tool_use_id?: string | null;
+      output_delta?: string;
+      message?: string;
+      [k: string]: unknown;
+    };
 
 /** Provider-neutral stored effort tiers. Existing values keep their wire
  *  meaning: none→minimum/off, smart→medium, deep→high, ultra→xhigh. `low`

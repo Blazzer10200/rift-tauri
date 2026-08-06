@@ -1,6 +1,6 @@
 # Rift version bump -- writes every source-manifest version in one shot.
 #
-# package.json + package-lock.json + src-tauri/Cargo.toml +
+# package.json + package-lock.json + src-tauri/Cargo.toml + Cargo.lock +
 # src-tauri/tauri.conf.json must always match. `release.ps1`'s preflight bails
 # on mismatch but doesn't fix it; this is the fixer.
 #
@@ -68,6 +68,11 @@ Bump-First -Path 'src-tauri/Cargo.toml' `
     -Replacement "`${1}$Version`${2}" `
     -Label 'Cargo.toml [package] version'
 
+Bump-First -Path 'src-tauri/Cargo.lock' `
+    -Pattern '(?ms)(\[\[package\]\]\r?\nname = "rift-tauri"\r?\nversion = ")[^"]+(")' `
+    -Replacement "`${1}$Version`${2}" `
+    -Label 'Cargo.lock rift-tauri package version'
+
 Bump-First -Path 'src-tauri/tauri.conf.json' `
     -Pattern '"version":\s*"[^"]+"' `
     -Replacement "`"version`": `"$Version`"" `
@@ -80,11 +85,14 @@ $pkgLockRoot = $pkgLock['packages']['']['version']
 $cargoText = Get-Content src-tauri/Cargo.toml -Raw
 $null = $cargoText -match '(?ms)\[package\][^\[]*?^version\s*=\s*"([^"]+)"'
 $cargoVer = $matches[1]
+$cargoLockText = Get-Content src-tauri/Cargo.lock -Raw
+$null = $cargoLockText -match '(?ms)\[\[package\]\]\r?\nname = "rift-tauri"\r?\nversion = "([^"]+)"'
+$cargoLockVer = $matches[1]
 $tauriCfg = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
 if ($pkg.version -ne $Version -or $pkgLock['version'] -ne $Version -or
     $pkgLockRoot -ne $Version -or $cargoVer -ne $Version -or
-    $tauriCfg.version -ne $Version) {
-    throw "Post-bump verify failed: pkg=$($pkg.version), lock=$($pkgLock['version']), lockRoot=$pkgLockRoot, cargo=$cargoVer, tauri=$($tauriCfg.version)"
+    $cargoLockVer -ne $Version -or $tauriCfg.version -ne $Version) {
+    throw "Post-bump verify failed: pkg=$($pkg.version), lock=$($pkgLock['version']), lockRoot=$pkgLockRoot, cargo=$cargoVer, cargoLock=$cargoLockVer, tauri=$($tauriCfg.version)"
 }
 
 Write-Host "All source manifests at $Version." -ForegroundColor Green

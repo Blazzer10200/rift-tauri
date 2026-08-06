@@ -15,7 +15,14 @@
   import { notify } from "../../state/toast.svelte";
   import { highlightSync, whenReady } from "../../state/highlighter.svelte";
   import FilePathMenu from "./FilePathMenu.svelte";
-  import { emphasisIntervals, emphasizeHtml, type CharInterval } from "./diffEmphasis";
+  import {
+    emphasisIntervals,
+    emphasizeHtml,
+    parseUnifiedPatch,
+    unifiedPatchCounts,
+    type CharInterval,
+    type UnifiedPatchPair,
+  } from "./diffEmphasis";
 
   const reducedMotion =
     typeof window !== "undefined" &&
@@ -40,15 +47,15 @@
     maxLines?: number | null;
   } = $props();
 
-  type DiffPair =
-    | { kind: "ctx";  left: string; right: string }
-    | { kind: "del";  left: string; right: null }
-    | { kind: "add";  left: null;   right: string }
-    | { kind: "mod";  left: string; right: string }
-    | { kind: "meta"; text: string }
-    | { kind: "gap";  lines: number };
+  type DiffPair = UnifiedPatchPair | { kind: "gap"; lines: number };
 
   const pairs = $derived.by<DiffPair[] | null>(() => {
+    const unified = typeof input.unified_diff === "string" ? input.unified_diff : null;
+    if (unified !== null) {
+      const rawKind = input.codex_diff_kind;
+      const kind = rawKind === "add" || rawKind === "delete" ? rawKind : "update";
+      return parseUnifiedPatch(unified, kind);
+    }
     // Write (new-file creation) has `content`, not old/new_string — render it
     // as an all-additions diff so the file body is actually shown, not hidden
     // behind a bare "N chars" chip. Only treat as write when content exists
@@ -217,6 +224,13 @@
   let expanded = $state<boolean>(
     untrack(() => {
       if (compact || defaultExpanded || hideHead) return true;
+      if (typeof input.unified_diff === "string") {
+        if (input.unified_diff.length > 200_000) return false;
+        const rawKind = input.codex_diff_kind;
+        const kind = rawKind === "add" || rawKind === "delete" ? rawKind : "update";
+        const count = unifiedPatchCounts(input.unified_diff, kind);
+        return count.add + count.del <= SMALL_DIFF;
+      }
       // Compute changed-line count directly from the raw strings (don't read
       // the `counts` $derived here — reading a derived inside a $state
       // initializer is order-fragile). Cheap line-set diff is enough to

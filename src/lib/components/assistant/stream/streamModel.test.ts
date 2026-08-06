@@ -38,6 +38,16 @@ describe("messageToTurn — outcome classification", () => {
     expect(t.files).toBe(1);
   });
 
+  it("Delete counts as an applied file mutation", () => {
+    const t = messageToTurn(msg([tool("Delete", "done", {
+      file_path: "/a/old.ts",
+      unified_diff: "old line\n",
+      codex_diff_kind: "delete",
+    })]));
+    expect(t.outcome).toBe("applied");
+    expect(t.files).toBe(1);
+  });
+
   it("distinct files are de-duped; same file edited twice = 1", () => {
     const t = messageToTurn(msg([
       tool("Edit", "done", { file_path: "/a/foo.ts" }),
@@ -137,6 +147,28 @@ describe("streamModel — edit diff counts + input passthrough", () => {
       ],
     })]);
     expect(t.add).toBe(3);
+    expect(t.del).toBe(2);
+  });
+
+  it("App Server unified updates carry accurate line counts and input", () => {
+    const [t] = toolsOf([tool("Edit", "done", {
+      file_path: "/a/foo.ts",
+      unified_diff: "@@ -1,2 +1,3 @@\n-old\n+new\n+extra\n keep\n",
+      codex_diff_kind: "update",
+    })]);
+    expect(t.add).toBe(2);
+    expect(t.del).toBe(1);
+    expect(t.input?.unified_diff).toContain("+extra");
+  });
+
+  it("App Server deleted files count every removed source line", () => {
+    const [t] = toolsOf([tool("Delete", "done", {
+      file_path: "/a/old.ts",
+      unified_diff: "one\ntwo\n",
+      codex_diff_kind: "delete",
+    })]);
+    expect(t.kind).toBe("delete");
+    expect(t.add).toBe(0);
     expect(t.del).toBe(2);
   });
 

@@ -11,10 +11,11 @@
 
 import type { Block, ChatMessage, ToolBlock } from "$lib/state/assistant.svelte";
 import { leafName as basename } from "$lib/utils/path";
+import { unifiedPatchCounts } from "../diffEmphasis";
 import { diffArrays } from "diff";
 
 export type TKind =
-  | "read" | "grep" | "edit" | "create" | "shell"
+  | "read" | "grep" | "edit" | "create" | "delete" | "shell"
   | "agent" | "web" | "fetch" | "test" | "lint" | "mcp" | "plan" | "ask" | "exitplan";
 
 export type PlanItem = { text: string; status: "done" | "active" | "todo" };
@@ -316,6 +317,7 @@ function nameToKind(name: string): TKind {
   if (n === "Grep" || n === "grep" || n === "Glob") return "grep";
   if (n === "Edit" || n === "MultiEdit" || n === "NotebookEdit") return "edit";
   if (n === "Write") return "create";
+  if (n === "Delete") return "delete";
   if (n === "Bash" || n === "remote_bash" || n === "BashOutput" || n === "KillBash" || n === "KillShell") return "shell";
   if (n === "PowerShell") return "shell"; // CC's dedicated PowerShell tool — same in/out shape as Bash
   // TaskOutput/TaskStop are the newer CLI's background-TASK ops (tail/stop a bg
@@ -346,6 +348,7 @@ function caption(tb: ToolBlock): string {
   if (n === "Read" || n === "read_file") return fp ?? "file";
   if (n === "Write") return fp ?? "file";
   if (n === "Edit") return fp ?? "file";
+  if (n === "Delete") return fp ?? "file";
   if (n === "MultiEdit") {
     const c = Array.isArray(inp.edits) ? inp.edits.length : 0;
     return fp ? `${fp} · ${c} edits` : `${c} edits`;
@@ -475,6 +478,11 @@ function diffCountsCached(id: string, inp: Record<string, unknown>) {
 // can show real line deltas (and roll them on the odometer) without rendering
 // the whole diff. MultiEdit sums each sub-edit.
 function diffCounts(inp: Record<string, unknown>): { add: number; del: number } | null {
+  if (typeof inp.unified_diff === "string") {
+    const rawKind = inp.codex_diff_kind;
+    const kind = rawKind === "add" || rawKind === "delete" ? rawKind : "update";
+    return unifiedPatchCounts(inp.unified_diff, kind);
+  }
   const pairs: Array<{ o: string; n: string }> = [];
   if (typeof inp.content === "string" && typeof inp.new_string !== "string") {
     pairs.push({ o: "", n: inp.content }); // Write (new file) → all adds
@@ -547,7 +555,7 @@ function adaptTool(tb: ToolBlock): StreamTool {
     path, dir: dirOf(path),
   };
   if (tb.inputPartial) t.forming = true;
-  if (kind === "edit" || kind === "create") {
+  if (kind === "edit" || kind === "create" || kind === "delete") {
     // While the input is still streaming (live-forming), old/new strings are
     // truncated — a diff over them is wrong AND diffCountsCached memoizes by id,
     // so a partial count would stick. Defer both until the input is complete.
@@ -744,7 +752,7 @@ export function messageToTurn(m: ChatMessage): TurnModel {
 
   // Classify what the turn did from its tools (not from cost — every turn costs).
   const tools = blocks.filter((b): b is { type: "tool"; tool: StreamTool } => b.type === "tool").map((b) => b.tool);
-  const mutators = tools.filter((t) => t.kind === "edit" || t.kind === "create");
+  const mutators = tools.filter((t) => t.kind === "edit" || t.kind === "create" || t.kind === "delete");
   const okMutators = mutators.filter((t) => t.status !== "error");
   const changedFiles = new Set(okMutators.map((t) => t.path ?? t.cap)); // distinct by full path
 
@@ -879,7 +887,7 @@ function segmentWork(tools: StreamTool[]): WorkSeg[] {
       segs.push({ seg: "rich", tool: t });
       continue;
     }
-    const grp = t.kind === "edit" || t.kind === "create" ? "edit" : "other";
+    const grp = t.kind === "edit" || t.kind === "create" || t.kind === "delete" ? "edit" : "other";
     if (!cur || cur.seg !== grp) { cur = { seg: grp, tools: [] }; segs.push(cur); }
     cur.tools.push(t);
   }
@@ -927,7 +935,7 @@ function coalescePolls(segs: WorkSeg[]): WorkSeg[] {
 // Lower-case verb phrase per kind for a mixed-kind breakdown ("read 3 · searched
 // 2 · ran 1"). Keeps the same vocabulary as VERB_PAST but count-friendly.
 const KIND_VERB: Record<TKind, string> = {
-  read: "read", grep: "searched", edit: "edited", create: "created", shell: "ran",
+  read: "read", grep: "searched", edit: "edited", create: "created", delete: "deleted", shell: "ran",
   agent: "delegated", web: "searched the web", fetch: "fetched", test: "tested",
   lint: "checked", mcp: "called", plan: "planned", ask: "asked", exitplan: "proposed a plan",
 };
@@ -964,7 +972,7 @@ function groupSummary(tools: StreamTool[]): string {
 // per-kind, dominant-first, so "Read 2 files · searched 1" becomes the far more
 // useful "Read layout.ts, rest.ts · searched \"apply_slot\"" — the filenames
 // were always in the data, the old flat-count summary just threw them away.
-const NAMABLE = (k: TKind) => k === "read" || k === "grep" || k === "edit" || k === "create";
+const NAMABLE = (k: TKind) => k === "read" || k === "grep" || k === "edit" || k === "create" || k === "delete";
 
 // One verb-led segment for a single kind's tools: names the targets if namable,
 // else defers to a bare count via KIND_VERB ("ran 2").
@@ -1079,12 +1087,12 @@ export function isFillerSay(text: string): boolean {
 }
 
 export const VERB_PAST: Record<TKind, string> = {
-  read: "Read", grep: "Searched", edit: "Edited", create: "Created", shell: "Ran",
+  read: "Read", grep: "Searched", edit: "Edited", create: "Created", delete: "Deleted", shell: "Ran",
   agent: "Delegated", web: "Searched the web", fetch: "Fetched", test: "Tested",
   lint: "Checked", mcp: "Called", plan: "Planned", ask: "Asked", exitplan: "Proposed a plan",
 };
 export const VERB_ING: Record<TKind, string> = {
-  read: "Reading", grep: "Searching", edit: "Editing", create: "Creating", shell: "Running",
+  read: "Reading", grep: "Searching", edit: "Editing", create: "Creating", delete: "Deleting", shell: "Running",
   agent: "Delegating", web: "Searching the web", fetch: "Fetching", test: "Running tests",
   lint: "Type-checking", mcp: "Calling", plan: "Planning", ask: "Waiting for your answer",
   exitplan: "Proposing a plan",

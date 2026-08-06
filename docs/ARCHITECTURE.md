@@ -56,6 +56,12 @@ All routes -> assistant://stream | done | error | permission-request | ask-user
   -> MessageBubble / ToolChip / EditDiff / StreamTurn
 ```
 
+`codex_app_server.rs` is the protocol boundary for subscription turns. It
+normalizes current App Server items and deltas into shared envelopes: live
+command output becomes `tool_progress`, patch updates become one file tool per
+path, and completed items replace partial state. Frontend renderers therefore
+remain provider-neutral and saved conversations keep the same block model.
+
 History ownership is deliberate:
 
 - Claude owns its CLI session; Rift persists the session ID.
@@ -120,6 +126,12 @@ below are relative to that directory.
 - Fast availability is route-specific and revalidated in the backend. Codex
   uses live service tiers; API uses reviewed model metadata; result chips require
   provider confirmation rather than the frontend request bit.
+- App Server protocol changes stay normalized in `codex_app_server.rs`. Never
+  key failure state on presence of nullable fields, collapse a multi-path
+  `fileChange` into one opaque card, or drop live output/patch/progress events.
+- Slash-command discovery stays route-aware: stable built-in lanes precede
+  provider-native commands and skills, while insertion preserves `/` versus
+  `$` syntax and never sends one provider's catalog through another route.
 - Persisted conversation fields and provider-route migration remain backward
   compatible.
 - Tauri capabilities scope local grants by `webviews`, not whole `windows`; the

@@ -9,7 +9,7 @@
   import { CHATGPT } from "../../state/assistant/providerDisplay";
   import { cliCommands } from "../../state/assistant/cliCommands.svelte";
   import { requestPrewarm, resetPrewarmDedup } from "../../state/assistant/prewarm";
-  import { fuzzyScore, slashScore, isFileDrag, attachImageFiles, summarizeAttach, attachTextFiles, summarizeTextAttach } from "./composer/helpers";
+  import { fuzzyScore, slashCatalogScore, isFileDrag, attachImageFiles, summarizeAttach, attachTextFiles, summarizeTextAttach } from "./composer/helpers";
   import { boundaryAutocorrect, finalWordAutocorrect, isBoundaryChar, oracleKnows, cachedOracleKnown, setSpellOracle, addPersonalWord, type BoundaryFix } from "$lib/utils/autocorrect";
   import { invoke } from "@tauri-apps/api/core";
   import AttachmentsRow from "./composer/AttachmentsRow.svelte";
@@ -175,6 +175,20 @@
     { name: "design-sync",  desc: "Sync this workspace with a claude.ai/design project", provider: "claude" },
     { name: "design-login", desc: "Authorize Claude Design access (terminal sessions only)", provider: "claude" },
   ];
+  const SLASH_BUILTIN_ORDER = new Map(SLASH_COMMANDS.map((command, index) => [command.name, index]));
+  const slashLane = (command: SlashCmd): number => {
+    if (command.custom) {
+      return command.custom.source === "project" ? 4
+        : command.custom.source === "plugin" ? 5
+        : command.custom.source === "user" ? 6
+        : command.custom.source === "cli" ? 7
+        : 4;
+    }
+    if (["new", "clear", "compact"].includes(command.name)) return 0;
+    if (["model", "retry", "copy", "stop"].includes(command.name)) return 1;
+    if (["design-sync", "design-login"].includes(command.name)) return 3;
+    return 2;
+  };
 
   // Model picker rows — version + tagline + context window. The CLI takes
   // the alias (`sonnet`/`opus`/`haiku`); version is display-only and pulled
@@ -447,17 +461,35 @@
   });
   const slashFiltered = $derived.by(() => {
     const q = draft.slice(1).toLowerCase();
-    const all = [...builtinSlash, ...customSlash, ...cliSlash, ...chatGptSkills];
+    const all = [...builtinSlash, ...customSlash, ...cliSlash, ...chatGptSkills]
+      .map((command, index) => ({ command, index }))
+      .sort((a, b) => {
+        const lane = slashLane(a.command) - slashLane(b.command);
+        if (lane !== 0) return lane;
+        const aBuiltin = SLASH_BUILTIN_ORDER.get(a.command.name);
+        const bBuiltin = SLASH_BUILTIN_ORDER.get(b.command.name);
+        if (aBuiltin !== undefined && bBuiltin !== undefined) return aBuiltin - bBuiltin;
+        return a.command.name.localeCompare(b.command.name) || a.index - b.index;
+      })
+      .map(({ command }) => command);
     if (!q) return all;
     return all
-      .map((c) => ({ c, s: slashScore(c.name, q) }))
+      .map((c) => ({
+        c,
+        s: slashCatalogScore(
+          c.name,
+          c.desc,
+          `${c.custom?.source ?? "builtin"} ${c.custom?.kind ?? "command"} ${c.custom?.hint ?? ""}`,
+          q,
+        ),
+      }))
       .filter((x): x is { c: SlashCmd; s: number } => x.s !== null)
-      .sort((a, b) => b.s - a.s)
+      .sort((a, b) => b.s - a.s || slashLane(a.c) - slashLane(b.c) || a.c.name.localeCompare(b.c.name))
       .map((x) => x.c);
   });
   let slashIdx = $state(0);
   $effect(() => {
-    const _v = slashFiltered.length;
+    const _v = slashFiltered.map((command) => `${command.prefix ?? "/"}${command.name}`).join("\u0000");
     void _v;
     slashIdx = 0;
   });
@@ -1466,7 +1498,13 @@
     {/if}
 
     {#if slashOpen}
-      <SlashMenu commands={slashFiltered} activeIdx={slashIdx} query={draft.slice(1).toLowerCase()} onPick={pickSlash} />
+      <SlashMenu
+        commands={slashFiltered}
+        activeIdx={slashIdx}
+        query={draft.slice(1).toLowerCase()}
+        providerLabel={paneChatGpt ? "ChatGPT" : "Claude"}
+        onPick={pickSlash}
+      />
     {/if}
 
     {#if tab && tab.usageOpen}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attachImageFiles, bytesToBase64, fmtSize, fuzzyScore, isFileDrag, queueChipLabel, slashMatchSegments, slashScore, summarizeAttach, summarizeTextAttach } from "./helpers";
+import { attachImageFiles, bytesToBase64, fmtSize, fuzzyScore, isFileDrag, queueChipLabel, slashCatalogScore, slashMatchSegments, slashScore, summarizeAttach, summarizeTextAttach } from "./helpers";
 
 describe("slashScore", () => {
   it("returns 0 for an empty query (everything matches, original order kept)", () => {
@@ -20,6 +20,19 @@ describe("slashScore", () => {
   });
   it("is case-insensitive", () => {
     expect(slashScore("Design-Sync", "design")).not.toBeNull();
+  });
+});
+
+describe("slashCatalogScore", () => {
+  it("finds commands by description and source metadata", () => {
+    expect(slashCatalogScore("doctor", "Inspect provider health", "project skill", "health")).not.toBeNull();
+    expect(slashCatalogScore("doctor", "Inspect provider health", "project skill", "project")).not.toBeNull();
+  });
+
+  it("keeps a name match ahead of a description match", () => {
+    const byName = slashCatalogScore("usage", "Plan limits", "builtin", "usage")!;
+    const byDescription = slashCatalogScore("limits", "Show usage details", "builtin", "usage")!;
+    expect(byName).toBeGreaterThan(byDescription);
   });
 });
 

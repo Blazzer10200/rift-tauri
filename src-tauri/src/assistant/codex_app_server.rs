@@ -876,6 +876,172 @@ struct StreamState {
     usage: Option<Value>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct ToolUseSpec {
+    id: String,
+    name: String,
+    input: Value,
+}
+
+fn file_change_tool_uses(id: &str, changes: Option<&Value>) -> Vec<ToolUseSpec> {
+    let Some(changes) = changes.and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    changes
+        .iter()
+        .enumerate()
+        .filter_map(|(index, change)| {
+            let path = change.get("path").and_then(Value::as_str)?;
+            let diff = change
+                .get("diff")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let kind = change
+                .pointer("/kind/type")
+                .and_then(Value::as_str)
+                .unwrap_or("update");
+            let tool_id = if index == 0 {
+                id.to_string()
+            } else {
+                format!("{id}:{index}")
+            };
+            let (name, input) = match kind {
+                "add" => (
+                    "Write",
+                    json!({
+                        "file_path": path,
+                        "content": diff,
+                        "codex_diff_kind": "add",
+                    }),
+                ),
+                "delete" => (
+                    "Delete",
+                    json!({
+                        "file_path": path,
+                        "unified_diff": diff,
+                        "codex_diff_kind": "delete",
+                    }),
+                ),
+                _ => (
+                    "Edit",
+                    json!({
+                        "file_path": path,
+                        "unified_diff": diff,
+                        "move_path": change.pointer("/kind/move_path").cloned(),
+                        "codex_diff_kind": "update",
+                    }),
+                ),
+            };
+            Some(ToolUseSpec {
+                id: tool_id,
+                name: name.to_string(),
+                input,
+            })
+        })
+        .collect()
+}
+
+fn item_tool_uses(item: &Value) -> Vec<ToolUseSpec> {
+    let Some(id) = item.get("id").and_then(Value::as_str) else {
+        return Vec::new();
+    };
+    if item.get("type").and_then(Value::as_str) == Some("fileChange") {
+        return file_change_tool_uses(id, item.get("changes"));
+    }
+    let (name, input) = match item.get("type").and_then(Value::as_str) {
+        Some("commandExecution") => (
+            "Bash",
+            json!({
+                "command": item.get("command").cloned().unwrap_or(Value::Null),
+                "cwd": item.get("cwd").cloned().unwrap_or(Value::Null),
+            }),
+        ),
+        Some("mcpToolCall") => (
+            item.get("tool")
+                .and_then(Value::as_str)
+                .unwrap_or("MCP tool"),
+            item.get("arguments").cloned().unwrap_or(Value::Null),
+        ),
+        Some("webSearch") => (
+            "WebSearch",
+            json!({ "query": item.get("query").cloned().unwrap_or(Value::Null) }),
+        ),
+        Some("dynamicToolCall") => (
+            item.get("tool").and_then(Value::as_str).unwrap_or("Tool"),
+            item.get("arguments").cloned().unwrap_or(Value::Null),
+        ),
+        Some("plan") => (
+            "ExitPlanMode",
+            json!({ "plan": item.get("text").cloned().unwrap_or(Value::Null) }),
+        ),
+        Some("imageView") => (
+            "ViewImage",
+            json!({ "file_path": item.get("path").cloned().unwrap_or(Value::Null) }),
+        ),
+        Some("sleep") => (
+            "Sleep",
+            json!({ "duration_ms": item.get("durationMs").cloned().unwrap_or(Value::Null) }),
+        ),
+        Some("imageGeneration") => (
+            "ImageGeneration",
+            json!({ "prompt": item.get("revisedPrompt").cloned().unwrap_or(Value::Null) }),
+        ),
+        Some("collabAgentToolCall") => (
+            "Agent",
+            json!({
+                "description": item.get("prompt").cloned().unwrap_or_else(|| json!("Codex agent task")),
+                "subagent_type": item.get("tool").cloned().unwrap_or_else(|| json!("agent")),
+                "model": item.get("model").cloned().unwrap_or(Value::Null),
+            }),
+        ),
+        Some("enteredReviewMode") => (
+            "EnterReviewMode",
+            json!({ "review": item.get("review").cloned().unwrap_or(Value::Null) }),
+        ),
+        Some("exitedReviewMode") => (
+            "ExitReviewMode",
+            json!({ "review": item.get("review").cloned().unwrap_or(Value::Null) }),
+        ),
+        _ => return Vec::new(),
+    };
+    vec![ToolUseSpec {
+        id: id.to_string(),
+        name: name.to_string(),
+        input,
+    }]
+}
+
+fn item_failed(item: &Value) -> bool {
+    item.get("status").and_then(Value::as_str) == Some("failed")
+        || item.get("success").and_then(Value::as_bool) == Some(false)
+        || item.get("error").is_some_and(|error| !error.is_null())
+}
+
+fn turn_plan_markdown(params: &Value) -> Option<String> {
+    if let Some(plan) = params.get("plan").and_then(Value::as_str) {
+        return Some(plan.to_string());
+    }
+    let steps = params.get("plan").and_then(Value::as_array)?;
+    let mut markdown = String::new();
+    if let Some(explanation) = params.get("explanation").and_then(Value::as_str) {
+        if !explanation.trim().is_empty() {
+            markdown.push_str(explanation.trim());
+            markdown.push_str("\n\n");
+        }
+    }
+    for step in steps {
+        let text = step.get("step").and_then(Value::as_str).unwrap_or_default();
+        if text.is_empty() {
+            continue;
+        }
+        let done = step.get("status").and_then(Value::as_str) == Some("completed");
+        markdown.push_str(if done { "- [x] " } else { "- [ ] " });
+        markdown.push_str(text);
+        markdown.push('\n');
+    }
+    (!markdown.is_empty()).then(|| markdown.trim_end().to_string())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn stream_turn(
     app: &AppHandle,
@@ -980,6 +1146,61 @@ async fn stream_turn(
                     );
                 }
             }
+            "item/commandExecution/outputDelta" => {
+                if let (Some(id), Some(delta)) = (
+                    params.get("itemId").and_then(Value::as_str),
+                    params.get("delta").and_then(Value::as_str),
+                ) {
+                    emit_line(
+                        app,
+                        window,
+                        session,
+                        epoch,
+                        json!({
+                            "type":"tool_progress", "tool_use_id":id,
+                            "tool_name":"Bash", "output_delta":delta,
+                        }),
+                    );
+                }
+            }
+            "item/commandExecution/terminalInteraction" => {
+                if let Some(id) = params.get("itemId").and_then(Value::as_str) {
+                    emit_line(
+                        app,
+                        window,
+                        session,
+                        epoch,
+                        json!({
+                            "type":"tool_progress", "tool_use_id":id,
+                            "tool_name":"Bash", "message":"Interactive command input",
+                        }),
+                    );
+                }
+            }
+            "item/fileChange/patchUpdated" => {
+                if let Some(id) = params.get("itemId").and_then(Value::as_str) {
+                    let item = json!({
+                        "id": id,
+                        "type": "fileChange",
+                        "changes": params.get("changes").cloned().unwrap_or_else(|| json!([])),
+                    });
+                    emit_item_started(app, window, session, epoch, Some(&item));
+                }
+            }
+            "item/mcpToolCall/progress" => {
+                if let Some(id) = params.get("itemId").and_then(Value::as_str) {
+                    emit_line(
+                        app,
+                        window,
+                        session,
+                        epoch,
+                        json!({
+                            "type":"tool_progress", "tool_use_id":id,
+                            "message":params.get("message").cloned().unwrap_or(Value::Null),
+                        }),
+                    );
+                }
+            }
             "item/started" => emit_item_started(app, window, session, epoch, params.get("item")),
             "item/completed" => {
                 if params.pointer("/item/type").and_then(Value::as_str) == Some("reasoning")
@@ -993,6 +1214,19 @@ async fn stream_turn(
                         epoch,
                         json!({
                             "type":"stream_event", "event":{"type":"content_block_stop","index":1}
+                        }),
+                    );
+                }
+                if params.pointer("/item/type").and_then(Value::as_str)
+                    == Some("contextCompaction")
+                {
+                    emit_line(
+                        app,
+                        window,
+                        session,
+                        epoch,
+                        json!({
+                            "type":"system", "subtype":"compact_boundary", "provider":"codex"
                         }),
                     );
                 }
@@ -1016,7 +1250,7 @@ async fn stream_turn(
                 }),
             ),
             "turn/plan/updated" => {
-                if let Some(plan) = params.get("plan").and_then(Value::as_str) {
+                if let Some(plan) = turn_plan_markdown(&params) {
                     emit_line(
                         app,
                         window,
@@ -1086,45 +1320,23 @@ fn emit_item_started(
     item: Option<&Value>,
 ) {
     let Some(item) = item else { return };
-    let Some(id) = item.get("id").and_then(Value::as_str) else {
-        return;
-    };
-    let (name, input) = match item.get("type").and_then(Value::as_str) {
-        Some("commandExecution") => (
-            "Bash",
-            json!({ "command": item.get("command").cloned().unwrap_or(Value::Null) }),
-        ),
-        Some("fileChange") => (
-            "Edit",
-            json!({ "changes": item.get("changes").cloned().unwrap_or(Value::Null) }),
-        ),
-        Some("mcpToolCall") => (
-            item.get("tool")
-                .and_then(Value::as_str)
-                .unwrap_or("MCP tool"),
-            item.get("arguments").cloned().unwrap_or(Value::Null),
-        ),
-        Some("webSearch") => (
-            "WebSearch",
-            json!({ "query": item.get("query").cloned().unwrap_or(Value::Null) }),
-        ),
-        Some("dynamicToolCall") => (
-            item.get("tool").and_then(Value::as_str).unwrap_or("Tool"),
-            item.get("arguments").cloned().unwrap_or(Value::Null),
-        ),
-        _ => return,
-    };
-    emit_line(
-        app,
-        window,
-        session,
-        epoch,
-        json!({
-            "type":"assistant", "message":{"content":[{
-                "type":"tool_use", "id":id, "name":name, "input":input
-            }]}
-        }),
-    );
+    let content = item_tool_uses(item)
+        .into_iter()
+        .map(|tool| {
+            json!({
+                "type":"tool_use", "id":tool.id, "name":tool.name, "input":tool.input
+            })
+        })
+        .collect::<Vec<_>>();
+    if !content.is_empty() {
+        emit_line(
+            app,
+            window,
+            session,
+            epoch,
+            json!({ "type":"assistant", "message":{"content":content} }),
+        );
+    }
 }
 
 fn emit_item_completed(
@@ -1139,38 +1351,50 @@ fn emit_item_completed(
     let Some(id) = item.get("id").and_then(Value::as_str) else {
         return;
     };
-    match item.get("type").and_then(Value::as_str) {
+    let item_type = item.get("type").and_then(Value::as_str);
+    match item_type {
         Some("agentMessage") if !agent_delta_items.contains(id) => {
             if let Some(text) = item.get("text").and_then(Value::as_str) {
                 emit_text_delta(app, window, session, epoch, text);
             }
         }
         Some("commandExecution") => {
+            emit_item_started(app, window, session, epoch, Some(item));
             let output = item
                 .get("aggregatedOutput")
                 .and_then(Value::as_str)
                 .unwrap_or_default();
-            let failed = item.get("status").and_then(Value::as_str) == Some("failed")
+            let failed = item_failed(item)
                 || item
                     .get("exitCode")
                     .and_then(Value::as_i64)
                     .is_some_and(|code| code != 0);
             emit_tool_result(app, window, session, epoch, id, output, failed);
         }
-        Some("fileChange") => emit_tool_result(
-            app,
-            window,
-            session,
-            epoch,
-            id,
-            &serde_json::to_string_pretty(&item.get("changes").cloned().unwrap_or(Value::Null))
-                .unwrap_or_default(),
-            item.get("status").and_then(Value::as_str) == Some("failed"),
-        ),
-        Some("mcpToolCall") | Some("dynamicToolCall") | Some("webSearch") => {
+        Some("fileChange") => {
+            emit_item_started(app, window, session, epoch, Some(item));
+            for tool in item_tool_uses(item) {
+                emit_tool_result(
+                    app,
+                    window,
+                    session,
+                    epoch,
+                    &tool.id,
+                    if item_failed(item) {
+                        "File change failed"
+                    } else {
+                        "File change applied"
+                    },
+                    item_failed(item),
+                );
+            }
+        }
+        Some("mcpToolCall") => {
+            emit_item_started(app, window, session, epoch, Some(item));
             let output = item
                 .get("result")
-                .or_else(|| item.get("error"))
+                .filter(|value| !value.is_null())
+                .or_else(|| item.get("error").filter(|value| !value.is_null()))
                 .cloned()
                 .unwrap_or_else(|| json!({"status": item.get("status")}));
             emit_tool_result(
@@ -1180,8 +1404,61 @@ fn emit_item_completed(
                 epoch,
                 id,
                 &serde_json::to_string_pretty(&output).unwrap_or_default(),
-                item.get("status").and_then(Value::as_str) == Some("failed")
-                    || item.get("error").is_some(),
+                item_failed(item),
+            );
+        }
+        Some("dynamicToolCall") => {
+            emit_item_started(app, window, session, epoch, Some(item));
+            let output = item
+                .get("contentItems")
+                .filter(|value| !value.is_null())
+                .cloned()
+                .unwrap_or_else(|| json!({"status": item.get("status")}));
+            emit_tool_result(
+                app,
+                window,
+                session,
+                epoch,
+                id,
+                &serde_json::to_string_pretty(&output).unwrap_or_default(),
+                item_failed(item),
+            );
+        }
+        Some("webSearch") => {
+            emit_item_started(app, window, session, epoch, Some(item));
+            let output = item
+                .get("results")
+                .filter(|value| !value.is_null())
+                .cloned()
+                .unwrap_or_else(|| json!({"status":"completed"}));
+            emit_tool_result(
+                app,
+                window,
+                session,
+                epoch,
+                id,
+                &serde_json::to_string_pretty(&output).unwrap_or_default(),
+                item_failed(item),
+            );
+        }
+        Some(
+            "plan" | "imageView" | "sleep" | "imageGeneration" | "collabAgentToolCall"
+            | "enteredReviewMode" | "exitedReviewMode",
+        ) => {
+            emit_item_started(app, window, session, epoch, Some(item));
+            let output = item
+                .get("result")
+                .or_else(|| item.get("status"))
+                .cloned()
+                .unwrap_or_else(|| json!("Completed"));
+            emit_tool_result(
+                app,
+                window,
+                session,
+                epoch,
+                id,
+                &serde_json::to_string_pretty(&output).unwrap_or_default(),
+                item_failed(item),
             );
         }
         _ => {}
@@ -1479,8 +1756,9 @@ fn emit_done(app: &AppHandle, window: &str, session: &str, epoch: u64, exit_code
 #[cfg(test)]
 mod tests {
     use super::{
-        codex_answers, effort_name, insert_service_tier, leading_skill_name,
-        parse_account_overview, parse_model, sandbox_policy, thread_confirmed_fast,
+        codex_answers, effort_name, file_change_tool_uses, insert_service_tier, item_failed,
+        leading_skill_name, parse_account_overview, parse_model, sandbox_policy,
+        thread_confirmed_fast, turn_plan_markdown,
     };
     use serde_json::json;
 
@@ -1592,5 +1870,48 @@ mod tests {
         assert_eq!(leading_skill_name("  $quick-review inspect this"), Some("quick-review"));
         assert_eq!(leading_skill_name("explain $quick-review"), None);
         assert_eq!(leading_skill_name("$bad/path inspect"), None);
+    }
+
+    #[test]
+    fn file_changes_become_one_visible_tool_per_path() {
+        let changes = json!([
+            {"path":"src/new.ts","diff":"export const ready = true;\n","kind":{"type":"add"}},
+            {"path":"src/edit.ts","diff":"@@ -1 +1 @@\n-old\n+new\n","kind":{"type":"update","move_path":null}},
+            {"path":"src/old.ts","diff":"gone\n","kind":{"type":"delete"}}
+        ]);
+        let tools = file_change_tool_uses("change-1", Some(&changes));
+
+        assert_eq!(tools.len(), 3);
+        assert_eq!(tools[0].id, "change-1");
+        assert_eq!(tools[0].name, "Write");
+        assert_eq!(tools[0].input["file_path"], "src/new.ts");
+        assert_eq!(tools[1].id, "change-1:1");
+        assert_eq!(tools[1].name, "Edit");
+        assert_eq!(tools[1].input["unified_diff"], "@@ -1 +1 @@\n-old\n+new\n");
+        assert_eq!(tools[2].id, "change-1:2");
+        assert_eq!(tools[2].name, "Delete");
+        assert_eq!(tools[2].input["codex_diff_kind"], "delete");
+    }
+
+    #[test]
+    fn nullable_mcp_error_does_not_turn_success_red() {
+        assert!(!item_failed(&json!({"status":"completed","error":null})));
+        assert!(item_failed(&json!({"status":"failed","error":null})));
+        assert!(item_failed(&json!({"status":"completed","error":{"message":"boom"}})));
+        assert!(item_failed(&json!({"status":"completed","success":false})));
+    }
+
+    #[test]
+    fn current_turn_plan_arrays_render_as_markdown() {
+        let markdown = turn_plan_markdown(&json!({
+            "explanation":"Release work",
+            "plan":[
+                {"step":"Implement","status":"completed"},
+                {"step":"Verify","status":"inProgress"}
+            ]
+        }))
+        .unwrap();
+
+        assert_eq!(markdown, "Release work\n\n- [x] Implement\n- [ ] Verify");
     }
 }

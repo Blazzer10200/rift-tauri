@@ -1,5 +1,26 @@
 import { describe, it, expect } from "vitest";
-import { emphasisIntervals, emphasizeHtml } from "./diffEmphasis";
+import { emphasisIntervals, emphasizeHtml, parseUnifiedPatch, unifiedPatchCounts } from "./diffEmphasis";
+
+describe("App Server unified patches", () => {
+  it("pairs replacements and preserves hunk metadata", () => {
+    const patch = "@@ -2,2 +2,3 @@\n keep\n-old\n+new\n+extra\n";
+    expect(parseUnifiedPatch(patch)).toEqual([
+      { kind: "meta", text: "@@ -2,2 +2,3 @@" },
+      { kind: "ctx", left: "keep", right: "keep" },
+      { kind: "mod", left: "old", right: "new" },
+      { kind: "add", left: null, right: "extra" },
+    ]);
+    expect(unifiedPatchCounts(patch)).toEqual({ add: 2, del: 1 });
+  });
+
+  it("renders raw deleted-file contents as removals", () => {
+    expect(parseUnifiedPatch("first\nsecond\n", "delete")).toEqual([
+      { kind: "del", left: "first", right: null },
+      { kind: "del", left: "second", right: null },
+    ]);
+    expect(unifiedPatchCounts("first\nsecond\n", "delete")).toEqual({ add: 0, del: 2 });
+  });
+});
 
 describe("emphasisIntervals", () => {
   it("marks only the changed word in a small edit", () => {

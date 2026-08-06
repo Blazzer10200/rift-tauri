@@ -9,6 +9,98 @@ import { diffWordsWithSpace } from "diff";
 
 export type CharInterval = [start: number, end: number];
 
+export type UnifiedPatchPair =
+  | { kind: "ctx"; left: string; right: string }
+  | { kind: "del"; left: string; right: null }
+  | { kind: "add"; left: null; right: string }
+  | { kind: "mod"; left: string; right: string }
+  | { kind: "meta"; text: string };
+
+/** Convert an App Server unified patch into the same line-pair model used by
+ * Claude's old_string/new_string edits. File headers stay out of the body;
+ * hunk headers remain as quiet metadata so location context is not lost. */
+export function parseUnifiedPatch(
+  patch: string,
+  kind: "add" | "update" | "delete" = "update",
+): UnifiedPatchPair[] {
+  const normalized = patch.replace(/\r\n/g, "\n");
+  if (!normalized) return [];
+  const hasPatchMarkers = /^(?:@@|diff --git|--- |\+\+\+ )/m.test(normalized);
+  if (!hasPatchMarkers) {
+    const lines = normalized.endsWith("\n")
+      ? normalized.slice(0, -1).split("\n")
+      : normalized.split("\n");
+    return lines.map((line) =>
+      kind === "delete"
+        ? { kind: "del" as const, left: line, right: null }
+        : { kind: "add" as const, left: null, right: line },
+    );
+  }
+
+  const out: UnifiedPatchPair[] = [];
+  let removed: string[] = [];
+  let added: string[] = [];
+  const flush = () => {
+    const count = Math.max(removed.length, added.length);
+    for (let i = 0; i < count; i++) {
+      const left = removed[i];
+      const right = added[i];
+      if (left !== undefined && right !== undefined) out.push({ kind: "mod", left, right });
+      else if (left !== undefined) out.push({ kind: "del", left, right: null });
+      else if (right !== undefined) out.push({ kind: "add", left: null, right });
+    }
+    removed = [];
+    added = [];
+  };
+
+  const lines = normalized.endsWith("\n")
+    ? normalized.slice(0, -1).split("\n")
+    : normalized.split("\n");
+  for (const line of lines) {
+    if (line.startsWith("diff --git ") || line.startsWith("index ") || line.startsWith("--- ") || line.startsWith("+++ ")) {
+      flush();
+      continue;
+    }
+    if (line.startsWith("@@")) {
+      flush();
+      out.push({ kind: "meta", text: line });
+      continue;
+    }
+    if (line === "\\ No newline at end of file") continue;
+    if (line.startsWith("-")) {
+      if (added.length > 0) flush();
+      removed.push(line.slice(1));
+      continue;
+    }
+    if (line.startsWith("+")) {
+      added.push(line.slice(1));
+      continue;
+    }
+    flush();
+    out.push({
+      kind: "ctx",
+      left: line.startsWith(" ") ? line.slice(1) : line,
+      right: line.startsWith(" ") ? line.slice(1) : line,
+    });
+  }
+  flush();
+  return out;
+}
+
+export function unifiedPatchCounts(
+  patch: string,
+  kind: "add" | "update" | "delete" = "update",
+): { add: number; del: number } {
+  let add = 0;
+  let del = 0;
+  for (const pair of parseUnifiedPatch(patch, kind)) {
+    if (pair.kind === "add") add++;
+    else if (pair.kind === "del") del++;
+    else if (pair.kind === "mod") { add++; del++; }
+  }
+  return { add, del };
+}
+
 /** Fraction of combined line length that may change before emphasis is more
  *  noise than signal — beyond it the pair reads as "rewritten", and full-line
  *  tint (already present) says that better than confetti. */

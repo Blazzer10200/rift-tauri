@@ -1136,9 +1136,19 @@ function applySubAgentFrame(tab: TabState, agentId: string, env: StreamEnvelope)
     const tid = env.tool_use_id;
     if (typeof tid === "string" && tid.length > 0) {
       const beat = Date.now();
+      const outputDelta = env.output_delta;
       mutateAgent(tab, agentId, (blocks) =>
         blocks.map((b) =>
-          b.type === "tool" && b.id === tid && b.status === "pending" ? { ...b, lastProgressAt: beat } : b,
+          b.type === "tool" && b.id === tid && b.status === "pending"
+            ? {
+                ...b,
+                lastProgressAt: beat,
+                result:
+                  typeof outputDelta === "string"
+                    ? `${typeof b.result === "string" ? b.result : ""}${outputDelta}`
+                    : b.result,
+              }
+            : b,
         ),
       );
     }
@@ -1515,10 +1525,20 @@ export function onStreamLine(tab: TabState, raw: string) {
       const tid = env.tool_use_id;
       if (typeof tid === "string" && tid.length > 0) {
         const beat = Date.now();
+        const outputDelta = env.output_delta;
         mutateStreaming(tab, (m) => ({
           ...m,
           blocks: m.blocks.map((b) =>
-            b.type === "tool" && b.id === tid && b.status === "pending" ? { ...b, lastProgressAt: beat } : b,
+            b.type === "tool" && b.id === tid && b.status === "pending"
+              ? {
+                  ...b,
+                  lastProgressAt: beat,
+                  result:
+                    typeof outputDelta === "string"
+                      ? `${typeof b.result === "string" ? b.result : ""}${outputDelta}`
+                      : b.result,
+                }
+              : b,
           ),
         }));
       }

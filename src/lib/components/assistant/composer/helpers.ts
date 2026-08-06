@@ -56,6 +56,25 @@ export function slashScore(name: string, query: string): number | null {
   return 1000 - firstHit * 10 - spread * 2 - n.length;
 }
 
+/** Palette search keeps command names dominant, but also finds a command by
+ * its purpose, argument hint, or source. This prevents large skill catalogs
+ * from feeling opaque when users remember the job rather than the exact name. */
+export function slashCatalogScore(
+  name: string,
+  description: string,
+  metadata: string,
+  query: string,
+): number | null {
+  const nameScore = slashScore(name, query);
+  if (nameScore !== null) return 4000 + nameScore;
+  const q = query.toLowerCase();
+  const descIndex = description.toLowerCase().indexOf(q);
+  if (descIndex !== -1) return 1500 - descIndex;
+  const metaIndex = metadata.toLowerCase().indexOf(q);
+  if (metaIndex !== -1) return 700 - metaIndex;
+  return null;
+}
+
 // Which chars of `name` the query hit — drives per-char highlight in the menu.
 // Mirrors slashScore's tiers (contiguous run when substring-matched, else
 // greedy left-to-right subsequence); empty query or no match → no highlights.
