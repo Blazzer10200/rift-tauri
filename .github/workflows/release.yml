@@ -205,10 +205,14 @@ jobs:
       # matches the bumped version, then build + pack + publish to this repo
       # using the workflow's built-in token (contents: write above).
       - name: Release
-        run: scripts/release.ps1 -Ci -Token $env:RELEASES_TOKEN
+        run: |
+          # GITHUB_* variables are runner-owned and cannot be overridden through
+          # step env on workflow_dispatch. Set the effective tag in this process
+          # so release.ps1 applies its normal version/tag guard to the requested tag.
+          $env:GITHUB_REF_NAME = $env:RELEASE_TAG
+          scripts/release.ps1 -Ci -Token $env:RELEASES_TOKEN
         env:
           RELEASES_TOKEN: ${{ github.token }}
-          GITHUB_REF_NAME: ${{ env.RELEASE_TAG }}
           # R2 feed upload — publishes FIRST (feed-first ordering in release.ps1
           # so a GitHub outage can't strand the live update feed).
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
