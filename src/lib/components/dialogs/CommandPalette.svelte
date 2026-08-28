@@ -7,7 +7,7 @@
     Settings as SettingsIcon, Plus, Palette,
     Sparkles, Mic, Info, History,
     SplitSquareHorizontal, AppWindow,
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { commandPalette, type SettingsSection } from "../../state/command-palette.svelte";
   import { workspace, type WorkspaceId } from "../../state/workspace.svelte";
@@ -16,7 +16,7 @@
   import { relTime } from "../workspace/hubHelpers";
   import { leafName } from "$lib/utils/path";
 
-  // lucide-svelte 1.x ships icons as legacy components — `typeof Search`
+  // @lucide/svelte 1.x ships icons as legacy components — `typeof Search`
   // matches what the workspaces registry uses (see workspaces/index.ts).
   type Icon = typeof Search;
 

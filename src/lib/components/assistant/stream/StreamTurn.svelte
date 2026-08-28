@@ -1,6 +1,6 @@
 <script lang="ts">
   import "$lib/styles/stream.css";
-  import { Check, Copy, RotateCcw, AlertTriangle, Zap, CornerDownRight } from "lucide-svelte";
+  import { Check, Copy, RotateCcw, AlertTriangle, Zap, CornerDownRight } from "@lucide/svelte";
   import Markdown from "../Markdown.svelte";
   import StreamThinking from "./StreamThinking.svelte";
   import WorkLine from "./WorkLine.svelte";

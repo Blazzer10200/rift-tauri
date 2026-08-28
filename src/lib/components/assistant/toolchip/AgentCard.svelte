@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Loader2, CheckCircle2, AlertCircle, Bot } from "lucide-svelte";
+  import { Loader2, CheckCircle2, AlertCircle, Bot } from "@lucide/svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import Markdown from "../Markdown.svelte";
 

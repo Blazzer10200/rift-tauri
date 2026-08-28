@@ -17,7 +17,7 @@
   // a streaming turn (streaming = the honest liveness signal; the turn-end
   // sweep closes every spawn + clears shellRows), then a brief linger showing
   // the settled fleet.
-  import { Bot, Check, ChevronDown, AlertCircle, Brain, Loader2, Square, Terminal, X } from "lucide-svelte";
+  import { Bot, Check, ChevronDown, AlertCircle, Brain, Loader2, Square, Terminal, X } from "@lucide/svelte";
   import { fade } from "svelte/transition";
   import { invoke } from "@tauri-apps/api/core";
   import { agentNowLine } from "../toolCaption";

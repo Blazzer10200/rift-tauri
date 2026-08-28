@@ -12,7 +12,7 @@ import {
   SpellCheck,
   SquareCode,
   TextSelect,
-} from "lucide-svelte";
+} from "@lucide/svelte";
 import { addPersonalWord, correctText, correctWord } from "$lib/utils/autocorrect";
 
 type CtxIcon = typeof Copy;

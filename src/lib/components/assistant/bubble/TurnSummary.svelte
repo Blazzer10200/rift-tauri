@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Check, GitCommit, Clock, RotateCcw, Zap } from "lucide-svelte";
+  import { Check, GitCommit, Clock, RotateCcw, Zap } from "@lucide/svelte";
   import { fade } from "svelte/transition";
   import { tooltip } from "$lib/actions/tooltip";
   import { assistant, type ChatMessage } from "../../../state/assistant.svelte";

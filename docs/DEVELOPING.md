@@ -33,7 +33,7 @@ next restart.
 ### Prerequisites
 
 - Windows 11 for the supported packaged target.
-- Node.js 20+ and npm.
+- Node.js 24.x and npm 11+ (`.node-version` and `packageManager` are authoritative).
 - Rust via rustup. `rust-toolchain.toml` pins the compiler and Clippy component
   used by CI.
 - Git Bash for the CDP shell helper.

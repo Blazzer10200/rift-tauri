@@ -84,6 +84,16 @@ bash scripts/cdp/c.sh -t browser inspect
 bash scripts/cdp/c.sh -t browser shot
 ```
 
+If another local app already owns Rift's default Vite/CDP ports, launch the
+primary workbench on isolated ports and a distinct WebView profile. The wrapper
+and every `c.sh` call must use the matching ports:
+
+```bash
+pwsh -NoProfile -File scripts/run-dev-deelevated.ps1 -WaitForCdp -NoKill -CdpPort 9224 -VitePort 1421 -UserDataName EBWebView-Rift-2
+RIFT_CDP_HOST=127.0.0.1 RIFT_CDP_PORT=9224 RIFT_CDP_API_PORT=9225 node scripts/cdp/serve.cjs
+RIFT_CDP_API=http://127.0.0.1:9225 bash scripts/cdp/c.sh inspect
+```
+
 Each parallel development instance needs its own CDP and wrapper ports. Instance 2 uses CDP `9224`, wrapper `9225`, and the `EBWebView-Dev2` profile:
 
 ```bash

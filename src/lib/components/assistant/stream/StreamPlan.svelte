@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Check, ChevronDown, ListChecks } from "lucide-svelte";
+  import { Check, ChevronDown, ListChecks } from "@lucide/svelte";
   import type { PlanItem } from "./streamModel";
   let { items = [] }: { items?: PlanItem[] } = $props();
   const done = $derived(items.filter((i) => i.status === "done").length);

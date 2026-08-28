@@ -5,7 +5,7 @@
   // actually exiting. The verify step shows honest numbers (a "couldn't
   // verify" state exists; it never fakes a green).
   import { invoke } from "@tauri-apps/api/core";
-  import { X, Check, Loader2, ShieldCheck, AlertTriangle } from "lucide-svelte";
+  import { X, Check, Loader2, ShieldCheck, AlertTriangle } from "@lucide/svelte";
   import { fade, scale } from "svelte/transition";
   import { assistant } from "$lib/state/assistant.svelte";
   import { stt } from "$lib/state/stt.svelte";

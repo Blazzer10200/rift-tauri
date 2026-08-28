@@ -11,7 +11,7 @@ type ToastItem = {
   id: number;
   severity: ToastSeverity;
   /** Lucide-svelte icon constructor (legacy Svelte 4 component shape;
-   *  typing it precisely fights the lucide-svelte type defs, so leave it
+   *  typing it precisely fights the @lucide/svelte type defs, so leave it
    *  permissive — the ToastHost just renders `<Icon size={12}/>`).
    *  Optional: when omitted, ToastHost falls back to a per-severity default
    *  icon. Keeps icon imports in the renderer rather than `.ts` state modules. */

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { ChevronDown, ChevronUp, Plus, X, MessageSquarePlus, ChevronRight, FolderOpen, HardDrive, Maximize2, Minimize2 } from "lucide-svelte";
+  import { ChevronDown, ChevronUp, Plus, X, MessageSquarePlus, ChevronRight, FolderOpen, HardDrive, Maximize2, Minimize2 } from "@lucide/svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { workspace } from "../../state/workspace.svelte";
   import { projects, projectRootKey } from "$lib/state/projects.svelte";

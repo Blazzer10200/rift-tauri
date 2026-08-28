@@ -8,7 +8,7 @@
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { onDestroy, onMount, untrack } from "svelte";
-  import { Globe, RotateCw, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Copy, ExternalLink, MoreHorizontal, Sparkles, CircleAlert, Search, ChevronUp, ChevronDown, ZoomIn, ZoomOut } from "lucide-svelte";
+  import { Globe, RotateCw, ChevronLeft, ChevronRight, MessageSquarePlus, Check, X, Copy, ExternalLink, MoreHorizontal, Sparkles, CircleAlert, Search, ChevronUp, ChevronDown, ZoomIn, ZoomOut } from "@lucide/svelte";
   import { portal } from "$lib/actions/portal";
   import { workspace } from "../../state/workspace.svelte";
   import { browserDock } from "../../state/browserDock.svelte";

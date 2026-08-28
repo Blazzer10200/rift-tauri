@@ -5,7 +5,7 @@
   import {
     FolderOpen, FileCode2, FileJson2, BookText, AppWindow, Orbit, ShieldCheck,
     Sparkles, Terminal,
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
 
   type Kind = "welcome" | "claude" | "openai" | "project" | "defaults";
   let { kind, caption, modelLabel }: { kind: Kind; caption?: string; modelLabel?: string } = $props();

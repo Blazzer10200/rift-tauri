@@ -2,7 +2,7 @@
   import {
     Download, X, RefreshCw, AlertTriangle, CheckCircle2,
     ArrowRight, ExternalLink, Clock, WifiOff, FlaskConical,
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { fade, fly } from "svelte/transition";
   import { updates } from "../../state/updates.svelte";
 

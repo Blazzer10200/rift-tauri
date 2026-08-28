@@ -7,7 +7,7 @@
     Sparkles, History, Activity as ActivityIcon, Loader2, Flame, Cpu, Wrench, DollarSign,
     Newspaper, ChevronDown, SplitSquareHorizontal, AlertTriangle, RotateCw,
     TrendingUp, TrendingDown, Clock, RefreshCw,
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import NewsFeed from "./NewsFeed.svelte";
   import {

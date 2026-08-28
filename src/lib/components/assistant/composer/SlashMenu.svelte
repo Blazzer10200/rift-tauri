@@ -7,7 +7,7 @@
     Plus, Eraser, Cpu, RotateCcw, Copy, StopCircle,
     Wrench, Coins, Gauge, BarChart3, Terminal, ClipboardCopy, HelpCircle,
     Palette, LogIn, Sparkles, FileCode2, SearchX, SquareSlash, Plug, FoldVertical,
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { slashMatchSegments } from "./helpers";
 
   type Icon = typeof Plus;

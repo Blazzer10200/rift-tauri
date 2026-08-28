@@ -6,7 +6,7 @@
   import {
     Newspaper, RefreshCw, Loader2, Sparkles, ExternalLink, AlertTriangle,
     ChevronDown, Cpu, Terminal, Code2, Building2,
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { news, type DigestItem } from "../../state/news.svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { fmtAgo } from "./welcomeShared";

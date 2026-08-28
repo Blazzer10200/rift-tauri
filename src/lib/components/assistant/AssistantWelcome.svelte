@@ -3,7 +3,7 @@
     Sparkles, FolderOpen, HardDrive,
     X, Folder, GitBranch, ChevronRight, ChevronDown,
     Compass, MessageSquare, Shield, Zap, BarChart3,
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { openPath } from "@tauri-apps/plugin-opener";
   import { assistant } from "../../state/assistant.svelte";
   import { github } from "../../state/github.svelte";

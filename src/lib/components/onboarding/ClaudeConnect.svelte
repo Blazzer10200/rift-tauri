@@ -15,7 +15,7 @@
   import {
     Terminal, UserCheck, CheckCircle2, AlertCircle, Loader2,
     RefreshCw, Copy, Check, KeyRound, LogIn,
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
 
   const CLI_DOCS_URL = "https://docs.claude.com/en/docs/claude-code";
   const INSTALL_CMD = "irm https://claude.ai/install.ps1 | iex";

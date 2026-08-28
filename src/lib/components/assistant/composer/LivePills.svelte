@@ -5,7 +5,7 @@
   // keyboard hint while idle-focused. Talks to the assistant store directly
   // (telemetry snapshot + Activity dock toggle — the cluster already reads it
   // pervasively, per the brief's QueueRail precedent).
-  import { ListPlus } from "lucide-svelte";
+  import { ListPlus } from "@lucide/svelte";
   import { tooltip } from "$lib/actions/tooltip";
 
   let {

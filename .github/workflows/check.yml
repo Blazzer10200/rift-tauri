@@ -20,7 +20,7 @@ jobs:
   rust:
     name: rust (clippy + test + machete)
     # Self-hosted WS2022 runner; persistent warm target/.
-    # Advisory scanning (cargo audit) lives in audit.yml on a DAILY schedule —
+    # Advisory scanning (cargo audit) lives in the manual audit.yml workflow —
     # a fresh RUSTSEC advisory is not a property of the pushed commit, and
     # per-push audit failed every push (+1 email each) until someone intervened.
     runs-on: [self-hosted, windows, tauri-build]
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@1.97.0
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           components: clippy
 
@@ -51,7 +51,7 @@ jobs:
     name: frontend (svelte-check + vitest)
     # Also self-hosted: GitHub-hosted minutes are exhausted (free tier), so an
     # ubuntu-latest job would insta-fail. The WS2022 runner has Node (choco).
-    # npm audit moved to audit.yml (daily) — same reasoning as cargo audit.
+    # npm audit moved to the manual audit.yml workflow for the same reason.
     runs-on: [self-hosted, windows, tauri-build]
     steps:
       - uses: actions/checkout@v6
@@ -59,7 +59,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: npm ci

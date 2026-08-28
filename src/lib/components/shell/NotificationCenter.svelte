@@ -4,7 +4,7 @@
   // grouped by recency. Live toasts still pop bottom-right (ToastHost) and
   // archive in here. Severity → icon/tone mapping mirrors ToastHost so a record
   // looks identical whether it's a live toast or a history row.
-  import { Bell, X, CheckCheck, Trash2, BellOff } from "lucide-svelte";
+  import { Bell, X, CheckCheck, Trash2, BellOff } from "@lucide/svelte";
   import { fly, fade } from "svelte/transition";
   import { toast, type NotifyRecord } from "$lib/state/toast.svelte";
   import { tooltip } from "$lib/actions/tooltip";

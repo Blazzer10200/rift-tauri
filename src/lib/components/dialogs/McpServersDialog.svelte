@@ -2,7 +2,7 @@
   import { tick } from "svelte";
   import { fade, scale } from "svelte/transition";
   import { quintOut } from "svelte/easing";
-  import { Plug, RefreshCw } from "lucide-svelte";
+  import { Plug, RefreshCw } from "@lucide/svelte";
   import { mcpPanel } from "../../state/mcp-panel.svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { mcpHint, statusMeta } from "../../state/assistant/mcpStatus";

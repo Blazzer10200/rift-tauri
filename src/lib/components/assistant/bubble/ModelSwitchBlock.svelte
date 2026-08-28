@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ArrowRightLeft } from "lucide-svelte";
+  import { ArrowRightLeft } from "@lucide/svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import { shortModel } from "./helpers";
   import { MODEL_OPTIONS } from "../composer/modelMatrix";

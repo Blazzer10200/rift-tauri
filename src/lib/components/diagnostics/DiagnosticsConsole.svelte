@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { X, Pause, Play, Trash2, Copy, Check, Search, Radio, Download } from "lucide-svelte";
+  import { X, Pause, Play, Trash2, Copy, Check, Search, Radio, Download } from "@lucide/svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { openPath } from "@tauri-apps/plugin-opener";
   import { fade, scale } from "svelte/transition";

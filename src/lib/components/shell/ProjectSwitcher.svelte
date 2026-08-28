@@ -6,7 +6,7 @@
   // affordances (open-focused, open-in-split via right-click, drag-a-project-to-
   // a-pane, new project) so nothing that shipped is lost — they just move behind
   // the dropdown + row context menu instead of a permanent chip list.
-  import { ChevronsUpDown, Plus, SplitSquareHorizontal, FolderOpen, ArrowRight, Layers, GitBranch, Check } from "lucide-svelte";
+  import { ChevronsUpDown, Plus, SplitSquareHorizontal, FolderOpen, ArrowRight, Layers, GitBranch, Check } from "@lucide/svelte";
   import { projects, projectRootKey } from "$lib/state/projects.svelte";
   import type { Project } from "$lib/state/assistant/types";
   import { assistant } from "$lib/state/assistant.svelte";

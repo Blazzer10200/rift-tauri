@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Sparkles, ChevronDown } from "lucide-svelte";
+  import { Sparkles, ChevronDown } from "@lucide/svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import Markdown from "../Markdown.svelte";
   import { formatBoundaryAt } from "./helpers";

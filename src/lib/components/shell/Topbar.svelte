@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { X, PanelLeftOpen } from "lucide-svelte";
+  import { X, PanelLeftOpen } from "@lucide/svelte";
   import { shell } from "$lib/state/shell.svelte";
   import { tooltip } from "$lib/actions/tooltip";
 

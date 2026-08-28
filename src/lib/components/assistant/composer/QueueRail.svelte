@@ -4,7 +4,7 @@
   // a turn is streaming is queued (send.ts) and fires automatically when the turn
   // finishes — the chips here let you edit, reorder, or drop a queued message
   // before it sends.
-  import { X, Clock, Paperclip, Pencil } from "lucide-svelte";
+  import { X, Clock, Paperclip, Pencil } from "@lucide/svelte";
   import { fly } from "svelte/transition";
   import { quintOut } from "svelte/easing";
   import { tick } from "svelte";

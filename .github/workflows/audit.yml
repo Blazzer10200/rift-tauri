@@ -1,13 +1,9 @@
 name: audit
 
-# Advisory scanning is time-based, not commit-based: a new RUSTSEC/npm advisory
-# lands on the world's clock and would otherwise fail EVERY push until handled
-# (the July 2026 quick-xml pair emailed a red X per push for three days). Daily
-# here = at most one actionable signal per day, and `check` stays green unless
-# the code itself broke.
+# Advisory scanning is time-based, not commit-based: run this workflow manually
+# when maintaining or releasing Rift so new RUSTSEC/npm advisories do not make
+# every push red or produce unattended failure notifications while it is idle.
 on:
-  schedule:
-    - cron: '0 10 * * *'
   workflow_dispatch:
 
 concurrency:

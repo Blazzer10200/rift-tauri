@@ -5,7 +5,7 @@
   // ←/→ effort nudges); this child renders, handles clicks, and owns the
   // pointer-drag slider. Derives re-compute here from the shared modelMatrix
   // + assistant store — same pure helpers the parent uses, so they can't drift.
-  import { Check, ChevronRight, HelpCircle, LoaderCircle, LockKeyhole, Plus, Zap } from "lucide-svelte";
+  import { Check, ChevronRight, HelpCircle, LoaderCircle, LockKeyhole, Plus, Zap } from "@lucide/svelte";
   import { tick } from "svelte";
   import { assistant, type TabState } from "../../../state/assistant.svelte";
   import { usage, limitZone, type ScopedLimit } from "../../../state/usage.svelte";

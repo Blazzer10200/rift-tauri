@@ -3,7 +3,7 @@
   // attach-error pill, lifted verbatim from Composer.svelte 2026-06-09.
   // Paste/drop/file-pick handlers stay in the parent (they write tab state);
   // this child renders + reports clicks only.
-  import { X, FileText } from "lucide-svelte";
+  import { X, FileText } from "@lucide/svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import { fmtSize } from "./helpers";
   import type { TextAttachment } from "$lib/state/assistant/attachments";

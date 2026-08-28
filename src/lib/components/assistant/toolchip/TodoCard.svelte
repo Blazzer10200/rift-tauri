@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Loader2, CheckCircle2, AlertCircle, ListChecks, Circle } from "lucide-svelte";
+  import { Loader2, CheckCircle2, AlertCircle, ListChecks, Circle } from "@lucide/svelte";
   import { tooltip } from "$lib/actions/tooltip";
 
   type TodoItem = { content: string; status: "pending" | "in_progress" | "completed" };

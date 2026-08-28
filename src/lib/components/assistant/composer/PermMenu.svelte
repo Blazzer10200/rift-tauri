@@ -7,7 +7,7 @@
   // (permIdx, ⇧Tab cycle) stays parent-owned. Visuals = spec `.pop` rich-item
   // popover (docs/design/rift-redesign.html) — icon tiles, tone tinting,
   // accent-soft selected slab + checkmark.
-  import { Check } from "lucide-svelte";
+  import { Check } from "@lucide/svelte";
   import { tick } from "svelte";
   import { assistant } from "../../../state/assistant.svelte";
   import { portal } from "$lib/actions/portal";

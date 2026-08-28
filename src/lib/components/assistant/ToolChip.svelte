@@ -13,7 +13,7 @@
     Bot, HelpCircle, FlagOff, Flag, BookOpen, Sparkles, Slash, Square, SkipForward,
     GitBranch, GitCommitHorizontal, AppWindow, Bell,
     Telescope, AlarmClock, Database, Radio, CalendarClock,
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import type { ToolBlock } from "../../state/assistant.svelte";
   import { slide } from "svelte/transition";
   import { untrack } from "svelte";

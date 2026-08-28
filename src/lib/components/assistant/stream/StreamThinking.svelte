@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Brain, ChevronDown } from "lucide-svelte";
+  import { Brain, ChevronDown } from "@lucide/svelte";
   import { fmtDur } from "./streamModel";
   import Markdown from "../Markdown.svelte";
   let { active = false, durSecs = 0, text = "" }: { active?: boolean; durSecs?: number; text?: string } = $props();

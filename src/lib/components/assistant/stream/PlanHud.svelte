@@ -3,7 +3,7 @@
   // floating at the top of the conversation, so the plan never scrolls away
   // with the stream. Collapsed: icon + current task + progress + count.
   // Click expands the full checklist. All-done → brief green linger, then gone.
-  import { Check, ChevronDown, ListChecks } from "lucide-svelte";
+  import { Check, ChevronDown, ListChecks } from "@lucide/svelte";
   import { fade } from "svelte/transition";
   import { tasksToPlanItems } from "./streamModel";
   import type { TabState } from "$lib/state/assistant.svelte";

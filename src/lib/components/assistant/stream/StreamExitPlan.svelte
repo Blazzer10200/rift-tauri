@@ -11,7 +11,7 @@
   // round-tripped (old CLI, race, timeout), a settled last-turn card keeps
   // Approve/Refine as send-shaped fallbacks. One component, two transports.
   import { untrack } from "svelte";
-  import { ScrollText, ChevronDown, Check, X, MessageSquareText, Loader2, Pencil } from "lucide-svelte";
+  import { ScrollText, ChevronDown, Check, X, MessageSquareText, Loader2, Pencil } from "@lucide/svelte";
   import Markdown from "../Markdown.svelte";
   import type { StreamTool } from "./streamModel";
   import { assistant, type TabState } from "$lib/state/assistant.svelte";

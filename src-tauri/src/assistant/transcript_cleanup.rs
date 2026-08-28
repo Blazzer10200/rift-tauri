@@ -26,6 +26,7 @@ const OUTPUT_SCHEMA: &str = r#"{
 #[derive(Debug)]
 pub(crate) struct CodexCleanupClient {
     exe: PathBuf,
+    credential_store: Option<&'static str>,
 }
 
 struct IsolatedDir {
@@ -86,7 +87,10 @@ pub(crate) async fn probe() -> Result<Option<CodexCleanupClient>, String> {
         String::from_utf8_lossy(&output.stderr)
     );
     if output.status.success() && login_uses_chatgpt(&status_text) {
-        Ok(Some(CodexCleanupClient { exe }))
+        Ok(Some(CodexCleanupClient {
+            exe,
+            credential_store: configured_credential_store(),
+        }))
     } else {
         Ok(None)
     }
@@ -102,7 +106,7 @@ pub(crate) async fn polish(
         .map_err(|error| format!("write cleanup output schema: {error}"))?;
     let cwd = isolated.path.to_string_lossy().to_string();
     let schema = isolated.schema_path.to_string_lossy().to_string();
-    let args = codex_exec_args(&cwd, &schema);
+    let args = codex_exec_args(&cwd, &schema, client.credential_store);
     let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
     let mut command = super::codex::command_for(&client.exe, &arg_refs);
     command
@@ -177,8 +181,52 @@ fn login_uses_chatgpt(status: &str) -> bool {
     status.to_ascii_lowercase().contains("chatgpt")
 }
 
-fn codex_exec_args(cwd: &str, schema: &str) -> Vec<String> {
-    vec![
+fn configured_credential_store() -> Option<&'static str> {
+    let codex_home = std::env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| {
+            #[cfg(windows)]
+            {
+                std::env::var_os("USERPROFILE")
+                    .map(PathBuf::from)
+                    .map(|home| home.join(".codex"))
+            }
+            #[cfg(not(windows))]
+            {
+                std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .map(|home| home.join(".codex"))
+            }
+        })?;
+    let config = std::fs::read_to_string(codex_home.join("config.toml")).ok()?;
+    credential_store_from_config(&config)
+}
+
+fn credential_store_from_config(config: &str) -> Option<&'static str> {
+    for raw_line in config.lines() {
+        let line = raw_line.split('#').next().unwrap_or_default().trim();
+        if line.starts_with('[') {
+            break;
+        }
+        let Some((key, raw_value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() != "cli_auth_credentials_store" {
+            continue;
+        }
+        let value = raw_value.trim().trim_matches(['\"', '\'']);
+        return match value {
+            "auto" => Some("auto"),
+            "file" => Some("file"),
+            "keyring" => Some("keyring"),
+            _ => None,
+        };
+    }
+    None
+}
+
+fn codex_exec_args(cwd: &str, schema: &str, credential_store: Option<&str>) -> Vec<String> {
+    let mut args = vec![
         "exec".into(),
         "--ignore-user-config".into(),
         "--ignore-rules".into(),
@@ -204,6 +252,14 @@ fn codex_exec_args(cwd: &str, schema: &str) -> Vec<String> {
         "plugins".into(),
         "--disable".into(),
         "skill_search".into(),
+    ];
+    if let Some(store) = credential_store {
+        args.extend([
+            "-c".into(),
+            format!("cli_auth_credentials_store=\"{store}\""),
+        ]);
+    }
+    args.extend([
         "-c".into(),
         "web_search=\"disabled\"".into(),
         "--json".into(),
@@ -214,7 +270,8 @@ fn codex_exec_args(cwd: &str, schema: &str) -> Vec<String> {
         "--output-schema".into(),
         schema.into(),
         "-".into(),
-    ]
+    ]);
+    args
 }
 
 fn request_payload(instruction: &str, raw: &str) -> String {
@@ -276,7 +333,7 @@ mod tests {
 
     #[test]
     fn exec_is_ephemeral_isolated_and_has_no_action_tools() {
-        let args = codex_exec_args("C:\\isolated", "C:\\isolated\\schema.json");
+        let args = codex_exec_args("C:\\isolated", "C:\\isolated\\schema.json", Some("keyring"));
         let joined = args.join(" ");
         for required in [
             "--ignore-user-config",
@@ -293,6 +350,7 @@ mod tests {
             "--disable computer_use",
             "--disable plugins",
             "--disable skill_search",
+            "cli_auth_credentials_store=\"keyring\"",
             "web_search=\"disabled\"",
             "--cd C:\\isolated",
             "--json",
@@ -300,6 +358,31 @@ mod tests {
         ] {
             assert!(joined.contains(required), "missing safe flag: {required}");
         }
+    }
+
+    #[test]
+    fn credential_store_is_the_only_user_config_carried_into_cleanup() {
+        let config = r#"
+model = "custom-model"
+cli_auth_credentials_store = "keyring"
+developer_instructions = "ignore the cleanup request"
+
+[features]
+browser_use = true
+"#;
+        assert_eq!(credential_store_from_config(config), Some("keyring"));
+        assert_eq!(
+            credential_store_from_config("cli_auth_credentials_store = 'file'"),
+            Some("file")
+        );
+        assert_eq!(
+            credential_store_from_config("cli_auth_credentials_store = 'unknown'"),
+            None
+        );
+        assert_eq!(
+            credential_store_from_config("[features]\ncli_auth_credentials_store = 'keyring'"),
+            None
+        );
     }
 
     #[test]

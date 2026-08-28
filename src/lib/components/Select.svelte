@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronDown, Check } from "lucide-svelte";
+  import { ChevronDown, Check } from "@lucide/svelte";
   // Portal the popover to <body> so an ancestor card's overflow:hidden /
   // backdrop-filter containing block can't clip it.
   import { portal } from "$lib/actions/portal";

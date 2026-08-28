@@ -18,7 +18,7 @@
   import {
     Check, ChevronLeft, ChevronRight, FolderGit2, FolderOpen,
     History, Loader2, Orbit, Terminal, TriangleAlert,
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
 
   type Props = { onDone: () => void };
   const { onDone }: Props = $props();

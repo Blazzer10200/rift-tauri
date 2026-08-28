@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { AlertCircle, CheckCircle2, KeyRound, Loader2, RefreshCw, Terminal } from "lucide-svelte";
+  import { AlertCircle, CheckCircle2, KeyRound, Loader2, RefreshCw, Terminal } from "@lucide/svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import "$lib/styles/onboarding.css";
 

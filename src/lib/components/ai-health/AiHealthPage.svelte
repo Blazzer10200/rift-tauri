@@ -6,7 +6,7 @@
   import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
-  import { HeartPulse, Gauge, Sparkles, ArrowRight, Wrench, Loader2, AlertTriangle, Check, Undo2, Wifi, Snowflake, Plug } from "lucide-svelte";
+  import { HeartPulse, Gauge, Sparkles, ArrowRight, Wrench, Loader2, AlertTriangle, Check, Undo2, Wifi, Snowflake, Plug } from "@lucide/svelte";
   import PageHero from "../shared/PageHero.svelte";
   import { usage, type LimitWindow, type AdviceApply } from "../../state/usage.svelte";
   import { assistant, type ModelSel } from "../../state/assistant.svelte";

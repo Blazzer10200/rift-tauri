@@ -8,7 +8,7 @@
     CircleCheck, RotateCcw, Trash2, ArrowUpCircle, Loader2,
     Download, ShieldCheck, ExternalLink, Bug, Terminal,
     Activity, MessageSquare, Search, CornerDownLeft, ChevronDown,
-  } from "lucide-svelte";
+  } from "@lucide/svelte";
   import { appConfigDir, appLogDir } from "@tauri-apps/api/path";
   import { confirm } from "@tauri-apps/plugin-dialog";
   import { openPath, openUrl } from "@tauri-apps/plugin-opener";

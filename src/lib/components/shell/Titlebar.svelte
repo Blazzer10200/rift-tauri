@@ -5,7 +5,7 @@
   // Topbar/Sidebar redesign took over normal-mode chrome; trimmed 2026-07-01.)
   import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import { Minus, Square, Copy, X } from "lucide-svelte";
+  import { Minus, Square, Copy, X } from "@lucide/svelte";
   import RiftLogo from "./RiftLogo.svelte";
   import { tooltip } from "$lib/actions/tooltip";
 

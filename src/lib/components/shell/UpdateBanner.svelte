@@ -9,7 +9,7 @@
   // Replaces the bottom-right UpdatePill for the app-update case. The transient
   // install-FAILURE toast (updates.download catch) is untouched — that's an
   // event, not a standing state.
-  import { Sparkles, Terminal, ArrowRight, X, Loader2, Check } from "lucide-svelte";
+  import { Sparkles, Terminal, ArrowRight, X, Loader2, Check } from "@lucide/svelte";
   import { slide } from "svelte/transition";
   import { updates } from "$lib/state/updates.svelte";
   import { cliUpdate } from "$lib/state/cliUpdate.svelte";

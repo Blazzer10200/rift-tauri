@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { FlaskConical, Shield } from "lucide-svelte";
+  import { FlaskConical, Shield } from "@lucide/svelte";
   import { slide } from "svelte/transition";
   import { fmtDur, stripAnsi, type StreamTool } from "./streamModel";
   import BlockHeader from "./BlockHeader.svelte";

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { slide } from "svelte/transition";
-  import { ChevronRight } from "lucide-svelte";
+  import { ChevronRight } from "@lucide/svelte";
   import { VERB_PAST, VERB_ING, isPlanArtifact, type StreamTool } from "./streamModel";
   import EditDiff from "../EditDiff.svelte";
   import AnimatedCount from "./AnimatedCount.svelte";

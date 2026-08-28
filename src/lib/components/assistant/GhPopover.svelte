@@ -3,7 +3,7 @@
   // status bar). Floating tier (rift-menu shell + portal). Read-only surface:
   // the two "do something" actions inject a prompt into the composer so every
   // write flows through the assistant's normal permission system.
-  import { ArrowDownToLine, ArrowUpFromLine, ExternalLink, GitBranch, GitPullRequest, RefreshCw, Sparkles } from "lucide-svelte";
+  import { ArrowDownToLine, ArrowUpFromLine, ExternalLink, GitBranch, GitPullRequest, RefreshCw, Sparkles } from "@lucide/svelte";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import { untrack } from "svelte";
   import { portal } from "$lib/actions/portal";

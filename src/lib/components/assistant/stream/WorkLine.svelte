@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronDown, ChevronRight, FileText, FolderSearch, FolderTree, Search, Terminal, Wrench } from "lucide-svelte";
+  import { ChevronDown, ChevronRight, FileText, FolderSearch, FolderTree, Search, Terminal, Wrench } from "@lucide/svelte";
   import { fmtDur, groupNames, resultMeta, workLineMode, VERB_PAST, VERB_ING, type StreamTool, type TKind } from "./streamModel";
   import { uiPrefs } from "$lib/state/ui-prefs.svelte";
   import OutputBlock from "./OutputBlock.svelte";

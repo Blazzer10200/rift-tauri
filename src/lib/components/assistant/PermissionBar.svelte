@@ -4,7 +4,7 @@
   // `can_use_tool` ask in a prompting permission mode (default / acceptEdits /
   // plan). Pairs to the block by tool_use_id; renders nothing until the ask
   // lands and disappears once the user decides (or the turn ends).
-  import { ShieldQuestion, Check, X, Loader2 } from "lucide-svelte";
+  import { ShieldQuestion, Check, X, Loader2 } from "@lucide/svelte";
   import { assistant } from "../../state/assistant.svelte";
 
   let { toolUseId, toolName }: { toolUseId: string; toolName: string } = $props();

@@ -6,7 +6,7 @@
   // the composer's `enchanting` class — and arrives here as props + callbacks.
   // `showEnhanceDiff` is child-local: the panel unmounts when the preview
   // clears, which resets it exactly like the old explicit `= false` writes.
-  import { Wand2, GitCompare, FolderSearch, RefreshCw, Check, X, Pencil, Undo2 } from "lucide-svelte";
+  import { Wand2, GitCompare, FolderSearch, RefreshCw, Check, X, Pencil, Undo2 } from "@lucide/svelte";
   import EditDiff from "../EditDiff.svelte";
   import { tooltip } from "$lib/actions/tooltip";
 

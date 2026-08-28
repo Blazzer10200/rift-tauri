@@ -4,7 +4,7 @@
   // island pills (bottom-right stack read as clutter next to the composer +
   // status bar); severity is a colored dot, not an icon tile — same language
   // as status pills and the notification center rows.
-  import { X } from "lucide-svelte";
+  import { X } from "@lucide/svelte";
   import { fly } from "svelte/transition";
   import { flip } from "svelte/animate";
   import { toast } from "../state/toast.svelte";

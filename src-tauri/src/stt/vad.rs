@@ -29,7 +29,8 @@ pub const MIN_COMMIT_VOICED_FRAMES: usize = 5;
 pub fn voiced_frame_count(samples_f32: &[f32]) -> usize {
     let mut vad = Vad::new_with_rate_and_mode(SampleRate::Rate16kHz, VadMode::Aggressive);
     let mut voiced = 0usize;
-    for chunk in samples_f32.chunks_exact(FRAME_SAMPLES) {
+    let (frames, _) = samples_f32.as_chunks::<FRAME_SAMPLES>();
+    for chunk in frames {
         let frame_i16: Vec<i16> = chunk
             .iter()
             .map(|s| (s.clamp(-1.0, 1.0) * i16::MAX as f32) as i16)

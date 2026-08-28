@@ -4,7 +4,7 @@
   // Consumers provide lead/title as snippets and keep their own container
   // chrome; the META CLUSTER (pill tones, duration residue, copy affordance,
   // chevron) is styled once here so every block reads as one family.
-  import { Check, ChevronRight, Copy, Loader2, X } from "lucide-svelte";
+  import { Check, ChevronRight, Copy, Loader2, X } from "@lucide/svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import type { Snippet } from "svelte";
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Send, Square, X, Mic, Loader2, Wand2, Paperclip,
-    Sparkles, ChevronUp, Folder, GitBranch } from "lucide-svelte";
+    Sparkles, ChevronUp, Folder, GitBranch } from "@lucide/svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { github } from "../../state/github.svelte";
   import GhPopover from "./GhPopover.svelte";

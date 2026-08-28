@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { ChevronDown, ChevronUp } from "lucide-svelte";
+  import { ChevronDown, ChevronUp } from "@lucide/svelte";
   import {
     splitOutput, splitOutputFold, nextRevealTier, ansiLines, classifyShellLine,
     OUTPUT_CHAR_CAP,

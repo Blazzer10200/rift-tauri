@@ -4,7 +4,7 @@
   // comes off the shared usage store; fetch fires on mount (60s backend cache
   // keeps repeat opens cheap). Esc or ✕ closes.
   import { onMount } from "svelte";
-  import { X, Gauge, RefreshCw, FoldVertical } from "lucide-svelte";
+  import { X, Gauge, RefreshCw, FoldVertical } from "@lucide/svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import { usage, limitZone, type LimitWindow, type ScopedLimit } from "../../../state/usage.svelte";
   import { assistant, type TabState } from "../../../state/assistant.svelte";

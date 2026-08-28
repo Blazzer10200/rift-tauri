@@ -65,11 +65,11 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@1.97.0
+        uses: dtolnay/rust-toolchain@1.98.0
         with:
           components: clippy
 
@@ -151,6 +151,16 @@ jobs:
 
       - name: npm ci
         run: npm ci
+
+      # Advisory databases change independently of source commits. Keep the
+      # unattended audit workflow disabled, but never publish a release whose
+      # current production dependency graph has a known vulnerability.
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+      - name: cargo audit
+        run: cargo audit --file src-tauri/Cargo.lock --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0185 --ignore RUSTSEC-2026-0194 --ignore RUSTSEC-2026-0195
+      - name: npm audit (prod only)
+        run: npm audit --omit=dev
 
       # Gate dedup: check.yml runs these exact gates (and more) on every push to
       # main. If a COMPLETED check run for THIS sha already SUCCEEDED, the inline

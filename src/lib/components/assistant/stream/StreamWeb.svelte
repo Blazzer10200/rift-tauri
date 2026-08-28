@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Globe } from "lucide-svelte";
+  import { Globe } from "@lucide/svelte";
   import type { StreamTool } from "./streamModel";
   let { tool }: { tool: StreamTool } = $props();
   const pending = $derived(tool.status === "pending");

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Pin, PinOff, MoreHorizontal, Pencil, Trash2, ChevronDown, Clock } from "lucide-svelte";
+  import { Pin, PinOff, MoreHorizontal, Pencil, Trash2, ChevronDown, Clock } from "@lucide/svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { shell } from "$lib/state/shell.svelte";
   import { workspace } from "$lib/state/workspace.svelte";

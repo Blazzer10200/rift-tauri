@@ -1,6 +1,6 @@
 <script lang="ts">
   import { Bot, Loader2, CheckCircle2, AlertCircle, ChevronDown, ArrowRight, Brain,
-    FileSearch, FilePen, FilePlus, Search, FolderTree, Terminal, Globe, AppWindow, GitBranch, ListChecks, Wrench } from "lucide-svelte";
+    FileSearch, FilePen, FilePlus, Search, FolderTree, Terminal, Globe, AppWindow, GitBranch, ListChecks, Wrench } from "@lucide/svelte";
   import { fmtDur, type StreamTool } from "./streamModel";
   import { captionForTool, agentNowLine } from "../toolCaption";
   import { fmtTokens } from "$lib/state/assistant/helpers";

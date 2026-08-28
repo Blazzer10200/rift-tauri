@@ -2,7 +2,7 @@
 // option tables + their pure derivation helpers, lifted from Composer.svelte
 // 2026-06-10 so the parent's onKey navigation and the SettingsMenu/PermMenu
 // children derive from one source and can never disagree.
-import { Hand, Code2, ClipboardList, Zap, Infinity as InfinityIcon, Gem, Feather, Sparkles, Rabbit, Orbit } from "lucide-svelte";
+import { Hand, Code2, ClipboardList, Zap, Infinity as InfinityIcon, Gem, Feather, Sparkles, Rabbit, Orbit } from "@lucide/svelte";
 import type { ChatGptRoute, CodexModel, ModelSel, OpenAiModel, PermissionMode, ThinkingEffort } from "../../../state/assistant/types";
 import { fableAvailable, fastEligible, haikuAvailable, MODEL_MAX_EFFORT, ctxWindowForModelId } from "../../../state/assistant/helpers";
 import { CHATGPT } from "../../../state/assistant/providerDisplay";

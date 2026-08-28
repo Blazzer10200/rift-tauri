@@ -4,7 +4,7 @@
   // dead WorkLine in stream mode — the question never rendered. This restores the
   // full interactive surface, reusing the same store binding/submit API.
   import { untrack } from "svelte";
-  import { CheckCircle2, Circle, Square, Loader2, MessageCircleQuestion, Check } from "lucide-svelte";
+  import { CheckCircle2, Circle, Square, Loader2, MessageCircleQuestion, Check } from "@lucide/svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { parseAskQuestions } from "$lib/state/assistant/askQuestions";
   import { parseAskUserResult, type StreamTool } from "./streamModel";

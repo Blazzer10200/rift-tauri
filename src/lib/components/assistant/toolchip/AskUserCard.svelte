@@ -3,7 +3,7 @@
   // chip stays a router; this owns all AskUser state, the store round-trip, and
   // the emerald card styling. The parent `.chip.as-card.is-ask` frame (border,
   // max-width, pending pulse) lives in ToolChip — this renders the head + body.
-  import { Loader2, CheckCircle2, AlertCircle, HelpCircle, Square, Circle } from "lucide-svelte";
+  import { Loader2, CheckCircle2, AlertCircle, HelpCircle, Square, Circle } from "@lucide/svelte";
   import { assistant, type ToolBlock } from "../../../state/assistant.svelte";
   import { parseAskQuestions } from "../../../state/assistant/askQuestions";
   import { parseAskUserResult } from "../stream/streamModel";

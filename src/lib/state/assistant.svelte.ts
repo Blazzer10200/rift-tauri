@@ -1285,7 +1285,7 @@ class AssistantStore {
     toast.push({
       severity: "info",
       // icon omitted — ToastHost supplies the info-severity default (CR5: keeps
-      // lucide-svelte UI imports out of this state module).
+      // @lucide/svelte UI imports out of this state module).
       title: kind === "effort"
         ? "Effort changed mid-conversation"
         : kind === "thinking"

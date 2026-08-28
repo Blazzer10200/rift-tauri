@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { GitBranch, ShieldCheck, Columns2 } from "lucide-svelte";
+  import { GitBranch, ShieldCheck, Columns2 } from "@lucide/svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { github } from "$lib/state/github.svelte";
   import GhPopover from "../assistant/GhPopover.svelte";

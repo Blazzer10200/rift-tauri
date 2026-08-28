@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { PanelLeftClose, Plus, Search } from "lucide-svelte";
+  import { PanelLeftClose, Plus, Search } from "@lucide/svelte";
   import { workspace, type WorkspaceId } from "$lib/state/workspace.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { shell } from "$lib/state/shell.svelte";

@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import path from "path";
 
 const baseConfig = defineViteConfig({
-  plugins: [svelte({ hot: false })],
+  plugins: [svelte()],
   resolve: {
     alias: {
       $lib: path.resolve(

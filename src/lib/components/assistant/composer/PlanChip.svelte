@@ -3,7 +3,7 @@
   // model pill so its lifecycle (proposed → executing → done) stays visible
   // after the stream card scrolls away. Click opens a read-only popover with
   // the full plan markdown. Fades out shortly after the plan lands done.
-  import { ScrollText, Check, Loader2 } from "lucide-svelte";
+  import { ScrollText, Check, Loader2 } from "@lucide/svelte";
   import Markdown from "../Markdown.svelte";
   import { portal } from "$lib/actions/portal";
   import { tooltip } from "$lib/actions/tooltip";

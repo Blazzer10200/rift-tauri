@@ -3,9 +3,9 @@ import type { WorkspaceId } from "$lib/state/workspace.svelte";
 import {
   MessageSquare, FolderTree,
   Activity, Settings as SettingsIcon, HeartPulse,
-} from "lucide-svelte";
+} from "@lucide/svelte";
 
-// lucide-svelte 1.x ships icons typed as legacy components; `typeof Activity`
+// @lucide/svelte 1.x ships icons typed as legacy components; `typeof Activity`
 // matches what each icon export looks like and stays compatible w/ Svelte 5
 // runes-mode without the explicit `Component<...>` constraint that rejects
 // them. Same pattern right-pane/index.ts used (PanelIcon).

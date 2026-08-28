@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, AlertCircle, X, Ban, CornerDownRight } from "lucide-svelte";
+  import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, AlertCircle, X, Ban, CornerDownRight } from "@lucide/svelte";
   import { onDestroy } from "svelte";
   import { fade, slide } from "svelte/transition";
   const reducedMotion =
     typeof window !== "undefined" &&
     window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
   import { assistant, type Block, type ChatMessage, type TabState } from "../../state/assistant.svelte";
-  import { RotateCcw } from "lucide-svelte";
+  import { RotateCcw } from "@lucide/svelte";
   import Markdown from "./Markdown.svelte";
   import EditDiff from "./EditDiff.svelte";
   import ToolChip from "./ToolChip.svelte";

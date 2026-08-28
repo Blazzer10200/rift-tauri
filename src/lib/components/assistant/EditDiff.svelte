@@ -10,7 +10,7 @@
   import { diffArrays } from "diff";
   import DOMPurify from "dompurify";
   import { invoke } from "@tauri-apps/api/core";
-  import { FileText, ChevronRight, CornerDownLeft, Copy, Check } from "lucide-svelte";
+  import { FileText, ChevronRight, CornerDownLeft, Copy, Check } from "@lucide/svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { notify } from "../../state/toast.svelte";
   import { highlightSync, whenReady } from "../../state/highlighter.svelte";

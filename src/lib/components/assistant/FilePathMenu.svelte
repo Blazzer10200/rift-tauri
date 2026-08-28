@@ -4,7 +4,7 @@
   // only positioning + the action set live here. Mount it conditionally and
   // feed it a viewport-anchored {x, y}.
   import { onMount } from "svelte";
-  import { Code2, ExternalLink, FolderOpen, Copy, Type } from "lucide-svelte";
+  import { Code2, ExternalLink, FolderOpen, Copy, Type } from "@lucide/svelte";
   import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
   import { invoke } from "@tauri-apps/api/core";
   import { portal } from "$lib/actions/portal";
