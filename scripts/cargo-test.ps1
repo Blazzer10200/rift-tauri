@@ -7,6 +7,7 @@
 # immediately red.
 
 $ErrorActionPreference = 'Continue'
+$env:CARGO_PROFILE_TEST_DEBUG = '0'
 $manifest = 'src-tauri/Cargo.toml'
 
 $firstOutput = @(& cargo test --manifest-path $manifest 2>&1)

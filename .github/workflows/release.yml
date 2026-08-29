@@ -213,6 +213,7 @@ jobs:
           # inline: workflow_dispatch may check out an older immutable tag that
           # predates scripts/cargo-test.ps1.
           $ErrorActionPreference = 'Continue'
+          $env:CARGO_PROFILE_TEST_DEBUG = '0'
           $firstOutput = @(& cargo test --manifest-path src-tauri/Cargo.toml 2>&1)
           $firstExit = $LASTEXITCODE
           $firstOutput | ForEach-Object { Write-Host "$_" }
