@@ -177,7 +177,7 @@
     {#if mode === "peek" && !open}
       <!-- Peek (OUT, collapsed): a few trailing lines under the output rule. -->
       <div class="ssh-peekwrap">
-        <div class="ssh-outlabel"><span>output</span>{#if failed}<span class="ssh-outlabel-bad">error</span>{/if}</div>
+        <div class="ssh-outlabel"><span>output</span>{#if outLineCount > 0}<span class="ssh-outlabel-meta">{outLineCount} line{outLineCount === 1 ? "" : "s"}</span>{/if}{#if failed}<span class="ssh-outlabel-bad">error</span>{/if}</div>
         <div class="ssh-peek">
           <!-- Index key, NEVER (ln): two identical trailing lines (git push "remote:",
                gh run watch reprints) threw each_key_duplicate, aborting the whole Svelte
@@ -190,16 +190,8 @@
     {:else if open}
       <!-- OUT: the command's output, under a labeled rule so IN vs OUT is clear. -->
       <div class="ssh-outwrap" transition:slide={{ duration: 140 }}>
-        <div class="ssh-outlabel"><span>output</span>{#if failed}<span class="ssh-outlabel-bad">error</span>{/if}</div>
+        <div class="ssh-outlabel"><span>output</span>{#if outLineCount > 0}<span class="ssh-outlabel-meta">{outLineCount} line{outLineCount === 1 ? "" : "s"}</span>{/if}{#if failed}<span class="ssh-outlabel-bad">error</span>{/if}</div>
         <OutputBlock text={tool.result ?? ""} start={mode === "full" ? "expanded" : "collapsed"} live={running} cursor={running || ride} tone="shell" fold="head-tail" />
-        {#if !running}
-          <div class="ssh-exit" class:bad={failed}>
-            <span class="ssh-exit-mark">{failed ? "✗" : "✓"}</span>
-            <span>{failed ? "failed" : "ok"}</span>
-            {#if tool.durSecs >= 1}<span class="ssh-exit-pip">·</span><span>{fmtDur(tool.durSecs)}</span>{/if}
-            <span class="ssh-exit-pip">·</span><span>{outLineCount} line{outLineCount === 1 ? "" : "s"}</span>
-          </div>
-        {/if}
       </div>
     {/if}
   {/if}
@@ -272,19 +264,9 @@
      not just implied by the fill shift. */
   .ssh-outlabel { display: flex; align-items: center; gap: 7px; padding: 5px 11px 2px;
     font-size: 8.5px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: var(--fg-faint); }
+  .ssh-outlabel-meta { margin-left: auto; font-family: var(--font-mono); font-size: 9px; font-weight: 500;
+    letter-spacing: 0.02em; text-transform: none; color: var(--fg-faint); opacity: 0.78; }
   .ssh-outlabel-bad { color: var(--danger); }
-
-  /* Exit-status footer — a slim truthful receipt: ✓/✗ · duration · line count.
-     (We deliberately don't invent an exit CODE — the envelope doesn't carry one.) */
-  .ssh-exit { animation: sshExitIn 240ms var(--ease-page) both;
-    display: flex; align-items: center; gap: 6px; padding: 4px 11px 6px;
-    border-top: 1px solid color-mix(in oklch, var(--border) 45%, transparent);
-    font-family: var(--font-mono); font-size: 10px; color: var(--fg-faint);
-    font-variant-numeric: tabular-nums; }
-  .ssh-exit .ssh-exit-mark { color: var(--ok); font-weight: 700; }
-  .ssh-exit.bad .ssh-exit-mark { color: var(--danger); }
-  .ssh-exit-pip { opacity: 0.5; }
-  @keyframes sshExitIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 
   /* tty-wait well — blank output line with the cursor parked on it. */
   .ssh-wait { padding: 2px 11px 8px; line-height: 1.55; display: flex; align-items: center; }

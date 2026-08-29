@@ -3,32 +3,23 @@
 > Current release only. Older release notes remain in Git history and on the
 > [GitHub releases page](https://github.com/Blazzer10200/rift-tauri/releases).
 
-## v0.154.0 — Calmer reasoning and compact controls
+## v0.155.0 — Organized output and queue flow
 
-- Reasoning now uses one stable, non-pulsing status row. Plaintext reasoning
-  stays collapsed unless opened, so provider state changes no longer flash or
-  repeatedly reflow the transcript.
-- The model selector now separates ChatGPT and Claude into compact tabs, keeps
-  the three primary ChatGPT choices visible, folds compatibility and unavailable
-  models under **Other models**, and groups speed/effort under **Response**.
-- ChatGPT plan-limit pills in the status bar now open a live in-chat usage
-  popover, matching Claude, instead of navigating away to AI Health.
-
-## v0.153.0 — Reliable ChatGPT activity and commands
-
-- ChatGPT command, tool, and file activity now appears as work starts instead of
-  disappearing until the final answer.
-- Added, edited, moved, and deleted files render as individual cards with
-  readable unified diffs and accurate line counts.
-- Live command output and MCP progress update pending cards; completed output
-  remains authoritative and replaces the partial stream.
-- Successful MCP calls no longer turn red when App Server sends `error: null`,
-  and dynamic tools retain their current structured results and success state.
-- Current App Server plan, image, sleep, review, agent, and compaction items are
-  normalized into Rift's shared activity surfaces.
-- The slash-command rail now has stable provider-aware lanes, calmer styling,
-  description/source search, deterministic selection, and correct `/` versus
-  `$` insertion for Claude commands and ChatGPT account skills.
+- Completed turns now keep the final answer in the open and fold commands,
+  reasoning, and other process evidence into one expandable **Work completed**
+  receipt instead of repeating completion badges and footers.
+- Long command results use progressive previews in the transcript and open the
+  complete output in a focused, copyable viewer, eliminating nested transcript
+  scrollbars without hiding access to evidence.
+- Queued follow-ups now live in one ordered, collapsible **Next up** shelf with
+  a single local count, automatic-send context, and quieter edit/remove actions.
+- The composer no longer pulses while a turn is active, duplicates queue state,
+  or surfaces a second plan-status chip beside the model. Workspace and branch
+  context are combined into one compact breadcrumb.
+- Stream rendering settings now describe the answer-first receipt hierarchy and
+  process-detail controls accurately.
+- The canonical frontend test gate now uses a bounded four-worker pool, avoiding
+  a reproduced Vitest shutdown stall without forcing slow serial execution.
 
 ## Known issues
 

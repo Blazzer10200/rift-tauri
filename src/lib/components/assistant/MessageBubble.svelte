@@ -91,9 +91,8 @@
     return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
   });
 
-  // Live activity label + token tally now live in the composer's LivePills
-  // (single source of in-flight truth, down by the prompt) — the in-bubble
-  // strips were de-duplicated to a quiet dots pulse (see .stage-strip below).
+  // Live activity and token accounting belong to the turn receipt. The
+  // in-bubble strips stay de-duplicated as a quiet dots pulse (see below).
 
   const plainText = $derived.by(() => {
     if (streaming) return "";

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { messageToTurn, parseAskUserResult, groupNames, workLineMode, isFillerSay, classifySay, outputPeek, groupBlocks, shellFlavor, resultMeta, splitOutput, nextRevealTier, isPlanArtifact, REVEAL_COLLAPSED, REVEAL_EXPANDED, REVEAL_SLACK, stripAnsi, ansiLines, classifyShellLine, shellCheckKind, parseCheckSummary, parseGrepLine, parseReadOutput, splitOutputFold, FOLD_TAIL, trimCmd, shellLabel } from "./streamModel";
+import { messageToTurn, parseAskUserResult, groupNames, workLineMode, isFillerSay, classifySay, outputPeek, groupBlocks, answerStartIndex, shellFlavor, resultMeta, splitOutput, nextRevealTier, isPlanArtifact, REVEAL_COLLAPSED, REVEAL_EXPANDED, REVEAL_SLACK, stripAnsi, ansiLines, classifyShellLine, shellCheckKind, parseCheckSummary, parseGrepLine, parseReadOutput, splitOutputFold, FOLD_TAIL, trimCmd, shellLabel } from "./streamModel";
 import type { StreamTool } from "./streamModel";
 import type { ChatMessage } from "$lib/state/assistant.svelte";
 
@@ -371,6 +371,41 @@ describe("classifySay — narration weight (filler / connective / prose)", () =>
   it("multi-line or code-bearing → prose", () => {
     expect(classifySay("Done.\nHere's what changed and why.")).toBe("prose");
     expect(classifySay("Run ```npm test``` to confirm.")).toBe("prose");
+  });
+});
+
+describe("answerStartIndex — completed-turn hierarchy", () => {
+  const groupsFor = (blocks: unknown[]) => groupBlocks(messageToTurn(msg(blocks)).blocks);
+
+  it("keeps an entirely textual reply visible as the answer", () => {
+    const groups = groupsFor([text("First paragraph."), text("Second paragraph.")]);
+    expect(answerStartIndex(groups)).toBe(0);
+  });
+
+  it("folds setup narration and work while leaving trailing prose visible", () => {
+    const groups = groupsFor([
+      text("I'll inspect the repository."),
+      tool("Read"),
+      tool("Grep"),
+      text("The repository is clean and one commit ahead."),
+    ]);
+    expect(groups.map((g) => g.type)).toEqual(["say", "work", "say"]);
+    expect(answerStartIndex(groups)).toBe(2);
+  });
+
+  it("keeps a tool-only turn entirely inside process evidence", () => {
+    const groups = groupsFor([tool("Read"), tool("Grep")]);
+    expect(answerStartIndex(groups)).toBe(groups.length);
+  });
+
+  it("treats a mid-turn steer as process and keeps the response after it", () => {
+    const groups = groupsFor([
+      tool("Read"),
+      { type: "steer", text: "Also check the issue tracker.", images: 0, files: 0 },
+      text("There are six open issues."),
+    ]);
+    expect(groups.map((g) => g.type)).toEqual(["work", "steer", "say"]);
+    expect(answerStartIndex(groups)).toBe(2);
   });
 });
 

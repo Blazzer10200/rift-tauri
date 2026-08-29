@@ -14,14 +14,12 @@
   import { invoke } from "@tauri-apps/api/core";
   import AttachmentsRow from "./composer/AttachmentsRow.svelte";
   import QueueRail from "./composer/QueueRail.svelte";
-  import LivePills from "./composer/LivePills.svelte";
   import EnhanceBar from "./composer/EnhanceBar.svelte";
   import SlashMenu from "./composer/SlashMenu.svelte";
   import UsagePanel from "./composer/UsagePanel.svelte";
   import MentionPopover from "./composer/MentionPopover.svelte";
   import SettingsMenu from "./composer/SettingsMenu.svelte";
   import CtxRing from "./composer/CtxRing.svelte";
-  import PlanChip from "./composer/PlanChip.svelte";
   import PermMenu from "./composer/PermMenu.svelte";
   import {
     MODEL_OPTIONS, MODE_OPTIONS,
@@ -127,10 +125,7 @@
       : null,
   );
 
-  // Pending rail (queue chips + clear) extracted to composer/QueueRail.svelte (C3).
-
-  // Live-activity pills + idle kbd-hint (the toolbar's middle slot) extracted
-  // to composer/LivePills.svelte (C4) — incl. the 1s `now` ticker.
+  // Pending messages are owned by the single ordered shelf in QueueRail.
 
   function setDraft(v: string) { if (tab) tab.draft = v; }
 
@@ -1523,25 +1518,23 @@
     <div class="composer" class:hero={hero} class:streaming={streaming} class:enchanting={enhancing} data-mode={mode}>
       {#if !hero && wsRoot}
         <div class="ctx-chips" aria-label="Workspace context">
-          <span class="ctx-chip" use:tooltip={wsRoot}>
-            <Folder size={11} />
-            <span class="cc-label">{wsFolderName}</span>
-          </span>
-          {#if assistant.workspaceBranch}
-            {#if ghActive}
-              <button class="ctx-chip" type="button" bind:this={ghAnchor}
-                onclick={() => (ghOpen = !ghOpen)} use:tooltip={"GitHub — branch status"}
-                aria-haspopup="dialog" aria-expanded={ghOpen}>
-                <GitBranch size={11} />
-                <span class="cc-label">{assistant.workspaceBranch}</span>
-                {#if github.dot !== "none"}<span class="gh-dot {github.dot}"></span>{/if}
-              </button>
-            {:else}
-              <span class="ctx-chip" use:tooltip={"Current git branch"}>
-                <GitBranch size={11} />
-                <span class="cc-label">{assistant.workspaceBranch}</span>
-              </span>
-            {/if}
+          {#if ghActive && assistant.workspaceBranch}
+            <button class="ctx-crumb" type="button" bind:this={ghAnchor}
+              onclick={() => (ghOpen = !ghOpen)} use:tooltip={`Workspace · ${wsRoot}\nGitHub branch status`}
+              aria-haspopup="dialog" aria-expanded={ghOpen}>
+              <Folder size={11} /><span class="cc-label">{wsFolderName}</span>
+              <span class="ctx-slash" aria-hidden="true">/</span>
+              <GitBranch size={11} /><span class="cc-label">{assistant.workspaceBranch}</span>
+              {#if github.dot !== "none"}<span class="gh-dot {github.dot}"></span>{/if}
+            </button>
+          {:else}
+            <span class="ctx-crumb" use:tooltip={wsRoot}>
+              <Folder size={11} /><span class="cc-label">{wsFolderName}</span>
+              {#if assistant.workspaceBranch}
+                <span class="ctx-slash" aria-hidden="true">/</span>
+                <GitBranch size={11} /><span class="cc-label">{assistant.workspaceBranch}</span>
+              {/if}
+            </span>
           {/if}
         </div>
         {#if ghOpen && ghAnchor}
@@ -1808,8 +1801,6 @@
           {/if}
         </div>
 
-        <LivePills {queue} />
-
         <div class="cbar-r">
           <!-- Model + effort picker — ONE pill (cont.127 → unified
                2026-07-17). Opens the unified SettingsMenu (models · effort). -->
@@ -1855,8 +1846,6 @@
             />
           {/if}
 
-          <PlanChip {tab} />
-
           {#if paneCtxTokens > 0}
             <CtxRing
               pct={paneCtxPct}
@@ -1888,9 +1877,6 @@
               <span class="icon-slot" class:active={mode === "send" || mode === "queue"}><Send size={14} /></span>
               <span class="icon-slot" class:active={mode === "stop"}><Square size={12} fill="currentColor" /></span>
             </span>
-            {#if queue.length > 0}
-              <span class="send-count" aria-hidden="true">{queue.length}</span>
-            {/if}
             {#key fireKey}
               {#if fireKey > 0}
                 <span class="send-ripple" aria-hidden="true"></span>
@@ -2013,35 +1999,13 @@
      prompt and the text you type read at the same size. */
   .composer.hero .placeholder-ghost { font-size: 14.5px; line-height: 1.55; top: 11px; left: 14px; right: 12px; }
 
-  /* Streaming = the composer visibly breathes: tinted ring (::before) + an
-     outer halo carried on the box's OWN box-shadow — pseudo shadows get
-     clipped by the well's overflow:hidden, so a halo on ::before never
-     actually painted. (The orbiting comet arc was retired 2026-07-22 —
-     traveling motion at the working edge pulled the eye off the stream.) */
+  /* The stream owns liveness. The composer gets only a static, quiet border
+     while work is in flight—no second pulse or halo competing with the active
+     output row. */
   .composer.streaming .composer-box {
-    border-color: color-mix(in oklch, var(--model-color) 55%, var(--border));
+    border-color: color-mix(in oklch, var(--model-color) 28%, var(--border));
     box-shadow:
-      0 0 20px -4px color-mix(in oklch, var(--model-color) 40%, transparent),
-      0 0 42px -4px color-mix(in oklch, var(--model-color) 22%, transparent),
       inset 0 1px 0 color-mix(in oklch, white 4%, transparent);
-  }
-  .composer.streaming .composer-box::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    border: 1.5px solid color-mix(in oklch, var(--model-color) 55%, transparent);
-    box-shadow: inset 0 0 10px color-mix(in oklch, var(--model-color) 18%, transparent);
-    pointer-events: none;
-    animation: composer-stream 2.6s ease-in-out infinite;
-    z-index: 2;
-  }
-  @keyframes composer-stream {
-    0%, 100% { opacity: 0.5; }
-    50%      { opacity: 0.85; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .composer.streaming .composer-box::before { animation: none; opacity: 0.8; }
   }
 
   .textarea-wrap {
@@ -2299,15 +2263,7 @@
     background: color-mix(in oklab, var(--warn) 10%, transparent);
   }
 
-  /* Live turn pills — additive readout that only mounts while a turn is in
-     flight (or work is queued). Sits centered between the input affordances
-     and the action cluster; the idle bar shows none of this. All pills tint to
-     the active model and open the Activity panel on click. */
-  /* Live-pills + lp-dot styles moved to composer/LivePills.svelte (C4). */
-
-  /* Send — the deck's anchor: a filled circular CTA. Dim when empty, accent-
-     tinted when ready, danger square while streaming; queued-count badge rides
-     the top-right corner. */
+  /* Send — the deck's anchor. Queue count belongs exclusively to QueueRail. */
   .send-btn {
     position: relative;
     width: 30px; height: 30px;
@@ -2341,17 +2297,6 @@
     color: var(--danger);
   }
   .send-btn.stop:hover { filter: brightness(1.1); }
-  .send-count {
-    position: absolute; top: -4px; right: -4px;
-    min-width: 15px; height: 15px; padding: 0 4px;
-    display: grid; place-items: center;
-    border-radius: 999px;
-    background: var(--model-color);
-    color: oklch(0.16 0.01 250);
-    font-size: 9.5px; font-weight: 700; line-height: 1;
-    font-variant-numeric: tabular-nums;
-    box-shadow: 0 0 0 2px var(--bg);
-  }
   /* Launch ripple — two concentric rings expand outward on every fire().
      Mounted by {#key fireKey}; self-removed when the animation ends via
      the unmount on the next key flip. */
@@ -2567,8 +2512,6 @@
   @media (prefers-reduced-motion: reduce) {
     .cbtn.reveal { animation: none; }
   }
-  /* kbd-hint styles moved to composer/LivePills.svelte (C4). */
-
   /* Unified settings pill — one icon-only control opening the model /
      thinking-depth / permission-mode panel. `data-mode` faintly tints the
      icon so the current permission posture (unguarded vs cautious) reads at
@@ -2646,13 +2589,19 @@
   .model-pill:hover :global(.pill-chev), .model-pill.open :global(.pill-chev) { opacity: 1; }
   .model-pill.open :global(.pill-chev) { transform: rotate(180deg); color: var(--fg-muted); }
 
-  /* Context chips row — layout only; the chip itself (.ctx-chip/.cc-label)
-     lives in app.css, shared w/ the Welcome launchpad (one chip dialect). */
+  /* One quiet workspace breadcrumb instead of two competing pills. */
   .ctx-chips {
-    display: flex; align-items: center; gap: 4px;
-    margin: 0 2px 6px;
-    min-width: 0;
+    display: flex; align-items: center; margin: 0 2px 6px; min-width: 0;
   }
+  .ctx-crumb { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%;
+    height: 22px; padding: 0 7px; border: 0; border-radius: 6px; background: transparent;
+    color: var(--fg-faint); font: inherit; font-size: 10.5px; cursor: default; }
+  button.ctx-crumb { cursor: pointer; }
+  button.ctx-crumb:hover { background: var(--surface-hover); color: var(--fg-muted); }
+  button.ctx-crumb:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--ring); }
+  .ctx-crumb :global(svg) { flex: none; }
+  .ctx-crumb .cc-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ctx-slash { color: var(--border-strong); }
 
   /* #87: ghost prompt-suggestion chip (CLI --prompt-suggestions). Quiet by
      default — faint text + dashed hairline on the well fill; accent on hover. */

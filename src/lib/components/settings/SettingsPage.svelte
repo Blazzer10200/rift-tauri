@@ -763,12 +763,12 @@
           <div class="card-tt">Chat rendering</div>
           <div class="card-sub">How model activity and replies are laid out.</div>
           <div class="ctl-row tight">
-            <div><div class="ctl-t">Stream view</div><div class="ctl-s">A boxless, text-first activity stream instead of classic bubbles.</div></div>
+            <div><div class="ctl-t">Stream view</div><div class="ctl-s">A text-first reply with completed work folded into an expandable receipt.</div></div>
             <button class="rift-toggle" class:on={uiPrefs.streamMode} role="switch" aria-checked={uiPrefs.streamMode} aria-label="Stream view" type="button" onclick={() => uiPrefs.toggleStreamMode()}><span class="rift-toggle-knob"></span></button>
           </div>
           {#if uiPrefs.streamMode}
             <div class="ctl-row tight">
-              <div><div class="ctl-t">Density preset{#if uiPrefs.activePreset === null}<span class="preset-custom">Custom mix</span>{/if}</div><div class="ctl-s">Sets the three dials below together — fine-tune any of them after.</div></div>
+              <div><div class="ctl-t">Process detail{#if uiPrefs.activePreset === null}<span class="preset-custom">Custom mix</span>{/if}</div><div class="ctl-s">Controls what appears while work is live and inside the completed receipt.</div></div>
               <div class="seg" role="radiogroup" aria-label="Density preset">
                 {#each DENSITY_PRESETS as p (p.id)}
                   <button class:on={uiPrefs.activePreset === p.id} role="radio" aria-checked={uiPrefs.activePreset === p.id} tabindex={uiPrefs.activePreset === p.id || (uiPrefs.activePreset === null && p.id === DENSITY_PRESETS[0].id) ? 0 : -1} type="button" onkeydown={onRadioKey} onclick={() => uiPrefs.applyPreset(p.id)}>{p.label}</button>
@@ -805,7 +805,7 @@
             <div class="code-preview" aria-hidden="true">
               <div class="code-preview-bar"><span></span><span></span><span></span><span class="code-preview-name mono">stream preview · updates live</span></div>
               <div class="sp-stage mono">
-                <div class="sp-head">✦ Working for 12s</div>
+                <div class="sp-head">✦ Live process · 3 actions · 12s</div>
                 {#if uiPrefs.narration === "chatty"}
                   <div class="sp-prose">Now checking the composer wiring before I edit anything.</div>
                 {:else if uiPrefs.narration === "balanced"}

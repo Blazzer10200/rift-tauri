@@ -1,6 +1,6 @@
 {
   "name": "rift-tauri",
-  "version": "0.154.0",
+  "version": "0.155.0",
   "description": "A local-workspace coding assistant for Windows with Claude and ChatGPT in a native Tauri shell.",
   "type": "module",
   "scripts": {
@@ -12,7 +12,7 @@
     "check:tokens": "node design-system/check-tokens.mjs",
     "doctor": "pwsh -NoProfile -File scripts/project-doctor.ps1",
     "tauri": "tauri",
-    "test": "vitest run",
+    "test": "vitest run --maxWorkers=4",
     "verify": "pwsh -NoProfile -File scripts/verify.ps1",
     "verify:frontend": "pwsh -NoProfile -File scripts/verify.ps1 -FrontendOnly",
     "verify:rust": "pwsh -NoProfile -File scripts/verify.ps1 -RustOnly",

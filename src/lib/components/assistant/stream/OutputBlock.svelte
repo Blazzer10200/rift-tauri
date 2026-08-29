@@ -1,18 +1,19 @@
 <script lang="ts">
-  import { untrack } from "svelte";
-  import { ChevronDown, ChevronUp } from "@lucide/svelte";
+  import { tick, untrack } from "svelte";
+  import { Check, ChevronDown, ChevronUp, Copy, Maximize2, X } from "@lucide/svelte";
+  import { portal } from "$lib/actions/portal";
   import {
     splitOutput, splitOutputFold, nextRevealTier, ansiLines, classifyShellLine,
-    OUTPUT_CHAR_CAP,
+    stripAnsi, OUTPUT_CHAR_CAP,
     type RevealTier, type AnsiSeg,
   } from "./streamModel";
 
   // Progressive-reveal tool output — THE shared output body for both trees
   // (live stream + history ToolChip). Long output caps at a glanceable head,
   // then steps up through "Show more" tiers (collapsed → expanded → all)
-  // instead of dumping the reader into a tiny inner-scroll box. Only once
-  // EVERYTHING is revealed and it's still tall does the block become a bounded
-  // scroll.
+  // instead of dumping the reader into a tiny inner-scroll box. Very long full
+  // output opens in a dedicated inspector so the transcript keeps exactly one
+  // vertical scrollbar.
   //
   //  - tone "plain": one <pre>, text as-is (already ANSI-stripped upstream).
   //  - tone "shell": per-line render w/ real ANSI SGR color + a conservative
@@ -54,9 +55,7 @@
   const foldView = $derived(fold === "head-tail" ? splitOutputFold(body, tier) : null);
   const next = $derived(nextRevealTier(tier, view.total));
   const collapsible = $derived(tier !== "collapsed" && nextRevealTier("collapsed", view.total) !== null);
-  // Reveal-all makes the block a bounded scroll only when there's genuinely a
-  // lot; short "all" output just renders at its natural height.
-  const scrolls = $derived(tier === "all" && view.total > 60);
+  const opensInspector = $derived(next === "all" && view.total > 60);
 
   // Shell tone: per-line ANSI segments (SGR state carried across lines) +
   // semantic tone per line. Indices align with view.lines.
@@ -64,13 +63,55 @@
   const cleanLine = (i: number) =>
     segLines ? segLines[i].map((s) => s.text).join("") : view.lines[i];
 
-  function more() { touched = true; if (next) tier = next; }
+  let inspectorOpen = $state(false);
+  let inspectorEl = $state<HTMLElement | null>(null);
+  let inspectorTrigger = $state<HTMLButtonElement | null>(null);
+  let copied = $state(false);
+  let copyTimer: ReturnType<typeof setTimeout> | null = null;
+  const inspectorText = $derived(tone === "shell" ? stripAnsi(body) : body);
+
+  async function openInspector() {
+    touched = true;
+    inspectorOpen = true;
+    await tick();
+    inspectorEl?.focus();
+  }
+  function closeInspector() {
+    inspectorOpen = false;
+    void tick().then(() => inspectorTrigger?.focus());
+  }
+  async function copyInspector() {
+    try {
+      await navigator.clipboard.writeText(inspectorText);
+      copied = true;
+      if (copyTimer) clearTimeout(copyTimer);
+      copyTimer = setTimeout(() => { copied = false; copyTimer = null; }, 1200);
+    } catch (e) {
+      console.warn("output copy failed", e);
+    }
+  }
+  $effect(() => {
+    if (!inspectorOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { e.stopPropagation(); closeInspector(); }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  });
+  $effect(() => () => { if (copyTimer) clearTimeout(copyTimer); });
+
+  function more() {
+    touched = true;
+    if (opensInspector) { void openInspector(); return; }
+    if (next) tier = next;
+  }
   function collapse() { touched = true; tier = "collapsed"; }
 
-  // Live tail-follow: while streaming and untouched, jump the cap to "all" so
-  // the freshest lines show as they land (bounded scroll contains it).
+  // Live output stays at the expanded inline tier. The CLI delivers command
+  // output as a completed body, so revealing everything created a second
+  // scrollbar without adding useful live feedback.
   $effect(() => {
-    if (live && !touched) tier = "all";
+    if (live && !touched) tier = "expanded";
   });
 
   // Staggered entrance — output arrives whole (results aren't token-streamed),
@@ -81,12 +122,12 @@
 
 <div class="oblock" data-tone={tone}>
   {#if tone === "shell" && segLines}
-    <div class="oblock-term" class:scrolls>
+    <div class="oblock-term">
       {#if fold === "head-tail" && foldView && foldView.hidden > 0}
         {#each foldView.lines.slice(0, foldView.head) as _, i (i)}
           <div class="term-line {classifyShellLine(cleanLine(i))}" style:animation-delay="{lineDelay(i)}ms">{#each segLines[i] as seg, si (si)}<span class={seg.cls}>{seg.text}</span>{:else}{" "}{/each}</div>
         {/each}
-        <button class="oblock-foldbtn" type="button" onclick={more}>
+        <button class="oblock-foldbtn" bind:this={inspectorTrigger} type="button" onclick={more}>
           ··· {foldView.hidden} line{foldView.hidden === 1 ? "" : "s"} hidden ···
         </button>
         {#each foldView.lines.slice(foldView.total - foldView.tail) as _, ti (ti)}
@@ -103,14 +144,14 @@
       {/if}
     </div>
   {:else}
-    <pre class="oblock-out" class:scrolls>{view.lines.slice(0, view.shown).join("\n")}</pre>
+    <pre class="oblock-out">{view.lines.slice(0, view.shown).join("\n")}</pre>
   {/if}
   {#if (next && !(fold === "head-tail" && foldView && foldView.hidden > 0)) || collapsible || capped}
     <div class="oblock-acts">
       {#if next && !(fold === "head-tail" && foldView && foldView.hidden > 0)}
-        <button class="oblock-btn" type="button" onclick={more}>
-          <ChevronDown size={12} strokeWidth={2.2} />
-          Show {view.hidden} more line{view.hidden === 1 ? "" : "s"}
+        <button class="oblock-btn" class:inspect={opensInspector} bind:this={inspectorTrigger} type="button" onclick={more}>
+          {#if opensInspector}<Maximize2 size={12} strokeWidth={2.2} />{:else}<ChevronDown size={12} strokeWidth={2.2} />{/if}
+          {opensInspector ? `Open all ${view.total} lines` : `Show ${view.hidden} more line${view.hidden === 1 ? "" : "s"}`}
         </button>
       {/if}
       {#if collapsible}
@@ -126,6 +167,29 @@
   {/if}
 </div>
 
+{#if inspectorOpen}
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="output-scrim" use:portal onclick={(e) => { if (e.target === e.currentTarget) closeInspector(); }}>
+    <div class="output-inspector" bind:this={inspectorEl} role="dialog" aria-modal="true" aria-label="Full command output" tabindex="-1">
+      <header class="oi-head">
+        <div class="oi-title">
+          <span>Output</span>
+          <span class="oi-count">{view.total} line{view.total === 1 ? "" : "s"}</span>
+          {#if capped}<span class="oi-capped">truncated</span>{/if}
+        </div>
+        <div class="oi-actions">
+          <button type="button" class="oi-btn" onclick={copyInspector} aria-label="Copy full output">
+            {#if copied}<Check size={13} /> Copied{:else}<Copy size={13} /> Copy{/if}
+          </button>
+          <button type="button" class="oi-close" onclick={closeInspector} aria-label="Close full output"><X size={15} /></button>
+        </div>
+      </header>
+      <pre class="oi-body">{inspectorText}</pre>
+    </div>
+  </div>
+{/if}
+
 <style>
   .oblock { display: flex; flex-direction: column; }
   .oblock-out {
@@ -133,11 +197,6 @@
     font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.5;
     color: var(--fg-2); white-space: pre-wrap; word-break: break-word;
   }
-  /* Only a fully-revealed, genuinely-long block scrolls — everything shorter
-     renders at natural height so "Show more" is the primary affordance, not an
-     inner scrollbar you have to fight. */
-  .oblock-out.scrolls, .oblock-term.scrolls { max-height: 460px; overflow: auto; }
-
   /* Terminal tone — per-line divs so ANSI segments + semantic tones can paint. */
   .oblock-term {
     padding: 8px 11px;
@@ -195,7 +254,48 @@
     transition: background var(--dur-fast), color var(--dur-fast);
   }
   .oblock-btn:hover { background: var(--surface-hover); color: var(--fg-2); }
+  .oblock-btn.inspect { color: var(--accent); }
   .oblock-btn.ghost { color: var(--fg-faint); }
   .oblock-btn :global(svg) { flex: none; }
   .oblock-capnote { margin-left: auto; font-size: 10px; font-style: italic; color: var(--fg-faint); }
+
+  /* Full output leaves the transcript entirely. The inspector owns its own
+     viewport, so the conversation never nests one scrollbar inside another. */
+  .output-scrim {
+    position: fixed; inset: 0; z-index: 1800;
+    display: flex; justify-content: flex-end;
+    background: rgb(0 0 0 / 0.48);
+    animation: oiScrimIn 160ms ease-out both;
+  }
+  .output-inspector {
+    width: min(760px, calc(100vw - 32px)); height: 100%; min-width: 0;
+    display: grid; grid-template-rows: auto minmax(0, 1fr);
+    background: var(--bg); border-left: 1px solid var(--border-strong);
+    box-shadow: -24px 0 60px rgb(0 0 0 / 0.38);
+    outline: none; animation: oiPanelIn 180ms var(--ease-page) both;
+  }
+  .oi-head { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    min-height: 48px; padding: 0 12px 0 16px; border-bottom: 1px solid var(--border); }
+  .oi-title, .oi-actions { display: inline-flex; align-items: center; gap: 8px; }
+  .oi-title { min-width: 0; color: var(--fg); font-size: var(--fs-sm); font-weight: 650; }
+  .oi-count { font-family: var(--font-mono); font-size: var(--fs-xs); font-weight: 500; color: var(--fg-faint); }
+  .oi-capped { padding: 1px 6px; border-radius: 999px; font-size: 9.5px; color: var(--warn); background: var(--warn-soft); }
+  .oi-btn, .oi-close { display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: 28px; border: 0; border-radius: 7px; background: transparent; color: var(--fg-muted);
+    font: inherit; font-size: var(--fs-xs); cursor: pointer; }
+  .oi-btn { padding: 0 9px; }
+  .oi-close { width: 28px; padding: 0; }
+  .oi-btn:hover, .oi-close:hover { background: var(--surface-hover); color: var(--fg); }
+  .oi-btn:focus-visible, .oi-close:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--ring); }
+  .oi-body { min-width: 0; margin: 0; padding: 14px 16px 28px; overflow: auto;
+    font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.55;
+    white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg-2); background: var(--bg-inset); }
+  @keyframes oiScrimIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes oiPanelIn { from { opacity: 0; transform: translateX(18px); } to { opacity: 1; transform: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .output-scrim, .output-inspector { animation: none; }
+  }
+  @media (max-width: 620px) {
+    .output-inspector { width: 100%; }
+  }
 </style>

@@ -91,13 +91,6 @@
   100% { opacity: 1; transform: scale(1); }
 }
 @keyframes headRise { from { opacity: 0; transform: translateX(-8px); } to { opacity: 1; transform: none; } }
-/* Hover timestamp — quiet mono at the head's right edge; invisible until the
-   pointer asks "when?". */
-/* Clock time rides the receipt now (head is live-only) — invisible until hover. */
-.sapplied .sapplied-time { font-family: var(--font-mono, monospace); font-size: 9.5px;
-  color: var(--fg-faint); letter-spacing: 0.02em; opacity: 0; transition: opacity var(--dur-fast) ease-out; }
-.sturn:hover .sapplied-time { opacity: 0.9; }
-
 /* bright narration — the only high-contrast text in the turn */
 .snarr { color: var(--fg-2); margin: var(--stream-gap) 0; animation: blockIn var(--dur-base) var(--ease-page) both; }
 
@@ -415,64 +408,67 @@
   .sturn-head, .snarr, .snarr-beat, .sfooter, .sstall-note, .scompact-card,
   .wline, .wline-list, .wline-active, .wbrow, .splan, .sxplan, .sweb, .sresult { animation: none; }
   .scompact-fill { transition: none; }
-  .sturn-head.live .sh-dot, .wline-active .wa-dot, .wb-dot.live, .sapplied .bgagent-dot { animation: none; }
+  .sturn-head.live .sh-dot, .wline-active .wa-dot, .wb-dot.live { animation: none; }
   .wline-active::after { animation: none; background: none; }
   .sturn-body.railed.live::after { animation: none; background: none; }
 }
 
-/* turn footer — a quiet receipt pill; tone varies by what the turn actually did */
-.sapplied { display: inline-flex; align-items: center; gap: 10px; margin: var(--stream-gap-turn) 0 2px;
-  padding: 3px 11px 3px 9px; border-radius: 999px; width: fit-content;
-  font-size: var(--fs-sm); color: var(--fg-subtle);
-  background: color-mix(in oklab, var(--fg) 4%, transparent);
-  border: 1px solid color-mix(in oklab, var(--border) 75%, transparent); }
-.sapplied[data-outcome="applied"] {
-  background: color-mix(in oklab, var(--ok) 6%, transparent);
-  border-color: color-mix(in oklab, var(--ok) 20%, transparent); }
-.sapplied[data-outcome="failed"] {
-  background: color-mix(in oklab, var(--danger) 6%, transparent);
-  border-color: color-mix(in oklab, var(--danger) 20%, transparent); }
-.sapplied .ok { display: inline-flex; align-items: center; gap: 5px; color: var(--ok); font-weight: 600; }
-/* "Done" (ran tools, no file changes) — quieter than Applied, no accent claim */
-.sapplied .ran { display: inline-flex; align-items: center; gap: 5px; color: var(--fg-muted); font-weight: 600; }
-/* "Changes failed" — edits attempted but all errored */
-.sapplied .bad { display: inline-flex; align-items: center; gap: 5px; color: var(--danger); font-weight: 600; }
-/* background agent still out when the turn ended — activity, not completion:
-   breathing live dot + status-busy ink instead of a checkmark claim */
-.sapplied .bgagent { display: inline-flex; align-items: center; gap: 6px; color: var(--status-busy); font-weight: 600; }
-.sapplied .bgagent-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--status-busy); flex: none;
-  animation: streamLivePulse var(--pulse-live) ease-out infinite; }
-.sapplied .bgagent-note { color: var(--fg-subtle); font-size: var(--fs-xs); }
-/* distinct-file count next to "Applied" */
-.sapplied .files { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--ok); }
-.sapplied .sapplied-meta { color: var(--fg-faint); font-family: var(--font-mono); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
-/* a faint separator dot before the meta group keeps time+cost reading as a
-   distinct trailing cluster from the Applied/Done verb */
-.sapplied .sapplied-meta::before {
-  content: ""; display: inline-block; vertical-align: middle;
-  width: 3px; height: 3px; margin-right: 9px; border-radius: 50%;
-  background: var(--fg-faint); opacity: 0.55;
+/* Completed-turn hierarchy: process evidence becomes one compact disclosure,
+   while trailing prose remains in the open as the answer. The receipt is the
+   only framed element at rest; expanding it unfolds the detailed ledger below. */
+.sactivity { width: fit-content; max-width: 100%; margin: 2px 0 var(--stream-gap-turn); }
+.sactivity.open { width: 100%; }
+.sactivity-head {
+  display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0;
+  min-height: 30px; padding: 5px 9px; border-radius: 9px;
+  border: 1px solid color-mix(in oklab, var(--border) 78%, transparent);
+  background: color-mix(in oklab, var(--fg) 3.5%, transparent);
+  color: var(--fg-subtle); font: inherit; font-size: var(--fs-sm); text-align: left;
+  cursor: pointer; transition: color var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast), border-radius var(--dur-fast);
 }
-/* cost — quiet prominence: the one number worth a glance, lifted out of the
-   faint meta with a soft accent-tinted chip (not boxed/loud) */
-.sapplied .sapplied-cost {
-  display: inline-flex; align-items: center;
-  padding: 1px 7px; border-radius: 6px;
-  font-family: var(--font-mono); font-size: var(--fs-xs); font-variant-numeric: tabular-nums;
-  color: color-mix(in oklab, var(--accent) 78%, var(--fg));
-  background: color-mix(in oklab, var(--accent) 9%, transparent);
-  cursor: default;
+.sactivity-head:hover { color: var(--fg-2); border-color: var(--border-strong); background: color-mix(in oklab, var(--fg) 5%, transparent); }
+.sactivity-head:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--ring); }
+.sactivity.open .sactivity-head { border-radius: 9px 9px 0 0; }
+.sactivity[data-outcome="applied"] .sactivity-head { border-color: color-mix(in oklab, var(--ok) 20%, var(--border)); }
+.sactivity[data-outcome="failed"] .sactivity-head { border-color: color-mix(in oklab, var(--danger) 28%, var(--border)); }
+.sactivity-chev { display: inline-flex; flex: none; color: var(--fg-faint); transition: transform var(--dur-fast), color var(--dur-fast); }
+.sactivity-chev.open { transform: rotate(90deg); }
+.sactivity-head:hover .sactivity-chev { color: var(--accent); }
+.sactivity-mark { display: inline-grid; place-items: center; flex: none; color: var(--ok); }
+.sactivity[data-outcome="failed"] .sactivity-mark { color: var(--danger); }
+.sactivity-title { min-width: 0; font-weight: 600; color: var(--fg-muted); white-space: nowrap; }
+.sactivity-detail { flex: none; padding-left: 1px; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-faint); white-space: nowrap; }
+.sactivity-meta { display: inline-flex; align-items: center; gap: 7px; flex: none; margin-left: auto;
+  font-family: var(--font-mono); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; color: var(--fg-faint); }
+.sactivity-meta > span + span::before { content: "·"; margin-right: 7px; opacity: 0.45; }
+.sactivity-cost, .sactivity-fast { color: color-mix(in oklab, var(--accent) 72%, var(--fg-muted)); }
+.sactivity-fast { display: inline-flex; align-items: center; gap: 3px; }
+.sactivity-time { opacity: 0; max-width: 0; overflow: hidden; transition: opacity var(--dur-fast), max-width var(--dur-fast); }
+.sturn:hover .sactivity-time, .sactivity-head:focus-visible .sactivity-time { opacity: 0.85; max-width: 90px; }
+.sactivity-body {
+  padding: 2px 12px 7px;
+  border: 1px solid color-mix(in oklab, var(--border) 78%, transparent); border-top: 0;
+  border-radius: 0 0 9px 9px; background: color-mix(in oklab, var(--bg-inset) 42%, transparent);
 }
-/* fast-mode confirmation — same quiet-chip anatomy as cost so the trailing
-   meta cluster reads as one system; only shown when the CLI confirmed the
-   turn actually ran fast (honest state, not a request echo) */
-.sapplied .sapplied-fast {
-  display: inline-flex; align-items: center; gap: 3px;
-  padding: 1px 7px; border-radius: 6px;
-  font-family: var(--font-mono); font-size: var(--fs-xs);
-  color: color-mix(in oklab, var(--accent) 78%, var(--fg));
-  background: color-mix(in oklab, var(--accent) 9%, transparent);
-  cursor: default;
+.sactivity-body .sturn-body > :first-child { margin-top: 8px; }
+.sactivity-body .sturn-body > :last-child { margin-bottom: 5px; }
+.sanswer { min-width: 0; }
+.sanswer > .snarr:first-child { margin-top: 0; }
+
+/* Text-only answers do not need a generic "Done" badge. Their receipt is just
+   quiet provenance: elapsed time, tokens, cost, and fast confirmation. */
+.sreceipt { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 5px 0 0;
+  font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+.sreceipt > span + span::before { content: "·"; margin-right: 8px; opacity: 0.45; }
+.sreceipt-cost, .sreceipt-fast { color: color-mix(in oklab, var(--accent) 72%, var(--fg-muted)); }
+.sreceipt-fast { display: inline-flex; align-items: center; gap: 3px; }
+.sreceipt-time { opacity: 0; transition: opacity var(--dur-fast); }
+.sturn:hover .sreceipt-time, .sturn:focus-within .sreceipt-time { opacity: 0.85; }
+
+@media (max-width: 720px) {
+  .sactivity-head { flex-wrap: wrap; }
+  .sactivity-meta { width: 100%; margin-left: 27px; }
+  .sactivity-time { display: none; }
 }
 
 /* per-turn hover actions (copy / retry) */

@@ -1,6 +1,7 @@
 <script lang="ts">
   import "$lib/styles/stream.css";
-  import { Check, Copy, RotateCcw, AlertTriangle, Zap, CornerDownRight } from "@lucide/svelte";
+  import { Check, Copy, RotateCcw, AlertTriangle, Zap, CornerDownRight, ChevronRight } from "@lucide/svelte";
+  import { slide } from "svelte/transition";
   import Markdown from "../Markdown.svelte";
   import StreamThinking from "./StreamThinking.svelte";
   import WorkLine from "./WorkLine.svelte";
@@ -13,7 +14,7 @@
   import StreamShell from "./StreamShell.svelte";
   import StreamExitPlan from "./StreamExitPlan.svelte";
   import PermissionBar from "../PermissionBar.svelte";
-  import { messageToTurn, groupBlocks, fmtDur, classifySay, VERB_ING, VERB_PAST, tasksToPlanItems, type StreamTool } from "./streamModel";
+  import { messageToTurn, groupBlocks, answerStartIndex, fmtDur, classifySay, VERB_ING, VERB_PAST, tasksToPlanItems, type Group, type StreamTool } from "./streamModel";
   import { assistant, type ChatMessage, type TabState } from "$lib/state/assistant.svelte";
   import { uiPrefs } from "$lib/state/ui-prefs.svelte";
   import { fmtTokens, isOpenAIModel } from "$lib/state/assistant/helpers";
@@ -38,6 +39,35 @@
 
   const turn = $derived(messageToTurn(message));
   const groups = $derived(groupBlocks(turn.blocks));
+  // Completed turns separate the evidence from the answer: setup narration,
+  // thinking, tools, and mid-turn steers fold into one activity receipt while
+  // trailing prose remains visible. Live turns stay chronological so nothing
+  // moves while the user is watching it arrive.
+  const answerAt = $derived(answerStartIndex(groups));
+  const activityGroups = $derived(groups.slice(0, answerAt));
+  const answerGroups = $derived(groups.slice(answerAt));
+  const actionCount = $derived(turn.blocks.filter((b) => b.type === "tool").length);
+  const hasActivity = $derived(!!turn.thinking || activityGroups.length > 0);
+  let activityOpen = $state(false);
+  const activityTitle = $derived(
+    turn.bgAgents > 0
+      ? "Agent working in background"
+      : turn.outcome === "applied"
+        ? "Changes applied"
+        : turn.outcome === "failed"
+          ? "Changes failed"
+          : turn.outcome === "planned"
+            ? "Plan prepared"
+            : actionCount > 0
+              ? "Work completed"
+              : "Reasoning",
+  );
+  const completionTokens = $derived(
+    typeof message.outputTokens === "number" && message.outputTokens > 0 ? message.outputTokens : null,
+  );
+  const completionCost = $derived(
+    typeof message.costUsd === "number" && message.costUsd > 0 ? `$${message.costUsd.toFixed(2)}` : null,
+  );
   // Light timeline rail — a thin connecting line down the turn body so a
   // multi-step turn reads as one sequence (history's spine, minus the bullet
   // chrome; stream stays boxless). Pure-text answers skip it — indenting prose
@@ -325,22 +355,7 @@
 </script>
 
 <div class="sturn">
-  <!-- The head earns its row only for awaiting-input or compaction states.
-       StreamThinking owns reasoning from first signal through completion. -->
-  {#if streaming && (awaitingInput || compacting)}
-  <div class="sturn-head live" class:awaiting-head={awaitingInput}>
-    <span class="sh-dot"></span>
-    <span class="sh-label">{headLabel}</span>
-  </div>
-  {/if}
-
-  <div class="sturn-body" class:railed class:live={streaming}>
-  <!-- One stable reasoning row. Plaintext stays collapsed until requested. -->
-  {#if turn.thinking}
-    <StreamThinking active={turn.thinking.active} durSecs={turn.thinking.durSecs} text={turn.thinking.text} />
-  {/if}
-
-  {#each groups as g, gi (gi)}
+  {#snippet renderGroup(g: Group, gi: number)}
     {#if g.type === "say"}
       {@const sm = sayMode(g.text, streaming && gi === groups.length - 1, gi)}
       {#if sm === "hide"}
@@ -405,8 +420,83 @@
         {/if}
       {/each}
     {/if}
-  {/each}
+  {/snippet}
+
+  <!-- The head earns its row only for awaiting-input or compaction states.
+       StreamThinking owns reasoning from first signal through completion. -->
+  {#if streaming && (awaitingInput || compacting)}
+  <div class="sturn-head live" class:awaiting-head={awaitingInput}>
+    <span class="sh-dot"></span>
+    <span class="sh-label">{headLabel}</span>
   </div>
+  {/if}
+
+  {#if streaming}
+    <div class="sturn-body" class:railed class:live={streaming}>
+      <!-- Live stays chronological: nothing is regrouped while it arrives. -->
+      {#if turn.thinking}
+        <StreamThinking active={turn.thinking.active} durSecs={turn.thinking.durSecs} text={turn.thinking.text} />
+      {/if}
+      {#each groups as g, gi (gi)}{@render renderGroup(g, gi)}{/each}
+    </div>
+  {:else}
+    {#if hasActivity}
+      <section class="sactivity" data-outcome={turn.outcome} class:open={activityOpen}>
+        <button
+          class="sactivity-head"
+          type="button"
+          aria-expanded={activityOpen}
+          onclick={() => (activityOpen = !activityOpen)}
+        >
+          <span class="sactivity-chev" class:open={activityOpen}><ChevronRight size={13} /></span>
+          <span class="sactivity-mark" aria-hidden="true">
+            {#if turn.outcome === "failed"}<AlertTriangle size={12} />{:else}<Check size={12} />{/if}
+          </span>
+          <span class="sactivity-title">{activityTitle}</span>
+          {#if turn.outcome === "applied" && turn.files > 0}
+            <span class="sactivity-detail">{turn.files} file{turn.files === 1 ? "" : "s"}</span>
+          {:else if actionCount > 0}
+            <span class="sactivity-detail">{actionCount} action{actionCount === 1 ? "" : "s"}</span>
+          {/if}
+          <span class="sactivity-meta">
+            {#if turn.totalSecs >= 1}<span>{fmtDur(turn.totalSecs)}</span>{/if}
+            {#if completionTokens}<span>↑ {fmtTokens(completionTokens)}</span>{/if}
+            {#if completionCost}<span class="sactivity-cost">{completionCost}</span>{/if}
+            {#if message.fast}<span class="sactivity-fast"><Zap size={10} />fast</span>{/if}
+            {#if turnTime}<span class="sactivity-time" use:tooltip={"When this turn ran"}>{turnTime}</span>{/if}
+          </span>
+        </button>
+        {#if activityOpen}
+          <div class="sactivity-body" transition:slide={{ duration: 180 }}>
+            <div class="sturn-body" class:railed={activityGroups.some((g) => g.type === "work") || !!turn.thinking}>
+              {#if turn.thinking}
+                <StreamThinking active={false} durSecs={turn.thinking.durSecs} text={turn.thinking.text} />
+              {/if}
+              {#each activityGroups as g, gi (gi)}{@render renderGroup(g, gi)}{/each}
+            </div>
+          </div>
+        {/if}
+      </section>
+    {/if}
+
+    {#if answerGroups.length > 0}
+      <div class="sanswer">
+        {#each answerGroups as g, gi (gi)}
+          {#if g.type === "say"}<div class="snarr"><Markdown text={g.text} /></div>{/if}
+        {/each}
+      </div>
+    {/if}
+
+    {#if !hasActivity && (turn.totalSecs >= 1 || completionTokens || completionCost || message.fast)}
+      <div class="sreceipt">
+        {#if turn.totalSecs >= 1}<span>{fmtDur(turn.totalSecs)}</span>{/if}
+        {#if completionTokens}<span>↑ {fmtTokens(completionTokens)} tokens</span>{/if}
+        {#if completionCost}<span class="sreceipt-cost">{completionCost}</span>{/if}
+        {#if message.fast}<span class="sreceipt-fast"><Zap size={10} />fast</span>{/if}
+        {#if turnTime}<span class="sreceipt-time" use:tooltip={"When this turn ran"}>{turnTime}</span>{/if}
+      </div>
+    {/if}
+  {/if}
 
   {#if streaming && (compacting || !thinkingNow)}
     <!-- While a pure reasoning pass is live StreamThinking already owns the
@@ -465,33 +555,6 @@
         it'll stream as soon as a response starts. You can keep waiting or press Stop.
       </div>
     {/if}
-  {:else if !streaming}
-    <div class="sapplied" data-outcome={turn.outcome}>
-      {#if turn.outcome === "applied"}
-        <span class="ok"><Check size={13} strokeWidth={2.5} /> Applied</span>
-        <span class="files">{turn.files} file{turn.files === 1 ? "" : "s"}</span>
-      {:else if turn.outcome === "failed"}
-        <span class="bad"><AlertTriangle size={13} strokeWidth={2.5} /> Changes failed</span>
-      {:else if turn.outcome === "planned"}
-        <span class="ran"><Check size={13} strokeWidth={2.5} /> Plan proposed</span>
-      {:else if turn.bgAgents === 0}
-        <span class="ran"><Check size={13} strokeWidth={2.5} /> Done</span>
-      {/if}
-      {#if turn.bgAgents > 0}
-        <span class="bgagent" use:tooltip={"This turn sent work to a background agent. It reports back here automatically when it finishes — no need to wait."}>
-          <span class="bgagent-dot"></span>Agent working in background</span>
-        <span class="bgagent-note">you can keep chatting</span>
-      {/if}
-      {#if turn.meta}
-        <span class="sapplied-meta">{turn.meta.time}</span>
-        {#if turn.meta.tokens}<span class="sapplied-meta" use:tooltip={"Output tokens this turn generated"}>↑ {fmtTokens(turn.meta.tokens)} tokens</span>{/if}
-        {#if turn.meta.cost}<span class="sapplied-cost" use:tooltip={"Total cost of this turn"}>{turn.meta.cost}</span>{/if}
-        {#if turn.meta.fast}<span class="sapplied-fast" use:tooltip={"This provider confirmed that the turn ran with higher-speed processing. Fast can use extra credits or premium API pricing."}><Zap size={11} />fast</span>{/if}
-      {:else if turn.totalSecs >= 1}
-        <span class="sapplied-meta">{fmtDur(turn.totalSecs)}</span>
-      {/if}
-      {#if turnTime}<span class="sapplied-time" use:tooltip={"When this turn ran"}>{turnTime}</span>{/if}
-    </div>
   {/if}
 
   {#if !streaming && (plainText.length > 0 || isLast)}

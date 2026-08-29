@@ -854,6 +854,22 @@ export function groupBlocks(rawBlocks: StreamBlock[]): Group[] {
   return out;
 }
 
+/** Split a completed turn into secondary process evidence and the answer the
+ * user came for. Everything through the final non-prose event (tool work or a
+ * mid-turn steer) belongs to the activity disclosure; the trailing prose stays
+ * visible as the answer. A text-only turn therefore starts its answer at 0,
+ * while a tool-only turn returns groups.length (no answer to extract).
+ *
+ * This is deliberately structural rather than heuristic: classifySay remains
+ * responsible for live narration density, but completed turns must never hide
+ * or demote the assistant's trailing response based on wording. */
+export function answerStartIndex(groups: Group[]): number {
+  for (let i = groups.length - 1; i >= 0; i--) {
+    if (groups[i].type !== "say") return i + 1;
+  }
+  return 0;
+}
+
 const isRichKind = (k: TKind) => k === "plan" || k === "web" || k === "fetch" || k === "test" || k === "lint" || k === "agent" || k === "ask" || k === "exitplan";
 
 // A tool gets its own rich block when its KIND is inherently rich, OR it's a
