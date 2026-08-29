@@ -206,7 +206,24 @@ jobs:
         run: npm run check
       - name: cargo test
         if: steps.gates.outputs.mode == 'inline'
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: |
+          # The persistent target can retain corrupt CodeView data after a runner
+          # interruption. Retry only the observed webview2-com LNK1103 case;
+          # ordinary compile/test failures remain immediately red. Keep this
+          # inline: workflow_dispatch may check out an older immutable tag that
+          # predates scripts/cargo-test.ps1.
+          $firstOutput = @(& cargo test --manifest-path src-tauri/Cargo.toml 2>&1)
+          $firstExit = $LASTEXITCODE
+          $firstOutput | ForEach-Object { Write-Host "$_" }
+          $failureText = $firstOutput -join "`n"
+          if ($firstExit -ne 0 -and $failureText -match 'LNK1103:\s+debugging information corrupt' -and $failureText -match 'libwebview2_com-') {
+            Write-Warning 'Corrupt webview2-com debug cache detected; cleaning that package and retrying once.'
+            cargo clean --manifest-path src-tauri/Cargo.toml -p webview2-com
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            cargo test --manifest-path src-tauri/Cargo.toml
+            exit $LASTEXITCODE
+          }
+          exit $firstExit
       - name: vitest
         if: steps.gates.outputs.mode == 'inline'
         run: npm test

@@ -42,7 +42,7 @@ jobs:
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
       - name: cargo test
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: powershell -NoProfile -File scripts/cargo-test.ps1
 
       - name: cargo machete
         run: cargo machete src-tauri
