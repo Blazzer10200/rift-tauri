@@ -5,7 +5,7 @@
 <h1 align="center">Rift</h1>
 
 <p align="center">
-  Claude Code and ChatGPT models in one native Windows workspace.<br/>
+  Claude Code and ChatGPT models in one native Windows app.<br/>
   Point Rift at a folder and chat — your chosen model can read, edit, search, and run git in place.<br/>
   <strong>No server, no telemetry — everything runs on your machine.</strong>
 </p>

@@ -9,18 +9,20 @@
   // accent-soft selected slab + checkmark.
   import { Check } from "@lucide/svelte";
   import { tick } from "svelte";
-  import { assistant } from "../../../state/assistant.svelte";
+  import type { PermissionMode } from "../../../state/assistant/types";
   import { portal } from "$lib/actions/portal";
   import { tooltip } from "$lib/actions/tooltip";
   import { MODE_OPTIONS, type ModeOpt, type PermTone, permToneFor } from "./modelMatrix";
 
   let {
     permIdx,
+    selectedMode,
     anchor,
     onPick,
     onRequestClose,
   }: {
     permIdx: number;
+    selectedMode: PermissionMode;
     anchor: HTMLElement | null;
     onPick: (m: ModeOpt) => void;
     onRequestClose: () => void;
@@ -80,7 +82,7 @@
   <div class="pop-label">Permission mode</div>
   {#each MODE_OPTIONS as m, i (m.id)}
     {@const Icon = m.icon}
-    {@const sel = m.id === assistant.permissionMode}
+    {@const sel = m.id === selectedMode}
     <button
       type="button"
       role="menuitemradio"

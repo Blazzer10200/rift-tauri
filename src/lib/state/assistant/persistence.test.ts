@@ -15,9 +15,9 @@ import { invoke } from "@tauri-apps/api/core";
 const mockInvoke = vi.mocked(invoke);
 
 // buildSaveRecord's workspaceRoot resolution is the regression surface: a tab's
-// saved folder must come from the tab's OWN root, else the GLOBAL workspace
-// default — NEVER the focused pane's root (`activeRoot`), which would misfile a
-// background/unfiled tab under an unrelated project. These build a minimal host
+// saved folder must come from the tab's OWN explicit root — NEVER the focused
+// pane or global defaults, either of which would misfile a background/local tab
+// under an unrelated project. These build a minimal host
 // + tab shaped like the structural PersistenceHost / SaveableTab subsets the
 // function actually reads.
 
@@ -52,9 +52,10 @@ describe("buildSaveRecord — workspaceRoot resolution", () => {
     expect(rec.workspaceRoot).toBe("C:/proj/OWN");
   });
 
-  it("falls back to the GLOBAL default, not the focused pane's root", () => {
+  it("does not inherit either mutable global when the tab is explicitly unfiled", () => {
     const rec = buildSaveRecord(host(), "c1", tab({ workspaceRoot: null }));
-    expect(rec.workspaceRoot).toBe("C:/proj/GLOBAL");
+    expect(rec.workspaceRoot).toBeNull();
+    expect(rec.workspaceRoot).not.toBe("C:/proj/GLOBAL");
     expect(rec.workspaceRoot).not.toBe("C:/proj/FOCUSED");
   });
 

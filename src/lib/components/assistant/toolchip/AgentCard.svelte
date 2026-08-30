@@ -11,6 +11,7 @@
     isError,
     status,
     durationLabel,
+    workspaceRoot = null,
   }: {
     agentSubtype: string;
     agentDescription: string | null;
@@ -19,6 +20,7 @@
     isError: boolean;
     status: "pending" | "done" | "error";
     durationLabel: string | null;
+    workspaceRoot?: string | null;
   } = $props();
 </script>
 
@@ -56,7 +58,7 @@
   {:else if isError}
     <pre class="result error">{agentResult?.text ?? ""}</pre>
   {:else if agentResult}
-    <div class="agent-result"><Markdown text={agentResult.text} /></div>
+    <div class="agent-result"><Markdown text={agentResult.text} {workspaceRoot} /></div>
     {#if agentResult.truncated > 0}
       <div class="agent-field-label">+{agentResult.truncated.toLocaleString()} more chars truncated</div>
     {/if}

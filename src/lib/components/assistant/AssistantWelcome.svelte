@@ -23,9 +23,18 @@
   // Optional tabId — when set (split-pane), suggestion clicks write into THIS
   // tab's draft instead of the focused-pane shim. Falls back to focused tab
   // when omitted (single-pane / pre-pane callers).
-  let { needsAuth = false, tabId = null }: { needsAuth?: boolean; tabId?: string | null } = $props();
+  let { needsAuth = false, tabId = null, paneId = null }:
+    { needsAuth?: boolean; tabId?: string | null; paneId?: string | null } = $props();
   const targetTab = $derived(tabId ? assistant.tabFor(tabId) : assistant.activeTab);
   const openAiTab = $derived(isOpenAIModel(assistant.modelFor(targetTab)));
+
+  function continueInPane(id: string) {
+    // Child click handlers run before the pane container's bubbling focus
+    // handler. Bind the destination synchronously so this action cannot replace
+    // whichever sibling happened to be focused.
+    if (paneId) assistant.setFocusedPaneById(paneId);
+    void assistant.openTab(id);
+  }
 
   // ── Cold-state orientation copy (mirrors comp app/data.jsx) ──────────────
   const RIFT_TAGLINE =
@@ -186,7 +195,7 @@
         </span>
       </div>
       {#if ghOpen && ghAnchor}
-        <GhPopover anchor={ghAnchor} onClose={() => (ghOpen = false)} />
+        <GhPopover anchor={ghAnchor} root={paneRoot} tab={targetTab} onClose={() => (ghOpen = false)} />
       {/if}
 
       <!-- Continue latest — one central resume action; the sidebar owns history.
@@ -212,7 +221,7 @@
             {#each resumables as c (c.id)}
               {@const title = c.title ?? "Untitled chat"}
               {@const provider = modelProviderLabel(c.model)}
-              <button class="resume-item" type="button" aria-label={`Continue latest ${provider} chat: ${title}`} onclick={() => void assistant.openTab(c.id)} use:tooltip={title}>
+              <button class="resume-item" type="button" aria-label={`Continue latest ${provider} chat: ${title}`} onclick={() => continueInPane(c.id)} use:tooltip={title}>
                 <MessageSquare size={13} />
                 <span class="ri-t">{title}</span>
                 <span class="ri-provider">{provider}</span>

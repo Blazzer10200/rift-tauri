@@ -5,7 +5,7 @@
   import EditDiff from "../EditDiff.svelte";
   import AnimatedCount from "./AnimatedCount.svelte";
 
-  let { tools }: { tools: StreamTool[] } = $props();
+  let { tools, workspaceRoot = null }: { tools: StreamTool[]; workspaceRoot?: string | null } = $props();
 
   const reduced =
     typeof window !== "undefined" &&
@@ -68,7 +68,7 @@
     </div>
     {#if open && t.input}
       <div class="wb-diffwrap" transition:slide={{ duration: reduced ? 0 : 200 }}>
-        <EditDiff input={t.input} compact defaultExpanded hideHead />
+        <EditDiff input={t.input} compact defaultExpanded hideHead {workspaceRoot} />
       </div>
     {/if}
   {/each}

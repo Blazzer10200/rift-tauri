@@ -37,8 +37,8 @@
   // `tab` is THIS pane's tab; the heartbeat reads its turn start, not the
   // global activeTab getter (which would mirror the focused pane in split mode).
   // `tabId` routes Retry/Continue into THIS pane's conversation.
-  let { message, streaming = false, isLast = false, tab = null, tabId = null }:
-    { message: ChatMessage; streaming?: boolean; isLast?: boolean; tab?: TabState | null; tabId?: string | null } = $props();
+  let { message, streaming = false, isLast = false, tab = null, tabId = null, workspaceRoot = null }:
+    { message: ChatMessage; streaming?: boolean; isLast?: boolean; tab?: TabState | null; tabId?: string | null; workspaceRoot?: string | null } = $props();
   const liveTab = $derived(tab ?? assistant.activeTab);
 
   function onBubbleContext(e: MouseEvent) {
@@ -276,7 +276,7 @@
 </script>
 
 {#if isSystem && boundaryBlock}
-  <BoundaryBlock {boundaryBlock} />
+  <BoundaryBlock {boundaryBlock} {workspaceRoot} />
 {:else if isSystem && modelSwitchBlock}
   <ModelSwitchBlock block={modelSwitchBlock} />
 {:else}
@@ -377,7 +377,7 @@
           {#if isUser}
             <div class="text">{b.text}</div>
           {:else}
-            <div class="text"><Markdown text={b.text} streaming={revealing} /></div>
+            <div class="text"><Markdown text={b.text} streaming={revealing} {workspaceRoot} /></div>
           {/if}
         {:else if b.type === "thinking"}
           {@const isActive = b.status === "active"}
@@ -406,21 +406,21 @@
               {/if}
             </button>
             {#if hasText && isOpen}
-              <div class="tn-think-body" transition:slide={{ duration: reducedMotion ? 0 : 180 }}><Markdown text={b.text} /></div>
+              <div class="tn-think-body" transition:slide={{ duration: reducedMotion ? 0 : 180 }}><Markdown text={b.text} {workspaceRoot} /></div>
             {/if}
           </div>
         {:else if b.type === "tool" && isInlineDiffTool(b.name)}
           {#if b.name === "MultiEdit" && Array.isArray(b.input.edits)}
             {@const inp = b.input as { file_path?: string; edits?: Array<{ file_path?: string; old_string?: string; new_string?: string }> }}
             {#each (inp.edits ?? []) as edit, ei (ei)}
-              <EditDiff input={{ ...edit, file_path: inp.file_path }} />
+              <EditDiff input={{ ...edit, file_path: inp.file_path }} {workspaceRoot} />
             {/each}
           {:else}
-            <EditDiff input={b.input} />
+            <EditDiff input={b.input} {workspaceRoot} />
           {/if}
           <PermissionBar toolUseId={b.id} toolName={b.name} />
         {:else if b.type === "tool"}
-          <ToolChip tool={b} variant={isUser ? "card" : "timeline"} {caption} />
+          <ToolChip tool={b} variant={isUser ? "card" : "timeline"} {caption} {workspaceRoot} />
           <PermissionBar toolUseId={b.id} toolName={b.name} />
         {:else if b.type === "steer"}
           <div class="steer-note" title={`Sent while ${turnProvider ?? "the assistant"} was working — read mid-turn`}>
@@ -541,7 +541,7 @@
       {/if}
 
       {#if !isUser && !streaming}
-        <TurnSummary {message} {costLabel} />
+        <TurnSummary {message} {costLabel} fallbackPermissionMode={assistant.permissionModeFor(liveTab)} />
       {/if}
 
       {#if isUser && msgTime}

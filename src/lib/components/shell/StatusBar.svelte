@@ -20,8 +20,17 @@
     openAi ? assistant.chatGptModelAvailable(assistant.effectiveModel) : !!(assistant.auth?.loggedIn || assistant.hasApiKey),
   );
   const providerLabel = $derived(modelProviderLabel(assistant.effectiveModel));
+  // Chat is pane-scoped; the other workspaces describe the global project
+  // selected by the Workspace hub. Showing a chat pane's folder under a hub
+  // for a different project creates two competing identities in one frame.
+  const contextRoot = $derived(
+    workspace.activeId === "chat" ? assistant.activeRoot : assistant.effectiveRoot(null),
+  );
+  const contextBranch = $derived(
+    workspace.activeId === "chat" ? assistant.workspaceBranch : null,
+  );
   const repoName = $derived.by(() => {
-    const leaf = (assistant.activeRoot ?? "").replace(/[/\\]+$/, "").split(/[/\\]/).pop();
+    const leaf = (contextRoot ?? "").replace(/[/\\]+$/, "").split(/[/\\]/).pop();
     if (leaf) return leaf;
     // No folder open — distinguish local-scratch mode (full tools in the scratch
     // workspace) from the truly tool-less state, matching the pane "Local" badge.
@@ -69,7 +78,7 @@
   // GitHub chip status — the bar is always mounted, so gate on a resolved
   // branch (the lazy loaders elsewhere fill it) and let the store min-gap.
   $effect(() => {
-    if (assistant.workspaceBranch) github.maybeRefresh(assistant.activeRoot);
+    if (contextBranch) github.maybeRefresh(contextRoot);
   });
   let ghOpen = $state(false);
   let ghAnchor = $state<HTMLElement | null>(null);
@@ -132,22 +141,22 @@
     <button class="sb-item sb-btn" type="button" onclick={() => workspace.setActive("home")} use:tooltip={"Open Workspace"}>
       <span class="sb-clip">{repoName}</span>
     </button>
-    {#if assistant.workspaceBranch}
+    {#if contextBranch}
       {#if ghActive}
         <button class="sb-item sb-btn sb-branch" type="button" bind:this={ghAnchor}
           onclick={() => (ghOpen = !ghOpen)} use:tooltip={"GitHub — branch status"}
           aria-haspopup="dialog" aria-expanded={ghOpen}>
-          <GitBranch size={11} /><span class="sb-clip">{assistant.workspaceBranch}</span>
+          <GitBranch size={11} /><span class="sb-clip">{contextBranch}</span>
           {#if github.dot !== "none"}<span class="gh-dot {github.dot}"></span>{/if}
         </button>
       {:else}
-        <span class="sb-item sb-branch"><GitBranch size={11} /><span class="sb-clip">{assistant.workspaceBranch}</span></span>
+        <span class="sb-item sb-branch"><GitBranch size={11} /><span class="sb-clip">{contextBranch}</span></span>
       {/if}
     {/if}
   </span>
   {/if}
   {#if ghOpen && ghAnchor}
-    <GhPopover anchor={ghAnchor} onClose={() => (ghOpen = false)} />
+    <GhPopover anchor={ghAnchor} root={contextRoot} tab={assistant.activeTab} onClose={() => (ghOpen = false)} />
   {/if}
 
   <span class="sb-note">AI can make mistakes — double-check important work.</span>

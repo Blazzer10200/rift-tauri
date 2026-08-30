@@ -96,6 +96,14 @@ const PERMISSION_MODES: readonly PermissionMode[] = [
   "default", "acceptEdits", "plan", "auto", "bypassPermissions",
 ] as const;
 
+/** Validate persisted/provider-adjacent permission data without letting an
+ * unknown value silently widen a conversation's capabilities. */
+export function asPermissionMode(v: unknown): PermissionMode | null {
+  return typeof v === "string" && (PERMISSION_MODES as readonly string[]).includes(v)
+    ? v as PermissionMode
+    : null;
+}
+
 /** Validate an untrusted string (e.g. a saved convo's model) into a ModelSel.
  *  Returns null for unknown values and for Fable past its sunset. */
 export function asModelSel(v: unknown): ModelSel | null {
@@ -231,7 +239,8 @@ export function saveThinkingEnabled(v: boolean, ws?: string | null) {
 export function loadPermissionMode(): PermissionMode {
   try {
     const v = typeof localStorage !== "undefined" ? localStorage.getItem(PERMISSION_KEY) : null;
-    if (v && (PERMISSION_MODES as readonly string[]).includes(v)) return v as PermissionMode;
+    const mode = asPermissionMode(v);
+    if (mode) return mode;
   } catch {
     /* SSR or storage disabled */
   }

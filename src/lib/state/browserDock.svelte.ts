@@ -26,6 +26,14 @@ class BrowserDock {
   // WebBrowserPage consumes it once its stage element exists (the dock may
   // need a mount cycle first when this call also opens it).
   pendingUrl = $state<string | null>(null);
+  // Provenance of the page currently occupying the singleton native webview.
+  // The dock may remain visible while focus moves, so every "Add to chat"
+  // action targets this owner instead of whichever pane happens to be active.
+  ownerTabId = $state<string | null>(null);
+  // Stable provider/CLI session used by the native browser guard. A tab id is
+  // only a frontend identity; the bridge arrives with the CLI session id.
+  ownerSessionId = $state<string | null>(null);
+  ownerWorkspaceRoot = $state<string | null>(null);
   // Last successfully loaded page — closing the dock destroys the native
   // webview, so this powers the empty-state "Reopen <host>" affordance.
   lastUrl = $state<string | null>(null);
@@ -61,9 +69,16 @@ class BrowserDock {
   }
 
   // Queue a URL for the dock and make sure the dock is showing.
-  openUrl(url: string) {
+  openUrl(url: string, owner?: { tabId?: string | null; sessionId?: string | null; workspaceRoot?: string | null }) {
+    if (owner) this.claimOwner(owner.tabId ?? null, owner.workspaceRoot ?? null, owner.sessionId ?? null);
     this.pendingUrl = url;
     if (!this.open) this.toggle();
+  }
+
+  claimOwner(tabId: string | null, workspaceRoot: string | null, sessionId: string | null = null) {
+    this.ownerTabId = tabId;
+    this.ownerWorkspaceRoot = workspaceRoot;
+    this.ownerSessionId = sessionId?.trim() || null;
   }
 
   setLastUrl(url: string) {

@@ -14,7 +14,8 @@
   // frames arrive — see applySubAgentFrame in streaming.ts). Falls back to `tool`
   // alone when the spawn was pruned (MAX_SPAWNS) or predates tracking.
   type Spawn = TabState["agentSpawns"][number];
-  let { tool, spawn = undefined, childSpawns = [] }: { tool: StreamTool; spawn?: Spawn; childSpawns?: Spawn[] } = $props();
+  let { tool, spawn = undefined, childSpawns = [], workspaceRoot = null }:
+    { tool: StreamTool; spawn?: Spawn; childSpawns?: Spawn[]; workspaceRoot?: string | null } = $props();
 
   // Tool-kind → glyph (ported from the retired SubAgentDock) so each step reads
   // as a distinct action, not a flat bullet.
@@ -180,7 +181,7 @@
     <div class="sa-body" bind:this={bodyEl} onscroll={onBodyScroll}>
       {@render timeline(blocks, childSpawns)}
       {#if result}
-        <div class="sa-result"><ArrowRight size={13} strokeWidth={2} /><div class="sa-result-md"><Markdown text={result} /></div></div>
+        <div class="sa-result"><ArrowRight size={13} strokeWidth={2} /><div class="sa-result-md"><Markdown text={result} {workspaceRoot} /></div></div>
       {/if}
     </div>
   {/if}

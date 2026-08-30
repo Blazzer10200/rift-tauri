@@ -71,10 +71,12 @@
   let {
     onsubmit,
     tabId = null,
+    paneId,
     hero = false,
   }: {
     onsubmit: (text: string) => void;
     tabId?: string | null;
+    paneId: string;
     hero?: boolean;
   } = $props();
 
@@ -91,21 +93,25 @@
   const streaming = $derived(tab?.streaming ?? false);
   // Context chips (in-chat only) — passive workspace · branch readout above
   // the well. Hero suppresses them: the welcome card already shows both.
-  // Reads THIS tab's effective root (per-tab pin else global default) — the
-  // global current alone showed a stale folder after a per-tab folder switch.
+  // Reads THIS tab's explicit root — the global current alone showed a stale
+  // folder after a per-tab folder switch.
   const wsRoot = $derived(tab ? assistant.effectiveRoot(tab) : (assistant.workspace.current ?? null));
   const wsFolderName = $derived(wsRoot?.split(/[\\/]/).filter(Boolean).pop() ?? "");
   $effect(() => {
-    if (!hero && assistant.workspace.current && assistant.workspaceBranch == null) void assistant.loadWorkspaceBranch();
+    if (!hero && wsRoot && focusedRoot && assistant.workspaceBranch == null) void assistant.loadWorkspaceBranch();
   });
   // GitHub chip status (CI dot + popover) — lazy, min-gap inside the store.
   $effect(() => {
-    if (!hero && assistant.workspace.current) github.maybeRefresh(assistant.activeRoot);
+    if (!hero && wsRoot && focusedRoot) github.maybeRefresh(wsRoot);
   });
   let ghOpen = $state(false);
   let ghAnchor = $state<HTMLElement | null>(null);
+  const focusedRoot = $derived(assistant.activeRoot === wsRoot);
+  const paneBranch = $derived(focusedRoot ? assistant.workspaceBranch : null);
+  const ghStatus = $derived(github.loadedFor === wsRoot ? github.status : null);
+  const ghDot = $derived(github.loadedFor === wsRoot ? github.dot : "none");
   const ghActive = $derived(
-    !!github.status && ["ok", "no_auth", "no_gh", "error"].includes(github.status.state),
+    !!ghStatus && ["ok", "no_auth", "no_gh", "error"].includes(ghStatus.state),
   );
   // Per-pane context readout — the bare assistant.ctx* getters delegate to the
   // focused activeTab, so in split-pane both composers showed the focused
@@ -329,7 +335,7 @@
     void assistant.effectiveModel;
     void assistant.effectiveEffort;
     void assistant.effectiveThinkingOn;
-    void assistant.permissionMode;
+    void assistant.permissionModeFor(tab);
     void tab?.convoCreatedAt;
     void tab?.workspaceRoot;
     void assistant.workspace.current;
@@ -563,20 +569,21 @@
   // Caption + pointer-drag dial live in composer/SettingsMenu.svelte (C7).
 
   // Permission-mode picker — option table in modelMatrix.ts (C7).
-  const currentMode = $derived(MODE_OPTIONS.find((m) => m.id === assistant.permissionMode) ?? MODE_OPTIONS[4]);
+  const effectivePermissionMode = $derived(assistant.permissionModeFor(tab));
+  const currentMode = $derived(MODE_OPTIONS.find((m) => m.id === effectivePermissionMode) ?? MODE_OPTIONS[4]);
   const PermIcon = $derived(currentMode.icon);
   // Flat-bar perm button tone — shared with the PermMenu rows (permToneFor) so
   // the bar pill + popover can't disagree. Drives `.cbtn.cperm.tone-*`.
   const permTone = $derived(permToneFor(currentMode.id));
   function pickMode(m: ModeOpt) {
-    assistant.setPermissionMode(m.id);
+    assistant.setPermissionMode(m.id, tab);
     permOpen = false;
     void tick().then(() => ta?.focus());
   }
   // Shift+Tab cycles the permission mode (mock affordance) without opening the menu.
   function cyclePerm() {
-    const i = MODE_OPTIONS.findIndex((m) => m.id === assistant.permissionMode);
-    assistant.setPermissionMode(MODE_OPTIONS[(i + 1) % MODE_OPTIONS.length].id);
+    const i = MODE_OPTIONS.findIndex((m) => m.id === effectivePermissionMode);
+    assistant.setPermissionMode(MODE_OPTIONS[(i + 1) % MODE_OPTIONS.length].id, tab);
   }
 
   // Flat, navigable row list spanning the unified settings panel — built by
@@ -595,7 +602,7 @@
   // Re-seed the perm cursor to the current mode whenever the perm menu opens.
   $effect(() => {
     if (permOpen) {
-      const i = MODE_OPTIONS.findIndex((m) => m.id === assistant.permissionMode);
+      const i = MODE_OPTIONS.findIndex((m) => m.id === effectivePermissionMode);
       permIdx = i >= 0 ? i : 0;
     }
   });
@@ -689,7 +696,7 @@
 
   function pickModel(m: ModelOpt) {
     if (!modelAccessFor(m, providerAccess, m.provider === "openai" ? pinnedPickerRoute : null).enabled) return;
-    void assistant.selectModel(m.id, tab);
+    void assistant.selectModel(m.id, tab, { paneId, sourceTabId: tabId });
     settingsOpen = false;
     void tick().then(() => ta?.focus());
   }
@@ -846,7 +853,7 @@
     if (!text || enhancing) return;
     if (enhanceOriginal === null) {
       enhanceOriginal = text;
-      if (!groundTouched && !groundEnhance && !!assistant.workspace.current && CODE_ANCHOR_RE.test(text)) {
+      if (!groundTouched && !groundEnhance && !!wsRoot && CODE_ANCHOR_RE.test(text)) {
         groundEnhance = true;
       }
     }
@@ -859,6 +866,9 @@
     enhancedPreview = "";
     enhanceStatus = null;
     enhanceMeta = null;
+    // Capture this pane's root before the async request. Focus/project changes
+    // elsewhere must not retarget a grounded rewrite after it has started.
+    const enhancementRoot = groundEnhance ? (wsRoot ?? undefined) : undefined;
     try {
       // Stream: deltas fill the preview live; the resolved value is the
       // authoritative final text. Grounded mode passes the workspace cwd.
@@ -869,7 +879,7 @@
           directive,
           previous,
           context: buildEnhanceContext(),
-          cwd: groundEnhance ? (assistant.workspace.current ?? undefined) : undefined,
+          cwd: enhancementRoot,
           onRequestId: (id) => { if (seq === enhanceSeq) enhanceRequestId = id; },
           onStatus: (s) => { if (seq === enhanceSeq) enhanceStatus = s; },
           onMeta: (m) => { if (seq === enhanceSeq) enhanceMeta = m; },
@@ -962,7 +972,7 @@
     pttTimer = setTimeout(() => {
       pttTimer = null;
       pttActive = true;
-      void stt.start(tabId);
+      void stt.start(tabId, wsRoot);
     }, 300);
     return true;
   }
@@ -1114,7 +1124,7 @@
         await stt.stop();
         void tick().then(() => { autosize(); ta?.focus(); });
       } else {
-        await stt.start(tabId);
+        await stt.start(tabId, wsRoot);
         void tick().then(() => ta?.focus());
       }
     } catch (e) {
@@ -1481,7 +1491,7 @@
         {enhanceStatus}
         {enhanceMeta}
         {groundEnhance}
-        hasWorkspace={!!assistant.workspace.current}
+        hasWorkspace={!!wsRoot}
         undoAvailable={undoDraft !== null}
         onToggleGround={toggleGround}
         onAccept={acceptEnhanced}
@@ -1518,27 +1528,27 @@
     <div class="composer" class:hero={hero} class:streaming={streaming} class:enchanting={enhancing} data-mode={mode}>
       {#if !hero && wsRoot}
         <div class="ctx-chips" aria-label="Workspace context">
-          {#if ghActive && assistant.workspaceBranch}
+          {#if ghActive && paneBranch}
             <button class="ctx-crumb" type="button" bind:this={ghAnchor}
               onclick={() => (ghOpen = !ghOpen)} use:tooltip={`Workspace · ${wsRoot}\nGitHub branch status`}
               aria-haspopup="dialog" aria-expanded={ghOpen}>
               <Folder size={11} /><span class="cc-label">{wsFolderName}</span>
               <span class="ctx-slash" aria-hidden="true">/</span>
-              <GitBranch size={11} /><span class="cc-label">{assistant.workspaceBranch}</span>
-              {#if github.dot !== "none"}<span class="gh-dot {github.dot}"></span>{/if}
+              <GitBranch size={11} /><span class="cc-label">{paneBranch}</span>
+              {#if ghDot !== "none"}<span class="gh-dot {ghDot}"></span>{/if}
             </button>
           {:else}
             <span class="ctx-crumb" use:tooltip={wsRoot}>
               <Folder size={11} /><span class="cc-label">{wsFolderName}</span>
-              {#if assistant.workspaceBranch}
+              {#if paneBranch}
                 <span class="ctx-slash" aria-hidden="true">/</span>
-                <GitBranch size={11} /><span class="cc-label">{assistant.workspaceBranch}</span>
+                <GitBranch size={11} /><span class="cc-label">{paneBranch}</span>
               {/if}
             </span>
           {/if}
         </div>
         {#if ghOpen && ghAnchor}
-          <GhPopover anchor={ghAnchor} onClose={() => (ghOpen = false)} />
+          <GhPopover anchor={ghAnchor} root={wsRoot} {tab} onClose={() => (ghOpen = false)} />
         {/if}
       {/if}
       <!-- WELL: attachments + input only. All chrome (border/glass/focus-ring/
@@ -1700,6 +1710,7 @@
           {#if permOpen}
             <PermMenu
               {permIdx}
+              selectedMode={effectivePermissionMode}
               anchor={permWrap}
               onPick={pickMode}
               onRequestClose={() => (permOpen = false)}
@@ -1838,6 +1849,7 @@
           {#if settingsOpen}
             <SettingsMenu
               {tab}
+              {paneId}
               activeKind={activeSettingsRow?.kind ?? null}
               activeModelId={activeSettingsRow?.kind === "model" ? activeSettingsRow.model.id : null}
               anchor={modelWrap}

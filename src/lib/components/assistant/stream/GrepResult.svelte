@@ -5,7 +5,6 @@
   // use. Match substrings highlight when the search pattern compiles.
   import { invoke } from "@tauri-apps/api/core";
   import { parseGrepLine, type GrepRow } from "./streamModel";
-  import { assistant } from "$lib/state/assistant.svelte";
   import { notify } from "$lib/state/toast.svelte";
   import { leafName } from "$lib/utils/path";
   import FilePathMenu from "../FilePathMenu.svelte";
@@ -14,10 +13,13 @@
     text,
     pattern = null,
     bare = false,
+    workspaceRoot = null,
   }: {
     text: string;
     pattern?: string | null;
     bare?: boolean; // Glob / files-with-matches — every line IS a path
+    /** Explicit transcript workspace; null means file actions are unavailable. */
+    workspaceRoot?: string | null;
   } = $props();
 
   type Row =
@@ -74,8 +76,12 @@
 
   let pathMenu = $state<{ path: string; line: number | null; x: number; y: number } | null>(null);
   async function openRow(e: MouseEvent, path: string, line: number | null) {
+    if (!workspaceRoot) {
+      notify.warn("This conversation has no workspace", { detail: "Open a project before using file actions." });
+      return;
+    }
     try {
-      const resolved = await invoke<string>("resolve_workspace_path", { root: assistant.activeRoot, path });
+      const resolved = await invoke<string>("resolve_workspace_path", { root: workspaceRoot, path });
       pathMenu = { path: resolved, line, x: e.clientX, y: e.clientY + 6 };
     } catch (err) {
       notify.warn("Couldn't locate path", { detail: String(err) });

@@ -8,14 +8,15 @@
   import { untrack } from "svelte";
   import { portal } from "$lib/actions/portal";
   import { tooltip } from "$lib/actions/tooltip";
-  import { assistant } from "$lib/state/assistant.svelte";
+  import type { TabState } from "$lib/state/assistant.svelte";
   import { github } from "$lib/state/github.svelte";
   import { ghCheckedLabel, ghElapsed, ghFixPrompt, ghPrPrompt, ghPullPrompt, ghPushPrompt, ghRelTime, ghSyncLabel } from "$lib/state/githubHelpers";
 
-  let { anchor, onClose }: { anchor: HTMLElement; onClose: () => void } = $props();
+  let { anchor, root, tab, onClose }:
+    { anchor: HTMLElement; root: string | null; tab: TabState | null; onClose: () => void } = $props();
 
   let panelEl = $state<HTMLElement | null>(null);
-  const s = $derived(github.status);
+  const s = $derived(github.loadedFor === root ? github.status : null);
   const run = $derived(s?.state === "ok" ? (s.run ?? null) : null);
   const pr = $derived(s?.state === "ok" ? (s.pr ?? null) : null);
   const sync = $derived(s?.state === "ok" ? ghSyncLabel(s.ahead, s.behind) : null);
@@ -76,13 +77,13 @@
   // untrack: refresh() synchronously reads loading/status/loadedFor, which
   // this effect would otherwise subscribe to → endless forced-refresh loop.
   $effect(() => {
-    const root = assistant.activeRoot;
-    untrack(() => void github.refresh(root, { force: true }));
+    if (root) untrack(() => void github.refresh(root, { force: true }));
   });
 
   function inject(prompt: string) {
-    const cur = assistant.composerDraft;
-    assistant.composerDraft = cur ? `${cur}\n\n${prompt}` : prompt;
+    if (!tab) return;
+    const cur = tab.draft;
+    tab.draft = cur ? `${cur}\n\n${prompt}` : prompt;
     onClose();
   }
 </script>
@@ -108,7 +109,8 @@
       <button
         class="gp-icon"
         type="button"
-        onclick={() => void github.refresh(assistant.activeRoot, { force: true })}
+        onclick={() => { if (root) void github.refresh(root, { force: true }); }}
+        disabled={!root}
         use:tooltip={"Refresh"}
         aria-label="Refresh GitHub status"
       >

@@ -27,8 +27,8 @@
   // delegate to the single focused activeTab, so in split-pane every pane would
   // otherwise mirror the focused pane's "Working… 109s". Falls back to the
   // active tab when omitted (single-pane callers).
-  let { message, streaming = false, isLast = false, tab = null }:
-    { message: ChatMessage; streaming?: boolean; isLast?: boolean; tab?: TabState | null } = $props();
+  let { message, streaming = false, isLast = false, tab = null, tabId = null, workspaceRoot = null }:
+    { message: ChatMessage; streaming?: boolean; isLast?: boolean; tab?: TabState | null; tabId?: string | null; workspaceRoot?: string | null } = $props();
   const liveTab = $derived(tab ?? assistant.activeTab);
   const turnModel = $derived(message.model ?? liveTab?.lastModelId ?? liveTab?.modelOverride ?? null);
   const turnProvider = $derived(turnModel ? modelProviderLabel(turnModel) : null);
@@ -364,7 +364,7 @@
         <div class="snarr-beat">{g.text.trim()}</div>
       {:else}
         <div class="snarr">
-          <Markdown text={g.text} {streaming} />
+          <Markdown text={g.text} {streaming} {workspaceRoot} />
         </div>
       {/if}
     {:else if g.type === "steer"}
@@ -396,11 +396,11 @@
           {:else if seg.tool.kind === "agent"}
             {@const spawn = liveTab?.agentSpawns.find((a) => a.id === seg.tool.id)}
             {@const childSpawns = liveTab?.agentSpawns.filter((a) => a.parentSpawnId === seg.tool.id) ?? []}
-            <StreamAgent tool={seg.tool} {spawn} {childSpawns} />
+            <StreamAgent tool={seg.tool} {spawn} {childSpawns} {workspaceRoot} />
           {:else if seg.tool.kind === "ask"}
             <StreamAskUser tool={seg.tool} live={streaming} />
           {:else if seg.tool.kind === "exitplan"}
-            <StreamExitPlan tool={seg.tool} tab={liveTab} {isLast} />
+            <StreamExitPlan tool={seg.tool} tab={liveTab} {isLast} {workspaceRoot} />
           {:else if seg.tool.kind === "shell"}
             <StreamShell tool={seg.tool} poll={seg.poll} />
           {/if}
@@ -408,12 +408,12 @@
             <PermissionBar toolUseId={pt.id} toolName={pt.name} />
           {/each}
         {:else if seg.seg === "edit"}
-          <WriteBatch tools={seg.tools} />
+          <WriteBatch tools={seg.tools} {workspaceRoot} />
           {#each pendingPerms(seg.tools) as pt (pt.id)}
             <PermissionBar toolUseId={pt.id} toolName={pt.name} />
           {/each}
         {:else}
-          <WorkLine tools={seg.tools} />
+          <WorkLine tools={seg.tools} {workspaceRoot} />
           {#each pendingPerms(seg.tools) as pt (pt.id)}
             <PermissionBar toolUseId={pt.id} toolName={pt.name} />
           {/each}
@@ -435,7 +435,7 @@
     <div class="sturn-body" class:railed class:live={streaming}>
       <!-- Live stays chronological: nothing is regrouped while it arrives. -->
       {#if turn.thinking}
-        <StreamThinking active={turn.thinking.active} durSecs={turn.thinking.durSecs} text={turn.thinking.text} />
+        <StreamThinking active={turn.thinking.active} durSecs={turn.thinking.durSecs} text={turn.thinking.text} {workspaceRoot} />
       {/if}
       {#each groups as g, gi (gi)}{@render renderGroup(g, gi)}{/each}
     </div>
@@ -470,7 +470,7 @@
           <div class="sactivity-body" transition:slide={{ duration: 180 }}>
             <div class="sturn-body" class:railed={activityGroups.some((g) => g.type === "work") || !!turn.thinking}>
               {#if turn.thinking}
-                <StreamThinking active={false} durSecs={turn.thinking.durSecs} text={turn.thinking.text} />
+                <StreamThinking active={false} durSecs={turn.thinking.durSecs} text={turn.thinking.text} {workspaceRoot} />
               {/if}
               {#each activityGroups as g, gi (gi)}{@render renderGroup(g, gi)}{/each}
             </div>
@@ -482,7 +482,7 @@
     {#if answerGroups.length > 0}
       <div class="sanswer">
         {#each answerGroups as g, gi (gi)}
-          {#if g.type === "say"}<div class="snarr"><Markdown text={g.text} /></div>{/if}
+          {#if g.type === "say"}<div class="snarr"><Markdown text={g.text} {workspaceRoot} /></div>{/if}
         {/each}
       </div>
     {/if}
@@ -565,7 +565,7 @@
         </button>
       {/if}
       {#if isLast}
-        <button class="msg-act" type="button" onclick={() => assistant.retryLast()}>
+        <button class="msg-act" type="button" onclick={() => assistant.retryLast(tabId)}>
           <RotateCcw size={13} />Retry
         </button>
       {/if}

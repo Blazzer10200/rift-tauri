@@ -29,9 +29,11 @@
   // Single-pane must never strand on a dead "Empty pane" card: closing the
   // last tab nulls currentConvoId, and there's no page-level chat browser to
   // fall back to. Re-seed a fresh chat so Chat always lands on the welcome
-  // (with composer). The split-pane empty slot is deliberate and left alone.
+  // (with composer). Wait for persisted panes to restore first; otherwise a
+  // cold-start tab can race init and capture a transient workspace. The
+  // split-pane empty slot is deliberate and left alone.
   $effect(() => {
-    if (!assistant.splitActive && assistant.currentConvoId == null) {
+    if (assistant.workspaceReady && !assistant.splitActive && assistant.currentConvoId == null) {
       void assistant.newTab();
     }
   });
@@ -66,7 +68,7 @@
 
   // Index removed btw `old` and `cur` (cur = old minus one element), -1 if the
   // change isn't a single removal. Tries each candidate — n ≤ 4, so brute force.
-  function removedIndex(old: (string | null)[], cur: (string | null)[]): number {
+  function removedIndex(old: string[], cur: string[]): number {
     for (let k = 0; k < old.length; k++) {
       if (old.filter((_, i) => i !== k).every((v, i) => v === cur[i])) return k;
     }
@@ -77,9 +79,9 @@
   // stored for the new count: a removed pane's share redistributes across the
   // survivors; an added pane takes 1/n with the rest scaled down. Anything
   // else (restore, multi-change) falls back to the per-count store.
-  let prevPaneIds: (string | null)[] = [];
+  let prevPaneIds: string[] = [];
   $effect(() => {
-    const ids = assistant.panes.map((p) => p.tabId);
+    const ids = assistant.panes.map((p) => p.id);
     const n = ids.length || 1;
     untrack(() => {
       const old = prevPaneIds;
@@ -201,7 +203,10 @@
     if (!tab || !url) return;
     untrack(() => {
       tab.pendingBrowserUrl = null;
-      browserDock.openUrl(url);
+      browserDock.openUrl(url, {
+        tabId: assistant.currentConvoId,
+        workspaceRoot: tab.workspaceRoot,
+      });
     });
   });
 
@@ -241,6 +246,7 @@
            to the exact prior tiling. Siblings unmount (streams live in the
            store; scroll comes back via the per-tab cache). -->
       <AssistantPane
+        paneId={assistant.panes[maxIdx].id}
         tabId={assistant.panes[maxIdx].tabId}
         focused={true}
         paneIdx={maxIdx}
@@ -252,8 +258,9 @@
         data-dragging={dragging}
         style="grid-template-columns: {gridTemplate};"
       >
-        {#each assistant.panes as p, i (p.tabId ?? `empty-${i}`)}
+        {#each assistant.panes as p, i (p.id)}
           <AssistantPane
+            paneId={p.id}
             tabId={p.tabId}
             focused={assistant.focusedPaneIdx === i}
             paneIdx={i}
@@ -283,7 +290,8 @@
       </div>
     {:else}
       <AssistantPane
-        tabId={assistant.currentConvoId}
+        paneId={assistant.panes[0].id}
+        tabId={assistant.panes[0].tabId}
         focused={true}
         paneIdx={0}
       />

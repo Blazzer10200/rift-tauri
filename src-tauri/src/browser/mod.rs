@@ -74,10 +74,71 @@ static OPEN_GEN: AtomicU64 = AtomicU64::new(0);
 /// gap in the very mechanism meant to prevent that reopen).
 static NAV_GATE: Mutex<()> = Mutex::new(());
 
+/// Provenance for the one native browser surface.  The dock is deliberately a
+/// singleton, but assistant sessions are not: never let a bridge request from
+/// one conversation inspect (or navigate over) the page another conversation
+/// deliberately placed there.  The owner is established only by an explicit
+/// frontend navigation carrying that tab's CLI session id, and is cleared when
+/// the native surface is destroyed.
+static OWNER_SESSION: Mutex<Option<String>> = Mutex::new(None);
+
 fn nav_gate() -> std::sync::MutexGuard<'static, ()> {
     match NAV_GATE.lock() {
         Ok(g) => g,
         Err(p) => p.into_inner(),
+    }
+}
+
+fn owner_session() -> std::sync::MutexGuard<'static, Option<String>> {
+    match OWNER_SESSION.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    }
+}
+
+fn normalized_session(session_id: Option<&str>) -> Result<Option<&str>, String> {
+    match session_id.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(s) if s.len() <= 256 => Ok(Some(s)),
+        Some(_) => Err("browser owner session id is too long".into()),
+        None => Ok(None),
+    }
+}
+
+/// Atomically validate an explicit frontend navigation against the native
+/// surface owner.  A session can adopt an unowned dock and can revisit its own
+/// page; adopting another session's page requires the old owner to close the
+/// dock first.  Calls without an owner retain compatibility for a purely local
+/// (non-assistant) browser, but cannot navigate a session-owned dock.
+fn authorize_navigation_owner(session_id: Option<&str>) -> Result<(), String> {
+    let requested = normalized_session(session_id)?;
+    let mut owner = owner_session();
+    match (owner.as_deref(), requested) {
+        (None, Some(session)) => {
+            *owner = Some(session.to_string());
+            Ok(())
+        }
+        (None, None) => Ok(()),
+        (Some(current), Some(session)) if current == session => Ok(()),
+        (Some(_), None) => Err(
+            "browser belongs to a conversation; select that conversation before navigating it".into(),
+        ),
+        (Some(_), Some(_)) => Err(
+            "browser belongs to a different conversation; Rift will not navigate it from this session".into(),
+        ),
+    }
+}
+
+/// Authorize an assistant bridge read.  Unlike frontend-only actions, a bridge
+/// call comes from a model process, so absence is not a safe fallback: an
+/// unowned page or a page owned by another session is opaque to it.
+pub(crate) fn authorize_assistant_read(session_id: &str) -> Result<(), String> {
+    let session = normalized_session(Some(session_id))?
+        .ok_or_else(|| "browser read requires an owning assistant session".to_string())?;
+    let owner = owner_session();
+    match owner.as_deref() {
+        Some(current) if current == session => Ok(()),
+        Some(_) => Err("browser belongs to a different conversation".into()),
+        None => Err("browser has no owning conversation; it cannot be read by an assistant".into()),
     }
 }
 
@@ -87,7 +148,15 @@ fn nav_gate() -> std::sync::MutexGuard<'static, ()> {
 /// port to accept a TCP connection before navigating. Fail-open: when the
 /// window expires, navigation proceeds and the error page is the honest
 /// outcome.
-pub async fn open_probed(app: &AppHandle, url: &str, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
+pub async fn open_probed(
+    app: &AppHandle,
+    url: &str,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    owner_session_id: Option<&str>,
+) -> Result<(), String> {
     let u = parse_url(url)?;
     let generation = OPEN_GEN.fetch_add(1, Ordering::AcqRel) + 1;
     if let Some((host, port)) = loopback_target(&u) {
@@ -119,6 +188,10 @@ pub async fn open_probed(app: &AppHandle, url: &str, x: f64, y: f64, w: f64, h: 
     if OPEN_GEN.load(Ordering::Acquire) != generation {
         return Ok(()); // superseded by a newer navigation/dismiss while probing
     }
+    // Keep the owner decision inside NAV_GATE with the final generation check
+    // and navigation, so an old loopback probe cannot adopt/navigate a dock a
+    // newer operation has already claimed.
+    authorize_navigation_owner(owner_session_id)?;
     open(app, url, x, y, w, h)
 }
 
@@ -252,6 +325,7 @@ pub fn close(app: &AppHandle) -> Result<(), String> {
     // recreate the dock after an explicit close.
     let _gate = nav_gate();
     OPEN_GEN.fetch_add(1, Ordering::AcqRel);
+    *owner_session() = None;
     if let Some(wv) = app.get_webview(LABEL) {
         wv.close().map_err(|e| format!("close: {e}"))?;
     }
@@ -745,6 +819,47 @@ fn sniff_image_mime(b: &[u8]) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // OWNER_SESSION is process-global because the native dock is process-wide;
+    // serialize the focused ownership tests so Rust's parallel test runner
+    // cannot leak an owner from one assertion into the next.
+    static OWNER_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn clear_owner_for_test() {
+        *owner_session() = None;
+    }
+
+    #[test]
+    fn browser_owner_is_session_scoped_and_fails_closed_for_reads() {
+        let _serial = OWNER_TEST_LOCK.lock().unwrap();
+        clear_owner_for_test();
+
+        // An explicit session adopts an unowned dock and can read it.
+        assert!(authorize_navigation_owner(Some("session-a")).is_ok());
+        assert!(authorize_assistant_read("session-a").is_ok());
+        // A second conversation can neither read nor navigate over it.
+        assert!(authorize_assistant_read("session-b").is_err());
+        assert!(authorize_navigation_owner(Some("session-b")).is_err());
+        // An omitted owner cannot silently operate a session-owned surface.
+        assert!(authorize_navigation_owner(None).is_err());
+
+        clear_owner_for_test();
+        // A local page has no assistant provenance and is opaque to every
+        // bridge session until the UI explicitly adopts it.
+        assert!(authorize_navigation_owner(None).is_ok());
+        assert!(authorize_assistant_read("session-a").is_err());
+        clear_owner_for_test();
+    }
+
+    #[test]
+    fn browser_owner_rejects_blank_and_oversized_session_ids() {
+        let _serial = OWNER_TEST_LOCK.lock().unwrap();
+        clear_owner_for_test();
+        assert!(authorize_navigation_owner(Some("   ")).is_ok()); // local/no owner
+        assert!(authorize_assistant_read(" ").is_err());
+        assert!(authorize_navigation_owner(Some(&"x".repeat(257))).is_err());
+        clear_owner_for_test();
+    }
 
     #[test]
     fn parse_url_allows_only_web_schemes() {

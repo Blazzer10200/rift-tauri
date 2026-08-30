@@ -13,6 +13,7 @@
   import { workspace } from "../../state/workspace.svelte";
   import { browserDock } from "../../state/browserDock.svelte";
   import { assistant } from "../../state/assistant.svelte";
+  import { notify } from "../../state/toast.svelte";
 
   let address = $state("");
   let addressEl = $state<HTMLInputElement | null>(null);
@@ -108,6 +109,12 @@
     try { return new URL(u).host || u; } catch { return u; }
   }
 
+  const ownerLabel = $derived.by(() => {
+    const root = browserDock.ownerWorkspaceRoot;
+    if (root) return root.split(/[\\/]/).filter(Boolean).at(-1) ?? root;
+    return browserDock.ownerTabId ? "Local chat" : null;
+  });
+
   function rect(): { x: number; y: number; w: number; h: number } | null {
     if (!stageEl) return null;
     const r = stageEl.getBoundingClientRect();
@@ -132,12 +139,40 @@
     const url = normalizeUrl(address);
     if (!url) return;
     address = url;
+    // Address-bar navigation is an explicit action by a conversation. Keep
+    // the dock's existing owner when a pending assistant URL already named
+    // one; otherwise adopt the focused tab. The native command receives the
+    // CLI session id too, so its singleton webview cannot be navigated by a
+    // different conversation while this request is in flight.
+    if (!browserDock.ownerTabId && assistant.activeTab) {
+      browserDock.claimOwner(
+        assistant.currentConvoId,
+        assistant.activeRoot,
+        assistant.activeTab.cliSessionId || null,
+      );
+    }
+    const owner = browserOwnerTab();
+    if (browserDock.ownerTabId && !owner) {
+      const message = "The browser's conversation is no longer open. Close the browser before using it again.";
+      error = message;
+      notify.warn("Browser ownership is unavailable", { detail: message });
+      return;
+    }
+    if (owner && assistant.activeTab && owner !== assistant.activeTab) {
+      const message = "This browser page belongs to another conversation. Select it before navigating.";
+      error = message;
+      notify.warn("Browser belongs to another conversation", { detail: message });
+      return;
+    }
+    if (owner && browserDock.ownerSessionId !== (owner.cliSessionId || null)) {
+      browserDock.claimOwner(browserDock.ownerTabId, owner.workspaceRoot, owner.cliSessionId || null);
+    }
     const b = rect();
     if (!b) return;
     loading = true;
     error = null;
     try {
-      await invoke("browser_open", { url, ...b });
+      await invoke("browser_open", { url, ...b, ownerSessionId: browserDock.ownerSessionId });
       opened = true;
       // The dock's 220ms open transition is usually still animating when the
       // bounds above were measured (t≈0 → near-zero width), and every
@@ -221,8 +256,29 @@
   // The unlock: pull the page's rendered (post-JS, authenticated) text and drop
   // it into the composer as a labelled context block — something WebFetch can't
   // reach. Stays visible + editable so the user trims/sends on their terms.
+  function browserOwnerTab() {
+    if (browserDock.ownerTabId) return assistant.tabFor(browserDock.ownerTabId);
+    const root = browserDock.ownerWorkspaceRoot;
+    if (!root) return null;
+    const matches = assistant.openTabs
+      .map((id) => assistant.tabFor(id))
+      .filter((tab) => tab?.workspaceRoot === root);
+    return matches.length === 1 ? matches[0] ?? null : null;
+  }
+
+  function requireBrowserOwner() {
+    const tab = browserOwnerTab();
+    if (tab) return tab;
+    notify.warn("Choose the browser's conversation first", {
+      detail: "This page is not uniquely owned by an open chat, so Rift will not guess where to add its content.",
+    });
+    return null;
+  }
+
   async function addToChat() {
     if (!opened || adding) return;
+    const owner = requireBrowserOwner();
+    if (!owner) { flash("fail"); return; }
     adding = true;
     try {
       const p = await invoke<PageSnapshot>("browser_read_page");
@@ -240,10 +296,10 @@
       const head = `[Page context: ${safeTitle} — ${safeUrl}]`;
       const tail = p.truncated ? `\n[…truncated — full page is ${p.full_len.toLocaleString()} chars]` : "";
       const block = `${head}\n${body}${tail}\n[End page context]`;
-      const cur = assistant.composerDraft;
+      const cur = owner.draft;
       const next = cur ? `${cur}\n\n${block}` : block;
       if (next.length > 200_000) { flash("fail"); return; }
-      assistant.composerDraft = next;
+      owner.draft = next;
       flash("ok");
     } catch (e) {
       console.warn("browser_read_page:", e);
@@ -270,6 +326,8 @@
   // composer as a labelled, sentinel-neutralized context block.
   async function addConsoleToChat() {
     if (!opened || consoleBusy) return;
+    const owner = requireBrowserOwner();
+    if (!owner) { flashConsole("fail"); return; }
     consoleBusy = true;
     try {
       const s = await invoke<{ url: string; entries: { level: string; text: string; ts: number }[]; dropped: number }>(
@@ -283,10 +341,10 @@
         .replace(/\[Console output:/gi, "[Console output​:");
       const safeUrl = (s.url || "").replace(/[[\]\r\n]/g, " ").slice(0, 2048);
       const block = `[Console output: ${safeUrl}]\n${lines}\n[End console output]`;
-      const cur = assistant.composerDraft;
+      const cur = owner.draft;
       const next = cur ? `${cur}\n\n${block}` : block;
       if (next.length > 200_000) { flashConsole("fail"); return; }
-      assistant.composerDraft = next;
+      owner.draft = next;
       flashConsole("ok");
     } catch (e) {
       console.warn("browser_read_console:", e);
@@ -421,6 +479,10 @@
     unlistenIcon?.();
     window.removeEventListener("resize", syncBounds);
     // Closing the dock destroys the native webview (no lingering surface).
+    // Clear the frontend mirror at the same lifecycle boundary. Otherwise a
+    // later local link could reuse a closed tab's stale owner id and falsely
+    // re-adopt the native singleton as that conversation.
+    browserDock.claimOwner(null, null);
     void invoke("browser_close");
   });
 </script>
@@ -444,6 +506,12 @@
         <Globe size={15} />
       {/if}
     </span>
+    {#if ownerLabel}
+      <span
+        class="wb-owner"
+        title={browserDock.ownerWorkspaceRoot ?? "This browser page belongs to a local conversation"}
+      >{ownerLabel}</span>
+    {/if}
     <input
       bind:this={addressEl}
       class="wb-address"
@@ -622,6 +690,19 @@
     background: color-mix(in oklch, var(--surface) 80%, transparent);
   }
   .wb-glyph { display: inline-flex; color: var(--fg-muted); margin-left: 2px; }
+  .wb-owner {
+    max-width: 112px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 3px 7px;
+    border: 1px solid color-mix(in oklch, var(--accent) 30%, var(--border));
+    border-radius: 999px;
+    color: var(--fg-muted);
+    background: color-mix(in oklch, var(--accent) 7%, transparent);
+    font-size: 10px;
+    line-height: 1.2;
+  }
   .wb-glyph-busy { color: var(--accent); animation: wb-spin 0.9s linear infinite; }
   @keyframes wb-spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .wb-glyph-busy { animation: none; } }
@@ -635,6 +716,7 @@
     font: inherit; font-size: 13px;
   }
   .wb-address:focus { outline: none; border-color: var(--accent); }
+  @container (max-width: 520px) { .wb-owner { display: none; } }
   .wb-btn {
     display: inline-flex; align-items: center; justify-content: center;
     width: 30px; height: 30px;

@@ -34,8 +34,14 @@
   const paneRoot = $derived(assistant.effectiveRoot(null));
   const hasRoot = $derived(paneRoot != null);
   const ctxName = $derived(hasRoot ? leafName(paneRoot!) : "workspace");
-  const branch = $derived(assistant.workspaceBranch);
-  const fileCount = $derived(assistant.workspaceFiles.length);
+  // The Workspace hub is global-project scoped even while chat panes remain
+  // mounted in the background. Keep its branch/file snapshot local so a
+  // focused chat pane cannot supply metadata for a different project.
+  let hubContextRoot = $state<string | null>(null);
+  let hubBranch = $state<string | null>(null);
+  let hubFileCount = $state(0);
+  const branch = $derived(hubContextRoot === paneRoot ? hubBranch : null);
+  const fileCount = $derived(hubContextRoot === paneRoot ? hubFileCount : 0);
   // Land at the top whenever the hub becomes the active surface — the page
   // stays mounted (keep-alive), so without this it reopens mid-scroll.
   let scrollEl = $state<HTMLDivElement | null>(null);
@@ -126,10 +132,32 @@
   });
 
   $effect(() => {
-    if (paneRoot && assistant.workspaceFiles.length === 0) void assistant.loadWorkspaceFiles();
-  });
-  $effect(() => {
-    if (paneRoot && assistant.workspaceBranch == null) void assistant.loadWorkspaceBranch();
+    const root = paneRoot;
+    if (!root) {
+      hubContextRoot = null;
+      hubBranch = null;
+      hubFileCount = 0;
+      return;
+    }
+    let live = true;
+    hubContextRoot = root;
+    hubBranch = null;
+    hubFileCount = 0;
+    void Promise.all([
+      invoke<string | null>("assistant_workspace_branch", { root }),
+      invoke<string[]>("assistant_list_workspace_files", { root }),
+    ]).then(([nextBranch, files]) => {
+      if (!live || paneRoot !== root) return;
+      hubBranch = nextBranch;
+      hubFileCount = files.length;
+    }).catch((error) => {
+      if (live && paneRoot === root) {
+        hubBranch = null;
+        hubFileCount = 0;
+        console.warn("workspace context load failed", error);
+      }
+    });
+    return () => { live = false; };
   });
 
   // ── Adopt-existing-folder versatility ──────────────────────────────────────

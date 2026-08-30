@@ -313,9 +313,9 @@
   padding: 1px 6px 1px 0; margin-left: -2px; border-radius: 6px;
   transition: background var(--dur-fast), color var(--dur-fast); }
 .wline-row.wr-click:hover { background: color-mix(in oklab, var(--fg) 3.5%, transparent); color: var(--fg-2); }
-.wline-row :global(.wr-chev) { flex: none; align-self: center; color: var(--fg-faint);
+.wline-row .wr-chev { flex: none; align-self: center; color: var(--fg-faint);
   transition: transform var(--dur-fast); }
-.wline-row :global(.wr-chev.open) { transform: rotate(90deg); }
+.wline-row .wr-chev.open { transform: rotate(90deg); }
 .wline-row .wr-chev-ghost { flex: none; width: 11px; }
 .wline-row .wr-verb { color: var(--fg-subtle); }
 .wline-row .wr-dir { color: var(--fg-faint); opacity: 0.7; }
@@ -329,8 +329,8 @@
 .wr-out { margin: 3px 0 8px; border: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
   border-radius: 8px; background: var(--bg-inset); overflow: hidden;
   animation: workOpen 0.24s var(--ease-page) both; }
-.wr-out :global(.oblock-out) { padding: 5px 10px; color: var(--fg-muted); font-size: var(--fs-xs); }
-.wr-out :global(.oblock-acts) { padding: 3px 9px 4px; border-top: 0; }
+.wr-out .oblock-out { padding: 5px 10px; color: var(--fg-muted); font-size: var(--fs-xs); }
+.wr-out .oblock-acts { padding: 3px 9px 4px; border-top: 0; }
 /* Detailed tier: full path shown in place of dir+basename. Let the row wrap so
    the whole path is legible rather than ellipsised away. */
 .wline-row .wr-path { color: var(--fg-2); }

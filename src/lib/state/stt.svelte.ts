@@ -163,6 +163,8 @@ class SttStore {
    *  fires before the pane-focus onclick bubbles). Composers gate their
    *  sendRequested handler on this so "send it" only fires the right pane. */
   targetTabId = $state<string | null>(null);
+  /** Workspace captured with targetTabId for local decoder vocabulary. */
+  private targetWorkspaceRoot: string | null = null;
   /** Live mic input level, 0..1 normalized — drives the composer waveform meter.
    *  Whisper feeds it from `stt://level`; web_speech from a browser AnalyserNode. */
   level = $state(0);
@@ -407,7 +409,9 @@ class SttStore {
       setTimeout(() => {
         // Re-check recording at fire-time: if something restarted the mic in
         // the 120ms gap, start() again would double-start the recogniser.
-        if (token === this.restartToken && !this.recording) void this.start();
+        if (token === this.restartToken && !this.recording) {
+          void this.start(this.targetTabId, this.targetWorkspaceRoot);
+        }
       }, 120);
     }
   }
@@ -461,9 +465,9 @@ class SttStore {
   }
 
   /** Begin live recognition. Returns false if unavailable / disabled.
-   *  `tabId` binds the dictation to a specific pane's tab; omit for the
-   *  focused tab (the legacy single-pane behaviour). */
-  async start(tabId?: string | null): Promise<boolean> {
+   *  `tabId` and `workspaceRoot` bind dictation + decoder vocabulary to the
+   *  exact pane that started it; neither is re-resolved after focus moves. */
+  async start(tabId?: string | null, workspaceRoot?: string | null): Promise<boolean> {
     if (!this.config.enabled) {
       this.lastError = "Speech-to-text is disabled. Enable it in Settings → Speech.";
       this.failToast();
@@ -476,6 +480,9 @@ class SttStore {
     if (this.whisperStartInvoked) return true;
     // Bind BEFORE reading baseDraft so we capture the target pane's draft.
     this.targetTabId = tabId ?? assistant.currentConvoId;
+    this.targetWorkspaceRoot = workspaceRoot
+      ?? assistant.tabFor(this.targetTabId)?.workspaceRoot
+      ?? null;
     this.starting = true;
     this.lastError = null;
     this.ghostTail = "";
@@ -507,6 +514,7 @@ class SttStore {
       try {
         const pending = invoke("stt_start_recording", {
           model: isWhisper ? this.config.whisper_model : this.config.parakeet_model,
+          root: this.targetWorkspaceRoot,
         });
         this.startPending = pending;
         await pending;

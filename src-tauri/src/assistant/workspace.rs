@@ -97,12 +97,6 @@ pub fn assistant_remove_recent_root(path: String) -> Result<WorkspaceState, Stri
     Ok(workspace_state_from(&cfg))
 }
 
-/// The active workspace root, if the user has opened a folder. Exposed for
-/// the STT engine's workspace-context prompt injection.
-pub(crate) fn current_root() -> Option<PathBuf> {
-    load_config().current_root
-}
-
 /// The user-visible Documents folder, resolved the way Explorer does — the
 /// `User Shell Folders\Personal` registry value (REG_EXPAND_SZ; honors OneDrive
 /// Known-Folder-Move redirection), falling back to `%USERPROFILE%\Documents`.
@@ -189,25 +183,21 @@ pub fn assistant_local_scratch_path() -> Option<String> {
     local_scratch_dir().ok().map(|p| p.to_string_lossy().into_owned())
 }
 
-/// Resolve a per-tab root override (validated dir) or fall back to the global
-/// `current_root`. Lets the `@`-mention walk + branch probe scope to whichever
-/// pane the user is interacting with instead of always the global default.
+/// Resolve an explicitly supplied per-tab root (validated dir). Pane-bound
+/// commands deliberately do not fall back to the mutable global `current_root`:
+/// an omitted/stale context must yield no data, never another pane's project.
 ///
 /// Stale-override guard: an explicit per-tab root that's SUPPLIED BUT NO LONGER A
 /// DIR (folder deleted/renamed, USB/network drive disconnected — none of which
 /// route through setRoot's "not a directory" self-heal, since that only fires on
-/// a fresh pick) must NOT silently fall through to the global root. Doing so ran
-/// this pane's `@`-mention walk / branch probe against a DIFFERENT project while
-/// the pane header still showed the stale one (cross-contamination). A stale
-/// override → `None` (honest empty result); only a genuinely ABSENT override
-/// falls back to the global default.
+/// a fresh pick) must also return `None`.
 pub(crate) fn resolve_root(override_path: Option<String>) -> Option<PathBuf> {
     match override_path.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
         Some(p) => {
             let path = PathBuf::from(p);
             path.is_dir().then_some(path)
         }
-        None => load_config().current_root,
+        None => None,
     }
 }
 

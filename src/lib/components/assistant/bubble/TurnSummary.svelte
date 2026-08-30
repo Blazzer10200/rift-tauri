@@ -2,14 +2,16 @@
   import { Check, GitCommit, Clock, RotateCcw, Zap } from "@lucide/svelte";
   import { fade } from "svelte/transition";
   import { tooltip } from "$lib/actions/tooltip";
-  import { assistant, type ChatMessage } from "../../../state/assistant.svelte";
+  import type { ChatMessage } from "../../../state/assistant.svelte";
+  import type { PermissionMode } from "../../../state/assistant/types";
   import { formatDuration, lineDelta } from "./helpers";
 
   const reducedMotion =
     typeof window !== "undefined" &&
     window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
 
-  let { message, costLabel = null }: { message: ChatMessage; costLabel?: string | null } = $props();
+  let { message, costLabel = null, fallbackPermissionMode }:
+    { message: ChatMessage; costLabel?: string | null; fallbackPermissionMode: PermissionMode } = $props();
 
   // ── TurnSummary — caps a completed assistant turn that touched files.
   // Stats derive from the turn's own Edit/Write/MultiEdit blocks (same line
@@ -48,9 +50,9 @@
     return ms;
   });
   // The mode the turn RAN with (snapshotted at send time) — falls back to the
-  // live global only for pre-field conversations, so switching modes later
+  // owning conversation only for pre-field conversations, so switching modes later
   // can't retroactively relabel a historical turn's badge.
-  const turnMode = $derived(message.permissionMode ?? assistant.permissionMode);
+  const turnMode = $derived(message.permissionMode ?? fallbackPermissionMode);
   const autoApplied = $derived(
     turnMode === "acceptEdits" ||
     turnMode === "bypassPermissions" ||

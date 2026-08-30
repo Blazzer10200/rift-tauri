@@ -119,6 +119,18 @@ below are relative to that directory.
 
 ## Load-bearing invariants
 
+- Every rendered chat pane owns a stable pane ID and a tab ID. The tab is the
+  source of truth for its workspace, conversation, provider/model, permissions,
+  draft, and local navigation; the workspace hub selection is only a global
+  default and must never be used as a rendered pane's fallback identity.
+- The conversation list scope is an explicit `all` or `focused-workspace`
+  view, never a fake workspace. Async UI work captures its pane/tab/workspace
+  identity before awaiting and discards results when that owner no longer
+  matches. Pane-bound backend commands require an explicit root and fail closed.
+- Provider session sidecars pin a CLI session to one canonical workspace under
+  both an in-process mutex and a Windows cross-process exclusive lock. A
+  persisted conversation with a conflicting root is invalid, not migratable.
+  The native browser similarly exposes page content only to its owning session.
 - Provider-neutral stored effort tiers preserve legacy meanings. Claude mapping
   changes together in `helpers.ts`, `config.rs`, and `turn.rs`; Codex and API
   mappings change together in `modelMatrix.ts`, `codex_app_server.rs`, and

@@ -186,7 +186,7 @@
 }
 .ob-accent-dot:hover { transform: translateY(-2px); }
 .ob-accent-dot.on { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px color-mix(in oklab, var(--sw) 80%, transparent); }
-.ob-accent-dot :global(.lucide) { stroke-width: 3; }
+.ob-accent-dot .lucide { stroke-width: 3; }
 
 /* inline accent strip — Welcome step (Personalize folded in) */
 .ob-accent-inline {
@@ -300,14 +300,14 @@
   transition: background var(--dur-fast) ease, border-color var(--dur-fast) ease;
 }
 .ob-recent-btn:hover { background: var(--surface-hover); border-color: var(--border-strong); }
-.ob-recent-btn :global(.lucide) { flex: none; color: var(--fg-subtle); }
+.ob-recent-btn .lucide { flex: none; color: var(--fg-subtle); }
 .ob-recent-path { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 
 .ob-hint { display: flex; align-items: flex-start; gap: 7px; font-size: 12px; color: var(--fg-muted); line-height: 1.5; margin: 0; }
-.ob-hint :global(.lucide) { flex: none; margin-top: 1px; color: var(--fg-subtle); }
+.ob-hint .lucide { flex: none; margin-top: 1px; color: var(--fg-subtle); }
 .ob-hint.ok { color: var(--ok); }
 .ob-hint--warn { color: var(--warn); }
-.ob-hint--warn :global(.lucide) { color: var(--warn); }
+.ob-hint--warn .lucide { color: var(--warn); }
 
 .ob-route-note {
   display: flex; align-items: flex-start; gap: 9px;
@@ -326,18 +326,18 @@
 @keyframes ob-live { 0% { box-shadow: 0 0 0 0 var(--ok-soft); } 70% { box-shadow: 0 0 0 6px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
 
 .ob-error { display: flex; align-items: center; gap: 7px; font-size: var(--fs-sm); color: var(--danger); }
-.ob-error :global(.lucide) { flex: none; }
+.ob-error .lucide { flex: none; }
 
 /* ── Claude step — status rows ────────────────────────────────────────────── */
 .ob-statcard { display: flex; flex-direction: column; gap: 2px; padding: 6px 15px; background: var(--bg-elev-1); border: 1px solid var(--border); border-radius: var(--r-card); }
 .ob-statrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 0; font-size: var(--fs-sm); }
 .ob-statrow + .ob-statrow { border-top: 1px solid var(--border); }
 .ob-statrow .k { color: var(--fg-muted); display: flex; align-items: center; gap: 8px; }
-.ob-statrow .k :global(.lucide) { color: var(--fg-subtle); }
+.ob-statrow .k .lucide { color: var(--fg-subtle); }
 .ob-statrow .v { display: flex; align-items: center; gap: 6px; color: var(--fg); font-weight: 500; }
 .ob-statrow .v.ok { color: var(--ok); }
 .ob-statrow .v.warn { color: var(--warn); }
-.ob-statrow .v :global(.lucide) { flex: none; }
+.ob-statrow .v .lucide { flex: none; }
 /* Summary row = a full-width plain-English sentence (the backend diagnostic),
    not a key/value pair — left-aligned, muted, normal weight. */
 .ob-statrow--summary { justify-content: flex-start; }
@@ -452,9 +452,9 @@
   font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-muted);
   padding: 4px 6px; border-radius: 6px;
 }
-.ob-mini-tree .row :global(.lucide) { flex: none; color: var(--fg-subtle); }
+.ob-mini-tree .row .lucide { flex: none; color: var(--fg-subtle); }
 .ob-mini-tree .r0 { color: var(--fg-2); font-weight: 600; }
-.ob-mini-tree .r0 :global(.lucide) { color: var(--accent); }
+.ob-mini-tree .r0 .lucide { color: var(--accent); }
 .ob-mini-tree .r1, .ob-mini-tree .r2, .ob-mini-tree .r3 { margin-left: 14px; }
 .ob-mini-tree .scan {
   position: absolute; left: 0; right: 0; top: -18%; height: 26px; opacity: 0;

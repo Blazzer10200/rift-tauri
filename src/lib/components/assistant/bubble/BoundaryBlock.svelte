@@ -5,7 +5,8 @@
   import { formatBoundaryAt } from "./helpers";
   import type { Block } from "../../../state/assistant.svelte";
 
-  let { boundaryBlock }: { boundaryBlock: Extract<Block, { type: "boundary" }> } = $props();
+  let { boundaryBlock, workspaceRoot = null }:
+    { boundaryBlock: Extract<Block, { type: "boundary" }>; workspaceRoot?: string | null } = $props();
   let boundaryExpanded = $state(false);
 </script>
 
@@ -63,7 +64,7 @@
       <span class="boundary-line" aria-hidden="true"></span>
     </button>
     {#if showBody && boundaryBlock.summary.length > 0}
-      <div class="boundary-body"><Markdown text={boundaryBlock.summary} /></div>
+      <div class="boundary-body"><Markdown text={boundaryBlock.summary} {workspaceRoot} /></div>
     {/if}
   </div>
 {/if}

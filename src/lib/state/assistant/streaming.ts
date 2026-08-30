@@ -877,11 +877,13 @@ function appendToolUse(tab: TabState, block: { id: string; name: string; input?:
     DESIGN_WRITE_METHODS.has(String(block.input?.method ?? ""))
   ) {
     DESIGN_DOCK_OPENED.add(tab);
-    browserDock.openUrl("https://claude.ai/design");
+    browserDock.openUrl("https://claude.ai/design", { workspaceRoot: tab.workspaceRoot });
   }
   // GitHub chip: a remote-mutating tool ran this turn — mark for a forced
   // status refresh at turn end (flushed in the `result` envelope).
-  if (/(?:^|_)(git_push|git_pull|git_commit|gh_pr_create)$/.test(block.name)) github.noteRemoteMutation();
+  if (/(?:^|_)(git_push|git_pull|git_commit|gh_pr_create)$/.test(block.name)) {
+    github.noteRemoteMutation(tab.workspaceRoot);
+  }
   tab.activity = {
     ...tab.activity,
     currentLabel: tab.shortToolLabel ? tab.shortToolLabel(block.name, block.input) : block.name,
@@ -1393,7 +1395,7 @@ export function onStreamLine(tab: TabState, raw: string) {
       if (Array.isArray(openAiHistory)) tab.openAiHistory = openAiHistory;
       // GitHub chip: the turn is over — if it pushed / opened a PR, the remote
       // state changed; refresh the branch status once.
-      github.flushRemoteMutation();
+      github.flushRemoteMutation(tab.workspaceRoot);
       if (typeof env.total_cost_usd === "number") {
         tab.totalCostUsd = (tab.totalCostUsd ?? 0) + env.total_cost_usd;
         const turnCost = env.total_cost_usd;

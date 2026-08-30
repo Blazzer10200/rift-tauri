@@ -23,8 +23,9 @@ class GithubState {
   dot = $derived(ghDot(this.status));
 
   #lastFetched = 0;
-  /** Set when a turn used git_push / gh_pr_create — flushed at turn end. */
-  #remoteMutated = false;
+  /** Workspace roots whose turn used a remote-mutating Git tool. Root-scoped
+   * so a background pane finishing cannot refresh/replace the focused repo. */
+  #remoteMutated = new Set<string>();
   /** Monotonic fetch id: a newer refresh supersedes any in-flight result. */
   #epoch = 0;
   #pollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -54,6 +55,7 @@ class GithubState {
       if (epoch !== this.#epoch) return; // superseded — a newer refresh owns the state
       this.#noteRunTransition(prevSnap, s);
       this.status = s;
+      this.#remoteMutated.delete(root);
     } catch (e) {
       if (epoch !== this.#epoch) return;
       // Keep branch/repo from the prior same-root snapshot so the popover
@@ -121,19 +123,21 @@ class GithubState {
 
   /** Cheap call sites (chip mount, focus regain) — min-gap applies. */
   maybeRefresh(root: string | null): void {
-    void this.refresh(root);
+    const force = !!root && this.#remoteMutated.has(root);
+    void this.refresh(root, { force });
   }
 
   /** streaming.ts: a remote-mutating tool ran this turn. */
-  noteRemoteMutation(): void {
-    this.#remoteMutated = true;
+  noteRemoteMutation(root: string | null): void {
+    if (root) this.#remoteMutated.add(root);
   }
 
   /** streaming.ts turn end: force-refresh once if anything mutated the remote. */
-  flushRemoteMutation(): void {
-    if (!this.#remoteMutated) return;
-    this.#remoteMutated = false;
-    if (this.loadedFor) void this.refresh(this.loadedFor, { force: true });
+  flushRemoteMutation(root: string | null): void {
+    if (!root || !this.#remoteMutated.has(root)) return;
+    // Only refresh a snapshot already displaying this root. A background
+    // project's completion stays pending and forces its next focused refresh.
+    if (this.loadedFor === root) void this.refresh(root, { force: true });
   }
 }
 

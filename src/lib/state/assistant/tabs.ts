@@ -12,9 +12,16 @@
 // state for removed tabs), #145 (debounced save snapshots the tab), #149
 // (racy openTab during delete), #181 (persistTabs in finally on restore).
 
-import { MAX_PANES, type ModelSel, type PaneState } from "./types";
+import {
+  MAX_PANES,
+  createPaneState,
+  type ModelSel,
+  type PaneState,
+  type PermissionMode,
+  type ThinkingEffort,
+} from "./types";
 import type { TextAttachment } from "./attachments";
-import { loadModel } from "./helpers";
+import { asModelSel, asPermissionMode, loadModel } from "./helpers";
 import { tabsStorageKey } from "./persistence";
 import { notify } from "../toast.svelte";
 import { shell } from "../shell.svelte";
@@ -45,9 +52,10 @@ type TabsHost = {
   workspaceFiles: string[];
   workspaceBranch: string | null;
   activeRoot: string | null;
+  workspaceCurrent: string | null;
   telemetry: { event(name: string, data?: unknown): void };
   // ── methods that stay on store / live in other modules ──
-  loadConversation(id: string): Promise<void>;
+  loadConversation(id: string, opts?: { activate?: boolean; paneId?: string }): Promise<boolean>;
   persistTabs(): void;
   scheduleSave(flush?: boolean, forConvoId?: string): void;
   stop(tabId?: string | null): Promise<void>;
@@ -76,7 +84,7 @@ export function addPane(host: TabsHost): boolean {
   }
   const insertAt = host.focusedPaneIdx + 1;
   const next = host.panes.slice();
-  next.splice(insertAt, 0, { tabId: null });
+  next.splice(insertAt, 0, createPaneState());
   host.panes = next;
   host.telemetry.event("pane.add", { count: next.length });
   // Focus the freshly-added pane so subsequent newTab/openTab assigns to it.
@@ -113,15 +121,18 @@ export function setFocusedPane(host: TabsHost, idx: number) {
   if (idx < 0 || idx >= host.panes.length) return;
   if (host.focusedPaneIdx === idx && host.currentConvoId === host.panes[idx].tabId) return;
   const prevRoot = host.activeRoot;
+  const targetPane = host.panes[idx];
   host.focusedPaneIdx = idx;
-  const next = host.panes[idx].tabId;
+  const next = targetPane.tabId;
   if (next) {
     const inMeta = host.conversations.some((c) => c.id === next);
     if (inMeta && !host.tabs.get(next)) {
-      // Async load: activeRoot still reflects the OLD pane when the sync check
-      // below runs, so re-check after the load resolves — else the @-mention +
-      // branch caches survive a cross-root pane switch as stale data.
-      void host.loadConversation(next).then(() => {
+      // Capture the stable pane identity. A late disk load may hydrate its tab,
+      // but may activate it only while this exact pane is still focused and
+      // still owns the requested tab.
+      const load = host.loadConversation(next, { paneId: targetPane.id });
+      host.currentConvoId = null;
+      void load.then(() => {
         if (host.activeRoot !== prevRoot) {
           host.workspaceFiles = [];
           host.workspaceBranch = null;
@@ -155,12 +166,12 @@ function assignFocusedPane(host: TabsHost, tabId: string | null) {
   if (tabId != null) {
     const sib = host.panes.findIndex((p, i) => i !== host.focusedPaneIdx && p.tabId === tabId);
     if (sib !== -1) {
-      host.focusedPaneIdx = sib;
+      setFocusedPane(host, sib);
       return;
     }
   }
   const next = host.panes.slice();
-  next[host.focusedPaneIdx] = { tabId };
+  next[host.focusedPaneIdx] = { ...cur, tabId };
   host.panes = next;
 }
 
@@ -201,9 +212,10 @@ export function dropTabIntoPane(host: TabsHost, tabId: string, paneIdx: number) 
       tabId === host.currentConvoId
         ? host.openTabs.find((t) => t !== tabId) ?? null
         : host.currentConvoId;
-    const next: PaneState[] = [{ tabId: null }, { tabId: null }];
-    next[paneIdx] = { tabId };
-    next[other] = { tabId: counterpart };
+    const existing = host.panes[0] ?? createPaneState();
+    const next: PaneState[] = [createPaneState(), createPaneState()];
+    next[paneIdx] = createPaneState(tabId);
+    next[other] = { ...existing, tabId: counterpart };
     host.panes = next;
     host.telemetry.event("pane.split.on", { via: "drag", p0: next[0].tabId, p1: next[1].tabId });
   } else if (paneIdx >= host.panes.length) {
@@ -225,13 +237,15 @@ export function dropTabIntoPane(host: TabsHost, tabId: string, paneIdx: number) 
       return;
     }
     const next = host.panes.slice();
-    next.push({ tabId });
+    next.push(createPaneState(tabId));
     host.panes = next;
     const newIdx = next.length - 1;
     host.focusedPaneIdx = newIdx;
     const inMeta = host.conversations.some((c) => c.id === tabId);
     if (inMeta && !host.tabs.get(tabId)) {
-      void host.loadConversation(tabId);
+      const paneId = next[newIdx].id;
+      host.currentConvoId = null;
+      void host.loadConversation(tabId, { paneId });
     } else {
       host.currentConvoId = tabId;
     }
@@ -251,14 +265,14 @@ export function dropTabIntoPane(host: TabsHost, tabId: string, paneIdx: number) 
     const siblingIdx = host.panes.findIndex((p, i) => i !== paneIdx && p.tabId === tabId);
     if (siblingIdx !== -1) {
       const swapped = host.panes.slice();
-      swapped[siblingIdx] = { tabId: host.panes[paneIdx].tabId };
-      swapped[paneIdx] = { tabId };
+      swapped[siblingIdx] = { ...swapped[siblingIdx], tabId: host.panes[paneIdx].tabId };
+      swapped[paneIdx] = { ...swapped[paneIdx], tabId };
       host.panes = swapped;
       setFocusedPane(host, paneIdx);
       return;
     }
     const next = host.panes.slice();
-    next[paneIdx] = { tabId };
+    next[paneIdx] = { ...next[paneIdx], tabId };
     host.panes = next;
   }
   // Move focus to the freshly-dropped pane + sync currentConvoId.
@@ -267,7 +281,9 @@ export function dropTabIntoPane(host: TabsHost, tabId: string, paneIdx: number) 
     const inMeta = host.conversations.some((c) => c.id === tabId);
     if (inMeta && !host.tabs.get(tabId)) {
       // Same stale-root-cache race as setFocusedPane — re-check post-load.
-      void host.loadConversation(tabId).then(() => {
+      const paneId = host.panes[paneIdx].id;
+      host.currentConvoId = null;
+      void host.loadConversation(tabId, { paneId }).then(() => {
         if (host.activeRoot !== prevRoot) {
           host.workspaceFiles = [];
           host.workspaceBranch = null;
@@ -290,7 +306,7 @@ export function dropTabIntoPane(host: TabsHost, tabId: string, paneIdx: number) 
 function scrubTabFromPanes(host: TabsHost, id: string) {
   let changed = false;
   const next = host.panes.map((p) => {
-    if (p.tabId === id) { changed = true; return { tabId: null }; }
+    if (p.tabId === id) { changed = true; return { ...p, tabId: null }; }
     return p;
   });
   if (changed) host.panes = next;
@@ -309,13 +325,72 @@ export async function restoreTabs(host: TabsHost) {
       activeTabId?: unknown;
       panes?: unknown;
       focusedPaneIdx?: unknown;
+      ephemeralTabs?: unknown;
     };
+    type EphemeralTab = {
+      id: string;
+      workspaceRoot: string | null;
+      model: ModelSel | null;
+      effort: ThinkingEffort | null;
+      thinkingOn: boolean | null;
+      permissionMode: PermissionMode;
+      draft: string;
+    };
+    const isUuid = (value: unknown): value is string =>
+      typeof value === "string"
+      && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+    const isAbsoluteRoot = (value: unknown): value is string =>
+      typeof value === "string"
+      && value.trim().toLowerCase() !== "all"
+      && (/^[a-z]:[\\/]/i.test(value) || /^\\\\/.test(value) || value.startsWith("/"));
+    const efforts: readonly ThinkingEffort[] = ["none", "low", "smart", "deep", "ultra", "max", "agentic"];
+    const ephemeral = new Map<string, EphemeralTab>();
+    if (Array.isArray(parsed.ephemeralTabs)) {
+      for (const item of parsed.ephemeralTabs) {
+        const raw = item as Record<string, unknown>;
+        if (!isUuid(raw?.id) || ephemeral.has(raw.id)) continue;
+        const root = raw.workspaceRoot == null
+          ? null
+          : isAbsoluteRoot(raw.workspaceRoot) ? raw.workspaceRoot : undefined;
+        if (root === undefined) continue;
+        ephemeral.set(raw.id, {
+          id: raw.id,
+          workspaceRoot: root,
+          model: asModelSel(raw.model),
+          effort: typeof raw.effort === "string" && (efforts as readonly string[]).includes(raw.effort)
+            ? raw.effort as ThinkingEffort
+            : null,
+          thinkingOn: typeof raw.thinkingOn === "boolean" ? raw.thinkingOn : null,
+          permissionMode: asPermissionMode(raw.permissionMode) ?? "bypassPermissions",
+          draft: typeof raw.draft === "string" ? raw.draft.slice(0, 200_000) : "",
+        });
+      }
+    }
     const ids = Array.isArray(parsed.openTabs)
       ? parsed.openTabs.filter((s): s is string => typeof s === "string")
       : [];
     const existing = new Set(host.conversations.map((c) => c.id));
-    const valid = ids.filter((id) => existing.has(id));
+    const valid = ids.filter((id) => existing.has(id) || ephemeral.has(id));
     host.openTabs = valid;
+    for (const id of valid) {
+      if (existing.has(id)) continue;
+      const saved = ephemeral.get(id);
+      if (!saved) continue;
+      const tab = host.ensureTab(id, id) as {
+        workspaceRoot: string | null;
+        modelOverride: ModelSel | null;
+        effortOverride: ThinkingEffort | null;
+        thinkingOverride: boolean | null;
+        permissionMode: PermissionMode;
+        draft: string;
+      };
+      tab.workspaceRoot = saved.workspaceRoot;
+      tab.modelOverride = saved.model;
+      tab.effortOverride = saved.effort;
+      tab.thinkingOverride = saved.thinkingOn;
+      tab.permissionMode = saved.permissionMode;
+      tab.draft = saved.draft;
+    }
     const active = typeof parsed.activeTabId === "string" ? parsed.activeTabId : null;
     // Restore split state — N-pane shape. Accepts length 1..MAX_PANES.
     // Stale tab refs are pruned to null (pane survives, empty). Legacy
@@ -326,16 +401,24 @@ export async function restoreTabs(host: TabsHost) {
       // chat surface on EVERY load until storage is cleared by hand. Later
       // duplicates hydrate empty so old records self-heal here.
       const seen = new Set<string>();
+      const seenPaneIds = new Set<string>();
       const norm = (p: unknown): PaneState => {
-        const id = (p as { tabId?: unknown })?.tabId;
-        if (typeof id !== "string" || !valid.includes(id) || seen.has(id)) return { tabId: null };
-        seen.add(id);
-        return { tabId: id };
+        const raw = p as { id?: unknown; tabId?: unknown };
+        const restoredPaneId = typeof raw?.id === "string" && raw.id.trim() && !seenPaneIds.has(raw.id)
+          ? raw.id
+          : undefined;
+        const pane = createPaneState(null, restoredPaneId);
+        seenPaneIds.add(pane.id);
+        const tabId = raw?.tabId;
+        if (typeof tabId !== "string" || !valid.includes(tabId) || seen.has(tabId)) return pane;
+        seen.add(tabId);
+        pane.tabId = tabId;
+        return pane;
       };
       const restored = parsed.panes.map(norm);
       // Keep at least one pane; if all restored panes are empty and we're
       // single-length, that's fine — assignFocusedPane will fill on next open.
-      host.panes = restored.length > 0 ? restored : [{ tabId: null }];
+      host.panes = restored.length > 0 ? restored : [createPaneState()];
       const fi = typeof parsed.focusedPaneIdx === "number" ? parsed.focusedPaneIdx : 0;
       host.focusedPaneIdx = Math.max(0, Math.min(fi, host.panes.length - 1));
     }
@@ -359,7 +442,13 @@ export async function restoreTabs(host: TabsHost) {
         else fp.tabId = winner;
       }
       try {
-        await host.loadConversation(winner);
+        if (existing.has(winner)) {
+          await host.loadConversation(winner, { paneId: host.panes[host.focusedPaneIdx]?.id });
+        } else {
+          // Ephemeral tabs are already hydrated above; activate without asking
+          // the conversation backend for a file that intentionally does not exist.
+          host.currentConvoId = winner;
+        }
       } catch (e) {
         // A transient load failure must NOT fall through to the outer catch —
         // that resets openTabs=[] and the finally persists it, permanently wiping
@@ -378,7 +467,7 @@ export async function restoreTabs(host: TabsHost) {
   } catch (e) {
     console.warn("restoreTabs failed", e);
     host.openTabs = [];
-    host.panes = [{ tabId: null }];
+    host.panes = [createPaneState()];
   } finally {
     host.persistTabs();
   }
@@ -392,6 +481,10 @@ export async function restoreTabs(host: TabsHost) {
 export async function openTab(host: TabsHost, id: string) {
   if (!host.openTabs.includes(id)) {
     host.openTabs = [...host.openTabs, id];
+  }
+  const alreadyVisible = host.panes.findIndex((p) => p.tabId === id);
+  if (alreadyVisible !== -1 && alreadyVisible !== host.focusedPaneIdx) {
+    setFocusedPane(host, alreadyVisible);
   }
   // Already-open fast path ONLY when the TabState actually exists: after a
   // failed loadConversation drops the half-built tab, a restored/stale
@@ -407,13 +500,26 @@ export async function openTab(host: TabsHost, id: string) {
   }
   // Stash outgoing tab's composer + attachments before any state change.
   const inMeta = host.conversations.some((c) => c.id === id);
+  // Bind the selection to the pane NOW, before any disk await. The stable pane
+  // id is the async correlation key; a later focus move cannot retarget it.
+  assignFocusedPane(host, id);
+  const targetPane = host.panes.find((p) => p.tabId === id);
   if (host.tabs.get(id)) {
     // Live TabState (possibly streaming in the bg) — its messages/queue ride
     // on the TabState; disk-reloading here would clobber the in-flight turn.
     host.currentConvoId = id;
     host.lastNotice = null;
   } else if (inMeta) {
-    await host.loadConversation(id);
+    host.currentConvoId = null;
+    const loaded = await host.loadConversation(id, { paneId: targetPane?.id });
+    if (!loaded) {
+      if (targetPane) {
+        host.panes = host.panes.map((p) =>
+          p.id === targetPane.id && p.tabId === id ? { ...p, tabId: null } : p,
+        );
+      }
+      host.openTabs = host.openTabs.filter((tabId) => tabId !== id);
+    }
   } else {
     // Fresh in-memory tab (no disk record yet). Mint a TabState with
     // cliSessionId seeded from convoId — first send() finalizes. Don't
@@ -427,7 +533,6 @@ export async function openTab(host: TabsHost, id: string) {
   }
   // Restore incoming tab's composer + attachments (loadConversation cleared
   // them; we re-fill from cache if the user had a draft mid-typing).
-  assignFocusedPane(host, id);
   host.persistTabs();
 }
 
@@ -490,18 +595,25 @@ export async function closeTab(host: TabsHost, id: string) {
     } else {
       // Right-priority: the entry that shifted into idx, else last.
       const neighbor = next[idx] ?? next[next.length - 1];
-      const inMeta = host.conversations.some((c) => c.id === neighbor);
-      if (inMeta) {
-        await host.loadConversation(neighbor);
+      const visibleIdx = host.panes.findIndex((p) => p.tabId === neighbor);
+      if (visibleIdx !== -1) {
+        setFocusedPane(host, visibleIdx);
       } else {
-        // #143: ensureTab seeds the fresh tab's cliSessionId to neighbor;
-        // don't store-write null afterwards or the setter clobbers it.
-        host.ensureTab(neighbor, neighbor);
-        host.currentConvoId = neighbor;
-        host.queue = [];
-        host.lastNotice = null;
+        assignFocusedPane(host, neighbor);
+        const paneId = host.panes[host.focusedPaneIdx]?.id;
+        const inMeta = host.conversations.some((c) => c.id === neighbor);
+        if (inMeta) {
+          host.currentConvoId = null;
+          await host.loadConversation(neighbor, { paneId });
+        } else {
+          // #143: ensureTab seeds the fresh tab's cliSessionId to neighbor;
+          // don't store-write null afterwards or the setter clobbers it.
+          host.ensureTab(neighbor, neighbor);
+          host.currentConvoId = neighbor;
+          host.queue = [];
+          host.lastNotice = null;
+        }
       }
-      assignFocusedPane(host, neighbor);
     }
   }
   host.persistTabs();
@@ -510,7 +622,7 @@ export async function closeTab(host: TabsHost, id: string) {
 /** Open a fresh empty tab. Mints currentConvoId up-front so the tab can
  *  render before the first send; convoCreatedAt stays null so send() still
  *  flags isFirstTurn=true and the CLI gets --session-id, not --resume. */
-export async function newTab(host: TabsHost) {
+export async function newTab(host: TabsHost): Promise<string> {
   // Don't stop the previous tab's stream — newTab leaves background tabs
   // streaming. Save unsaved tail of the previous tab before swapping.
   if (host.messages.length > 0 && host.currentConvoId) {
@@ -519,10 +631,12 @@ export async function newTab(host: TabsHost) {
   // Snapshot outgoing tab's composer state before we mint the new one.
   // Inherit the focused tab's folder so a new chat opens in the same project
   // by default (a concrete snapshot — later folder switches elsewhere can't
-  // leak in). null = follow the global default.
-  const inheritRoot =
-    (host.tabs.get(host.currentConvoId ?? "") as { workspaceRoot?: string | null } | undefined)
-      ?.workspaceRoot ?? null;
+  // leak in). When there is no focused tab, snapshot the global new-chat
+  // default; an existing tab's null remains an explicit local/no-project scope.
+  const current = host.tabs.get(host.currentConvoId ?? "") as
+    | { workspaceRoot?: string | null }
+    | undefined;
+  const inheritRoot = current ? current.workspaceRoot ?? null : host.workspaceCurrent;
   const id = crypto.randomUUID();
   host.openTabs = [...host.openTabs, id];
   // Fresh TabState — empty messages, no streaming. cliSessionId defaults
@@ -547,6 +661,7 @@ export async function newTab(host: TabsHost) {
   host.composerTextAttachments = [];
   assignFocusedPane(host, id);
   host.persistTabs();
+  return id;
 }
 
 /** Clear the active conversation IN PLACE (Claude Code `/clear` semantics).
@@ -585,7 +700,7 @@ export async function clearConversation(host: TabsHost) {
   if (idx === -1) nextTabs.push(newId);
   else nextTabs[idx] = newId;
   host.openTabs = nextTabs;
-  host.panes = host.panes.map((p) => (p.tabId === oldId ? { tabId: newId } : p));
+  host.panes = host.panes.map((p) => (p.tabId === oldId ? { ...p, tabId: newId } : p));
   // Fresh empty TabState; cliSessionId seeded to newId. #143: don't write the
   // per-tab fields via store setters afterwards or ensureTab's seed is lost.
   host.ensureTab(newId, newId);
@@ -642,7 +757,7 @@ export async function closeOtherTabs(host: TabsHost, keepId: string) {
   }
   host.openTabs = [keepId];
   if (host.currentConvoId !== keepId) {
-    await host.loadConversation(keepId);
+    await openTab(host, keepId);
   }
   host.persistTabs();
 }
@@ -704,7 +819,7 @@ export async function closeTabsToRight(host: TabsHost, anchorId: string) {
   }
   host.openTabs = kept;
   if (removedActive) {
-    await host.loadConversation(anchorId);
+    await openTab(host, anchorId);
   }
   host.persistTabs();
 }

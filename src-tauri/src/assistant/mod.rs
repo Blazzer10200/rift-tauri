@@ -72,10 +72,8 @@ pub use news::*;
 // Glob re-export for the __cmd__ item.
 pub use mcp_list::*;
 // R7 split (2026-06-09): workspace root state + @-mention file enumeration +
-// branch probe in `workspace.rs`. Glob re-export for the same __cmd__ reason;
-// `current_root` stays reachable as `crate::assistant::current_root` (stt).
+// branch probe in `workspace.rs`. Glob re-export for the same __cmd__ reason.
 pub use workspace::*;
-pub(crate) use workspace::current_root;
 // Projects: named alias over a workspace folder + per-project file-pattern
 // config. Glob re-export for the __cmd__ items (same reason as workspace).
 pub use projects::*;

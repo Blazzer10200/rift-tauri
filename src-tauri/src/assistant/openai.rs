@@ -6,7 +6,7 @@
 //! older Claude wire decoder is incrementally retired.
 
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
@@ -18,6 +18,7 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio_util::sync::CancellationToken;
 
 use super::{AssistantAttachment, PermissionRegistry};
@@ -401,7 +402,7 @@ pub async fn assistant_openai_send(
         .filter(|mode| super::config::is_valid_permission_mode(mode))
         .unwrap_or_else(|| "bypassPermissions".into());
     let trust_level = super::config::effective_trust_level(&cfg.trust_level);
-    let roots = resolve_roots(root.as_deref(), cfg.current_root.as_deref())?;
+    let roots = resolve_turn_roots(&session_id, root.as_deref())?;
     let epoch = turn_epoch.unwrap_or(0);
     let window_label = window.label().to_string();
     let mut input = validated_history(history.unwrap_or_default())?;
@@ -675,22 +676,9 @@ async fn stream_response(
     Ok(ResponseRound { response, calls })
 }
 
-fn resolve_roots(
-    explicit: Option<&str>,
-    configured: Option<&Path>,
-) -> Result<Vec<PathBuf>, String> {
-    let selected = explicit
-        .map(PathBuf::from)
-        .or_else(|| configured.map(Path::to_path_buf));
-    let Some(selected) = selected else {
-        return Ok(Vec::new());
-    };
-    let canonical = std::fs::canonicalize(&selected)
-        .map_err(|e| format!("workspace root is unavailable: {e}"))?;
-    if !canonical.is_dir() {
-        return Err("workspace root is not a directory".into());
-    }
-    Ok(vec![super::strip_unc(&canonical)])
+fn resolve_turn_roots(session_id: &str, requested: Option<&str>) -> Result<Vec<PathBuf>, String> {
+    let root = super::resolve_session_workspace(session_id, requested)?;
+    Ok(root.into_iter().collect())
 }
 
 fn provider_instructions(roots: &[PathBuf], permission_mode: &str) -> String {
@@ -1003,11 +991,7 @@ async fn tool_run_command(
     if command.is_empty() || command.len() > 32 * 1024 {
         return Err("command must be 1-32768 bytes".into());
     }
-    let timeout_secs = args
-        .get("timeout_seconds")
-        .and_then(Value::as_u64)
-        .unwrap_or(120)
-        .clamp(1, 300);
+    let timeout_secs = command_timeout_seconds(args);
     let mut process = if cfg!(windows) {
         let mut process = tokio::process::Command::new("powershell");
         process.args(["-NoProfile", "-NonInteractive", "-Command", command]);
@@ -1028,17 +1012,53 @@ async fn tool_run_command(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let output = tokio::select! {
-        _ = cancel.cancelled() => return Err("command cancelled".into()),
-        result = tokio::time::timeout(Duration::from_secs(timeout_secs), process.output()) => {
+    if cancel.is_cancelled() {
+        return Err("command cancelled".into());
+    }
+    let mut child = process
+        .spawn()
+        .map_err(|e| format!("command launch failed: {e}"))?;
+    let pid = child.id();
+    let Some(stdout) = child.stdout.take() else {
+        reap_command_tree(&mut child, pid).await;
+        return Err("command stdout pipe was unavailable".into());
+    };
+    let Some(stderr) = child.stderr.take() else {
+        reap_command_tree(&mut child, pid).await;
+        return Err("command stderr pipe was unavailable".into());
+    };
+    let stdout_task = tokio::spawn(async move {
+        read_capped_command_stream(stdout).await
+    });
+    let stderr_task = tokio::spawn(async move {
+        read_capped_command_stream(stderr).await
+    });
+    let status = tokio::select! {
+        _ = cancel.cancelled() => {
+            reap_command_tree(&mut child, pid).await;
+            let _ = stdout_task.await;
+            let _ = stderr_task.await;
+            return Err("command cancelled".into());
+        }
+        result = tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait()) => {
             match result {
-                Ok(result) => result.map_err(|e| format!("command launch failed: {e}"))?,
-                Err(_) => return Err(format!("command timed out after {timeout_secs}s")),
+                Ok(Ok(status)) => status,
+                Ok(Err(error)) => {
+                    let _ = stdout_task.await;
+                    let _ = stderr_task.await;
+                    return Err(format!("command wait failed: {error}"));
+                }
+                Err(_) => {
+                    reap_command_tree(&mut child, pid).await;
+                    let _ = stdout_task.await;
+                    let _ = stderr_task.await;
+                    return Err(format!("command timed out after {timeout_secs}s"));
+                }
             }
         }
     };
-    let mut stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-    let mut stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let mut stdout = read_command_output(stdout_task, "stdout").await?;
+    let mut stderr = read_command_output(stderr_task, "stderr").await?;
     if stdout.len() > MAX_COMMAND_OUTPUT_BYTES {
         stdout.truncate(MAX_COMMAND_OUTPUT_BYTES);
         stdout.push_str("\n[stdout truncated]");
@@ -1049,10 +1069,53 @@ async fn tool_run_command(
     }
     Ok(format!(
         "exit_code: {}\nstdout:\n{}\nstderr:\n{}",
-        output.status.code().unwrap_or(-1),
+        status.code().unwrap_or(-1),
         stdout,
         stderr
     ))
+}
+
+async fn reap_command_tree(child: &mut tokio::process::Child, pid: Option<u32>) {
+    if let Some(pid) = pid {
+        super::warm_pool::kill_child_tree_async(pid).await;
+    } else {
+        let _ = child.start_kill();
+    }
+    let _ = child.wait().await;
+}
+
+async fn read_command_output(
+    task: tokio::task::JoinHandle<std::io::Result<Vec<u8>>>,
+    stream: &str,
+) -> Result<String, String> {
+    let output = task
+        .await
+        .map_err(|e| format!("command {stream} reader failed: {e}"))?
+        .map_err(|e| format!("command {stream} read failed: {e}"))?;
+    Ok(String::from_utf8_lossy(&output).into_owned())
+}
+
+async fn read_capped_command_stream<R>(mut stream: R) -> std::io::Result<Vec<u8>>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut output = Vec::with_capacity(MAX_COMMAND_OUTPUT_BYTES + 1);
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let read = stream.read(&mut buffer).await?;
+        if read == 0 {
+            return Ok(output);
+        }
+        let remaining = (MAX_COMMAND_OUTPUT_BYTES + 1).saturating_sub(output.len());
+        output.extend_from_slice(&buffer[..read.min(remaining)]);
+    }
+}
+
+fn command_timeout_seconds(args: &Value) -> u64 {
+    args.get("timeout_seconds")
+        .and_then(Value::as_u64)
+        .unwrap_or(120)
+        .clamp(1, 300)
 }
 
 fn emit_tool_use(app: &AppHandle, window: &str, session: &str, epoch: u64, call: &FunctionCall) {
@@ -1429,6 +1492,14 @@ mod tests {
     }
 
     #[test]
+    fn command_timeout_is_bounded_before_process_launch() {
+        assert_eq!(command_timeout_seconds(&json!({})), 120);
+        assert_eq!(command_timeout_seconds(&json!({ "timeout_seconds": 0 })), 1);
+        assert_eq!(command_timeout_seconds(&json!({ "timeout_seconds": 301 })), 300);
+        assert_eq!(command_timeout_seconds(&json!({ "timeout_seconds": 45 })), 45);
+    }
+
+    #[test]
     fn native_file_tools_are_workspace_scoped_and_exact() {
         let temp = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(temp.path()).unwrap();
@@ -1453,5 +1524,11 @@ mod tests {
             &roots,
         )
         .is_err());
+    }
+
+    #[test]
+    fn rootless_turn_context_stays_rootless() {
+        let id = "550e8400-e29b-41d4-a716-4466554400c1";
+        assert!(resolve_turn_roots(id, None).unwrap().is_empty());
     }
 }

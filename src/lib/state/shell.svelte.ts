@@ -14,6 +14,12 @@ const MIN_W = 208;
 const MAX_W = 380;
 const DEFAULT_W = 248;
 
+/** Conversation-list context. `all` is an application view, never a project
+ *  id/path and never a nullable workspace alias. */
+export type ConversationScope =
+  | { kind: "focused-workspace" }
+  | { kind: "all" };
+
 // Below this window width the sidebar auto-collapses to give the main content
 // room (1366px laptops, 150%-scaled 1080p). Hysteresis: re-open only past a
 // wider mark so a window parked near the edge doesn't flicker open/closed.
@@ -40,9 +46,10 @@ class ShellState {
   resizing = $state(false);
   /** Pinned conversation ids — frontend-only (the backend meta has no pin). */
   pinned = $state<Set<string>>(new Set<string>());
-  /** Sidebar scope: false (default) = show only the open project's chats;
-   *  true = show every project's chats (with a per-row project label). */
-  allProjects = $state(false);
+  /** Explicit sidebar view. It filters history only and cannot mutate pane or
+   *  workspace identity. */
+  conversationScope = $state<ConversationScope>({ kind: "focused-workspace" });
+  get allProjects(): boolean { return this.conversationScope.kind === "all"; }
   /** Projects list expanded (show all) vs collapsed (active project only).
    *  Progressive disclosure so a 20-project rail stays 2 rows tall by default. */
   projectsExpanded = $state(false);
@@ -74,7 +81,10 @@ class ShellState {
       const ids = JSON.parse(localStorage.getItem(PINNED_KEY) ?? "[]") as unknown;
       if (Array.isArray(ids)) this.pinned = new Set(ids.filter((s): s is string => typeof s === "string"));
     } catch (e) { console.warn("[shell] pinned-convos parse failed:", e); }
-    this.allProjects = localStorage.getItem(ALL_PROJECTS_KEY) === "1";
+    const scope = localStorage.getItem(ALL_PROJECTS_KEY);
+    this.conversationScope = scope === "1" || scope === "all"
+      ? { kind: "all" }
+      : { kind: "focused-workspace" };
     this.projectsExpanded = localStorage.getItem(PROJECTS_OPEN_KEY) === "1";
     this.historyExpanded = localStorage.getItem(HISTORY_OPEN_KEY) === "1";
   }
@@ -96,9 +106,9 @@ class ShellState {
   }
 
   setAllProjects(v: boolean) {
-    this.allProjects = v;
+    this.conversationScope = v ? { kind: "all" } : { kind: "focused-workspace" };
     if (typeof window !== "undefined") {
-      localStorage.setItem(ALL_PROJECTS_KEY, v ? "1" : "0");
+      localStorage.setItem(ALL_PROJECTS_KEY, v ? "all" : "workspace");
     }
   }
 

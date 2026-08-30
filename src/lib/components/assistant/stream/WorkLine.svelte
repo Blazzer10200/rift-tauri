@@ -6,7 +6,7 @@
   import GrepResult from "./GrepResult.svelte";
   import ReadResult from "./ReadResult.svelte";
 
-  let { tools }: { tools: StreamTool[] } = $props();
+  let { tools, workspaceRoot = null }: { tools: StreamTool[]; workspaceRoot?: string | null } = $props();
   // Detailed tier auto-opens the per-tool list; minimal/balanced start collapsed
   // (both still expandable via the chevron). Derived so a live pref change re-runs.
   const mode = $derived(workLineMode(uiPrefs.toolDetail));
@@ -93,7 +93,7 @@
               {#if t.kind === "read" && t.name !== "list_dir"}
                 <ReadResult text={t.result ?? ""} path={t.path ?? null} offset={numOf(t, "offset")} />
               {:else if t.kind === "grep"}
-                <GrepResult text={t.result ?? ""} pattern={strOf(t, "pattern")} bare={t.name === "Glob"} />
+                <GrepResult text={t.result ?? ""} pattern={strOf(t, "pattern")} bare={t.name === "Glob"} {workspaceRoot} />
               {:else}
                 <OutputBlock text={t.result ?? ""} start={mode === "expanded" ? "expanded" : "collapsed"} live={t.status === "pending"} />
               {/if}

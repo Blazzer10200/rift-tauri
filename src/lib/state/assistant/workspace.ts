@@ -42,7 +42,7 @@ type WorkspaceHost = {
   // chosen folder onto the tab rather than the global default.
   activeRoot: string | null;
   tabFor: (id: string | null) => { workspaceRoot: string | null; modelOverride: ModelSel | null } | null;
-  activeTab: { workspaceRoot: string | null } | null;
+  activeTab: { workspaceRoot: string | null; modelOverride: ModelSel | null } | null;
 };
 
 /** `applyPrefs: false` refreshes the workspace snapshot (recents MRU etc.)
@@ -132,14 +132,15 @@ export async function setTabRoot(host: WorkspaceHost, tabId: string | null, path
 export async function setRoot(host: WorkspaceHost, path: string): Promise<void> {
   try {
     host.workspace = await invoke<WorkspaceState>("assistant_set_root", { path });
-    // A global switch must win on the FOCUSED pane: drop its per-tab override so
-    // effectiveRoot follows the new workspace.current. Without this, a tab that
-    // inherited/hydrated a concrete workspaceRoot keeps resolving activeRoot to
-    // the OLD project after "switch project" (sidebar header, branch pill,
-    // chat-scope filter, and the root sent to the CLI all stay stale). Other
-    // panes' per-tab roots are intentionally untouched.
+    // A project switch updates the global NEW-CHAT default and writes a concrete
+    // snapshot onto the focused tab. Never clear the tab to an implicit
+    // "follow workspace.current" state: that was the split-pane corruption
+    // path where changing one project made every null-root sibling follow it.
     const focused = host.activeTab;
-    if (focused) focused.workspaceRoot = null;
+    if (focused) {
+      focused.workspaceRoot = host.workspace.current ?? path;
+      focused.modelOverride = loadModel(focused.workspaceRoot);
+    }
     host.workspaceFiles = [];
     host.workspaceBranch = null;
     host.applyWorkspacePrefs();

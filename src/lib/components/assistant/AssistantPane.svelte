@@ -18,10 +18,11 @@
 
   import { tooltip } from "$lib/actions/tooltip";
   let {
+    paneId,
     tabId,
     focused,
     paneIdx,
-  }: { tabId: string | null; focused: boolean; paneIdx: number } = $props();
+  }: { paneId: string; tabId: string | null; focused: boolean; paneIdx: number } = $props();
 
   // Park the jump-to-latest button just above the composer no matter how tall it
   // grows (queue rail / attachments / enhance bar). A fixed px offset hid the
@@ -72,7 +73,7 @@
   );
   const paneModel = $derived(tab?.lastModelId ?? null);
   const paneCost = $derived(tab?.totalCostUsd ?? null);
-  // This pane's project folder (its own per-tab root, else the global default) —
+  // This pane's project folder (its own explicit per-tab root) —
   // each pane can run in a DIFFERENT folder, so the head surfaces the basename +
   // a click-to-change picker. "—" when nothing is set (pure conversational).
   const paneRoot = $derived(tab ? assistant.effectiveRoot(tab) : null);
@@ -392,7 +393,7 @@
   });
 
   function onPaneClick() {
-    if (!focused) assistant.setFocusedPane(paneIdx);
+    if (!focused) assistant.setFocusedPaneById(paneId);
   }
 
   // ── drag-from-tabsbar drop targets ───────────────────────────────────────
@@ -458,7 +459,7 @@
   // once. Focus first so the @-mention/branch caches refresh against this pane.
   function onPickPaneFolder(e: MouseEvent) {
     e.stopPropagation();
-    if (!focused) assistant.setFocusedPane(paneIdx);
+    if (!focused) assistant.setFocusedPaneById(paneId);
     void assistant.pickTabFolder(tabId);
   }
 
@@ -467,14 +468,14 @@
   // pane". Each handler focuses this pane first so newTab / openTab assigns
   // here (both rely on focusedPaneIdx via assignFocusedPane).
   function onEmptyNew() {
-    if (!focused) assistant.setFocusedPane(paneIdx);
+    if (!focused) assistant.setFocusedPaneById(paneId);
     void assistant.newTab();
   }
   function onEmptyClosePane() {
     assistant.closePane(paneIdx);
   }
   function onEmptyOpenRecent(id: string) {
-    if (!focused) assistant.setFocusedPane(paneIdx);
+    if (!focused) assistant.setFocusedPaneById(paneId);
     void assistant.openTab(id);
   }
   // Skip convos already visible in another pane — moving a tab cross-pane
@@ -491,17 +492,17 @@
   // Project quick-picks — a fresh chat scoped to that project, opened in THIS
   // pane (per-tab root; the global default never moves).
   function onEmptyOpenProject(root: string) {
-    void assistant.openProjectInPane(root, { paneIdx });
+    void assistant.openProjectInPane(root, { paneId });
   }
   const emptyProjects = $derived.by(() => {
     if (tabId) return [];
     return projects.sorted.slice(0, 4);
   });
-  const emptyActiveKey = $derived(projectRootKey(assistant.activeRoot));
+  const emptyActiveKey = $derived(projectRootKey(assistant.workspaceCurrent));
   const emptyMonogram = (name: string) => (name.trim().match(/[a-z0-9]/i)?.[0] ?? "·").toUpperCase();
   const emptyNewTip = $derived(
-    assistant.activeRoot
-      ? `Start a fresh chat in ${leafName(assistant.activeRoot)}`
+    assistant.workspaceCurrent
+      ? `Start a fresh chat in ${leafName(assistant.workspaceCurrent)}`
       : "Start a fresh chat",
   );
 
@@ -542,7 +543,10 @@
       // single-pane mode, dropping on the empty half grows the split; the
       // store's openProjectInPane handles the cap-aware grow.
       const splitNew = !assistant.splitActive && targetPane >= assistant.panes.length;
-      void assistant.openProjectInPane(projRoot, { paneIdx: targetPane, splitNew });
+      void assistant.openProjectInPane(
+        projRoot,
+        assistant.splitActive ? { paneId } : { paneIdx: targetPane, splitNew },
+      );
       return;
     }
     if (tabDrag) assistant.dropTabIntoPane(tabDrag, targetPane);
@@ -693,7 +697,7 @@
     <div class="csurf-col" class:is-home={showEmpty} class:is-convo={!showEmpty} class:engaged>
       {#if showEmpty && !engaged}
         <div class="welcome-wrap" bind:this={welcomeEl} in:welcomeIn out:welcomeOut>
-          <AssistantWelcome {needsAuth} {tabId} />
+          <AssistantWelcome {needsAuth} {tabId} {paneId} />
         </div>
       {:else if !showEmpty}
         <div class="stream" bind:this={scrollEl} onscroll={onScroll} onwheel={() => (glideUntil = 0)}>
@@ -703,6 +707,8 @@
                 <StreamTurn
                   message={m}
                   {tab}
+                  {tabId}
+                  workspaceRoot={tab?.workspaceRoot ?? null}
                   isLast={mi === messages.length - 1}
                   streaming={streaming && mi === messages.length - 1}
                 />
@@ -711,6 +717,7 @@
                   message={m}
                   {tab}
                   {tabId}
+                  workspaceRoot={tab?.workspaceRoot ?? null}
                   isLast={mi === messages.length - 1}
                   streaming={streaming
                     && mi === messages.length - 1
@@ -788,7 +795,7 @@
         onfocusin={onHostFocusIn}
         onfocusout={onHostFocusOut}
       >
-        <Composer {tabId} hero={showEmpty && !engaged} onsubmit={handleSend} />
+        <Composer {tabId} {paneId} hero={showEmpty && !engaged} onsubmit={handleSend} />
       </div>
     </div>
   {/if}

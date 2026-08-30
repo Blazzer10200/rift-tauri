@@ -32,7 +32,8 @@
   const reducedMotion =
     typeof window !== "undefined" &&
     window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
-  let { tool, variant = "card", caption = null }: { tool: ToolBlock; variant?: "card" | "timeline"; caption?: string | null } = $props();
+  let { tool, variant = "card", caption = null, workspaceRoot = null }:
+    { tool: ToolBlock; variant?: "card" | "timeline"; caption?: string | null; workspaceRoot?: string | null } = $props();
   // Agent + TodoWrite + AskUser are first-class card variants — default-expanded
   // since their body IS the message, not a debug detail. All other tools collapse.
   const isAgent = $derived(/^(mcp__rift__)?(Agent|Task)$/.test(tool.name));
@@ -459,6 +460,7 @@
       isError={tool.isError ?? false}
       status={tool.status}
       {durationLabel}
+      {workspaceRoot}
     />
   {:else if isTodoWrite}
     <TodoCard {todoItems} {todoCounts} status={tool.status} />
@@ -530,7 +532,7 @@
       {:else if resultStyle === "code"}
         <div class="body-frame"><ReadResult text={tool.result} path={readPath} offset={readOffset} /></div>
       {:else if resultStyle === "list" && shortName(tool.name) !== "list_dir"}
-        <div class="body-frame"><GrepResult text={tool.result} pattern={grepPattern} bare={shortName(tool.name) === "Glob"} /></div>
+        <div class="body-frame"><GrepResult text={tool.result} pattern={grepPattern} bare={shortName(tool.name) === "Glob"} {workspaceRoot} /></div>
       {:else}
         <div class="body-frame"><OutputBlock text={tool.result} tone="plain" start="collapsed" /></div>
       {/if}

@@ -2,7 +2,8 @@
   import { Brain, ChevronDown } from "@lucide/svelte";
   import { fmtDur } from "./streamModel";
   import Markdown from "../Markdown.svelte";
-  let { active = false, durSecs = 0, text = "" }: { active?: boolean; durSecs?: number; text?: string } = $props();
+  let { active = false, durSecs = 0, text = "", workspaceRoot = null }:
+    { active?: boolean; durSecs?: number; text?: string; workspaceRoot?: string | null } = $props();
   // Keep the row stable while reasoning streams. Automatically opening and
   // closing the body made provider state changes reflow the transcript.
   let open = $state(false);
@@ -21,6 +22,6 @@
     <!-- Markdown, matching MessageBubble's thinking body — reasoning is often
          structured (lists, steps); a plain <p> flattened it. Streams the same
          word-reveal as prose while the pass is live. -->
-    <div class="sthink-text"><Markdown {text} streaming={active} /></div>
+    <div class="sthink-text"><Markdown {text} streaming={active} {workspaceRoot} /></div>
   {/if}
 </div>

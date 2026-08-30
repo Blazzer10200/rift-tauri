@@ -17,8 +17,11 @@ pub async fn browser_open(
     y: f64,
     w: f64,
     h: f64,
+    // Stable assistant CLI session that intentionally owns this singleton
+    // browser navigation. Omitted only for a local, non-assistant browse.
+    owner_session_id: Option<String>,
 ) -> Result<(), String> {
-    crate::browser::open_probed(&app, &url, x, y, w, h).await
+    crate::browser::open_probed(&app, &url, x, y, w, h, owner_session_id.as_deref()).await
 }
 
 #[tauri::command]

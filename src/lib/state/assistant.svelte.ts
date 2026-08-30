@@ -47,7 +47,7 @@ import type {
   PaneState,
   QueueItem,
 } from "./assistant/types";
-import { MAX_PANES } from "./assistant/types";
+import { MAX_PANES, createPaneState } from "./assistant/types";
 
 // M1 split (2026-05-26): helpers lifted to `./assistant/helpers`.
 import {
@@ -285,6 +285,14 @@ export class TabState {
    *  explicit picks + by the sibling-pinning guard in the store setters. */
   effortOverride = $state<ThinkingEffort | null>(null);
   thinkingOverride = $state<boolean | null>(null);
+  /** Permission policy for THIS conversation. It is concrete (not an
+   * override/fallback) so changing a sibling pane can never widen this tab's
+   * next turn or a queued prompt that later drains here. */
+  permissionMode = $state<PermissionMode>("bypassPermissions");
+  /** Mode restored after this tab's plan is approved. */
+  planReturnMode: PermissionMode | null = null;
+  /** Thinking dial snapshot owned by this tab while plan mode floors effort. */
+  planEffortRestore: { enabled: boolean; effort: ThinkingEffort } | null = null;
   /** "This conversation" popover (ctx ring / /usage) — per-tab so opening it
    *  in one split pane doesn't pop the card in the other. Transient. */
   usageOpen = $state<false | "ctx" | "full">(false);
@@ -306,7 +314,7 @@ export class TabState {
   sessionCwd = $state<string | null>(null);
   /** Per-tab project folder. The folder THIS tab's turns run in — set via the
    *  per-pane folder picker, inherited on new/clear, hydrated from `sessionCwd`
-   *  on disk-load. null = follow the global workspace default. Distinct from
+   *  on disk-load. null is an explicit local/no-project scope. Distinct from
    *  `sessionCwd` (the backend's pinned cwd readout): `workspaceRoot` is the
    *  user-intended root the renderer passes to `assistant_send`, so two panes
    *  / windows can work in different directories. */
@@ -454,8 +462,9 @@ export class TabState {
    *  over-reports if the hook is somehow absent. */
   planCap?: () => number;
 
-  constructor(cliSessionId: string) {
+  constructor(cliSessionId: string, permissionMode: PermissionMode = loadPermissionMode()) {
     this.cliSessionId = cliSessionId;
+    this.permissionMode = permissionMode;
   }
 
   resetUsage() {
@@ -661,11 +670,11 @@ class AssistantStore {
     return id ? this.tabs.get(id) ?? null : null;
   }
 
-  /** The folder a tab's turns run in: its own per-tab root, else the global
-   *  workspace default. Used for the per-pane picker display, the @-mention
-   *  walk, and the root passed to `assistant_send`. */
+  /** The folder a tab's turns run in. Tabs carry an explicit snapshot; `null`
+   *  means local/no-project mode and never follows a later global project
+   *  switch. With no tab, the global root remains the new-chat default. */
   effectiveRoot(tab: TabState | null): string | null {
-    return tab?.workspaceRoot ?? this.workspace?.current ?? null;
+    return tab ? tab.workspaceRoot : this.workspace?.current ?? null;
   }
 
   /** Effective root of the focused tab — drives the global @-mention walk +
@@ -674,12 +683,11 @@ class AssistantStore {
     return this.effectiveRoot(this.activeTab);
   }
 
-  /** The global workspace default root (independent of which pane is focused).
-   *  Persistence uses this — not `activeRoot` — as the fallback scope when
-   *  saving a tab with no per-tab root, so a background save never inherits the
-   *  focused pane's project. */
+  /** The global new-chat default root (independent of which pane is focused).
+   *  It is snapshotted only when creating a tab with no source tab; persistence
+   *  never substitutes it for a tab's explicit local/no-project scope. */
   get workspaceCurrent(): string | null {
-    return this.workspace.current ?? null;
+    return this.workspace?.current ?? null;
   }
 
   /** No project folder open, but the backend scratch workspace is available →
@@ -714,6 +722,13 @@ class AssistantStore {
    *  so each pane carries its own draft. No-op in single-pane mode. */
   setFocusedPane(idx: number) { tabsSetFocusedPane(this, idx); this.drainQueue(this.activeTab); }
 
+  /** Stable-id variant for component/async callers. Array indices are layout
+   *  positions and may shift when a neighboring pane closes. */
+  setFocusedPaneById(paneId: string) {
+    const idx = this.panes.findIndex((pane) => pane.id === paneId);
+    if (idx !== -1) this.setFocusedPane(idx);
+  }
+
   /** Maximize/restore a split pane in place — a temporary zoom, not a layout
    *  change (pane fracs untouched; restore lands exactly where you were).
    *  Maximizing also focuses the pane. */
@@ -737,8 +752,14 @@ class AssistantStore {
    *  projects can sit side-by-side from one gesture. Returns false if the split
    *  couldn't grow (width/cap), in which case the project opens in the focused
    *  pane instead. */
-  async openProjectInPane(root: string, opts?: { paneIdx?: number; splitNew?: boolean }): Promise<boolean> {
-    let targetIdx = opts?.paneIdx ?? this.focusedPaneIdx;
+  async openProjectInPane(
+    root: string,
+    opts?: { paneId?: string; paneIdx?: number; splitNew?: boolean },
+  ): Promise<boolean> {
+    let targetIdx = opts?.paneId
+      ? this.panes.findIndex((pane) => pane.id === opts.paneId)
+      : opts?.paneIdx ?? this.focusedPaneIdx;
+    if (targetIdx < 0) targetIdx = this.focusedPaneIdx;
     if (opts?.splitNew || targetIdx >= this.panes.length) {
       // Want a NEW pane to the side — try to grow the split first.
       const before = this.panes.length;
@@ -750,24 +771,31 @@ class AssistantStore {
       targetIdx = grew ? this.panes.length - 1 : this.focusedPaneIdx;
       if (!grew) {
         this.setFocusedPane(targetIdx);
-        await this.newTab();
-        await this.setTabRoot(this.currentConvoId, root);
+        const tabId = await this.newTab();
+        await this.setTabRoot(tabId, root);
         return false;
       }
     }
-    this.setFocusedPane(targetIdx);
-    await this.newTab();
-    await this.setTabRoot(this.currentConvoId, root);
+    const targetPaneId = this.panes[targetIdx]?.id;
+    if (!targetPaneId) return false;
+    this.setFocusedPaneById(targetPaneId);
+    const tabId = await this.newTab();
+    await this.setTabRoot(tabId, root);
     return true;
   }
 
   /** Look up the TabState whose CLI session matches the event's session_id.
    *  Linear scan over open tabs is fine — typical user has <10. */
   private tabByCliSession(sid: string): TabState | null {
+    let match: TabState | null = null;
     for (const t of this.tabs.values()) {
-      if (t.cliSessionId === sid) return t;
+      if (t.cliSessionId !== sid) continue;
+      // Corrupt/duplicated state must fail closed. Returning the first match
+      // would route a stream nondeterministically into the wrong transcript.
+      if (match) return null;
+      match = t;
     }
-    return null;
+    return match;
   }
 
   /** Get-or-create the TabState for a convo. Used by send() on first turn
@@ -776,7 +804,7 @@ class AssistantStore {
   ensureTab(convoId: string, cliSessionId: string): TabState {
     const existing = this.tabs.get(convoId);
     if (existing) return existing;
-    const tab = new TabState(cliSessionId);
+    const tab = new TabState(cliSessionId, this.permissionModeFor(this.activeTab));
     this.wireTab(tab);
     const next = new Map(this.tabs);
     next.set(convoId, tab);
@@ -813,7 +841,7 @@ class AssistantStore {
       this.ui.tasksUpdatedAt = Date.now();
     };
     tab.onTurnComplete = (t) => this.handleTurnComplete(t);
-    tab.onEnterPlanMode = () => this.setPermissionMode("plan");
+    tab.onEnterPlanMode = (owner) => this.setPermissionMode("plan", owner, false);
     tab.onAskUserStale = (t) => askUserStaleNudge(this, t);
     tab.planCap = () => this.planCap;
   }
@@ -905,17 +933,9 @@ class AssistantStore {
   // Extended-thinking master switch. On (default) = current behavior; off routes
   // the cloud turn through the no-think shim for fastest TTFT. Persisted, per-ws.
   thinkingEnabled = $state<boolean>(loadThinkingEnabled());
-  // Permission mode passed to the CLI's `--permission-mode`. Global (matches
-  // model/effort). `bypassPermissions` until the user picks otherwise so
-  // existing behavior is unchanged. Persisted to localStorage.
+  // Default permission mode for NEW conversations. Every TabState snapshots a
+  // concrete value; existing tabs never follow later changes to this default.
   permissionMode = $state<PermissionMode>(loadPermissionMode());
-  /** Mode to return to when a plan is approved (Approve & build). Captured on
-   *  entering plan mode, cleared on leaving it by any path. Session-scoped —
-   *  a restart mid-plan falls back to `acceptEdits` at approve time. */
-  planReturnMode: PermissionMode | null = null;
-  /** Dial snapshot taken when plan mode floors the active tab's thinking —
-   *  restored on exit unless the user moved the dial themselves meanwhile. */
-  private planEffortRestore: { tab: TabState; enabled: boolean; effort: ThinkingEffort } | null = null;
   // Fast mode is a global speed preference. Each provider/model route gates it
   // independently at send time, and result badges appear only after the
   // backend confirms higher-speed processing actually ran.
@@ -947,7 +967,7 @@ class AssistantStore {
    *  single-pane (no visible split). `currentConvoId` always mirrors
    *  `panes[focusedPaneIdx].tabId` so existing send/openTab/closeTab paths
    *  keep working without per-pane branching. */
-  panes = $state<PaneState[]>([{ tabId: null }]);
+  panes = $state<PaneState[]>([createPaneState()]);
   focusedPaneIdx = $state(0);
   /** Temporarily zoom one split pane full-width (null = normal tiling). Not
    *  persisted — a maximize is a moment, not a layout. Cleared on any pane
@@ -1088,11 +1108,15 @@ class AssistantStore {
   /** Provider sessions use different wire histories and tool protocols. A
    * cross-provider pick therefore starts a fresh chat instead of pretending a
    * Claude session can be resumed by ChatGPT (or vice versa). */
-  async selectModel(v: ModelSel, tab: TabState | null = this.activeTab) {
+  async selectModel(
+    v: ModelSel,
+    tab: TabState | null = this.activeTab,
+    origin?: { paneId?: string; sourceTabId?: string | null },
+  ) {
     const previous = this.modelFor(tab);
     const crossesProvider = isOpenAIModel(previous) !== isOpenAIModel(v);
     if (crossesProvider && (tab?.messages.length ?? 0) > 0) {
-      await this.newChatWithModel(v);
+      await this.newChatWithModel(v, origin);
       notify.info("Started a fresh provider session", {
         detail: "Claude and ChatGPT chats keep separate histories so tool state stays correct.",
       });
@@ -1165,30 +1189,58 @@ class AssistantStore {
     if (midConvo) this.cacheBustHint("thinking");
   }
 
-  setPermissionMode(v: PermissionMode) {
-    if (this.permissionMode === v) return;
-    const prev = this.permissionMode;
-    this.permissionMode = v;
-    savePermissionMode(v);
-    // Entering plan mode remembers where Approve & build returns to; leaving
-    // plan mode (approval flip or manual pick) clears the memory.
-    this.planReturnMode = v === "plan" ? prev : null;
-    // Effort floor: a plan is only worth approving if it was thought through,
-    // so plan mode raises the dial to at least High and puts it back after.
-    if (v === "plan") this.floorPlanEffort();
-    else if (prev === "plan") this.unfloorPlanEffort();
-    this.telemetry.event("permission_mode.change", { from: prev, to: v });
+  permissionModeFor(tab: TabState | null): PermissionMode {
+    return tab?.permissionMode ?? this.permissionMode;
   }
 
-  private floorPlanEffort() {
-    const tab = this.activeTab;
-    if (!tab) return;
+  /** Change one conversation's permission policy. `persistDefault` is true for
+   * an explicit composer pick, so future chats inherit the choice; provider
+   * events and plan-card transitions pass false and cannot affect siblings. */
+  setPermissionMode(
+    v: PermissionMode,
+    tab: TabState | null = this.activeTab,
+    persistDefault = true,
+  ) {
+    const prev = this.permissionModeFor(tab);
+    if (prev === v) {
+      // The active conversation may already use this value while the saved
+      // new-chat default differs (for example after switching from a sibling).
+      if (persistDefault && this.permissionMode !== v) {
+        this.permissionMode = v;
+        savePermissionMode(v);
+      }
+      return;
+    }
+    if (tab) tab.permissionMode = v;
+    if (persistDefault) {
+      this.permissionMode = v;
+      savePermissionMode(v);
+    }
+    // Entering plan mode remembers where Approve & build returns to; leaving
+    // plan mode (approval flip or manual pick) clears the memory.
+    if (tab) tab.planReturnMode = v === "plan" ? prev : null;
+    // Effort floor: a plan is only worth approving if it was thought through,
+    // so plan mode raises the dial to at least High and puts it back after.
+    if (tab && v === "plan") this.floorPlanEffort(tab);
+    else if (tab && prev === "plan") this.unfloorPlanEffort(tab);
+    this.telemetry.event("permission_mode.change", { from: prev, to: v });
+    if (tab) {
+      for (const [convoId, candidate] of this.tabs) {
+        if (candidate === tab) {
+          this.scheduleSave(false, convoId);
+          break;
+        }
+      }
+    }
+  }
+
+  private floorPlanEffort(tab: TabState) {
     const enabled = this.thinkingOnFor(tab);
     const effort = this.effortFor(tab);
     const target = clampEffort("deep", this.modelFor(tab));
     if (target === "none") return; // model can't think — nothing to raise
     if (enabled && EFFORT_ORDER.indexOf(effort) >= EFFORT_ORDER.indexOf(target)) return;
-    this.planEffortRestore = { tab, enabled, effort };
+    tab.planEffortRestore = { enabled, effort };
     this.setThinkingDial(true, target, tab);
     toast.push({
       severity: "info",
@@ -1198,14 +1250,14 @@ class AssistantStore {
     });
   }
 
-  private unfloorPlanEffort() {
-    const snap = this.planEffortRestore;
-    this.planEffortRestore = null;
+  private unfloorPlanEffort(tab: TabState) {
+    const snap = tab.planEffortRestore;
+    tab.planEffortRestore = null;
     if (!snap) return;
-    const target = clampEffort("deep", this.modelFor(snap.tab));
+    const target = clampEffort("deep", this.modelFor(tab));
     // A manual dial move while planning is the user's choice — keep it.
-    if (!this.thinkingOnFor(snap.tab) || this.effortFor(snap.tab) !== target) return;
-    this.setThinkingDial(snap.enabled, snap.effort, snap.tab);
+    if (!this.thinkingOnFor(tab) || this.effortFor(tab) !== target) return;
+    this.setThinkingDial(snap.enabled, snap.effort, tab);
   }
 
   /** Latched by billing route so subscription, API, and Claude disclosures each
@@ -1337,7 +1389,6 @@ class AssistantStore {
     // dedup + payload unions are vitest'd there); these stay 1-line thunks.
     const store = this;
     const listenerHost: ListenerHost = {
-      get activeTab() { return store.activeTab; },
       tabBySession: (sid) => store.tabByCliSession(sid),
       bgTaskWarnedSessions: this.bgTaskWarnedSessions,
     };
@@ -1415,7 +1466,14 @@ class AssistantStore {
             // user sits on Settings/AI Health would otherwise queue invisibly
             // until they wander back. Route to chat first, then open.
             workspace.setActive("chat");
-            browserDock.openUrl(e.payload.url);
+            let ownerTabId: string | null = null;
+            for (const [id, candidate] of this.tabs) {
+              if (candidate === tab) { ownerTabId = id; break; }
+            }
+            browserDock.openUrl(e.payload.url, {
+              tabId: ownerTabId,
+              workspaceRoot: tab.workspaceRoot,
+            });
           } else {
             // A background pane must not hijack the dock out from under the
             // focused pane — park the URL on ITS tab; opened when that tab
@@ -1495,8 +1553,11 @@ class AssistantStore {
 
     await this.refreshConversations();
     await this.refreshWorkspace();
-    this.workspaceReady = true;
     await this.restoreTabs();
+    // Publish readiness only after tab/pane restoration has settled.  If the
+    // page seeds its fallback tab between workspace refresh and restore, that
+    // tab can race the persisted layout and capture the wrong initial scope.
+    this.workspaceReady = true;
 
     // Best-effort flush on window close so we don't lose the last turn
     // sitting inside the 700ms scheduleSave debounce. See flushNow() doc.
@@ -1531,10 +1592,9 @@ class AssistantStore {
   }
 
   /** Auto-recovery: claude's --resume index lost track of our session JSONL.
-   *  Pop the failed user+assistant message pair, null convoCreatedAt so the
-   *  next send uses --session-id, surface a friendly notice, then re-send
-   *  the prompt. Tab-aware: ignore if the lost session isn't current
-   *  (user switched tabs while the error was in flight). */
+   *  The active tab retries as a fresh session. A background tab keeps its
+   *  authored prompt/partial output and surfaces a recoverable, tab-owned error
+   *  instead of silently deleting work while focus is elsewhere. */
   private onSessionLost(payload: { session_id: string; prompt?: string; turn_epoch?: number }) {
     // Find the tab whose CLI session failed (may not be the active tab if the
     // user switched mid-recovery). After S103 decoupling cliSessionId may
@@ -1562,30 +1622,47 @@ class AssistantStore {
       tab.currentTurnRecord = null;
     }
     tab.streaming = false;
-    // Drop the empty assistant message + the user message that failed.
-    // send() will re-add them on retry.
-    const msgs = tab.messages.slice();
-    if (msgs.length >= 2 && msgs[msgs.length - 1].role === "assistant") {
-      msgs.pop();
-      if (msgs[msgs.length - 1]?.role === "user") msgs.pop();
-    }
-    tab.messages = msgs;
     tab.streamingMsgId = null;
     tab.streamingMsgIdx = null;
-    tab.lastError = null;
     // RR7: cancel the rAF text-drain pacer + zero pendingText. Without this, any
     // text buffered when the session was lost keeps the drainTick loop re-arming
     // each frame (appendText early-returns on null streamingMsgId), burning
     // frames until it self-drains — matches the onStreamError terminal path.
     tab.flushPendingText();
-    notify.warn("Session was lost — retrying as a fresh start");
-    // Auto-retry only when the lost tab is active. Bg-tab retry would require
-    // routing send() to a specific tab; for now the user re-clicks send.
+    // Auto-retry only when the lost tab is active. In that case remove the
+    // failed pair because send() immediately re-adds it. A background loss is
+    // different: preserve the user's prompt (and any partial response), expose
+    // a recoverable error, and let the tab-scoped Retry action resend it.
     if (this.activeTab === tab && retryPrompt) {
+      const msgs = tab.messages.slice();
+      if (msgs.length >= 2 && msgs[msgs.length - 1].role === "assistant") {
+        msgs.pop();
+        if (msgs[msgs.length - 1]?.role === "user") msgs.pop();
+      }
+      tab.messages = msgs;
+      tab.lastError = null;
+      notify.warn("Session was lost — retrying as a fresh start");
       this.convoCreatedAt = null;
       this.convoTitle = null;
       void this.send(retryPrompt);
+      return;
     }
+
+    // Remove only a wholly empty placeholder; never erase user-authored text
+    // or partial provider output merely because focus moved before the failure.
+    const msgs = tab.messages.slice();
+    const tail = msgs[msgs.length - 1];
+    if (tail?.role === "assistant" && tail.blocks.length === 0) msgs.pop();
+    tab.messages = msgs;
+    tab.lastError = "The provider session was lost before this turn completed. Your prompt is preserved; retry it in this conversation.";
+    let convoId: string | null = null;
+    for (const [id, candidate] of this.tabs) {
+      if (candidate === tab) { convoId = id; break; }
+    }
+    if (convoId) this.scheduleSave(true, convoId);
+    notify.warn("A background conversation lost its provider session", {
+      detail: "Its prompt is still in that conversation and can be retried safely.",
+    });
   }
 
   /** `assistant://ask-user` arrived from the bridge — pair the request_id
@@ -1762,7 +1839,7 @@ class AssistantStore {
     if (!info) return;
     const returnMode: PermissionMode | null =
       action === "ask" ? "default"
-      : action === "build" ? (this.planReturnMode ?? "acceptEdits")
+      : action === "build" ? (tab.planReturnMode ?? "acceptEdits")
       : null;
     const decision = planDecision(action, returnMode, opts?.feedback, opts?.editedPlan);
     // Same RR8 rule as submitPermissionDecision: pop the prompt only after a
@@ -1773,7 +1850,7 @@ class AssistantStore {
     tab.permissionPrompts = next;
     const rev = tab.plan?.revision ?? 0;
     if (returnMode) {
-      this.setPermissionMode(returnMode);
+      this.setPermissionMode(returnMode, tab, false);
       // The SAME turn rolls into execution now — onStreamDone/Error settle
       // this to done (clean terminal) or back to approved (interrupted).
       tab.plan = {
@@ -1801,8 +1878,8 @@ class AssistantStore {
    *  flip the mode + auto-send the execute prompt as a fresh turn on the plan's
    *  own tab. One card, two transports; see `docs/ARCHITECTURE.md#frontend-map`. */
   approvePlanFallback(tab: TabState, planMd: string): void {
-    const mode = this.planReturnMode ?? "acceptEdits";
-    this.setPermissionMode(mode);
+    const mode = tab.planReturnMode ?? "acceptEdits";
+    this.setPermissionMode(mode, tab, false);
     tab.plan = {
       md: planMd, status: "executing", approvedAt: Date.now(),
       revision: Math.max(tab.plan?.revision ?? 0, 1),
@@ -1873,7 +1950,9 @@ class AssistantStore {
     this.convoTitle = null;
   }
 
-  loadConversation(id: string) { return persistLoad(this, id); }
+  loadConversation(id: string, opts?: { activate?: boolean; paneId?: string }) {
+    return persistLoad(this, id, opts);
+  }
   deleteConversation(id: string) { return persistDelete(this, id); }
   async deleteAllConversations() {
     for (const id of this.openTabs) {
@@ -1912,9 +1991,15 @@ class AssistantStore {
    *  created with unless the user switches it. This mints a new tab and sets
    *  the model up front so its first turn runs against the user's pick —
    *  the fresh-start alternative to switching the current chat mid-flight. */
-  async newChatWithModel(id: ModelSel) {
-    await this.newTab();
-    this.setModel(id);
+  async newChatWithModel(
+    id: ModelSel,
+    origin?: { paneId?: string; sourceTabId?: string | null },
+  ) {
+    const targetPaneId = origin?.paneId
+      ?? this.panes.find((pane) => pane.tabId === origin?.sourceTabId)?.id;
+    if (targetPaneId) this.setFocusedPaneById(targetPaneId);
+    const convoId = await this.newTab();
+    this.setModel(id, this.tabFor(convoId));
   }
 
   /** Clear the active conversation in place (Claude Code `/clear` semantics):

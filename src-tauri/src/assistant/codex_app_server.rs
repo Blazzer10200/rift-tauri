@@ -210,27 +210,45 @@ fn app_server_error(error: &Value) -> String {
         .to_string()
 }
 
-fn active_turns() -> &'static Mutex<HashMap<String, CancellationToken>> {
-    static ACTIVE: OnceLock<Mutex<HashMap<String, CancellationToken>>> = OnceLock::new();
+type ActiveTurn = (u64, CancellationToken);
+
+fn active_turns() -> &'static Mutex<HashMap<String, ActiveTurn>> {
+    static ACTIVE: OnceLock<Mutex<HashMap<String, ActiveTurn>>> = OnceLock::new();
     ACTIVE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-struct ActiveGuard(String);
+static NEXT_TURN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+struct ActiveGuard {
+    session_id: String,
+    generation: u64,
+}
 
 impl Drop for ActiveGuard {
     fn drop(&mut self) {
         let mut active = active_turns().lock().unwrap_or_else(|p| p.into_inner());
-        active.remove(&self.0);
+        if active.get(&self.session_id).map(|(generation, _)| *generation) == Some(self.generation) {
+            active.remove(&self.session_id);
+        }
     }
 }
 
 fn register_turn(session_id: &str) -> (CancellationToken, ActiveGuard) {
+    use std::sync::atomic::Ordering;
+
+    let generation = NEXT_TURN.fetch_add(1, Ordering::Relaxed);
     let token = CancellationToken::new();
     let mut active = active_turns().lock().unwrap_or_else(|p| p.into_inner());
-    if let Some(old) = active.insert(session_id.to_string(), token.clone()) {
+    if let Some((_, old)) = active.insert(session_id.to_string(), (generation, token.clone())) {
         old.cancel();
     }
-    (token, ActiveGuard(session_id.to_string()))
+    (
+        token,
+        ActiveGuard {
+            session_id: session_id.to_string(),
+            generation,
+        },
+    )
 }
 
 pub fn cancel_codex_session(session_id: &str) -> bool {
@@ -238,7 +256,7 @@ pub fn cancel_codex_session(session_id: &str) -> bool {
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .get(session_id)
-        .cloned();
+        .map(|(_, token)| token.clone());
     if let Some(token) = token {
         token.cancel();
         true
@@ -252,7 +270,7 @@ pub fn cancel_all_codex_turns() {
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .values()
-        .cloned()
+        .map(|(_, token)| token.clone())
         .collect();
     for token in tokens {
         token.cancel();
@@ -270,7 +288,9 @@ pub async fn assistant_codex_account_overview(
             json!({ "includeHidden": false, "limit": 100 }),
         )
         .await;
-    let root = resolve_root(root.as_deref(), super::config::load_config().current_root.as_deref())?;
+    // Skills are pane/workspace scoped. An omitted root means user-level only;
+    // never borrow whichever project happens to be globally selected.
+    let root = resolve_root(root.as_deref())?;
     let skills = if let Some(root) = root.as_deref() {
         server
             .request(
@@ -596,7 +616,7 @@ pub async fn assistant_codex_send(
         .filter(|mode| super::config::is_valid_permission_mode(mode))
         .or(cfg.permission_mode)
         .unwrap_or_else(|| "default".into());
-    let root = resolve_root(root.as_deref(), cfg.current_root.as_deref())?;
+    let root = resolve_turn_root(&session_id, root.as_deref())?;
     let epoch = turn_epoch.unwrap_or(0);
     let window_label = window.label().to_string();
     let (cancel, _guard) = register_turn(&session_id);
@@ -630,15 +650,15 @@ pub async fn assistant_codex_send(
     result
 }
 
-fn resolve_root(
-    requested: Option<&str>,
-    configured: Option<&std::path::Path>,
-) -> Result<Option<String>, String> {
+fn resolve_turn_root(session_id: &str, requested: Option<&str>) -> Result<Option<String>, String> {
+    let root = super::resolve_session_workspace(session_id, requested)?;
+    Ok(root.map(|path| path.to_string_lossy().into_owned()))
+}
+
+fn resolve_root(requested: Option<&str>) -> Result<Option<String>, String> {
     let candidate = requested
         .filter(|value| !value.trim().is_empty())
-        .map(std::path::PathBuf::from)
-        .or_else(|| configured.map(std::path::PathBuf::from))
-        .or_else(super::current_root);
+        .map(std::path::PathBuf::from);
     let Some(candidate) = candidate else {
         return Ok(None);
     };
@@ -1756,9 +1776,9 @@ fn emit_done(app: &AppHandle, window: &str, session: &str, epoch: u64, exit_code
 #[cfg(test)]
 mod tests {
     use super::{
-        codex_answers, effort_name, file_change_tool_uses, insert_service_tier, item_failed,
-        leading_skill_name, parse_account_overview, parse_model, sandbox_policy,
-        thread_confirmed_fast, turn_plan_markdown,
+        cancel_codex_session, codex_answers, effort_name, file_change_tool_uses,
+        insert_service_tier, item_failed, leading_skill_name, parse_account_overview, parse_model,
+        register_turn, sandbox_policy, thread_confirmed_fast, turn_plan_markdown,
     };
     use serde_json::json;
 
@@ -1913,5 +1933,17 @@ mod tests {
         .unwrap();
 
         assert_eq!(markdown, "Release work\n\n- [x] Implement\n- [ ] Verify");
+    }
+
+    #[test]
+    fn stale_active_guard_cannot_remove_a_newer_turn() {
+        let id = "550e8400-e29b-41d4-a716-4466554400b1";
+        let (_old_token, old_guard) = register_turn(id);
+        let (new_token, new_guard) = register_turn(id);
+        drop(old_guard);
+
+        assert!(cancel_codex_session(id));
+        assert!(new_token.is_cancelled());
+        drop(new_guard);
     }
 }

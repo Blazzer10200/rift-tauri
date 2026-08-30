@@ -413,6 +413,9 @@ export type ConversationRecord = {
    *  (like `model`) so a chat keeps its effort across restarts. Serde-flatten. */
   effort?: ThinkingEffort;
   thinkingOn?: boolean;
+  /** Permission policy owned by this conversation. Legacy records omit it and
+   *  inherit the user's current new-chat default exactly once on hydration. */
+  permissionMode?: PermissionMode;
 };
 
 // Minimal stream-json envelope shape we care about.
@@ -599,9 +602,23 @@ export type TurnRecord = {
   errorMsg?: string;
 };
 
-/** Per-pane reference into the openTabs list. v2 split UI: `panes` is always
- *  an array of length ≥1. `null` tabId = empty pane. */
-export type PaneState = { tabId: string | null };
+/** Stable split-pane identity. A pane survives tab swaps, project switches,
+ *  async conversation hydration, and persistence/restore; `tabId` is only the
+ *  chat currently displayed inside it. Keeping those identities separate is
+ *  what prevents a late operation from targeting whichever array index happens
+ *  to be focused when it resolves. `null` tabId = an intentionally empty pane. */
+export type PaneState = { id: string; tabId: string | null };
+
+let paneFallbackSeq = 0;
+
+/** Mint or restore a pane record. The timestamp/sequence fallback exists only
+ *  for non-browser test/SSR environments without `crypto.randomUUID`. */
+export function createPaneState(tabId: string | null = null, id?: string): PaneState {
+  const stableId = id?.trim()
+    || globalThis.crypto?.randomUUID?.()
+    || `pane-${Date.now().toString(36)}-${(++paneFallbackSeq).toString(36)}`;
+  return { id: stableId, tabId };
+}
 
 /** Hard cap on horizontal panes. 4 × min-width 320px = 1280px. */
 export const MAX_PANES = 4;

@@ -47,6 +47,7 @@ function pumpRaf() {
 }
 
 import { assistant } from "./assistant.svelte.js";
+import { createPaneState } from "./assistant/types.js";
 import { send as sendDirect } from "./assistant/send.js";
 import { finalizeInflightBlocks } from "./assistant/streaming.js";
 import { notify, toast } from "./toast.svelte";
@@ -1231,7 +1232,7 @@ describe("split-pane — background-pane isolation", () => {
     const tabA = assistant.ensureTab(a, a);
     const tabB = assistant.ensureTab(b, b);
     assistant.openTabs = [a, b];
-    assistant.panes = [{ tabId: a }, { tabId: b }];
+    assistant.panes = [createPaneState(a), createPaneState(b)];
     assistant.focusedPaneIdx = 0;
     assistant.currentConvoId = a; // pane A is focused
     return { a, b, tabA, tabB };

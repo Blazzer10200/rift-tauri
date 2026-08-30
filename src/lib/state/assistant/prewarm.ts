@@ -60,7 +60,7 @@ function signatureOf(
     // off must not re-arm a prewarm for an identical spawn.
     store.effectiveThinkingOn ? effortToFlag(store.effectiveEffort, store.effectiveModel) : "low",
     String(store.effectiveThinkingOn),
-    store.permissionMode,
+    store.permissionModeFor(store.activeTab),
     // Mirror the send-path gating (fastEligible) so the spare's SpawnKey
     // matches the real send — an ineligible model folds to "false" both here
     // and there, and a fast toggle mid-typing re-arms the trigger.
@@ -133,7 +133,7 @@ export function requestPrewarm(store: AssistantStore): void {
       model: store.effectiveModel,
       thinkingEffort: store.effectiveEffort,
       thinkingEnabled: store.effectiveThinkingOn,
-      permissionMode: store.permissionMode,
+      permissionMode: store.permissionModeFor(t),
       fastMode: store.fastMode && fastEligible(store.effectiveModel),
       root,
       isFirstTurn,

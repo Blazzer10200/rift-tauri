@@ -14,7 +14,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { notify } from "../toast.svelte";
-import { asModelSel, isOpenAIModel } from "./helpers";
+import { asModelSel, asPermissionMode, isOpenAIModel } from "./helpers";
 import type {
   AgentSpawn,
   ChatMessage,
@@ -23,10 +23,12 @@ import type {
   ConversationRecord,
   ModelSel,
   PaneState,
+  PermissionMode,
   PlanRecord,
   QueueItem,
   ThinkingEffort,
 } from "./types";
+import { createPaneState } from "./types";
 
 /** Restore a legacy ChatGPT route from provider-owned continuation state.
  *  A Codex thread wins if both exist: it proves the chat began on the signed-in
@@ -70,6 +72,8 @@ type SaveableTab = {
   modelOverride: ModelSel | null;
   effortOverride: ThinkingEffort | null;
   thinkingOverride: boolean | null;
+  permissionMode: PermissionMode;
+  draft: string;
   lastTurnUsage: { input: number; output: number; cacheRead: number; cacheCreate: number } | null;
   openAiHistory?: unknown[];
   codexThreadId?: string | null;
@@ -93,6 +97,7 @@ type LoadableTab = SaveableTab & {
   promptHistory: string[];
   dockAutoOpenedThisConvo: boolean;
   pinnedModel: ModelSel | null;
+  queue: QueueItem[];
 };
 
 /** Subset of AssistantStore that persistence touches. */
@@ -105,6 +110,7 @@ type PersistenceHost = {
   model: string;
   thinkingEffort: ThinkingEffort;
   thinkingEnabled: boolean;
+  permissionMode: PermissionMode;
   openTabs: string[];
   panes: PaneState[];
   focusedPaneIdx: number;
@@ -114,13 +120,10 @@ type PersistenceHost = {
   lastNotice: string | null;
   messages: ChatMessage[];
   queue: QueueItem[];
-  // Effective folder of the focused tab — fallback scope for a save whose tab
-  // has no explicit per-pane root (matches AssistantStore.activeRoot).
+  // Effective folder of the focused tab (used by non-persistence UI paths).
   activeRoot: string | null;
-  // The GLOBAL workspace default root (AssistantStore.workspace.current). The
-  // correct fallback when saving a tab that has no per-tab root: `activeRoot`
-  // is scoped to the FOCUSED pane, so using it would stamp a background/unfiled
-  // tab with an unrelated project's folder.
+  // The global workspace default is retained for legacy migration/new-tab
+  // defaults, never as an implicit save-time pane root.
   workspaceCurrent: string | null;
   ensureTab(convoId: string, cliSessionId: string): LoadableTab;
   closeTab(id: string): Promise<void>;
@@ -128,11 +131,16 @@ type PersistenceHost = {
   pruneTabUi(id: string): void;
 };
 
-// Monotonic load token per host — guards loadConversation against a stale-IPC
-// race: click A then B, A's invoke resolves last → without this it clobbers
-// host state with A while the user last selected B (next send targets A's
-// session). Each call captures the token; only the latest may write host fields.
-const loadGeneration = new WeakMap<PersistenceHost, number>();
+function shouldActivateLoad(
+  host: PersistenceHost,
+  id: string,
+  opts: { activate?: boolean; paneId?: string },
+): boolean {
+  if (opts.activate === false) return false;
+  if (!opts.paneId) return true;
+  const focused = host.panes[host.focusedPaneIdx];
+  return focused?.id === opts.paneId && focused.tabId === id;
+}
 
 // Tombstones for convos deleted this session. A save racing past its delete —
 // the 700ms debounce timer, or maybeGenerateTitle's in-flight model call —
@@ -248,12 +256,10 @@ export function buildSaveRecord(
     openAiHistory: tab.openAiHistory?.length ? tab.openAiHistory : undefined,
     codexThreadId: tab.codexThreadId ?? undefined,
     chatGptRoute: tab.chatGptRoute ?? undefined,
-    // Scope the convo to the tab's OWN folder, else the GLOBAL workspace
-    // default — never `host.activeRoot`, which is the focused pane's root and
-    // would misfile a background/unfiled tab under an unrelated project (a
-    // background-tab save while another pane is focused elsewhere). null =
-    // unfiled, and a genuinely-unfiled tab stays unfiled.
-    workspaceRoot: tab.workspaceRoot ?? host.workspaceCurrent ?? null,
+    // Scope the convo to the tab's OWN explicit folder snapshot. `null` means
+    // local/unfiled and must remain null; consulting a mutable global default
+    // here is the split-pane corruption class this state model prevents.
+    workspaceRoot: tab.workspaceRoot,
     // Agent transcripts, capped (last 30 spawns × 80 blocks) so reopened convos
     // keep expandable agent cards without unbounded record growth.
     agentSpawns: (tab.agentSpawns ?? []).slice(-30).map((s) => ({ ...s, blocks: s.blocks.slice(-80) })),
@@ -262,6 +268,7 @@ export function buildSaveRecord(
     // Effective dial at save time — mirrors `model` so reopening restores it.
     effort: tab.effortOverride ?? host.thinkingEffort,
     thinkingOn: tab.thinkingOverride ?? host.thinkingEnabled,
+    permissionMode: tab.permissionMode,
   };
 }
 
@@ -440,7 +447,11 @@ export async function renameConversation(
   }
 }
 
-export async function loadConversation(host: PersistenceHost, id: string): Promise<void> {
+export async function loadConversation(
+  host: PersistenceHost,
+  id: string,
+  opts: { activate?: boolean; paneId?: string } = {},
+): Promise<boolean> {
   // Streams are per-tab (routed by session_id) — switching must NOT stop the
   // outgoing tab's in-flight turn; it keeps streaming in the background.
   if (host.messages.length > 0 && host.currentConvoId && host.currentConvoId !== id) {
@@ -450,20 +461,29 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
   // written FROM memory) — re-hydrating would clobber an in-flight bg stream's
   // messages + streaming indexes. Pointer-switch instead.
   if (host.tabs.get(id)) {
-    host.currentConvoId = id;
-    host.lastNotice = null;
-    return;
+    if (shouldActivateLoad(host, id, opts)) {
+      host.currentConvoId = id;
+      host.lastNotice = null;
+    }
+    return true;
   }
-  const gen = (loadGeneration.get(host) ?? 0) + 1;
-  loadGeneration.set(host, gen);
   try {
     const convo = await invoke<ConversationRecord>("assistant_load_conversation", { id });
-    // A newer loadConversation started while this IPC was in flight — discard
-    // this stale result so the last click wins (Tauri has no invoke-cancel).
-    if (loadGeneration.get(host) !== gen) return;
     // Legacy convos lack cliSessionId — fall back to id so --resume still hits
     // the original JSONL. New convos persist cliSessionId explicitly.
     const cliSid = convo.cliSessionId ?? convo.id;
+    // A provider session is a routing identity, not shareable metadata. If two
+    // records claim it, accepting both would send every event to whichever Map
+    // entry happened to be visited first. Fail the later open visibly instead.
+    const collision = [...host.tabs.entries()].find(
+      ([otherId, other]) => otherId !== convo.id && other.cliSessionId === cliSid,
+    );
+    if (collision) {
+      const detail = `This chat shares provider session ${cliSid} with another open conversation. Close the duplicate or start a new chat; Rift will not guess where streamed work belongs.`;
+      notify.danger("Couldn't safely resume this chat", { detail });
+      if (shouldActivateLoad(host, id, opts)) host.lastError = detail;
+      return false;
+    }
     const tab = host.ensureTab(convo.id, cliSid);
     // A persisted "agent still working" stamp can never resolve — the parked
     // CLI that owned those agents died with the previous app run. Clear it so
@@ -504,6 +524,7 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     tab.chatGptRoute = isOpenAIModel(restoredModel)
       ? inferChatGptRoute(convo.chatGptRoute, tab.codexThreadId, tab.openAiHistory)
       : null;
+    tab.permissionMode = asPermissionMode(convo.permissionMode) ?? host.permissionMode;
     // The record's workspaceRoot was SAVED (buildSaveRecord) but never read
     // back — a restored convo silently lost its per-tab root, so turns ran
     // root-less (no workspace MCP tools, builtin reads against the wrong cwd;
@@ -533,12 +554,9 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     tab.dockAutoOpenedThisConvo = false;
     // Disk record already carries a title — don't regenerate on every open.
     tab.titleGenerated = true;
-    host.currentConvoId = convo.id;
-    host.currentCliSessionId = cliSid;
-    host.convoCreatedAt = convo.createdAt;
-    host.convoTitle = convo.title;
-    host.queue = [];
-    host.lastNotice = null;
+    tab.convoCreatedAt = convo.createdAt;
+    tab.convoTitle = convo.title;
+    tab.queue = [];
     // ui-audit #5: the saved model scopes to THIS tab only — opening an old
     // chat must not rewrite the global new-chat default (or toast about it).
     tab.modelOverride = restoredModel;
@@ -555,24 +573,36 @@ export async function loadConversation(host: PersistenceHost, id: string): Promi
     // against it) so the picker's "this chat" tag + the mid-chat switch
     // marker work on reopened chats too.
     tab.pinnedModel = restoredModel;
+    // Hydration is pane-neutral. Only publish this tab through the legacy
+    // active-tab shim when the stable pane that requested it is still focused
+    // and still owns it. A late A load can therefore populate A in the
+    // background but can never replace the now-focused B pane.
+    if (shouldActivateLoad(host, convo.id, opts)) {
+      host.currentConvoId = convo.id;
+      host.lastNotice = null;
+    }
+    return true;
   } catch (e) {
     // Toast, not just lastError: the ambient lastError setter routes to the
     // PREVIOUS activeTab (or storeLastError, which only WorkspacePage reads),
     // so a sidebar-click load failure was architecturally invisible — clicks
     // read as "nothing happened" (post-force-close field report 2026-07-17).
     notify.danger("Couldn't open this chat", { detail: String(e) });
-    host.lastError = `Failed to load conversation: ${String(e)}`;
+    if (shouldActivateLoad(host, id, opts)) {
+      host.lastError = `Failed to load conversation: ${String(e)}`;
+    }
     // ensureTab already registered a half-built TabState under `id`; evict it so
     // the fast-path above doesn't surface the broken tab forever (a retry would
     // otherwise short-circuit before the disk load). Next open re-attempts.
     host.dropTab(id);
     // If the failed convo is still the active pointer, clear it — otherwise
     // openTab's already-open guard short-circuits every retry into a permanent
-    // silent no-op (and activeRoot falls back to the stale global workspace).
+    // silent no-op.
     if (host.currentConvoId === id) host.currentConvoId = null;
     // Re-list so a row whose file the backend list now drops (unreadable /
     // corrupt) disappears instead of inviting more dead clicks.
     void refreshConversations(host).catch(() => { /* list refresh is best-effort here */ });
+    return false;
   }
 }
 
@@ -664,10 +694,12 @@ export async function deleteAllConversations(host: PersistenceHost): Promise<voi
     host.lastNotice = null;
   }
   if (host.openTabs.length === 0) {
-    host.panes = [{ tabId: null }];
+    host.panes = [createPaneState()];
     host.focusedPaneIdx = 0;
   } else {
-    host.panes = host.panes.map((p) => (p.tabId && deletedOk.has(p.tabId) ? { tabId: null } : p));
+    host.panes = host.panes.map((p) =>
+      p.tabId && deletedOk.has(p.tabId) ? { ...p, tabId: null } : p,
+    );
   }
   // Re-sync from backend regardless — reflects exactly what survived.
   await refreshConversations(host);
@@ -684,6 +716,24 @@ export function tabsStorageKey(): string {
 
 export function persistTabs(host: PersistenceHost): void {
   try {
+    const savedConversationIds = new Set(host.conversations.map((c) => c.id));
+    // Empty tabs intentionally do not become conversation files/history rows,
+    // but their pane identity still has to survive a restart. Keep a bounded,
+    // attachment-free local snapshot until the first real turn is persisted.
+    const ephemeralTabs = host.openTabs.flatMap((id) => {
+      if (savedConversationIds.has(id)) return [];
+      const tab = host.tabs.get(id);
+      if (!tab || tab.convoCreatedAt != null) return [];
+      return [{
+        id,
+        workspaceRoot: tab.workspaceRoot,
+        model: tab.modelOverride,
+        effort: tab.effortOverride,
+        thinkingOn: tab.thinkingOverride,
+        permissionMode: tab.permissionMode,
+        draft: tab.draft.slice(0, 200_000),
+      }];
+    });
     localStorage.setItem(
       tabsStorageKey(),
       JSON.stringify({
@@ -691,6 +741,7 @@ export function persistTabs(host: PersistenceHost): void {
         activeTabId: host.currentConvoId,
         panes: host.panes,
         focusedPaneIdx: host.focusedPaneIdx,
+        ephemeralTabs,
       }),
     );
   } catch { /* localStorage unavailable */ }

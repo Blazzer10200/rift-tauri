@@ -24,16 +24,16 @@ export type ListenerTab = {
 export type ShellRow = { pid: number; exe: string; cmd: string; started_at: number };
 
 /** Structural slice of AssistantStore: session→tab routing + the
- *  once-per-session bg_task warn registry. `activeTab` must be a live
- *  getter (read at event time, not captured at init). */
+ *  once-per-session bg_task warn registry. Focus is intentionally absent:
+ *  an event without an owner must never guess a destination. */
 export type ListenerHost = {
-  readonly activeTab: ListenerTab | null;
   tabBySession(sid: string): ListenerTab | null;
   bgTaskWarnedSessions: Set<string>;
 };
 
-// Legacy payload shape (bare string) routes to activeTab for forward-compat
-// during dev hot-reload.
+// String/optional fields remain in the runtime union so malformed events can be
+// rejected safely. Production backends must provide session_id on every event;
+// focus is never an identity fallback.
 export type StreamPayload =
   | { session_id?: string; line?: string; turn_epoch?: number }
   | string;
@@ -55,12 +55,9 @@ export type ShellRowsPayload = {
 /** `assistant://stream` — route by session_id to the right TabState so
  *  background tabs keep painting concurrently with the foreground. */
 export function handleStreamEvent(host: ListenerHost, payload: StreamPayload | null | undefined): void {
-  if (typeof payload === "string") {
-    host.activeTab?.onStream(payload);
-    return;
-  }
+  if (typeof payload === "string") return;
   const { session_id, line, turn_epoch } = payload ?? {};
-  const tab = session_id ? host.tabBySession(session_id) : host.activeTab;
+  const tab = session_id ? host.tabBySession(session_id) : null;
   if (!tab || typeof line !== "string") return;
   // #80: a frame from a stopped/superseded turn must not paint into the
   // NEXT turn's bubble — drop it. (Terminals also consume the stop gate;
@@ -76,7 +73,8 @@ const MAX_BG_WARNED_SESSIONS = 200;
 /** `assistant://done` — terminal routing + the backgrounded-Bash warning. */
 export function handleDoneEvent(host: ListenerHost, payload: DonePayload | null | undefined): void {
   const sid = payload?.session_id;
-  const tab = sid ? host.tabBySession(sid) : host.activeTab;
+  if (!sid) return;
+  const tab = host.tabBySession(sid);
   // #80: a terminal from a stopped/superseded turn must not finalize the
   // LIVE turn (the old same-session race: stale DONE nulled the next
   // turn's streamingMsgId + dropped its currentTurnRecord) — consume the
@@ -94,7 +92,7 @@ export function handleDoneEvent(host: ListenerHost, payload: DonePayload | null 
   // session (not per turn) so a model that repeatedly backgrounds work
   // doesn't spam a 9s toast every turn.
   if (payload?.bg_task) {
-    const key = sid ?? "__active__";
+    const key = sid;
     if (!host.bgTaskWarnedSessions.has(key)) {
       if (host.bgTaskWarnedSessions.size >= MAX_BG_WARNED_SESSIONS) {
         const oldest = host.bgTaskWarnedSessions.values().next().value;
@@ -114,7 +112,7 @@ export function handleDoneEvent(host: ListenerHost, payload: DonePayload | null 
  *  poller must not paint rows into the next turn's HUD. */
 export function handleShellRowsEvent(host: ListenerHost, payload: ShellRowsPayload | null | undefined): void {
   const { session_id, rows, turn_epoch } = payload ?? {};
-  const tab = session_id ? host.tabBySession(session_id) : host.activeTab;
+  const tab = session_id ? host.tabBySession(session_id) : null;
   if (!tab || !Array.isArray(rows)) return;
   if (isStaleTurnEpoch(tab.turnEpoch, turn_epoch)) return;
   tab.shellRows = rows;
@@ -122,12 +120,9 @@ export function handleShellRowsEvent(host: ListenerHost, payload: ShellRowsPaylo
 
 /** `assistant://error` — same legacy-string + epoch discipline as stream. */
 export function handleErrorEvent(host: ListenerHost, payload: ErrorPayload | null | undefined): void {
-  if (typeof payload === "string") {
-    host.activeTab?.onError(payload);
-    return;
-  }
+  if (typeof payload === "string") return;
   const { session_id, message, turn_epoch } = payload ?? {};
-  const tab = session_id ? host.tabBySession(session_id) : host.activeTab;
+  const tab = session_id ? host.tabBySession(session_id) : null;
   if (!tab || typeof message !== "string") return;
   // #80: mirror the done listener — a stale turn's error (e.g. its stop
   // marker was eaten and the DONE remapped to ERROR) must not banner the

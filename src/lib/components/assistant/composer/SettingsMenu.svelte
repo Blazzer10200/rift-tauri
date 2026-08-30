@@ -6,7 +6,7 @@
   // pointer-drag slider. Derives re-compute here from the shared modelMatrix
   // + assistant store — same pure helpers the parent uses, so they can't drift.
   import { Check, ChevronRight, HelpCircle, LoaderCircle, LockKeyhole, Plus, Zap } from "@lucide/svelte";
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import { assistant, type TabState } from "../../../state/assistant.svelte";
   import { usage, limitZone, type ScopedLimit } from "../../../state/usage.svelte";
   import { portal } from "$lib/actions/portal";
@@ -20,6 +20,7 @@
 
   let {
     tab = null,
+    paneId,
     activeKind,
     activeModelId,
     anchor,
@@ -27,6 +28,7 @@
     onRequestClose,
   }: {
     tab?: TabState | null;
+    paneId: string;
     activeKind: SettingsRow["kind"] | null;
     activeModelId: ModelOpt["id"] | null;
     anchor: HTMLElement | null;
@@ -139,8 +141,12 @@
   const primaryOpenAiIds = $derived(new Set(primaryOpenAiModels.map((m) => m.id)));
   const otherOpenAiModels = $derived(currentOpenAiModels.filter((m) => !primaryOpenAiIds.has(m.id)));
   type PickerProvider = "openai" | "claude";
-  let providerView = $state<PickerProvider>("openai");
-  let previousCursor = $state<ModelOpt["id"] | null>(null);
+  // Open on the provider that owns the pane's persisted model, even when that
+  // provider is currently unavailable. The keyboard cursor only contains
+  // selectable rows, so letting its initial value choose the provider would
+  // hide an offline pinned Claude model behind the ChatGPT tab.
+  let providerView = $state<PickerProvider>(untrack(() => currentModel?.provider ?? "openai"));
+  let previousCursor = $state<ModelOpt["id"] | null>(untrack(() => activeModelId));
   // Arrow navigation still spans the shared parent-owned row list. Switch the
   // visible provider only when that cursor actually crosses providers; a mouse
   // click on a provider tab must not immediately snap back to the old cursor.
@@ -392,7 +398,11 @@
       <button
         type="button"
         class="sn-action"
-        onmousedown={(e) => { e.preventDefault(); void assistant.newChatWithModel((picked ?? pinned!).id); onRequestClose(); }}
+        onmousedown={(e) => {
+          e.preventDefault();
+          void assistant.newChatWithModel((picked ?? pinned!).id, { paneId });
+          onRequestClose();
+        }}
       >
         <Plus size={12} /> New chat in {picked ? picked.label : "this model"}
       </button>

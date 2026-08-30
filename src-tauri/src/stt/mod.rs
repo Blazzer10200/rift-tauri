@@ -413,9 +413,18 @@ static WS_CTX_CACHE: std::sync::Mutex<Option<(std::path::PathBuf, String, std::t
     std::sync::Mutex::new(None);
 const WS_CTX_TTL: std::time::Duration = std::time::Duration::from_secs(120);
 
-fn workspace_context() -> String {
-    let root = match crate::assistant::current_root() {
-        Some(r) => r,
+fn workspace_context(root: Option<String>) -> String {
+    // Dictation belongs to the composer that started it. Missing/stale context
+    // must produce no project vocabulary, never borrow the mutable global root
+    // from a different split pane.
+    let root = match root
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_dir())
+    {
+        Some(root) => root,
         None => return String::new(),
     };
     if let Ok(g) = WS_CTX_CACHE.lock() {
@@ -473,6 +482,7 @@ pub async fn stt_start_recording(
     cache: tauri::State<'_, EngineCache>,
     session: tauri::State<'_, SttSession>,
     model: Option<String>,
+    root: Option<String>,
 ) -> Result<(), String> {
     let win = window.label().to_string();
     let cfg = load_config();
@@ -568,7 +578,7 @@ pub async fn stt_start_recording(
     // running it inline here stalled a worker for seconds on record-start.
     // Spawned BEFORE the capture wait so the walk (cache-miss case) and the
     // WASAPI init overlap instead of stacking onto the press-to-ready delay.
-    let ws_ctx_task = tokio::task::spawn_blocking(workspace_context);
+    let ws_ctx_task = tokio::task::spawn_blocking(move || workspace_context(root));
 
     // recv() would block the Tokio worker — offload to a blocking thread.
     // Bounded wait: a stalled audio subsystem (Bluetooth/WASAPI device-enum hang

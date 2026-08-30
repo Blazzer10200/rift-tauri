@@ -257,6 +257,19 @@ fn session_id_or_warn(id: Option<String>, op: &str) -> String {
     }
 }
 
+/// Browser and notification bridge operations must never fall back to an
+/// implicit active tab. A missing session id used to emit an empty id and left
+/// the frontend to guess; with a singleton native browser that can expose the
+/// page belonging to another conversation. Keep `ask_user`'s legacy warning
+/// path above, but fail closed for the operations below.
+fn required_session_id(id: Option<String>, op: &str) -> Result<String, Response> {
+    match id {
+        Some(s) if !s.trim().is_empty() && s.len() <= 256 => Ok(s),
+        Some(_) => Err(err(format!("{op}: invalid `session_id`"))),
+        None => Err(err(format!("{op}: missing `session_id`"))),
+    }
+}
+
 async fn ask_user_op(app: &AppHandle, req: Request) -> Response {
     let window = window_of(&req);
     let request_id = match req.request_id {
@@ -347,12 +360,16 @@ fn open_browser_op(app: &AppHandle, req: Request) -> Response {
     if app.get_window(&window).is_none() {
         return err("open_browser: target window is not available");
     }
+    let session_id = match required_session_id(req.session_id, "open_browser") {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
     let _ = app.emit_to(
         window,
         "assistant://open-browser",
         serde_json::json!({
             "url": url,
-            "session_id": session_id_or_warn(req.session_id, "open_browser"),
+            "session_id": session_id,
         }),
     );
     ok_with(serde_json::json!({ "opened": url }))
@@ -364,7 +381,13 @@ fn open_browser_op(app: &AppHandle, req: Request) -> Response {
 /// when the model looked at the page they're browsing.
 async fn read_browser_page_op(app: &AppHandle, req: Request) -> Response {
     let window = window_of(&req);
-    let session_id = session_id_or_warn(req.session_id, "read_browser_page");
+    let session_id = match required_session_id(req.session_id, "read_browser_page") {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    if let Err(e) = crate::browser::authorize_assistant_read(&session_id) {
+        return err(format!("read_browser_page: {e}"));
+    }
     match crate::browser::read_page(app).await {
         Ok(p) => {
             let _ = app.emit_to(
@@ -384,7 +407,13 @@ async fn read_browser_page_op(app: &AppHandle, req: Request) -> Response {
 /// Console-buffer twin of `read_browser_page_op` — the indicator says console.
 async fn read_browser_console_op(app: &AppHandle, req: Request) -> Response {
     let window = window_of(&req);
-    let session_id = session_id_or_warn(req.session_id, "read_browser_console");
+    let session_id = match required_session_id(req.session_id, "read_browser_console") {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
+    if let Err(e) = crate::browser::authorize_assistant_read(&session_id) {
+        return err(format!("read_browser_console: {e}"));
+    }
     match crate::browser::read_console(app).await {
         Ok(s) => {
             let _ = app.emit_to(
@@ -426,6 +455,10 @@ fn notify_op(app: &AppHandle, req: Request) -> Response {
     if app.get_window(&window).is_none() {
         return err("notify: target window is not available");
     }
+    let session_id = match required_session_id(req.session_id, "notify") {
+        Ok(id) => id,
+        Err(response) => return response,
+    };
     let _ = app.emit_to(
         window,
         "assistant://notify",
@@ -433,7 +466,7 @@ fn notify_op(app: &AppHandle, req: Request) -> Response {
             "title": title,
             "detail": detail,
             "severity": severity,
-            "session_id": session_id_or_warn(req.session_id, "notify"),
+            "session_id": session_id,
         }),
     );
     ok_with(serde_json::json!({ "shown": true }))

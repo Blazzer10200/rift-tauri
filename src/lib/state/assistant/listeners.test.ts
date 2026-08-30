@@ -43,7 +43,6 @@ function makeTab(epoch = 0): FakeTab {
 function makeHost(opts: { active?: FakeTab | null; tabs?: Record<string, FakeTab> } = {}): ListenerHost {
   const tabs = opts.tabs ?? {};
   return {
-    activeTab: opts.active ?? null,
     tabBySession: (sid: string) => tabs[sid] ?? null,
     bgTaskWarnedSessions: new Set<string>(),
   };
@@ -54,10 +53,10 @@ beforeEach(() => {
 });
 
 describe("handleStreamEvent", () => {
-  it("legacy bare-string payload routes to activeTab", () => {
+  it("drops a bare-string payload rather than guessing the active tab", () => {
     const active = makeTab();
     handleStreamEvent(makeHost({ active }), '{"type":"ping"}');
-    expect(active.streamed).toEqual(['{"type":"ping"}']);
+    expect(active.streamed).toEqual([]);
   });
 
   it("legacy string with no activeTab is a no-op, not a crash", () => {
@@ -108,10 +107,10 @@ describe("handleStreamEvent", () => {
 });
 
 describe("handleDoneEvent", () => {
-  it("no session_id finalizes the active tab", () => {
+  it("no session_id is dropped rather than finalizing the active tab", () => {
     const active = makeTab();
     handleDoneEvent(makeHost({ active }), {});
-    expect(active.doneCount).toBe(1);
+    expect(active.doneCount).toBe(0);
   });
 
   it("session_id routes the terminal to the owning tab", () => {
@@ -158,13 +157,13 @@ describe("handleDoneEvent", () => {
     expect(mockWarn).toHaveBeenCalledTimes(1);
   });
 
-  it("bg_task with no session_id dedupes under the __active__ key", () => {
+  it("bg_task with no session_id is dropped without an owner", () => {
     const active = makeTab();
     const host = makeHost({ active });
     handleDoneEvent(host, { bg_task: true });
     handleDoneEvent(host, { bg_task: true });
-    expect(mockWarn).toHaveBeenCalledTimes(1);
-    expect(host.bgTaskWarnedSessions.has("__active__")).toBe(true);
+    expect(mockWarn).not.toHaveBeenCalled();
+    expect(host.bgTaskWarnedSessions).toEqual(new Set());
   });
 
   it("warn registry is bounded: 200 cap evicts the oldest entry", () => {
@@ -184,10 +183,10 @@ describe("handleDoneEvent", () => {
 });
 
 describe("handleErrorEvent", () => {
-  it("legacy bare-string payload routes to activeTab", () => {
+  it("drops a bare-string error rather than guessing the active tab", () => {
     const active = makeTab();
     handleErrorEvent(makeHost({ active }), "boom");
-    expect(active.errors).toEqual(["boom"]);
+    expect(active.errors).toEqual([]);
   });
 
   it("session_id routes to the owning tab; non-string message dropped", () => {

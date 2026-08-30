@@ -11,7 +11,6 @@
   import DOMPurify from "dompurify";
   import { invoke } from "@tauri-apps/api/core";
   import { FileText, ChevronRight, CornerDownLeft, Copy, Check } from "@lucide/svelte";
-  import { assistant } from "../../state/assistant.svelte";
   import { notify } from "../../state/toast.svelte";
   import { highlightSync, whenReady } from "../../state/highlighter.svelte";
   import FilePathMenu from "./FilePathMenu.svelte";
@@ -35,6 +34,7 @@
     defaultExpanded = false,
     hideHead = false,
     maxLines = null,
+    workspaceRoot = null,
   }: {
     input: Record<string, unknown>;
     compact?: boolean;
@@ -45,6 +45,8 @@
     // #34: cap rendered diff rows; the rest hides behind a "Show N more lines"
     // button. null = unlimited (chat-bubble default).
     maxLines?: number | null;
+    /** Explicit transcript workspace; null means file actions are unavailable. */
+    workspaceRoot?: string | null;
   } = $props();
 
   type DiffPair = UnifiedPatchPair | { kind: "gap"; lines: number };
@@ -332,9 +334,13 @@
   async function openFile(e: MouseEvent) {
     e.stopPropagation();
     if (!filePath) return;
+    if (!workspaceRoot) {
+      notify.warn("This conversation has no workspace", { detail: "Open a project before using file actions." });
+      return;
+    }
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
     try {
-      menuPath = await invoke<string>("resolve_workspace_path", { root: assistant.activeRoot, path: filePath });
+      menuPath = await invoke<string>("resolve_workspace_path", { root: workspaceRoot, path: filePath });
       menuPos = { x: r.left, y: r.bottom + 4 };
     } catch (err) {
       notify.warn("Couldn't locate path", { detail: String(err) });

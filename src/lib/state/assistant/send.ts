@@ -92,7 +92,10 @@ export async function send(
   // Try-handle as a slash command first; if it matched, we're done. (A KNOWN
   // slash command never reaches the queue — send() consumes it before the
   // queue-on-busy branch — so drain-path re-entry always falls through here.)
-  if (trimmed.startsWith("/") && runSlash(store, trimmed, liveTab ?? null)) return;
+  if (
+    trimmed.startsWith("/")
+    && runSlash(store, trimmed, liveTab ?? null, targetConvoId ?? store.currentConvoId)
+  ) return;
   // Auth chokepoint — every send path funnels here (composer Enter/button,
   // queue drains, programmatic retries). A turn with no usable Claude session
   // dies as "claude exited with 1"; block it, re-probe (state may be stale),
@@ -173,6 +176,7 @@ export async function send(
     }
   }
   const isFirstTurn = !tab.convoCreatedAt;
+  const turnPermissionMode = store.permissionModeFor(tab);
   if (!tab.cliSessionId) {
     tab.cliSessionId = convoId;
   }
@@ -361,7 +365,7 @@ export async function send(
   // reads the message copy so a later mode switch can't relabel history.
   const asst: ChatMessage = {
     id: crypto.randomUUID(), role: "assistant", blocks: [],
-    permissionMode: store.permissionMode,
+    permissionMode: turnPermissionMode,
     ts: Date.now(),
   };
   tab.messages = [...tab.messages, asst];
@@ -417,7 +421,7 @@ export async function send(
         store.codexModels,
         store.openAiModels,
       ),
-      permissionMode: store.permissionMode,
+      permissionMode: turnPermissionMode,
       root: store.effectiveRoot(tab),
     };
     if (chatGptRoute === "codex") {
@@ -661,7 +665,12 @@ export function removeQueued(store: AssistantStore, id: string, tabId?: string) 
 }
 
 /** Client-side slash commands. Returns true if input was consumed. */
-function runSlash(store: AssistantStore, input: string, tab: TabState | null): boolean {
+function runSlash(
+  store: AssistantStore,
+  input: string,
+  tab: TabState | null,
+  tabId: string | null,
+): boolean {
   const [cmd, ...rest] = input.slice(1).split(/\s+/);
   const arg = rest.join(" ").trim();
   switch (cmd.toLowerCase()) {
@@ -713,7 +722,7 @@ function runSlash(store: AssistantStore, input: string, tab: TabState | null): b
       return true;
     }
     case "retry":
-      void retryLast(store);
+      void retryLast(store, tabId);
       return true;
     case "copy":
       void copyLastAssistant(store);
@@ -739,7 +748,7 @@ function runSlash(store: AssistantStore, input: string, tab: TabState | null): b
       // turn — overlaid with this chat's init-frame statuses (headless auth
       // ≠ terminal auth, so the session's view wins per name).
       mcpPanel.show();
-      void mcpPanel.refresh(store.workspace.current, store.activeTab?.mcpServers ?? null);
+      void mcpPanel.refresh(tab ? store.effectiveRoot(tab) : null, tab?.mcpServers ?? null);
       return true;
     }
     case "tools":
@@ -792,8 +801,8 @@ function runSlash(store: AssistantStore, input: string, tab: TabState | null): b
       return true;
     }
     case "openincli": {
-      const sid = store.currentCliSessionId;
-      const ws = store.workspace.current;
+      const sid = tab?.cliSessionId ?? "";
+      const ws = tab ? store.effectiveRoot(tab) : null;
       if (!sid) {
         store.lastError = "No active session yet — send a message first.";
         return true;

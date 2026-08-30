@@ -143,7 +143,11 @@
     return /^[\w.@-]+\.(?:rs|ts|tsx|js|jsx|mjs|cjs|svelte|vue|py|rb|go|java|kt|cs|c|h|cpp|hpp|lua|json|jsonc|toml|yml|yaml|md|css|scss|html|htm|txt|sh|ps1|bat|sql|lock|conf|ini|env)(?::\d+(?::\d+)?)?$/i.test(s);
   }
 
-  let { text, streaming = false }: { text: string; streaming?: boolean } = $props();
+  // The transcript owns its workspace. Never resolve a path through the
+  // globally focused tab: a background split can render while another pane has
+  // focus. Rootless/local conversations deliberately cannot open path actions.
+  let { text, streaming = false, workspaceRoot = null }:
+    { text: string; streaming?: boolean; workspaceRoot?: string | null } = $props();
 
   // Upper bound on characters fed to marked/DOMPurify per render (see `parsed`).
   // ~500k chars ≈ 125k tokens — larger than any single real message, so it only
@@ -403,7 +407,7 @@
     // Local-dev URLs open in the in-app browser dock instead of the system
     // browser — the preview belongs next to the chat that produced it.
     if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(:\d+)?([/?#]|$)/i.test(href)) {
-      browserDock.openUrl(href);
+      browserDock.openUrl(href, { workspaceRoot });
       return;
     }
     void openUrl(href).catch((err) => console.warn("openUrl failed", err));
@@ -417,6 +421,10 @@
   // FilePathMenu below the clicked span with the resolved absolute path.
   async function openPathMenu(el: HTMLElement, raw: string) {
     if (!raw) return;
+    if (!workspaceRoot) {
+      notify.warn("This conversation has no workspace", { detail: "Open a project before using file actions." });
+      return;
+    }
     let path = raw;
     let line: number | null = null;
     const m = /^(.+?):(\d+)(?::\d+)?$/.exec(raw);
@@ -425,7 +433,7 @@
       line = parseInt(m[2], 10);
     }
     try {
-      const resolved = await invoke<string>("resolve_workspace_path", { root: assistant.activeRoot, path });
+      const resolved = await invoke<string>("resolve_workspace_path", { root: workspaceRoot, path });
       const r = el.getBoundingClientRect();
       pathMenu = { path: resolved, line, x: r.left, y: r.bottom + 4 };
     } catch (err) {

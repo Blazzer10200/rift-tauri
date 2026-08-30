@@ -28,7 +28,7 @@ use super::config::{
     FABLE_FALLBACK_MODEL, FABLE_MODEL, HAIKU_FALLBACK_MODEL, HAIKU_MODEL,
 };
 use super::convo_store::{
-    is_valid_session_id, load_session_cwd, load_session_model, save_session_cwd, save_session_model,
+    establish_session_workspace, is_valid_session_id, load_session_model, save_session_model,
 };
 use super::{write_mcp_config, AskUserRegistry, McpConfigGuard, PermissionRegistry};
 
@@ -1002,7 +1002,7 @@ async fn run_or_prewarm(
     // BEFORE any use. Renderer-supplied — must not flow into CLI args or
     // sidecar filename without check. Blocks leading-dash flag injection
     // into `--session-id`/`--resume` AND path-traversal segments in
-    // save_session_cwd's filename derivation.
+    // the session-sidecar filename derivation.
     // RR9: cap the renderer-supplied prompt + prior_context_summary before they
     // flow into build_user_envelope → blocking stdin write_all (mirrors the
     // attachment 20 MiB cap). A renderer bug could otherwise
@@ -1241,29 +1241,11 @@ async fn resolve_spawn(
         .filter(|v| is_valid_permission_mode(v))
         .unwrap_or_else(|| "bypassPermissions".to_string());
 
-    // Workspace root resolution — priority order:
-    //   0. (Resume only) The cwd that was active when this session was created,
-    //      loaded from the sidecar. Pins every turn to the same
-    //      `~/.claude/projects/<cwd-hash>/<uuid>.jsonl` so --resume succeeds
-    //      even after the user opens a different workspace.
-    //   1. The user's explicitly-opened folder (`current_root` in config).
-    //   2. Empty → no-tools turn + no-workspace addendum.
-    // Validate every candidate still exists on disk; missing dir → fall through.
-    let pinned_cwd: Option<PathBuf> = if is_first_turn {
-        None
-    } else {
-        load_session_cwd(session_id).filter(|p| p.is_dir())
-    };
-    // Per-tab root: the renderer passes the tab's chosen folder so each pane
-    // (and each window) can run turns in a different directory. Wins over the
-    // global `current_root` on the first turn; subsequent turns ride the
-    // per-session pinned cwd above (which we save from this very value below).
-    let tab_root: Option<PathBuf> = root
-        .as_deref()
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
-        .filter(|p| p.is_dir());
+    // A pane supplies its own root. Never substitute config.current_root here:
+    // a split transition or the explicit All view must not redirect a turn into
+    // whichever workspace another pane selected most recently. Resumed Claude
+    // sessions are additionally checked against their pinned cwd.
+    let session_root = super::resolve_session_workspace(session_id, root.as_deref())?;
     // No folder open → fall back to the persistent local scratch workspace
     // (`Documents\Rift Workspace`; legacy `%LOCALAPPDATA%\Rift\local`) so the
     // standard OAuth no-folder turn gets the
@@ -1272,15 +1254,11 @@ async fn resolve_spawn(
     // keep the empty roots → no-tools fallback intact (mirrors the `use_full_config`
     // computation below; recomputed here because that binding is resolved later).
     let scratch_eligible = cfg.use_full_config.unwrap_or(true) && !use_api_key;
-    let roots: Vec<PathBuf> = if let Some(p) = pinned_cwd.clone() {
-        vec![p]
-    } else if let Some(r) = tab_root {
+    let roots: Vec<PathBuf> = if let Some(r) = session_root {
         vec![r]
-    } else if let Some(root) = cfg.current_root.as_ref().filter(|p| p.is_dir()) {
-        vec![root.clone()]
     } else if scratch_eligible {
         match super::workspace::local_scratch_dir() {
-            Ok(scratch) => vec![scratch],
+            Ok(scratch) => vec![establish_session_workspace(session_id, &scratch)?],
             Err(e) => {
                 log::warn!(
                     "assistant: local scratch dir unavailable, falling back to no-tools: {e}"
@@ -1291,16 +1269,6 @@ async fn resolve_spawn(
     } else {
         Vec::new()
     };
-    // Pin the cwd on first turn so every subsequent --resume aims at the same
-    // session JSONL even if the user later switches workspace folders. Also
-    // covers the legacy-migration path: existing pre-pin conversations have
-    // no sidecar on disk; the first turn after upgrade captures whatever
-    // workspace is currently active and locks the session there.
-    if let Some(first) = roots.first() {
-        if is_first_turn || pinned_cwd.is_none() {
-            save_session_cwd(session_id, first);
-        }
-    }
     // Pin the model this session runs on: first turn captures it, legacy
     // pre-pin conversations back-fill on their first post-upgrade turn, and a
     // deliberate mid-chat switch RE-pins so later turns keep the user's pick

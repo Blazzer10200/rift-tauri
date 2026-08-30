@@ -6,7 +6,10 @@
 //! Disk format is the contract — don't reshape any serialized field.
 
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Mutex,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -16,6 +19,25 @@ use super::{dirs_home, is_valid_model_name};
 /// race on a shared `.tmp` and silently install stale data. Mirrors
 /// `config.rs::CONFIG_WRITE_LOCK`. Poison-recovered at the call site.
 static CONVO_WRITE_LOCK: Mutex<()> = Mutex::new(());
+
+/// The session cwd is a security and correctness boundary: once a provider
+/// session is associated with a workspace it must never move. Keep the
+/// read/compare/create sequence in one critical section so two simultaneous
+/// first turns cannot each decide that they own an unpinned session.
+static SESSION_CWD_LOCK: Mutex<()> = Mutex::new(());
+static SIDECAR_TMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// A filesystem-level companion to `SESSION_CWD_LOCK`. The mutex protects
+/// threads in this Rift process; this handle protects independent Rift
+/// processes that share the same `.rift` data directory. On Windows an open
+/// file with `share_mode(0)` is an exclusive OS lock and is released by the OS
+/// even if its owning process crashes. The lock file deliberately remains on
+/// disk after the handle closes: deleting it would let a second process create
+/// a different file while another process still holds the old one.
+struct SessionCwdFileLock {
+    #[cfg(windows)]
+    _file: std::fs::File,
+}
 
 /// Directory holding one `<uuid>.json` per saved conversation.
 fn conversations_dir() -> Result<PathBuf, String> {
@@ -158,24 +180,73 @@ pub(super) fn is_valid_session_id(s: &str) -> bool {
     true
 }
 
-pub(super) fn save_session_cwd(id: &str, cwd: &Path) {
-    if let Ok(p) = session_cwd_path(id) {
-        let s = cwd.to_string_lossy();
-        // Per-writer tmp name so two windows pinning the SAME session id
-        // concurrently (turns aren't serialized ACROSS windows) can't truncate
-        // each other's in-flight write and rename a torn/wrong cwd into place —
-        // the sidecar drives --resume, so a garbled value silently loses the
-        // session. Mirrors save_conversation_sync's pid-tagged tmp.
-        let tmp = p.with_extension(format!("cwd.{}.tmp", std::process::id()));
-        if let Err(e) = std::fs::write(&tmp, s.as_bytes()) {
-            log::warn!("assistant: save session cwd {}: {e}", p.display());
-            return;
-        }
-        if let Err(e) = std::fs::rename(&tmp, &p) {
-            let _ = std::fs::remove_file(&tmp);
-            log::warn!("assistant: save session cwd rename {}: {e}", p.display());
+fn sidecar_tmp_path(path: &Path, extension: &str) -> PathBuf {
+    let sequence = SIDECAR_TMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    path.with_extension(format!("{extension}.{}.{}.tmp", std::process::id(), sequence))
+}
+
+fn session_cwd_lock_path(path: &Path) -> PathBuf {
+    path.with_extension("cwd.lock")
+}
+
+#[cfg(windows)]
+fn acquire_session_cwd_file_lock(sidecar_path: &Path) -> Result<SessionCwdFileLock, String> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::time::{Duration, Instant};
+
+    let lock_path = session_cwd_lock_path(sidecar_path);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        // `share_mode(0)` denies every sharing mode. Unlike create_new lock
+        // files, it cannot become permanently stale: Windows closes the handle
+        // during process teardown. It also works when the lock file already
+        // exists from a prior successful turn.
+        match std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .share_mode(0)
+            .open(&lock_path)
+        {
+            Ok(file) => return Ok(SessionCwdFileLock { _file: file }),
+            // Windows reports ERROR_SHARING_VIOLATION / ERROR_LOCK_VIOLATION
+            // as `Other` on some toolchains, so inspect the OS code as well as
+            // the portable kinds before deciding this is a terminal failure.
+            Err(error)
+                if (matches!(
+                    error.kind(),
+                    std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::WouldBlock
+                ) || matches!(error.raw_os_error(), Some(32 | 33)))
+                    && Instant::now() < deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(error) => {
+                return Err(format!(
+                    "lock session workspace {}: {error}",
+                    lock_path.display()
+                ));
+            }
         }
     }
+}
+
+// Rift currently targets Windows. Keep non-Windows test/dev builds usable; the
+// in-process mutex above still protects their supported single-process mode.
+#[cfg(not(windows))]
+fn acquire_session_cwd_file_lock(_sidecar_path: &Path) -> Result<SessionCwdFileLock, String> {
+    Ok(SessionCwdFileLock {})
+}
+
+fn write_session_cwd(path: &Path, cwd: &Path) -> Result<(), String> {
+    let tmp = sidecar_tmp_path(path, "cwd");
+    std::fs::write(&tmp, cwd.to_string_lossy().as_bytes())
+        .map_err(|e| format!("write {}: {e}", tmp.display()))?;
+    std::fs::rename(&tmp, path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp);
+        format!("rename {}: {e}", path.display())
+    })
 }
 
 pub(super) fn load_session_cwd(id: &str) -> Option<PathBuf> {
@@ -186,6 +257,116 @@ pub(super) fn load_session_cwd(id: &str) -> Option<PathBuf> {
         None
     } else {
         Some(PathBuf::from(trimmed))
+    }
+}
+
+/// Compare a persisted conversation's declared workspace to its immutable
+/// provider-session sidecar. A conversation JSON is user-local data and can
+/// survive partial writes, manual edits, or an older Rift build; it must not be
+/// trusted to re-home a session that was already pinned elsewhere.
+///
+/// Missing roots remain valid so a moved/deleted project can be reported to the
+/// user as unavailable rather than being silently reassigned. When both paths
+/// exist we canonicalize before comparing. If either disappeared, only an
+/// equivalent Windows path spelling is accepted; any disagreement fails closed.
+fn validate_conversation_session_binding(convo: &Conversation) -> Result<(), String> {
+    let Some(declared) = convo.workspace_root.as_deref() else {
+        return Ok(());
+    };
+    let session_id = convo.cli_session_id.as_deref().unwrap_or(&convo.id);
+    let Some(pinned) = load_session_cwd(session_id) else {
+        return Ok(());
+    };
+
+    let declared_path = PathBuf::from(declared.trim());
+    let matches = if declared_path.is_dir() && pinned.is_dir() {
+        super::canonicalize_root(declared_path.clone())?
+            == super::canonicalize_root(pinned.clone())?
+    } else {
+        // `PathBuf` equality is case-sensitive, unlike Windows workspace
+        // identity. Normalize the only spelling differences we can safely
+        // resolve without touching a missing folder; do not collapse `..` or
+        // otherwise guess at a moved directory.
+        declared_path
+            .to_string_lossy()
+            .replace('/', "\\")
+            .eq_ignore_ascii_case(&pinned.to_string_lossy().replace('/', "\\"))
+    };
+    if matches {
+        Ok(())
+    } else {
+        Err(format!(
+            "conversation workspace conflicts with its pinned session: record declares {}, session is bound to {}",
+            declared_path.display(),
+            pinned.display()
+        ))
+    }
+}
+
+/// Resolve a renderer-supplied workspace for a turn without ever consulting the
+/// mutable application-wide `current_root`. A rooted session is immutable: a
+/// later turn may name the same canonical folder, but may not silently move an
+/// existing provider session into another project.
+///
+/// `None` on a new session is deliberately a rootless/local turn. It never means
+/// "use whichever project happened to be selected last". Once a session has a
+/// sidecar, omission keeps that immutable pin; this is required for no-folder
+/// Claude turns whose first turn is assigned Rift's local scratch directory.
+pub(super) fn resolve_session_workspace(id: &str, requested: Option<&str>) -> Result<Option<PathBuf>, String> {
+    let requested = match requested.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => {
+            let raw = PathBuf::from(value);
+            if !raw.is_dir() {
+                return Err(format!("workspace folder does not exist: {}", raw.display()));
+            }
+            Some(super::canonicalize_root(raw)?)
+        }
+        None => None,
+    };
+    resolve_or_establish_session_workspace(id, requested)
+}
+
+/// Establish a workspace pin for a locally-created scratch turn. This shares
+/// the exact same atomic compare-and-establish path as renderer-supplied roots.
+pub(super) fn establish_session_workspace(id: &str, requested: &Path) -> Result<PathBuf, String> {
+    if !requested.is_dir() {
+        return Err(format!("workspace folder does not exist: {}", requested.display()));
+    }
+    let requested = super::canonicalize_root(requested.to_path_buf())?;
+    resolve_or_establish_session_workspace(id, Some(requested))?
+        .ok_or_else(|| "workspace pin unexpectedly resolved empty".to_string())
+}
+
+fn resolve_or_establish_session_workspace(
+    id: &str,
+    requested: Option<PathBuf>,
+) -> Result<Option<PathBuf>, String> {
+    let _guard = SESSION_CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let path = session_cwd_path(id)?;
+    let _file_lock = acquire_session_cwd_file_lock(&path)?;
+    let pinned = match load_session_cwd(id) {
+        Some(path) if !path.is_dir() => {
+            return Err(format!(
+                "conversation workspace is unavailable: {}",
+                path.display()
+            ));
+        }
+        Some(path) => Some(super::canonicalize_root(path)?),
+        None => None,
+    };
+    match (pinned, requested) {
+        (Some(pinned), Some(requested)) if pinned != requested => Err(format!(
+            "conversation workspace mismatch: this session is bound to {}, not {}",
+            pinned.display(),
+            requested.display()
+        )),
+        (Some(pinned), Some(_)) => Ok(Some(pinned)),
+        (Some(pinned), None) => Ok(Some(pinned)),
+        (None, Some(requested)) => {
+            write_session_cwd(&path, &requested)?;
+            Ok(Some(requested))
+        }
+        (None, None) => Ok(None),
     }
 }
 
@@ -214,7 +395,7 @@ pub(super) fn save_session_model(id: &str, model: &str) {
         // Per-writer tmp name — same cross-window race as save_session_cwd; a
         // torn model pin risks the documented resume-wedge (model-bound thinking
         // signatures). Atomic rename after a whole-value write.
-        let tmp = p.with_extension(format!("model.{}.tmp", std::process::id()));
+        let tmp = sidecar_tmp_path(&p, "model");
         if let Err(e) = std::fs::write(&tmp, model.as_bytes()) {
             log::warn!("assistant: save session model {}: {e}", p.display());
             return;
@@ -475,7 +656,13 @@ pub async fn assistant_load_conversation(id: String) -> Result<Conversation, Str
     tokio::task::spawn_blocking(move || {
         let p = convo_path(&id)?;
         let bytes = std::fs::read(&p).map_err(|e| format!("read {}: {e}", p.display()))?;
-        serde_json::from_slice(&bytes).map_err(|e| format!("parse conversation: {e}"))
+        let convo: Conversation = serde_json::from_slice(&bytes)
+            .map_err(|e| format!("parse conversation: {e}"))?;
+        validate_conversation(&convo)?;
+        if convo.id != id {
+            return Err("conversation record id does not match its filename".into());
+        }
+        Ok(convo)
     })
     .await
     .map_err(|e| format!("load_conversation join error: {e}"))?
@@ -499,6 +686,7 @@ pub async fn assistant_save_conversation(convo: Conversation) -> Result<(), Stri
 }
 
 fn save_conversation_sync(convo: &Conversation) -> Result<(), String> {
+    validate_conversation(convo)?;
     let p = convo_path(&convo.id)?;
     let s = serde_json::to_string(convo).map_err(|e| e.to_string())?;
     // Serialize saves (multi-window can race the same id) + per-call tmp suffix
@@ -511,6 +699,28 @@ fn save_conversation_sync(convo: &Conversation) -> Result<(), String> {
         let _ = std::fs::remove_file(&tmp);
         format!("rename {}: {e}", p.display())
     })?;
+    Ok(())
+}
+
+fn validate_conversation(convo: &Conversation) -> Result<(), String> {
+    let _ = convo_path(&convo.id)?;
+    if let Some(session_id) = convo.cli_session_id.as_deref() {
+        if !is_valid_session_id(session_id) {
+            return Err("invalid CLI session id".into());
+        }
+    }
+    if let Some(route) = convo.chat_gpt_route.as_deref() {
+        if !matches!(route, "codex" | "openai") {
+            return Err("invalid ChatGPT route".into());
+        }
+    }
+    if let Some(root) = convo.workspace_root.as_deref() {
+        let root = root.trim();
+        if root.is_empty() || root.eq_ignore_ascii_case("all") || !Path::new(root).is_absolute() {
+            return Err("workspaceRoot must be an absolute workspace path, not All".into());
+        }
+    }
+    validate_conversation_session_binding(convo)?;
     Ok(())
 }
 
@@ -776,5 +986,164 @@ mod tests {
         assert!(!is_valid_session_id("550e8400xe29bx41d4xa716x446655440000")); // hyphens→x
         assert!(!is_valid_session_id("g50e8400-e29b-41d4-a716-446655440000")); // non-hex
         assert!(!is_valid_session_id("../0e8400-e29b-41d4-a716-446655440000")); // traversal
+    }
+
+    #[test]
+    fn session_workspace_is_pinned_and_never_falls_back_to_current_workspace() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let id = "550e8400-e29b-41d4-a716-4466554400a1";
+        let first_root = super::super::canonicalize_root(first.path().to_path_buf()).unwrap();
+        delete_session_cwd(id);
+        assert_eq!(
+            resolve_session_workspace(id, Some(first.path().to_str().unwrap())).unwrap(),
+            Some(first_root.clone())
+        );
+
+        assert_eq!(
+            resolve_session_workspace(id, Some(first.path().to_str().unwrap())).unwrap(),
+            Some(first_root.clone())
+        );
+        assert!(resolve_session_workspace(id, Some(second.path().to_str().unwrap())).is_err());
+        assert_eq!(resolve_session_workspace(id, None).unwrap(), Some(first_root));
+        assert!(resolve_session_workspace(id, Some("definitely-not-a-workspace")).is_err());
+        delete_session_cwd(id);
+    }
+
+    #[test]
+    fn concurrent_first_turns_cannot_establish_different_workspaces() {
+        use std::sync::{Arc, Barrier};
+
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let id = "550e8400-e29b-41d4-a716-4466554400b1";
+        delete_session_cwd(id);
+
+        let barrier = Arc::new(Barrier::new(3));
+        let roots = [
+            first.path().to_string_lossy().into_owned(),
+            second.path().to_string_lossy().into_owned(),
+        ];
+        let mut workers = Vec::new();
+        for root in roots {
+            let barrier = Arc::clone(&barrier);
+            workers.push(std::thread::spawn(move || {
+                barrier.wait();
+                resolve_session_workspace(id, Some(&root))
+            }));
+        }
+        barrier.wait();
+        let results: Vec<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().expect("workspace worker panicked"))
+            .collect();
+
+        assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+        assert_eq!(results.iter().filter(|result| result.is_err()).count(), 1);
+        let pinned = load_session_cwd(id).expect("first successful turn pinned a workspace");
+        let successful_root = results
+            .into_iter()
+            .find_map(Result::ok)
+            .expect("one turn succeeds");
+        assert_eq!(successful_root, Some(pinned));
+        delete_session_cwd(id);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn session_workspace_file_lock_excludes_another_opener_until_released() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let id = "550e8400-e29b-41d4-a716-4466554400b2";
+        let sidecar = session_cwd_path(id).unwrap();
+        let held = acquire_session_cwd_file_lock(&sidecar).expect("first process lock");
+        let (started_tx, started_rx) = mpsc::channel();
+        let (acquired_tx, acquired_rx) = mpsc::channel();
+        let worker_sidecar = sidecar.clone();
+        let worker = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            let lock = acquire_session_cwd_file_lock(&worker_sidecar);
+            acquired_tx.send(lock.is_ok()).unwrap();
+        });
+
+        started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        // This is the same kernel sharing primitive used across processes, so
+        // a second opener must remain blocked while the first handle is live.
+        assert!(acquired_rx.recv_timeout(Duration::from_millis(80)).is_err());
+        drop(held);
+        assert!(acquired_rx.recv_timeout(Duration::from_secs(2)).unwrap());
+        worker.join().unwrap();
+        delete_session_cwd(id);
+    }
+
+    #[test]
+    fn sidecar_temp_paths_are_unique_within_a_process() {
+        let path = std::env::temp_dir().join("rift-session-pin.cw");
+        let first = sidecar_tmp_path(&path, "cwd");
+        let second = sidecar_tmp_path(&path, "cwd");
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn conversation_validation_allows_moved_roots_but_rejects_ambiguous_identity() {
+        let valid = Conversation {
+            id: "550e8400-e29b-41d4-a716-4466554400a2".into(),
+            title: "Moved workspace".into(),
+            model: "gpt-5.6".into(),
+            created_at: 0,
+            updated_at: 0,
+            messages: serde_json::json!([]),
+            cli_session_id: Some("550e8400-e29b-41d4-a716-4466554400a3".into()),
+            chat_gpt_route: Some("codex".into()),
+            workspace_root: Some(
+                std::env::temp_dir()
+                    .join("rift-moved-workspace")
+                    .to_string_lossy()
+                    .into_owned(),
+            ),
+            extra: serde_json::Map::new(),
+        };
+        assert!(validate_conversation(&valid).is_ok());
+
+        let mut invalid = valid.clone();
+        invalid.workspace_root = Some("All".into());
+        assert!(validate_conversation(&invalid).is_err());
+        invalid.workspace_root = Some("relative/workspace".into());
+        assert!(validate_conversation(&invalid).is_err());
+        invalid.workspace_root = valid.workspace_root.clone();
+        invalid.chat_gpt_route = Some("unknown".into());
+        assert!(validate_conversation(&invalid).is_err());
+        invalid.chat_gpt_route = valid.chat_gpt_route.clone();
+        invalid.cli_session_id = Some("not-a-session".into());
+        assert!(validate_conversation(&invalid).is_err());
+    }
+
+    #[test]
+    fn conversation_rejects_workspace_conflicting_with_session_pin() {
+        let pinned = tempfile::tempdir().unwrap();
+        let conflicting = tempfile::tempdir().unwrap();
+        let session_id = "550e8400-e29b-41d4-a716-4466554400c1";
+        delete_session_cwd(session_id);
+        let pinned_root = establish_session_workspace(session_id, pinned.path()).unwrap();
+
+        let convo = Conversation {
+            id: "550e8400-e29b-41d4-a716-4466554400c2".into(),
+            title: "Wrong project".into(),
+            model: "gpt-5.6".into(),
+            created_at: 0,
+            updated_at: 0,
+            messages: serde_json::json!([]),
+            cli_session_id: Some(session_id.into()),
+            chat_gpt_route: Some("codex".into()),
+            workspace_root: Some(conflicting.path().to_string_lossy().into_owned()),
+            extra: serde_json::Map::new(),
+        };
+        assert!(validate_conversation(&convo).is_err());
+
+        let mut matching = convo;
+        matching.workspace_root = Some(pinned_root.to_string_lossy().into_owned());
+        assert!(validate_conversation(&matching).is_ok());
+        delete_session_cwd(session_id);
     }
 }

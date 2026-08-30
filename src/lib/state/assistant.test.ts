@@ -13,8 +13,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { assistant } from "./assistant.svelte.js";
 import { recordTurnUsage } from "./assistant/streaming.js";
 import { restoreTabs } from "./assistant/tabs.js";
-import { tabsStorageKey } from "./assistant/persistence.js";
+import { buildSaveRecord, tabsStorageKey } from "./assistant/persistence.js";
 import { shell } from "./shell.svelte.js";
+import { createPaneState } from "./assistant/types.js";
+
+const pane = (tabId: string | null = null) => createPaneState(tabId);
 
 describe("provider readiness", () => {
   afterEach(() => {
@@ -559,7 +562,7 @@ describe("drag a tab onto a pane half enters split (single-pane)", () => {
       }
       return undefined;
     });
-    assistant.panes = [{ tabId: null }];
+    assistant.panes = [pane()];
     assistant.focusedPaneIdx = 0;
   });
 
@@ -568,7 +571,7 @@ describe("drag a tab onto a pane half enters split (single-pane)", () => {
     assistant.ensureTab("drag-b", "drag-b");
     assistant.openTabs = ["drag-a", "drag-b"];
     assistant.currentConvoId = "drag-a";
-    assistant.panes = [{ tabId: "drag-a" }];
+    assistant.panes = [pane("drag-a")];
 
     // Drop the visible tab (drag-a) onto the right half.
     assistant.dropTabIntoPane("drag-a", 1);
@@ -583,7 +586,7 @@ describe("drag a tab onto a pane half enters split (single-pane)", () => {
     assistant.ensureTab("pair-b", "pair-b");
     assistant.openTabs = ["pair-a", "pair-b"];
     assistant.currentConvoId = "pair-a";
-    assistant.panes = [{ tabId: "pair-a" }];
+    assistant.panes = [pane("pair-a")];
 
     assistant.dropTabIntoPane("pair-b", 1);
 
@@ -595,7 +598,7 @@ describe("drag a tab onto a pane half enters split (single-pane)", () => {
     assistant.ensureTab("solo", "solo");
     assistant.openTabs = ["solo"];
     assistant.currentConvoId = "solo";
-    assistant.panes = [{ tabId: "solo" }];
+    assistant.panes = [pane("solo")];
 
     assistant.dropTabIntoPane("solo", 1);
 
@@ -616,7 +619,7 @@ describe("openProjectInPane — open a project into a (split) pane", () => {
       if (cmd === "assistant_list_recent_roots") return { current: null, recent: [] };
       return undefined;
     });
-    assistant.panes = [{ tabId: null }];
+    assistant.panes = [pane()];
     assistant.focusedPaneIdx = 0;
     assistant.openTabs = [];
     assistant.currentConvoId = null;
@@ -642,13 +645,256 @@ describe("openProjectInPane — open a project into a (split) pane", () => {
 
   it("paneIdx beyond current panes auto-grows; falls back to focused pane when split can't grow", async () => {
     // Fill to MAX so addPane can't grow → returns false, opens in focused pane.
-    assistant.panes = [{ tabId: null }, { tabId: null }, { tabId: null }, { tabId: null }];
+    assistant.panes = [pane(), pane(), pane(), pane()];
     assistant.focusedPaneIdx = 1;
     const grew = await assistant.openProjectInPane("C:/proj/beta", { splitNew: true });
 
     expect(grew).toBe(false);
     expect(assistant.focusedPaneIdx).toBe(1);
     expect(assistant.tabFor(assistant.currentConvoId!)!.workspaceRoot).toBe("C:/proj/beta");
+  });
+});
+
+describe("pane/workspace identity isolation", () => {
+  const invokeMock = vi.mocked(invoke);
+
+  beforeEach(() => {
+    invokeMock.mockReset();
+    invokeMock.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "assistant_set_tab_root") return args.path;
+      if (cmd === "assistant_set_root") return { current: args.path, recent: [args.path] };
+      if (cmd === "assistant_get_workspace") return (assistant as any).workspace;
+      if (cmd === "assistant_session_cwd") return null;
+      return undefined;
+    });
+    (assistant as any).tabs = new Map();
+    (assistant as any).workspace = { current: "C:/proj/a", recent: ["C:/proj/a"] };
+    assistant.openTabs = [];
+    assistant.panes = [pane()];
+    assistant.focusedPaneIdx = 0;
+    assistant.currentConvoId = null;
+    assistant.conversations = [] as any;
+    shell.setAllProjects(false);
+    vi.spyOn(shell, "maxPanesForWidth").mockReturnValue(4);
+  });
+
+  it("captures the global root when a tab is created instead of following future switches", async () => {
+    const aId = await assistant.newTab();
+    expect(assistant.tabFor(aId)!.workspaceRoot).toBe("C:/proj/a");
+
+    await assistant.openProjectInPane("C:/proj/b", { splitNew: true });
+    const bId = assistant.currentConvoId!;
+    expect(assistant.tabFor(bId)!.workspaceRoot).toBe("C:/proj/b");
+
+    shell.setAllProjects(true);
+    await assistant.setRoot("C:/proj/c");
+
+    expect((assistant as any).workspace.current).toBe("C:/proj/c");
+    expect(assistant.tabFor(aId)!.workspaceRoot).toBe("C:/proj/a");
+    expect(assistant.tabFor(bId)!.workspaceRoot).toBe("C:/proj/c");
+    expect(assistant.panes.map((p) => assistant.tabFor(p.tabId)?.workspaceRoot)).toEqual([
+      "C:/proj/a",
+      "C:/proj/c",
+    ]);
+    // All is a history view only; it never becomes a path/project identity.
+    expect(shell.conversationScope).toEqual({ kind: "all" });
+  });
+
+  it("treats a null tab root as explicit local mode, not a mutable global fallback", () => {
+    const tab = assistant.ensureTab("local-tab", "local-tab");
+    tab.workspaceRoot = null;
+    (assistant as any).workspace = { current: "C:/proj/global", recent: [] };
+    expect(assistant.effectiveRoot(tab)).toBeNull();
+    expect(assistant.effectiveRoot(null)).toBe("C:/proj/global");
+  });
+
+  it("sets a project on the tab minted for a stable pane even if focus moves mid-await", async () => {
+    const aId = await assistant.newTab();
+    const aPaneId = assistant.panes[0].id;
+    assistant.addPane();
+    const bPaneId = assistant.panes[1].id;
+
+    let release!: (value: string) => void;
+    const canonical = new Promise<string>((resolve) => { release = resolve; });
+    invokeMock.mockImplementation(async (cmd: string) => {
+      if (cmd === "assistant_set_tab_root") return canonical;
+      if (cmd === "assistant_get_workspace") return (assistant as any).workspace;
+      return undefined;
+    });
+
+    const opening = assistant.openProjectInPane("C:/proj/b", { paneId: bPaneId });
+    await Promise.resolve();
+    const mintedId = assistant.panes.find((p) => p.id === bPaneId)?.tabId;
+    expect(mintedId).toBeTruthy();
+
+    assistant.setFocusedPaneById(aPaneId);
+    release("C:/proj/b");
+    await opening;
+
+    expect(assistant.currentConvoId).toBe(aId);
+    expect(assistant.tabFor(aId)!.workspaceRoot).toBe("C:/proj/a");
+    expect(assistant.tabFor(mintedId!)!.workspaceRoot).toBe("C:/proj/b");
+    expect(assistant.panes.find((p) => p.id === bPaneId)?.tabId).toBe(mintedId);
+  });
+
+  it("hydrates a late conversation into its originating pane without activating another pane", async () => {
+    const a = crypto.randomUUID();
+    const b = crypto.randomUUID();
+    const pa = pane(a);
+    const pb = pane(b);
+    assistant.panes = [pa, pb];
+    assistant.openTabs = [a, b];
+    assistant.conversations = [
+      { id: a, title: "A", model: "sonnet", createdAt: 1, updatedAt: 1 },
+      { id: b, title: "B", model: "sonnet", createdAt: 1, updatedAt: 1 },
+    ] as any;
+
+    const resolvers = new Map<string, (value: any) => void>();
+    invokeMock.mockImplementation((cmd: string, args?: any) => {
+      if (cmd === "assistant_load_conversation") {
+        return new Promise((resolve) => resolvers.set(args.id, resolve));
+      }
+      if (cmd === "assistant_session_cwd") return Promise.resolve(null);
+      return Promise.resolve(undefined);
+    });
+
+    assistant.setFocusedPaneById(pa.id);
+    assistant.setFocusedPaneById(pb.id);
+    resolvers.get(a)!({
+      id: a, title: "A", model: "sonnet", createdAt: 1, updatedAt: 1,
+      messages: [], cliSessionId: a, workspaceRoot: "C:/proj/a",
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(assistant.currentConvoId).not.toBe(a);
+    expect(assistant.panes).toEqual([pa, pb]);
+
+    resolvers.get(b)!({
+      id: b, title: "B", model: "sonnet", createdAt: 1, updatedAt: 1,
+      messages: [], cliSessionId: b, workspaceRoot: "C:/proj/b",
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(assistant.currentConvoId).toBe(b);
+    expect(assistant.tabFor(a)!.workspaceRoot).toBe("C:/proj/a");
+    expect(assistant.tabFor(b)!.workspaceRoot).toBe("C:/proj/b");
+  });
+
+  it("refuses two conversation records that claim the same provider session", async () => {
+    assistant.ensureTab("first", "shared-session");
+    assistant.conversations = [
+      { id: "first", title: "First", model: "sonnet", createdAt: 1, updatedAt: 1 },
+      { id: "second", title: "Second", model: "sonnet", createdAt: 1, updatedAt: 1 },
+    ] as any;
+    invokeMock.mockImplementation(async (cmd: string, args?: any) => {
+      if (cmd === "assistant_load_conversation") {
+        return {
+          id: args.id,
+          title: "Second",
+          model: "sonnet",
+          createdAt: 1,
+          updatedAt: 1,
+          messages: [],
+          cliSessionId: "shared-session",
+        };
+      }
+      return null;
+    });
+
+    const loaded = await assistant.loadConversation("second", { activate: false });
+
+    expect(loaded).toBe(false);
+    expect(assistant.tabFor("second")).toBeNull();
+    expect(assistant.tabFor("first")?.cliSessionId).toBe("shared-session");
+  });
+
+  it("starts a cross-provider chat in the pane that requested it even when another pane is focused", async () => {
+    const aId = await assistant.newTab();
+    const aPaneId = assistant.panes[0].id;
+    const a = assistant.tabFor(aId)!;
+    a.modelOverride = "sonnet";
+    a.messages = [{ id: "u", role: "user", blocks: [{ type: "text", text: "started" }] }];
+
+    await assistant.openProjectInPane("C:/proj/b", { splitNew: true });
+    const bId = assistant.currentConvoId!;
+    const bPaneId = assistant.panes[1].id;
+    expect(assistant.panes[assistant.focusedPaneIdx]?.id).toBe(bPaneId);
+
+    await assistant.selectModel("gpt-5.6-sol", a, { paneId: aPaneId, sourceTabId: aId });
+
+    const replacementId = assistant.panes.find((p) => p.id === aPaneId)?.tabId;
+    expect(replacementId).toBeTruthy();
+    expect(replacementId).not.toBe(aId);
+    expect(assistant.modelFor(assistant.tabFor(replacementId!))).toBe("gpt-5.6-sol");
+    expect(assistant.panes.find((p) => p.id === bPaneId)?.tabId).toBe(bId);
+    expect(assistant.modelFor(assistant.tabFor(bId))).toBe("sonnet");
+  });
+
+  it("preserves a background tab's prompt when its provider session is lost", () => {
+    const a = assistant.ensureTab("lost-a", "lost-session-a");
+    const b = assistant.ensureTab("lost-b", "lost-session-b");
+    a.messages = [
+      { id: "u", role: "user", blocks: [{ type: "text", text: "keep this prompt" }] },
+      { id: "a", role: "assistant", blocks: [] },
+    ];
+    a.streaming = true;
+    assistant.openTabs = ["lost-a", "lost-b"];
+    assistant.panes = [pane("lost-a"), pane("lost-b")];
+    assistant.focusedPaneIdx = 1;
+    assistant.currentConvoId = "lost-b";
+
+    (assistant as any).onSessionLost({ session_id: "lost-session-a" });
+
+    expect(a.streaming).toBe(false);
+    expect(a.messages).toHaveLength(1);
+    expect(a.messages[0].role).toBe("user");
+    expect(a.lastError).toContain("prompt is preserved");
+    expect(b.messages).toEqual([]);
+    expect(assistant.currentConvoId).toBe("lost-b");
+  });
+});
+
+describe("conversation permission isolation", () => {
+  beforeEach(() => {
+    (assistant as any).tabs = new Map();
+    (assistant as any).workspace = { current: "C:/proj/a", recent: ["C:/proj/a"] };
+    assistant.openTabs = [];
+    assistant.panes = [pane()];
+    assistant.focusedPaneIdx = 0;
+    assistant.currentConvoId = null;
+    assistant.permissionMode = "bypassPermissions";
+  });
+
+  it("keeps explicit and provider-driven mode changes on their owning tabs", async () => {
+    const aId = await assistant.newTab();
+    const a = assistant.tabFor(aId)!;
+    assistant.addPane();
+    const bId = await assistant.newTab();
+    const b = assistant.tabFor(bId)!;
+
+    assistant.setPermissionMode("default", a);
+    expect(assistant.permissionModeFor(a)).toBe("default");
+    expect(assistant.permissionModeFor(b)).toBe("bypassPermissions");
+
+    // A background provider event must neither restyle nor widen its sibling.
+    b.onEnterPlanMode?.(b);
+    expect(assistant.permissionModeFor(b)).toBe("plan");
+    expect(b.planReturnMode).toBe("bypassPermissions");
+    expect(assistant.permissionModeFor(a)).toBe("default");
+    expect(a.planReturnMode).toBeNull();
+  });
+
+  it("persists the tab-owned permission mode in its conversation record", async () => {
+    const id = await assistant.newTab();
+    const tab = assistant.tabFor(id)!;
+    tab.permissionMode = "acceptEdits";
+    tab.messages = [{ id: "u1", role: "user", blocks: [{ type: "text", text: "hello" }] }];
+
+    const record = buildSaveRecord(assistant as any, id, tab);
+
+    expect(record.permissionMode).toBe("acceptEdits");
   });
 });
 
@@ -712,7 +958,7 @@ describe("deleteAllConversations — partial backend failure (orphan-tab regress
     assistant.ensureTab("del-fail", "del-fail");
     assistant.openTabs = ["del-ok", "del-fail"];
     assistant.currentConvoId = "del-ok";
-    assistant.panes = [{ tabId: "del-ok" }];
+    assistant.panes = [pane("del-ok")];
     assistant.focusedPaneIdx = 0;
     assistant.conversations = [
       { id: "del-ok", title: "ok", model: "sonnet", createdAt: 1, updatedAt: 1 },
@@ -776,7 +1022,10 @@ describe("pane duplicate-key invariant", () => {
     // effectiveRoot reads workspace.current on every pane move — stub it.
     prevWorkspace = (assistant as any).workspace;
     (assistant as any).workspace = { current: null, recent: [] };
-    assistant.panes = [{ tabId: null }];
+    assistant.tabs = new Map();
+    assistant.openTabs = [];
+    assistant.currentConvoId = null;
+    assistant.panes = [pane()];
     assistant.focusedPaneIdx = 0;
   });
 
@@ -784,8 +1033,78 @@ describe("pane duplicate-key invariant", () => {
     if (!hadLS) delete (globalThis as any).localStorage;
     (assistant as any).workspace = prevWorkspace;
     assistant.conversations = [] as any;
-    assistant.panes = [{ tabId: null }];
+    assistant.tabs = new Map();
+    assistant.openTabs = [];
+    assistant.currentConvoId = null;
+    assistant.panes = [pane()];
     assistant.focusedPaneIdx = 0;
+  });
+
+  it("restores unsent tabs with independent pane, workspace, draft, model, and permission state", async () => {
+    const tabA = "550e8400-e29b-41d4-a716-4466554400d1";
+    const tabB = "550e8400-e29b-41d4-a716-4466554400d2";
+    localStorage.setItem(tabsStorageKey(), JSON.stringify({
+      openTabs: [tabA, tabB],
+      activeTabId: tabB,
+      panes: [
+        { id: "pane-a", tabId: tabA },
+        { id: "pane-b", tabId: tabB },
+      ],
+      focusedPaneIdx: 1,
+      ephemeralTabs: [
+        {
+          id: tabA,
+          workspaceRoot: "C:/proj/a",
+          model: "sonnet",
+          effort: "smart",
+          thinkingOn: true,
+          permissionMode: "default",
+          draft: "draft a",
+        },
+        {
+          id: tabB,
+          workspaceRoot: "C:/proj/b",
+          model: "gpt-5.6-sol",
+          effort: "deep",
+          thinkingOn: false,
+          permissionMode: "acceptEdits",
+          draft: "draft b",
+        },
+      ],
+    }));
+
+    await restoreTabs(assistant as any);
+
+    expect(assistant.panes).toEqual([
+      { id: "pane-a", tabId: tabA },
+      { id: "pane-b", tabId: tabB },
+    ]);
+    expect(assistant.focusedPaneIdx).toBe(1);
+    expect(assistant.currentConvoId).toBe(tabB);
+    expect(assistant.tabFor(tabA)).toMatchObject({
+      workspaceRoot: "C:/proj/a",
+      modelOverride: "sonnet",
+      effortOverride: "smart",
+      thinkingOverride: true,
+      permissionMode: "default",
+      draft: "draft a",
+    });
+    expect(assistant.tabFor(tabB)).toMatchObject({
+      workspaceRoot: "C:/proj/b",
+      modelOverride: "gpt-5.6-sol",
+      effortOverride: "deep",
+      thinkingOverride: false,
+      permissionMode: "acceptEdits",
+      draft: "draft b",
+    });
+    expect(invokeMock).not.toHaveBeenCalledWith("assistant_load_conversation", expect.anything());
+
+    const healed = JSON.parse(localStorage.getItem(tabsStorageKey()) ?? "{}");
+    expect(healed.panes).toEqual([
+      { id: "pane-a", tabId: tabA },
+      { id: "pane-b", tabId: tabB },
+    ]);
+    expect(healed.ephemeralTabs).toHaveLength(2);
   });
 
   it("restoreTabs self-heals a poisoned record with the same tab in two panes", async () => {
@@ -813,7 +1132,7 @@ describe("pane duplicate-key invariant", () => {
     assistant.ensureTab("kb", "kb");
     assistant.openTabs = ["ka", "kb"];
     assistant.currentConvoId = "kb";
-    assistant.panes = [{ tabId: "ka" }, { tabId: "kb" }];
+    assistant.panes = [pane("ka"), pane("kb")];
     assistant.focusedPaneIdx = 1;
 
     await assistant.closeTab("kb");
@@ -827,7 +1146,7 @@ describe("pane duplicate-key invariant", () => {
     assistant.ensureTab("sb", "sb");
     assistant.openTabs = ["sa", "sb"];
     assistant.currentConvoId = "sb";
-    assistant.panes = [{ tabId: "sa" }, { tabId: "sb" }];
+    assistant.panes = [pane("sa"), pane("sb")];
     assistant.focusedPaneIdx = 1;
 
     assistant.dropTabIntoPane("sa", 2); // sentinel: "new pane at end"

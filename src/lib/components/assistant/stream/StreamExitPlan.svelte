@@ -17,8 +17,8 @@
   import { assistant, type TabState } from "$lib/state/assistant.svelte";
   import type { PlanAction } from "$lib/state/assistant/helpers";
 
-  let { tool, tab = null, isLast = false }:
-    { tool: StreamTool; tab?: TabState | null; isLast?: boolean } = $props();
+  let { tool, tab = null, isLast = false, workspaceRoot = null }:
+    { tool: StreamTool; tab?: TabState | null; isLast?: boolean; workspaceRoot?: string | null } = $props();
   const plan = $derived(typeof tool.input?.plan === "string" ? (tool.input.plan as string) : "");
   const pending = $derived(tool.status === "pending");
   const prompt = $derived(assistant.permissionPromptFor(tool.id));
@@ -124,7 +124,7 @@
       {#if editing && showActions}
         <textarea class="sxplan-edit" bind:value={draft} rows={Math.min(18, Math.max(6, draft.split("\n").length + 1))} spellcheck="false"></textarea>
       {:else}
-        <Markdown text={shownMd} />
+        <Markdown text={shownMd} {workspaceRoot} />
         {#if drafting}<span class="sxplan-caret" aria-hidden="true"></span>{/if}
       {/if}
     </div>
