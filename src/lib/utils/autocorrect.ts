@@ -8,7 +8,6 @@
 //      wordlist does NOT know, never on identifiers/proper nouns/short words.
 
 import { TYPO_DATA } from "./typoData";
-import { WORD_FREQ } from "./wordFreq";
 
 const TYPO_MAP: Record<string, string> = {
   teh: "the", thier: "their", recieve: "receive", recieved: "received",
@@ -169,16 +168,33 @@ export async function oracleKnows(word: string): Promise<boolean> {
   }
 }
 
-// word → frequency rank (line index). Built lazily — 50k-line split only on
-// the first autocorrect that actually needs the fuzzy layer.
+// word → frequency rank (line index). The 50k-word source is deliberately a
+// dynamic chunk: exact corrections remain synchronous, while focusing/using
+// autocorrect warms the fuzzy layer without adding 425 kB to assistant startup.
 let RANK: Map<string, number> | null = null;
-function rankMap(): Map<string, number> {
-  if (!RANK) {
-    RANK = new Map();
-    let i = 0;
-    for (const w of WORD_FREQ.split("\n")) RANK.set(w, i++);
-  }
-  return RANK;
+let RANK_LOADING: Promise<void> | null = null;
+
+export function fuzzyAutocorrectReady(): boolean {
+  return RANK !== null;
+}
+
+/** Load and index the fuzzy dictionary once. Callers may fire-and-forget when
+ *  latency matters (typing), or await it for an explicit whole-text pass. */
+export function warmAutocorrectDictionary(): Promise<void> {
+  if (RANK_LOADING) return RANK_LOADING;
+  if (RANK) return Promise.resolve();
+  RANK_LOADING = import("./wordFreq")
+    .then(({ WORD_FREQ }) => {
+      const ranks = new Map<string, number>();
+      let i = 0;
+      for (const w of WORD_FREQ.split("\n")) ranks.set(w, i++);
+      RANK = ranks;
+    })
+    .catch((error) => {
+      RANK_LOADING = null; // a later focus/explicit pass may retry
+      throw error;
+    });
+  return RANK_LOADING;
 }
 
 const LETTERS = "abcdefghijklmnopqrstuvwxyz";
@@ -206,8 +222,7 @@ function edits1(w: string): Set<string> {
 function ed1Cap(len: number): number { return len <= 3 ? 1500 : len === 4 ? 6000 : 12000; }
 const ED2_CAP = 4000;
 
-function bestRanked(cands: Iterable<string>, cap: number): string | null {
-  const ranks = rankMap();
+function bestRanked(cands: Iterable<string>, cap: number, ranks: Map<string, number>): string | null {
   let best: string | null = null, bestRank = cap;
   for (const c of cands) {
     const r = ranks.get(c);
@@ -265,7 +280,8 @@ function morphStems(w: string): string[] {
 /** Real word? Exact hit in the frequency list / chat vocabulary, or a regular
  *  inflected or prefixed form of one. */
 function isKnownWord(lower: string): boolean {
-  const ranks = rankMap();
+  const ranks = RANK;
+  if (!ranks) return true; // fuzzy layer is intentionally inactive until warm
   const known = (s: string) =>
     ranks.has(s) || EXTRA_WORDS.has(s) || personal().has(s) || WS_VOCAB.has(s) || ORACLE_CACHE.get(s) === true;
   if (known(lower)) return true;
@@ -281,16 +297,17 @@ function isKnownWord(lower: string): boolean {
 /** Edit-distance correction for a lowercase word the wordlist doesn't know.
  *  Null = leave it alone. `capitalized` tightens every rank ceiling. */
 function fuzzyCorrect(lower: string, capitalized = false): string | null {
+  const ranks = RANK;
+  if (!ranks) return null;
   if (lower.length < 3 || lower.includes("'")) return null;
   if (isKnownWord(lower)) return null; // real word, or a regular form of one
   const clamp = (cap: number) => (capitalized ? Math.min(cap, CAPITALIZED_CAP) : cap);
   const e1 = edits1(lower);
-  const hit1 = bestRanked(e1, clamp(ed1Cap(lower.length)));
+  const hit1 = bestRanked(e1, clamp(ed1Cap(lower.length)), ranks);
   if (hit1) return hit1;
   if (lower.length < 6 || lower.length > 12) return null;
   // distance 2 — only for longer words, only very common targets.
   let best: string | null = null, bestRank = clamp(ED2_CAP);
-  const ranks = rankMap();
   for (const mid of e1) {
     for (const c of edits1(mid)) {
       const r = ranks.get(c);

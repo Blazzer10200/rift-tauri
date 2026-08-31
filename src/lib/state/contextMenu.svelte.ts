@@ -13,7 +13,7 @@ import {
   SquareCode,
   TextSelect,
 } from "@lucide/svelte";
-import { addPersonalWord, correctText, correctWord } from "$lib/utils/autocorrect";
+import { addPersonalWord, correctText, correctWord, warmAutocorrectDictionary } from "$lib/utils/autocorrect";
 
 type CtxIcon = typeof Copy;
 
@@ -85,13 +85,16 @@ async function cutField(el: EditField) {
 
 /** Correct the field's selection if one exists, else the whole value. Replaces
  *  via setRangeText so bind:value updates and the change stays undoable. */
-function autoCorrectField(el: EditField) {
+async function autoCorrectField(el: EditField) {
   const selStart = el.selectionStart ?? 0;
   const selEnd = el.selectionEnd ?? 0;
   const hasSel = selStart !== selEnd;
   const s = hasSel ? selStart : 0;
   const e = hasSel ? selEnd : el.value.length;
   const src = el.value.slice(s, e);
+  // An explicit whole-text pass can wait for the optional fuzzy dictionary;
+  // typing-time exact corrections never wait on this chunk.
+  await warmAutocorrectDictionary().catch(() => {});
   const fixed = correctText(src);
   if (fixed === src) return;
   el.focus();

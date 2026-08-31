@@ -10,7 +10,7 @@
   import { cliCommands } from "../../state/assistant/cliCommands.svelte";
   import { requestPrewarm, resetPrewarmDedup } from "../../state/assistant/prewarm";
   import { fuzzyScore, slashCatalogScore, isFileDrag, attachImageFiles, summarizeAttach, attachTextFiles, summarizeTextAttach } from "./composer/helpers";
-  import { boundaryAutocorrect, finalWordAutocorrect, isBoundaryChar, oracleKnows, cachedOracleKnown, setSpellOracle, addPersonalWord, type BoundaryFix } from "$lib/utils/autocorrect";
+  import { boundaryAutocorrect, finalWordAutocorrect, isBoundaryChar, oracleKnows, cachedOracleKnown, setSpellOracle, addPersonalWord, warmAutocorrectDictionary, type BoundaryFix } from "$lib/utils/autocorrect";
   import { invoke } from "@tauri-apps/api/core";
   import AttachmentsRow from "./composer/AttachmentsRow.svelte";
   import QueueRail from "./composer/QueueRail.svelte";
@@ -1611,6 +1611,9 @@
             const atBoundary =
               (typeof typed === "string" && isBoundaryChar(typed)) || ie.inputType === "insertLineBreak";
             if (assistant.autocorrect && atBoundary) {
+              // Exact fixes are always ready. Start the larger fuzzy dictionary
+              // without blocking this keystroke; later boundaries can use it.
+              void warmAutocorrectDictionary().catch(() => {});
               const fix = boundaryAutocorrect(el.value, el.selectionStart ?? el.value.length);
               if (fix && !fix.fuzzy) {
                 el.setRangeText(fix.replacement, fix.start, fix.end, "preserve");
@@ -1637,6 +1640,9 @@
           }}
           onkeyup={(e) => { if (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End") refreshMention(); }}
           onclick={refreshMention}
+          onfocus={() => {
+            if (assistant.autocorrect) void warmAutocorrectDictionary().catch(() => {});
+          }}
           onblur={() => {
             if (!mentionState) return;
             requestAnimationFrame(() => { mentionState = null; });

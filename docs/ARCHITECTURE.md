@@ -110,6 +110,9 @@ below are relative to that directory.
   orchestration; `composer/` contains the model/settings/queue/attachment
   surfaces. `stream/`, `bubble/`, and `toolchip/` render live and persisted
   blocks.
+- Composer autocorrect keeps its exact typo map synchronous. The larger
+  `wordFreq.ts` fuzzy dictionary is a dynamic chunk warmed on composer focus;
+  typing never awaits it, while the explicit whole-text action may wait for it.
 - `components/settings/SettingsPage.svelte` is the single provider setup and
   product settings surface.
 - `components/workspace/`, `ai-health/`, `diagnostics/`, `webview/`,
@@ -126,7 +129,9 @@ below are relative to that directory.
 - The conversation list scope is an explicit `all` or `focused-workspace`
   view, never a fake workspace. Async UI work captures its pane/tab/workspace
   identity before awaiting and discards results when that owner no longer
-  matches. Pane-bound backend commands require an explicit root and fail closed.
+  matches. `ProjectSwitcher` is the sidebar's single scope control; do not add a
+  parallel All/project toggle that can contradict it. Pane-bound backend
+  commands require an explicit root and fail closed.
 - Provider session sidecars pin a CLI session to one canonical workspace under
   both an in-process mutex and a Windows cross-process exclusive lock. A
   persisted conversation with a conflicting root is invalid, not migratable.

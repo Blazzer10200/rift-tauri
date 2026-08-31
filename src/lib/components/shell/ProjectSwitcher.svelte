@@ -1,11 +1,7 @@
 <script lang="ts">
-  // Sidebar project switcher — the C+ redesign's scope headline. Replaces
-  // ProjectRail's Projects-block header with one Linear-style switcher row: the
-  // active project's monogram + name + live git branch pill, opening a dropdown
-  // of every project + "All projects". It preserves ProjectRail's real
-  // affordances (open-focused, open-in-split via right-click, drag-a-project-to-
-  // a-pane, new project) so nothing that shipped is lost — they just move behind
-  // the dropdown + row context menu instead of a permanent chip list.
+  // Sidebar workspace identity and the single owner of conversation scope. The
+  // trigger shows the active project (or All), while its menu preserves focused
+  // open, split-open, drag-to-pane, and new-project actions.
   import { ChevronsUpDown, Plus, SplitSquareHorizontal, FolderOpen, ArrowRight, Layers, GitBranch, Check } from "@lucide/svelte";
   import { projects, projectRootKey } from "$lib/state/projects.svelte";
   import type { Project } from "$lib/state/assistant/types";
@@ -202,16 +198,15 @@
 {/if}
 
 <style>
-  /* switcher trigger — the C+ hero. Inset well (--bg-inset) w/ a monogram tile,
-     name + branch pill stacked, a chevron. Same low-saturation language as the
-     rest of the rail; accent lives only in the monogram + branch pill. */
-  .switcher { display: flex; align-items: center; gap: 10px; height: 46px; margin: 2px 0; padding: 0 8px; flex: none;
-    border-radius: 11px; border: 1px solid var(--border); background: var(--bg-inset);
+  /* The project is context, not a second card inside the sidebar card. A flat
+     identity row keeps the monogram memorable and removes nested-box noise. */
+  .switcher { display: flex; align-items: center; gap: 10px; height: 43px; margin: 0 0 3px; padding: 0 7px; flex: none;
+    border-radius: 9px; border: 1px solid transparent; background: transparent;
     transition: border-color var(--dur-fast), background var(--dur-fast); }
-  .switcher:hover, .switcher.open { border-color: var(--border-strong); background: var(--surface); }
+  .switcher:hover, .switcher.open { border-color: color-mix(in oklab, var(--border) 72%, transparent); background: var(--surface-hover); }
   /* Boot skeleton — same footprint as the switcher trigger so nothing jumps. */
-  .sw-skel { display: flex; align-items: center; gap: 10px; height: 46px; margin: 2px 0; padding: 0 8px; flex: none;
-    border-radius: 11px; border: 1px solid var(--border); background: var(--bg-inset);
+  .sw-skel { display: flex; align-items: center; gap: 10px; height: 43px; margin: 0 0 3px; padding: 0 7px; flex: none;
+    border-radius: 9px; border: 1px solid transparent; background: transparent;
     animation: sw-skel-in 240ms var(--ease-page) both; }
   .sw-skel-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
   @keyframes sw-skel-in { from { opacity: 0; } to { opacity: 1; } }

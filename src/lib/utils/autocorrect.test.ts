@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import {
   addPersonalWord,
   boundaryAutocorrect,
@@ -12,7 +12,10 @@ import {
   setSpellOracle,
   setWorkspaceVocab,
   setWorkspaceVocabFromPaths,
+  warmAutocorrectDictionary,
 } from "./autocorrect";
+
+beforeAll(() => warmAutocorrectDictionary());
 
 const apply = (value: string, caret: number): string | null => {
   const fix = boundaryAutocorrect(value, caret);

@@ -13,11 +13,9 @@
   import { goHome } from "$lib/state/nav";
   import { rootKey } from "$lib/utils/path";
 
-  // Footer icon nav — the destinations that used to stack as full rows above the
-  // history now collapse into ONE compact icon strip: Workspace · Chat · AI
-  // Health left, Settings right. Model + connection state deliberately live
-  // elsewhere (composer model pill / app status bar) — no duplicate readouts.
-  // Excludes legacy/disabled ids.
+  // Footer navigation stays compact without becoming anonymous: the five daily
+  // destinations share one labelled dock. Model + connection state live in the
+  // composer/status bar, so the sidebar does not duplicate them.
   const footNav = $derived(
     workspace.order.filter(
       // Diagnostics is a support surface, not a daily destination. It remains
@@ -31,15 +29,9 @@
     return workspace.activeId === id;
   }
 
-  // Sliding-thumb position in the dock — items are fixed-width (30px + 2px
-  // gap), so the offset is arithmetic, no measuring. -1 (settings active or
-  // legacy id) hides the thumb.
-  const dockIdx = $derived(footNav.indexOf(workspace.activeId));
-
-  // Per-icon hover micro-motion hook (CSS targets .snav-ic-<key>).
-  const ICON_KEY: Record<WorkspaceId, string> = {
-    home: "home", chat: "chat", projects: "projects", settings: "settings", "ai-health": "health",
-    diagnostics: "diag",
+  const NAV_LABEL: Record<WorkspaceId, string> = {
+    home: "Home", chat: "Chat", projects: "Projects", settings: "Settings", "ai-health": "Health",
+    diagnostics: "Support",
   };
 
   function goto(id: WorkspaceId) {
@@ -64,27 +56,6 @@
           (c) => !assistant.activeRoot || rootKey(c.workspaceRoot) === rootKey(assistant.activeRoot),
         ).length,
   );
-
-  // Sliding thumb under the active scope button — measured (labels differ in
-  // width). A one-shot measure dislocates whenever layout shifts AFTER it ran
-  // (font swap, project-switch re-render, rail resize), so a ResizeObserver on
-  // the segment re-measures on any size change; zero-width reads (hidden /
-  // mid-transition) are discarded rather than committed.
-  let segEl = $state<HTMLElement>();
-  let segThumb = $state({ x: 2, w: 0 });
-  $effect(() => {
-    void shell.allProjects;
-    const seg = segEl;
-    if (!seg) return;
-    const measure = () => {
-      const on = seg.querySelector<HTMLElement>(".seg-btn.on");
-      if (on && on.offsetWidth > 0) segThumb = { x: on.offsetLeft, w: on.offsetWidth };
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(seg);
-    return () => ro.disconnect();
-  });
 
   // Collapsed → the island only ever appears as the hover-peek, which renders
   // a MINI flavor: fixed compact width, content-sized height, no scope row —
@@ -178,16 +149,12 @@
       </button>
     </div>
 
-    <!-- Scope segment: This project / All (binds shell.allProjects) + live count.
-         Hidden in the mini peek — scope refinement is full-sidebar furniture. -->
+    <!-- ProjectSwitcher is the single scope owner. This header names the list
+         without repeating a second This project / All control. -->
     {#if !mini}
-      <div class="tool-row">
-        <div class="seg" role="group" aria-label="Conversation scope" bind:this={segEl}>
-          <span class="seg-thumb" aria-hidden="true" style="transform:translateX({segThumb.x}px); width:{segThumb.w}px"></span>
-          <button class="seg-btn" class:on={!shell.allProjects} type="button" onclick={() => shell.setAllProjects(false)} aria-pressed={!shell.allProjects}>This project</button>
-          <button class="seg-btn" class:on={shell.allProjects} type="button" onclick={() => shell.setAllProjects(true)} aria-pressed={shell.allProjects}>All</button>
-        </div>
-        <span class="count-note">{scopeCount} {scopeCount === 1 ? "chat" : "chats"}</span>
+      <div class="history-head">
+        <span class="history-title">Conversations</span>
+        <span class="count-note" aria-label={`${scopeCount} ${scopeCount === 1 ? "conversation" : "conversations"}`}>{scopeCount}</span>
       </div>
     {/if}
 
@@ -195,30 +162,26 @@
       <ConversationList {mini} />
     </div>
 
-    <nav class="foot-nav" aria-label="Workspaces">
-      <!-- Destinations sit in an inset dock well (same seg idiom as the scope
-           toggle) with a sliding thumb under the active one; utilities
-           (notifications, settings) stay outside on the right so the two
-           groups read as distinct rather than one anonymous icon soup. -->
-      <div class="fnav-dock" role="presentation">
-        <span class="fnav-thumb" aria-hidden="true" class:show={dockIdx >= 0} style="transform:translateX({2 + dockIdx * 32}px)"></span>
-        {#each footNav as id (id)}
-          {@const def = WORKSPACES[id]}
-          <button
-            class="fnav-item"
-            class:on={isNavActive(id)}
-            type="button"
-            onclick={() => goto(id)}
-            use:tooltip={def.title}
-            aria-label={def.title}
-            aria-current={isNavActive(id) ? "page" : undefined}
-          >
-            <def.icon class="snav-ic snav-ic-{ICON_KEY[id]}" size={17} />
-          </button>
-        {/each}
+    <nav class="foot-nav" aria-label="Destinations">
+      {#each footNav as id (id)}
+        {@const def = WORKSPACES[id]}
+        <button
+          class="fnav-item"
+          class:on={isNavActive(id)}
+          type="button"
+          onclick={() => goto(id)}
+          use:tooltip={def.title}
+          aria-label={def.title}
+          aria-current={isNavActive(id) ? "page" : undefined}
+        >
+          <def.icon class="snav-ic" size={16} />
+          <span>{NAV_LABEL[id]}</span>
+        </button>
+      {/each}
+      <div class="fnav-alert">
+        <NotificationCenter />
+        <span>Alerts</span>
       </div>
-      <span class="fnav-spacer" aria-hidden="true"></span>
-      <NotificationCenter />
       <button
         class="fnav-item"
         class:on={isNavActive("settings")}
@@ -228,7 +191,8 @@
         aria-label="Settings"
         aria-current={isNavActive("settings") ? "page" : undefined}
       >
-        <WORKSPACES.settings.icon class="snav-ic snav-ic-settings" size={17} />
+        <WORKSPACES.settings.icon class="snav-ic" size={16} />
+        <span>Settings</span>
       </button>
     </nav>
   </aside>
@@ -327,7 +291,7 @@
   .sidebar.mini { bottom: auto; max-height: calc(100% - 62px); padding-top: 10px; }
   .sidebar button { -webkit-app-region: no-drag; }
 
-  .side-head { display: flex; align-items: center; justify-content: space-between; height: 40px; margin-bottom: 8px; padding: 0 6px 0 8px; flex: none; -webkit-app-region: drag; }
+  .side-head { display: flex; align-items: center; justify-content: space-between; height: 40px; margin-bottom: 3px; padding: 0 4px 0 6px; flex: none; -webkit-app-region: drag; }
   .brand { display: inline-flex; align-items: center; gap: 9px; }
   .brand :global(.brand-mk) { border-radius: 7px; display: block; }
   .brand-name { font-size: 14px; font-weight: 650; letter-spacing: -0.012em; color: var(--fg); }
@@ -335,64 +299,44 @@
     color: var(--fg-faint); transition: background var(--dur-fast), color var(--dur-fast); }
   .side-collapse:hover { background: var(--surface-hover); color: var(--fg-2); }
 
-  /* shared icon micro-motion hooks (used by the footer icon nav + status gear) */
-  :global(.snav-ic) { transition: transform 0.34s var(--ease-page); transform-origin: 50% 50%; }
+  /* Shared icon response stays quiet; navigation labels carry recognition. */
+  :global(.snav-ic) { transition: transform var(--dur-fast) var(--ease-page); transform-origin: 50% 50%; }
 
   /* action row — New chat (primary, grows) + a search icon-button share one row
      to save vertical space (opens the command palette scoped to chats). */
-  .action-row { display: flex; align-items: center; gap: 6px; flex: none; margin: 2px 0; }
+  .action-row { display: flex; align-items: center; gap: 6px; flex: none; margin: 2px 0 5px; }
   .action-row .new-chat { flex: 1; margin: 0; }
-  .ic-btn { width: 38px; height: 38px; flex: none; display: grid; place-items: center; border-radius: 10px;
+  .ic-btn { width: 36px; height: 36px; flex: none; display: grid; place-items: center; border-radius: 9px;
     color: var(--fg-muted); border: 1px solid var(--border); background: var(--bg-inset);
     transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast); }
   .ic-btn:hover { background: var(--surface-hover); color: var(--fg); border-color: var(--border-strong); }
 
-  /* scope toolrow — This project / All segment + live chat count. */
-  .tool-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 2px 2px; flex: none; }
-  .seg { position: relative; display: inline-flex; padding: 2px; gap: 2px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-inset); }
-  .seg-thumb { position: absolute; top: 2px; left: 0; height: 22px; border-radius: 6px; background: var(--surface-active);
-    transition: transform var(--dur-fast) var(--ease-page), width var(--dur-fast) var(--ease-page); }
-  .seg-btn { position: relative; z-index: 1; height: 22px; padding: 0 10px; border-radius: 6px; color: var(--fg-subtle); font-size: 11px; font-weight: 600;
-    transition: color var(--dur-fast); }
-  .seg-btn:hover { color: var(--fg-2); }
-  .seg-btn.on { color: var(--fg); }
-  @media (prefers-reduced-motion: reduce) { .seg-thumb { transition: none; } }
-  .count-note { font-size: 10.5px; font-weight: 500; color: var(--fg-faint); font-variant-numeric: tabular-nums; padding-right: 2px; }
+  .history-head { display: flex; align-items: center; gap: 8px; height: 28px; padding: 3px 5px 0 7px; flex: none;
+    border-bottom: 1px solid color-mix(in oklab, var(--border) 48%, transparent); }
+  .history-title { flex: 1; font-size: 10px; font-weight: 700; letter-spacing: 0.075em; text-transform: uppercase; color: var(--fg-subtle); }
+  .count-note { min-width: 22px; height: 18px; padding: 0 6px; display: inline-grid; place-items: center; border-radius: 999px;
+    font-size: 9.5px; font-weight: 650; color: var(--fg-faint); background: color-mix(in oklab, var(--fg) 6%, transparent); font-variant-numeric: tabular-nums; }
 
-  /* footer icon nav — destinations collapse from full rows to a compact icon
-     strip so the conversation list owns nearly the whole rail. The four
-     workspaces sit in an inset dock well (seg idiom: --bg-inset + hairline +
-     sliding thumb); the bell + settings stay outside as loose utilities. */
-  .foot-nav { display: flex; align-items: center; gap: 3px; flex: none; padding-top: 8px; margin-top: 4px;
-    border-top: 1px solid color-mix(in oklab, var(--border) 60%, transparent); }
-  .fnav-dock { position: relative; display: inline-flex; gap: 2px; padding: 2px; border-radius: 10px;
-    border: 1px solid var(--border); background: var(--bg-inset); }
-  .fnav-thumb { position: absolute; top: 2px; left: 0; width: 30px; height: 30px; border-radius: 8px;
-    background: var(--surface-active); opacity: 0;
-    transition: transform var(--dur-fast) var(--ease-page), opacity var(--dur-fast); }
-  .fnav-thumb.show { opacity: 1; }
-  @media (prefers-reduced-motion: reduce) { .fnav-thumb { transition: none; } }
-  .fnav-item { position: relative; z-index: 1; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 8px;
-    color: var(--fg-muted); transition: background var(--dur-fast), color var(--dur-fast), transform var(--dur-fast); }
-  .fnav-item:active { transform: scale(0.92); }
+  /* One labelled destination dock. The former split icon groups looked like
+     unrelated utilities; shared columns make the information architecture
+     obvious without consuming conversation height. */
+  .foot-nav { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: stretch; gap: 2px; flex: none;
+    padding-top: 7px; margin-top: 3px; border-top: 1px solid color-mix(in oklab, var(--border) 56%, transparent); }
+  .fnav-item, .fnav-alert { position: relative; min-width: 0; height: 42px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    border-radius: 8px; color: var(--fg-faint); font-size: 8px; font-weight: 600; letter-spacing: -0.01em;
+    transition: background var(--dur-fast), color var(--dur-fast), transform var(--dur-fast); }
+  .fnav-item > span, .fnav-alert > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fnav-item:active { transform: scale(0.96); }
   .fnav-item:hover { background: var(--surface-hover); color: var(--fg-2); }
-  .fnav-item.on { color: var(--accent); background: color-mix(in oklab, var(--fg) 8%, transparent); }
-  /* inside the dock the thumb carries the active surface — the button itself
-     stays transparent so the two backgrounds don't stack. */
-  .fnav-dock .fnav-item.on { background: transparent; }
-  .fnav-dock .fnav-item:hover:not(.on) { background: var(--surface-hover); }
-  .fnav-item:hover :global(.snav-ic-home)     { transform: translateY(-2.5px) scale(1.06); }
-  .fnav-item:hover :global(.snav-ic-chat)     { transform: rotate(-10deg) scale(1.06); }
-  .fnav-item:hover :global(.snav-ic-health)   { transform: scale(1.1); }
-  .fnav-item:hover :global(.snav-ic-diag)     { transform: scale(1.1); }
-  .fnav-item:hover :global(.snav-ic-local)    { transform: rotate(90deg) scale(1.06); }
-  .fnav-item:hover :global(.snav-ic-settings) { transform: rotate(140deg); }
-  .fnav-spacer { flex: 1; }
+  .fnav-item:hover :global(.snav-ic) { transform: translateY(-1px); }
+  .fnav-item.on { color: var(--accent); background: color-mix(in oklab, var(--accent) 9%, transparent); }
+  .fnav-alert :global(.nc-bell) { width: 28px; height: 24px; border-radius: 6px; }
+  .fnav-alert:focus-within, .fnav-alert:hover { color: var(--fg-2); background: var(--surface-hover); }
 
   /* primary action — New chat. Reads as primary via an accent-tinted surface +
      accent icon, not a saturated slab, so it stays in the rail's soft language. */
-  .new-chat { display: flex; align-items: center; gap: 10px; height: 38px; margin: 2px 0 8px; padding: 0 10px 0 11px; flex: none;
-    border-radius: 10px; font-size: 13px; font-weight: 580; color: var(--fg);
+  .new-chat { display: flex; align-items: center; gap: 9px; height: 36px; margin: 0; padding: 0 10px; flex: none;
+    border-radius: 9px; font-size: 12.5px; font-weight: 600; color: var(--fg);
     border: 1px solid color-mix(in oklab, var(--accent) 28%, var(--border));
     background: linear-gradient(180deg, color-mix(in oklab, var(--accent) 12%, transparent), color-mix(in oklab, var(--accent) 5%, transparent));
     transition: background var(--dur-fast), border-color var(--dur-fast), transform var(--dur-fast); }
@@ -404,5 +348,9 @@
   .new-chat :global(svg) { flex: none; color: var(--accent); }
 
   /* conversation-list section wrapper */
-  .side-sec { display: flex; flex-direction: column; flex: 1; min-height: 0; margin-top: 2px; }
+  .side-sec { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+
+  @media (prefers-reduced-motion: reduce) {
+    :global(.snav-ic), .fnav-item { transition: none; }
+  }
 </style>

@@ -408,8 +408,8 @@
     margin-right: 4px; vertical-align: 1px; background: oklch(0.75 0.14 var(--ph)); }
   .crow:hover .crow-proj, .crow.menu-open .crow-proj { display: none; }
 
-  .conv-list { display: flex; flex-direction: column; gap: 1px; overflow-y: auto; min-height: 0; flex: 1; padding: 8px 0;
-    margin-top: 4px; border-top: 1px solid color-mix(in oklab, var(--border) 45%, transparent);
+  .conv-list { display: flex; flex-direction: column; gap: 1px; overflow-y: auto; min-height: 0; flex: 1; padding: 5px 0 8px;
+    margin-top: 0;
     scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
   .conv-list::-webkit-scrollbar { width: 8px; }
   .conv-list::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
