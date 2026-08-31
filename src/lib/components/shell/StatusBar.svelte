@@ -131,6 +131,7 @@
     class="sb-item sb-btn sb-conn"
     type="button"
     onclick={openProviderSettings}
+    aria-label={`${providerLabel} connection settings${connected ? "" : " — offline"}`}
     use:tooltip={connected ? `${providerLabel} connection — open settings` : `${providerLabel} isn't connected — open provider settings`}
   >
     <span class="sb-dot" class:off={!connected}></span>
@@ -138,13 +139,14 @@
   </button>
   <span class="sb-sep"></span>
   <span class="sb-group sb-context">
-    <button class="sb-item sb-btn" type="button" onclick={() => workspace.setActive("home")} use:tooltip={"Open Workspace"}>
+    <button class="sb-item sb-btn" type="button" onclick={() => workspace.setActive("home")} aria-label={`Open ${repoName} workspace`} use:tooltip={"Open workspace overview"}>
       <span class="sb-clip">{repoName}</span>
     </button>
     {#if contextBranch}
       {#if ghActive}
         <button class="sb-item sb-btn sb-branch" type="button" bind:this={ghAnchor}
           onclick={() => (ghOpen = !ghOpen)} use:tooltip={"GitHub — branch status"}
+          aria-label={`Open GitHub status for ${contextBranch}`}
           aria-haspopup="dialog" aria-expanded={ghOpen}>
           <GitBranch size={11} /><span class="sb-clip">{contextBranch}</span>
           {#if github.dot !== "none"}<span class="gh-dot {github.dot}"></span>{/if}
@@ -172,6 +174,7 @@
         type="button"
         disabled={!assistant.canAddPane}
         onclick={() => assistant.addPane()}
+        aria-label={assistant.splitActive ? "Add another chat pane" : "Split chat into two panes"}
         use:tooltip={assistant.canAddPane
           ? (assistant.splitActive ? "Add another chat pane (Ctrl+\\)" : "Split the chat into two panes (Ctrl+\\)")
           : "Pane limit reached"}
@@ -194,6 +197,7 @@
             type="button"
             data-zone={l.z}
             onclick={() => (usageOpen = !usageOpen)}
+            aria-label={`${l.label}: ${l.u}% used${fmtReset(l.r)}`}
             aria-expanded={usageOpen}
             use:tooltip={`${l.label} — ${l.u}% used${fmtReset(l.r)}`}
           >
@@ -218,7 +222,7 @@
 <style>
   /* Rides inside the main island as its footer — hairline separator only, fill
      comes from the island (no second surface). */
-  .statusbar { flex: none; height: 27px; display: flex; align-items: center; gap: 13px; padding: 0 16px; overflow: visible;
+  .statusbar { flex: none; min-height: 32px; display: flex; align-items: center; gap: 13px; padding: 0 16px; overflow: visible;
     border-top: 1px solid var(--border); background: transparent;
     font-size: 11px; color: var(--fg-subtle); position: relative; z-index: 1; }
   .sb-item { display: inline-flex; align-items: center; gap: 6px; font-variant-numeric: tabular-nums; }
@@ -226,7 +230,8 @@
   /* Interactive bar items — same footprint as static ones (negative margins eat
      the hover pad) so the bar's rhythm doesn't shift. */
   .sb-btn { border: 0; background: transparent; font: inherit; color: inherit; cursor: pointer;
-    padding: 3px 6px; margin: 0 -6px; border-radius: 5px; -webkit-app-region: no-drag; }
+    min-height: 30px; padding: 5px 7px; margin: 0 -7px; border-radius: 6px; -webkit-app-region: no-drag; }
+  .sb-btn:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--ring); }
   .sb-btn:hover:not(:disabled) { background: color-mix(in oklab, var(--fg) 7%, transparent); color: var(--fg-muted); }
   .sb-btn:disabled { opacity: 0.5; cursor: default; }
   .sb-conn { color: var(--fg-muted); }

@@ -49,6 +49,17 @@
   const actionCount = $derived(turn.blocks.filter((b) => b.type === "tool").length);
   const hasActivity = $derived(!!turn.thinking || activityGroups.length > 0);
   let activityOpen = $state(false);
+  const activityShellCount = $derived(activityGroups.reduce((count, group) => {
+    if (group.type !== "work") return count;
+    return count + group.segs.reduce((n, seg) =>
+      n + (seg.seg === "rich" && seg.tool.kind === "shell" ? 1 : 0), 0);
+  }, 0));
+  let outputBulkOpen = $state(false);
+  let outputBulkVersion = $state(0);
+  function toggleActivityOutput() {
+    outputBulkOpen = !outputBulkOpen;
+    outputBulkVersion += 1;
+  }
   const activityTitle = $derived(
     turn.bgAgents > 0
       ? "Agent working in background"
@@ -355,7 +366,7 @@
 </script>
 
 <div class="sturn">
-  {#snippet renderGroup(g: Group, gi: number)}
+  {#snippet renderGroup(g: Group, gi: number, historicalReceipt: boolean)}
     {#if g.type === "say"}
       {@const sm = sayMode(g.text, streaming && gi === groups.length - 1, gi)}
       {#if sm === "hide"}
@@ -402,7 +413,13 @@
           {:else if seg.tool.kind === "exitplan"}
             <StreamExitPlan tool={seg.tool} tab={liveTab} {isLast} {workspaceRoot} />
           {:else if seg.tool.kind === "shell"}
-            <StreamShell tool={seg.tool} poll={seg.poll} />
+            <StreamShell
+              tool={seg.tool}
+              poll={seg.poll}
+              historical={historicalReceipt}
+              bulkOpen={outputBulkOpen}
+              bulkVersion={outputBulkVersion}
+            />
           {/if}
           {#each pendingPerms([seg.tool]) as pt (pt.id)}
             <PermissionBar toolUseId={pt.id} toolName={pt.name} />
@@ -437,7 +454,7 @@
       {#if turn.thinking}
         <StreamThinking active={turn.thinking.active} durSecs={turn.thinking.durSecs} text={turn.thinking.text} {workspaceRoot} />
       {/if}
-      {#each groups as g, gi (gi)}{@render renderGroup(g, gi)}{/each}
+      {#each groups as g, gi (gi)}{@render renderGroup(g, gi, false)}{/each}
     </div>
   {:else}
     {#if hasActivity}
@@ -468,11 +485,19 @@
         </button>
         {#if activityOpen}
           <div class="sactivity-body" transition:slide={{ duration: 180 }}>
+            {#if activityShellCount > 0}
+              <div class="sactivity-tools">
+                <span>{activityShellCount} terminal {activityShellCount === 1 ? "result" : "results"}</span>
+                <button type="button" onclick={toggleActivityOutput} aria-pressed={outputBulkOpen}>
+                  {outputBulkOpen ? "Collapse output" : "Expand output"}
+                </button>
+              </div>
+            {/if}
             <div class="sturn-body" class:railed={activityGroups.some((g) => g.type === "work") || !!turn.thinking}>
               {#if turn.thinking}
                 <StreamThinking active={false} durSecs={turn.thinking.durSecs} text={turn.thinking.text} {workspaceRoot} />
               {/if}
-              {#each activityGroups as g, gi (gi)}{@render renderGroup(g, gi)}{/each}
+              {#each activityGroups as g, gi (gi)}{@render renderGroup(g, gi, true)}{/each}
             </div>
           </div>
         {/if}

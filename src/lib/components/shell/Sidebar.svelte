@@ -178,10 +178,7 @@
           <span>{NAV_LABEL[id]}</span>
         </button>
       {/each}
-      <div class="fnav-alert">
-        <NotificationCenter />
-        <span>Alerts</span>
-      </div>
+      <div class="fnav-alert"><NotificationCenter label="Alerts" footer /></div>
       <button
         class="fnav-item"
         class:on={isNavActive("settings")}
@@ -322,15 +319,14 @@
      obvious without consuming conversation height. */
   .foot-nav { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: stretch; gap: 2px; flex: none;
     padding-top: 7px; margin-top: 3px; border-top: 1px solid color-mix(in oklab, var(--border) 56%, transparent); }
-  .fnav-item, .fnav-alert { position: relative; min-width: 0; height: 42px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-    border-radius: 8px; color: var(--fg-faint); font-size: 8px; font-weight: 600; letter-spacing: -0.01em;
+  .fnav-item, .fnav-alert { position: relative; min-width: 0; height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    border-radius: 8px; color: var(--fg-subtle); font-size: 10px; font-weight: 600; letter-spacing: -0.01em;
     transition: background var(--dur-fast), color var(--dur-fast), transform var(--dur-fast); }
-  .fnav-item > span, .fnav-alert > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fnav-item > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .fnav-item:active { transform: scale(0.96); }
   .fnav-item:hover { background: var(--surface-hover); color: var(--fg-2); }
   .fnav-item:hover :global(.snav-ic) { transform: translateY(-1px); }
   .fnav-item.on { color: var(--accent); background: color-mix(in oklab, var(--accent) 9%, transparent); }
-  .fnav-alert :global(.nc-bell) { width: 28px; height: 24px; border-radius: 6px; }
   .fnav-alert:focus-within, .fnav-alert:hover { color: var(--fg-2); background: var(--surface-hover); }
 
   /* primary action — New chat. Reads as primary via an accent-tinted surface +

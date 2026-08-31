@@ -324,9 +324,9 @@
             {#if plainText.length > 0}
               <button class="copybtn" type="button" onclick={copy} use:tooltip={"Copy"} aria-label="Copy message">
                 {#if copied}
-                  <Check size={11} />
+                  <Check size={12} /><span>Copied</span>
                 {:else}
-                  <Copy size={11} />
+                  <Copy size={12} /><span>Copy</span>
                 {/if}
               </button>
             {/if}
@@ -338,7 +338,7 @@
                 use:tooltip={"Retry this turn — re-runs your last prompt"}
                 aria-label="Retry this turn"
               >
-                <RotateCcw size={11} />
+                <RotateCcw size={12} /><span>Retry</span>
               </button>
             {/if}
           </div>
@@ -544,8 +544,15 @@
         <TurnSummary {message} {costLabel} fallbackPermissionMode={assistant.permissionModeFor(liveTab)} />
       {/if}
 
-      {#if isUser && msgTime}
-        <span class="user-time" aria-hidden="true">{msgTime}</span>
+      {#if isUser}
+        <div class="user-actions">
+          {#if msgTime}<span class="user-time" aria-hidden="true">{msgTime}</span>{/if}
+          {#if plainText.length > 0}
+            <button class="user-copy" type="button" onclick={copy} aria-label="Copy message">
+              {#if copied}<Check size={12} /><span>Copied</span>{:else}<Copy size={12} /><span>Copy</span>{/if}
+            </button>
+          {/if}
+        </div>
       {/if}
 
     </div>
@@ -1168,17 +1175,19 @@
     margin-left: 2px;
   }
   .copybtn {
-    opacity: 0.42;
+    min-height: 28px; display: inline-flex; align-items: center; gap: 5px;
+    opacity: 0.58;
     background: transparent;
     border: 0;
     color: var(--fg-faint);
-    padding: 2px 4px;
-    border-radius: 4px;
+    padding: 0 8px;
+    border-radius: 6px;
     cursor: pointer;
     transition: opacity var(--dur-fast) ease-out, color var(--dur-fast) ease-out, background var(--dur-fast) ease-out;
   }
   .bubble:hover .copybtn { opacity: 1; }
   .copybtn:hover { color: var(--fg); background: var(--surface-hover); }
+  .copybtn:focus-visible, .user-copy:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--ring); opacity: 1; }
 
   .content {
     display: flex; flex-direction: column;
@@ -1228,17 +1237,17 @@
     transition: opacity var(--dur-fast) ease-out;
   }
   .bubble:hover .head-time { opacity: 0.9; }
+  .user-actions { min-height: 28px; display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 2px; opacity: 0.38; transition: opacity var(--dur-fast); }
+  .bubble[data-role="user"]:hover .user-actions, .bubble[data-role="user"]:focus-within .user-actions { opacity: 1; }
   .bubble[data-role="user"] .user-time {
-    align-self: flex-end;
-    margin-top: 3px;
     font-family: var(--font-mono, monospace);
-    font-size: 9.5px;
+    font-size: 10px;
     color: var(--fg-faint);
     letter-spacing: 0.02em;
-    opacity: 0;
-    transition: opacity var(--dur-fast) ease-out;
+    opacity: 1;
   }
-  .bubble[data-role="user"]:hover .user-time { opacity: 0.9; }
+  .user-copy { min-height: 28px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border-radius: 6px; color: var(--fg-subtle); font: inherit; font-size: 11px; background: transparent; border: 0; }
+  .user-copy:hover { color: var(--fg); background: var(--surface-hover); }
 
   /* User image thumbnails — pasted/dropped into the composer get persisted
      on the user message and render here above the text bubble. Click opens

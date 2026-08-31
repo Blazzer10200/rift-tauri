@@ -10,6 +10,9 @@
   import { tooltip } from "$lib/actions/tooltip";
   import { portal } from "$lib/actions/portal";
 
+  let { label = "Notifications", footer = false }:
+    { label?: string; footer?: boolean } = $props();
+
   const reducedMotion =
     typeof window !== "undefined" &&
     window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -99,18 +102,19 @@
   });
 </script>
 
-<div class="nc" bind:this={rootEl}>
+<div class="nc" class:footer bind:this={rootEl}>
   <button
     class="nc-bell"
     class:active={toast.centerOpen}
     type="button"
     onclick={toggleCenter}
-    use:tooltip={"Notifications"}
-    aria-label="Notifications"
+    use:tooltip={label}
+    aria-label={label}
     aria-haspopup="dialog"
     aria-expanded={toast.centerOpen}
   >
-    <Bell size={17} />
+    <span class="nc-icon" aria-hidden="true"><Bell size={17} /></span>
+    {#if footer}<span class="nc-label">{label}</span>{/if}
     {#if toast.unreadCount > 0}
       <span class="nc-badge" transition:fade={{ duration: reducedMotion ? 0 : 120 }}>
         {toast.unreadCount > 9 ? "9+" : toast.unreadCount}
@@ -210,9 +214,10 @@
      used to proxy this was dissolved — search was a sidebar/Ctrl+K duplicate and
      notifications deserve one-click access with a visible badge.) */
   .nc { position: relative; display: flex; }
+  .nc.footer { width: 100%; height: 100%; }
 
-  /* Sized to the sidebar footer-nav items (40×34) so the bell reads as a
-     sibling of the workspace icons, not a stray control. */
+  /* Fill the sidebar footer-nav tile so icon, label, badge, and hit target are
+     one control rather than adjacent-looking fragments. */
   .nc-bell {
     position: relative;
     width: 30px; height: 30px;
@@ -222,6 +227,18 @@
     transition: background var(--dur-fast), color var(--dur-fast);
   }
   .nc-bell:hover, .nc-bell.active { background: var(--surface-hover); color: var(--fg-2); }
+  .nc-bell:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--ring); }
+  .nc-icon { display: inline-grid; place-items: center; }
+  .nc-label { display: none; }
+  .nc.footer .nc-bell {
+    width: 100%; height: 100%;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    border-radius: 8px; color: inherit;
+  }
+  .nc.footer .nc-label {
+    display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: inherit; font-weight: inherit; line-height: 1.2;
+  }
 
   .nc-badge {
     position: absolute;
@@ -238,6 +255,7 @@
     box-shadow: 0 0 0 2px var(--bg);
     pointer-events: none;
   }
+  .nc.footer .nc-badge { top: 3px; right: 3px; }
 
   .panel {
     /* Portaled to <body>, fixed coords measured at open — opens upward from

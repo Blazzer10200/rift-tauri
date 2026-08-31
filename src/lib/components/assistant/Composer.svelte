@@ -6,7 +6,6 @@
   import GhPopover from "./GhPopover.svelte";
   import { notify } from "../../state/toast.svelte";
   import { clampEffort, isOpenAIModel, modelFamily } from "../../state/assistant/helpers";
-  import { CHATGPT } from "../../state/assistant/providerDisplay";
   import { cliCommands } from "../../state/assistant/cliCommands.svelte";
   import { requestPrewarm, resetPrewarmDedup } from "../../state/assistant/prewarm";
   import { fuzzyScore, slashCatalogScore, isFileDrag, attachImageFiles, summarizeAttach, attachTextFiles, summarizeTextAttach } from "./composer/helpers";
@@ -198,22 +197,10 @@
   // composer/modelMatrix.ts (C7) — shared with SettingsMenu + PermMenu so the
   // keyboard nav here and the rendered rows there can never disagree.
 
-  // Idle placeholder — ONE quiet rotating phrase (the old single-line kbd
-  // soup "Ask · / · @ · Ctrl+D" read as a manual page; owner killed it
-  // 2026-07-14). Cycles every 7s through short plain-text hints via the
-  // shared placeholder-fade rise; frozen on the first hint under
-  // reduced-motion.
-  const IDLE_HINTS = $derived.by(() => {
-    const provider = isOpenAIModel(assistant.modelFor(tab)) ? CHATGPT.label : "Claude";
-    const hints = [
-      `Ask ${provider} anything`,
-      "Type / for a command",
-      "Mention a file with @",
-    ];
-    if (stt.config.enabled) hints.push("Ctrl+D to dictate");
-    return hints;
-  });
-  let hintIdx = $state(0);
+  // Keep the primary prompt stable. Commands, mentions, dictation, and file
+  // attachment shortcuts remain discoverable from their dedicated controls;
+  // rotating them through the empty field made the composer feel restless.
+  const IDLE_HINT = "Ask anything about this project";
 
   function autosize() {
     if (!ta) return;
@@ -1090,14 +1077,6 @@
   // Split-pane: the stt store is a global singleton — every mic-button visual
   // must gate on ownership or ALL panes light up while one dictates.
   const sttMine = $derived(stt.targetTabId === tabId);
-  // Rotate the idle hint only while the idle ghost is actually showing.
-  const idleGhost = $derived(!dictating && !hero && draft.length === 0 && !streaming && attachments.length === 0);
-  $effect(() => {
-    if (!idleGhost) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const t = setInterval(() => { hintIdx = (hintIdx + 1) % IDLE_HINTS.length; }, 7000);
-    return () => clearInterval(t);
-  });
   const dictGhost = $derived(dictating ? stt.ghostTail : "");
   $effect(() => {
     const _g = dictGhost;
@@ -1598,6 +1577,7 @@
       <div class="textarea-wrap" class:polishing={stt.polishing}>
         <textarea
           bind:this={ta}
+          aria-label="Message composer"
           value={draft}
           oninput={(e) => {
             const el = e.currentTarget as HTMLTextAreaElement;
@@ -1659,9 +1639,7 @@
         {:else if hero && draft.length === 0 && !streaming && attachments.length === 0}
           <span class="placeholder-ghost static" aria-hidden="true">What are we working on today?</span>
         {:else if draft.length === 0 && !streaming && attachments.length === 0}
-          {#key hintIdx}
-            <span class="placeholder-ghost" aria-hidden="true">{IDLE_HINTS[hintIdx % IDLE_HINTS.length]}</span>
-          {/key}
+          <span class="placeholder-ghost static" aria-hidden="true">{IDLE_HINT}</span>
         {:else if streaming && draft.length === 0 && askTarget}
           <span class="placeholder-ghost static" aria-hidden="true">Rift asked a question — type here, <span class="ph-k">Enter</span> answers it</span>
         {:else if streaming && draft.length === 0}
@@ -2136,7 +2114,7 @@
   /* Flat control button — transparent base; .ic = square icon variant. */
   .cbtn {
     display: inline-flex; align-items: center; gap: 6px;
-    height: 30px; padding: 0 9px;
+    height: 34px; padding: 0 10px;
     border-radius: 8px;
     font: inherit; font-size: 12px;
     color: var(--fg-muted);
@@ -2150,7 +2128,7 @@
   .cbtn:active:not(:disabled) { transform: scale(0.96); }
   .cbtn:disabled { opacity: 0.4; cursor: default; }
   .cbtn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
-  .cbtn.ic { width: 32px; padding: 0; justify-content: center; color: var(--fg-subtle); }
+  .cbtn.ic { width: 34px; padding: 0; justify-content: center; color: var(--fg-subtle); }
   .cbtn.ic:hover:not(:disabled) { color: var(--fg-2); }
   .cbtn.ic.active { background: var(--accent-soft); color: var(--accent); }
   .cbtn.enhance:hover:not(:disabled) { color: var(--accent); }
@@ -2284,7 +2262,7 @@
   /* Send — the deck's anchor. Queue count belongs exclusively to QueueRail. */
   .send-btn {
     position: relative;
-    width: 30px; height: 30px;
+    width: 34px; height: 34px;
     margin-left: 3px;
     display: flex; align-items: center; justify-content: center;
     background: transparent;
@@ -2538,7 +2516,7 @@
     align-self: center;
     display: inline-flex; align-items: center; gap: 7px;
     min-width: 0;
-    height: 30px; padding: 0 8px;
+    height: 34px; padding: 0 8px;
     background: transparent;
     border: 1px solid transparent;
     border-radius: 9px;

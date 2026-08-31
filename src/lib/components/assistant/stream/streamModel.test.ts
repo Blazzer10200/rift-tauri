@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { messageToTurn, parseAskUserResult, groupNames, workLineMode, isFillerSay, classifySay, outputPeek, groupBlocks, answerStartIndex, shellFlavor, resultMeta, splitOutput, nextRevealTier, isPlanArtifact, REVEAL_COLLAPSED, REVEAL_EXPANDED, REVEAL_SLACK, stripAnsi, ansiLines, classifyShellLine, shellCheckKind, parseCheckSummary, parseGrepLine, parseReadOutput, splitOutputFold, FOLD_TAIL, trimCmd, shellLabel } from "./streamModel";
+import { messageToTurn, parseAskUserResult, groupNames, workLineMode, isFillerSay, classifySay, outputPeek, groupBlocks, answerStartIndex, shellFlavor, resultMeta, splitOutput, nextRevealTier, isPlanArtifact, REVEAL_COLLAPSED, REVEAL_EXPANDED, REVEAL_SLACK, stripAnsi, ansiLines, classifyShellLine, shellCheckKind, parseCheckSummary, parseGrepLine, parseReadOutput, splitOutputFold, FOLD_TAIL, trimCmd, shellLabel, shellDisplay } from "./streamModel";
 import type { StreamTool } from "./streamModel";
 import type { ChatMessage } from "$lib/state/assistant.svelte";
 
@@ -598,6 +598,11 @@ describe("groupBlocks — say-fragment stitching (sentence split across a tool)"
 });
 
 describe("streamModel — shell flavor + detail surfacing (transcript revamp)", () => {
+  it("decodes doubled Windows separators for display without touching normal paths", () => {
+    expect(shellDisplay('"C:\\\\Users\\\\BLAZZER\\\\pwsh.exe" -Command test')).toBe('"C:\\Users\\BLAZZER\\pwsh.exe" -Command test');
+    expect(shellDisplay("C:\\repo\\src")).toBe("C:\\repo\\src");
+  });
+
   const toolOf = (m: ChatMessage) => {
     const b = messageToTurn(m).blocks.find((x) => x.type === "tool");
     return b && b.type === "tool" ? b.tool : null;

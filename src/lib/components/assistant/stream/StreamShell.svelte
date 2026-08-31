@@ -1,13 +1,25 @@
 <script lang="ts">
   import { slide } from "svelte/transition";
-  import { fmtDur, outputPeek, stripAnsi, type StreamTool } from "./streamModel";
+  import { fmtDur, outputPeek, shellDisplay, stripAnsi, type StreamTool } from "./streamModel";
   import { uiPrefs } from "$lib/state/ui-prefs.svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import { highlightSync, whenReady } from "$lib/state/highlighter.svelte";
   import OutputBlock from "./OutputBlock.svelte";
   import BlockHeader from "./BlockHeader.svelte";
 
-  let { tool, poll }: { tool: StreamTool; poll?: number } = $props();
+  let {
+    tool,
+    poll,
+    historical = false,
+    bulkOpen = false,
+    bulkVersion = 0,
+  }: {
+    tool: StreamTool;
+    poll?: number;
+    historical?: boolean;
+    bulkOpen?: boolean;
+    bulkVersion?: number;
+  } = $props();
 
   const running = $derived(tool.status === "pending");
   const failed = $derived(tool.status === "error");
@@ -24,6 +36,7 @@
   const fullCmd = $derived(
     typeof tool.input?.command === "string" ? (tool.input.command as string) : (tool.cap ?? ""),
   );
+  const displayFullCmd = $derived(shellDisplay(fullCmd));
 
   // Live elapsed — anchored to mount (the block mounts the instant the tool
   // starts streaming, so mount ≈ spawn). Ticks the pill once a second while
@@ -119,9 +132,16 @@
   // watches output land. User can override either way once it's done.
   let open = $state(false);
   let touched = $state(false); // user toggled manually → stop auto-driving `open`
+  let seenBulkVersion = $state(0);
   $effect(() => {
+    if (bulkVersion !== seenBulkVersion) {
+      seenBulkVersion = bulkVersion;
+      open = bulkOpen;
+      touched = true;
+      return;
+    }
     if (touched) return;
-    open = mode === "full";
+    open = mode === "full" && !historical;
   });
 
   // Peek renders dim trailing lines — strip ANSI there (the full body gets the
@@ -160,7 +180,7 @@
       <span class="ssh-prompt {flavor}" use:tooltip={flavor === "pwsh" ? "Ran in PowerShell" : flavor === "cmd" ? "Ran in cmd.exe" : "Ran in bash"} aria-hidden="true">{promptGlyph}</span>
     {/snippet}
     {#snippet title()}
-      <code class="ssh-cmd" title={fullCmd}>{#if typing}{(tool.cap ?? "").slice(0, typedN)}{:else if cmdHtml}{@html cmdHtml}{:else}{tool.cap}{/if}</code>
+      <code class="ssh-cmd" title={displayFullCmd}>{#if typing}{(tool.cap ?? "").slice(0, typedN)}{:else if cmdHtml}{@html cmdHtml}{:else}{tool.cap}{/if}</code>
       {#if poll && poll > 1}<span class="ssh-poll" title="Ran {poll} times waiting on this — showing the latest run">{running ? "waiting" : "polled"} ×{poll}</span>{/if}
       {#if running && !showWait}<span class="ssh-cursor" aria-hidden="true"></span>{/if}
     {/snippet}

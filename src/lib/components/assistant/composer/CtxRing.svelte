@@ -62,7 +62,9 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 2px;
+    width: 32px;
+    height: 32px;
+    padding: 0;
     border: 0;
     border-radius: 999px;
     background: transparent;

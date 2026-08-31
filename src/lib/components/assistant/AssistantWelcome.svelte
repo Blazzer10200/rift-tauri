@@ -159,11 +159,12 @@
     </div>
   {:else if hasRoot}
     <div class="wel-inner home-launchpad">
-      <!-- Greeting — session eyebrow over the project question. -->
-      <div class="greet">
-        <span class="greet-eyebrow"><span class="ge-dot"></span>{greet}</span>
-        <h1 class="greet-title">What's next for <b>{ctxName}</b>?</h1>
-      </div>
+      <div class="launch-main">
+        <!-- Greeting — session eyebrow over the project question. -->
+        <div class="greet">
+          <span class="greet-eyebrow"><span class="ge-dot"></span>{greet}</span>
+          <h1 class="greet-title">What's next for <b>{ctxName}</b>?</h1>
+        </div>
 
       <!-- Context row — live signals + actions. The title above owns the
            project name; repeating it here (or in a hero-style card) would
@@ -189,14 +190,15 @@
           <button class="greet-switch" type="button" onclick={() => void assistant.pickTabFolder(tabId)}>
             <Folder size={13} /> Switch folder
           </button>
-          <button class="greet-switch" type="button" onclick={() => workspace.setActive("home")} use:tooltip={"Your activity — usage stats on the Workspace page"}>
-            <BarChart3 size={13} /> Activity
+          <button class="greet-switch" type="button" onclick={() => workspace.setActive("home")} use:tooltip={"Open workspace activity and usage"}>
+            <BarChart3 size={13} /> View activity
           </button>
         </span>
       </div>
       {#if ghOpen && ghAnchor}
         <GhPopover anchor={ghAnchor} root={paneRoot} tab={targetTab} onClose={() => (ghOpen = false)} />
       {/if}
+      </div>
 
       <!-- Continue latest — one central resume action; the sidebar owns history.
            During boot the conversation list is still loading, so show skeleton
@@ -380,6 +382,7 @@
     width: 100%;
     display: flex; flex-direction: column; align-items: center;
     min-height: 0;
+    container-type: inline-size;
   }
   .wel-inner {
     width: 100%; max-width: 600px;
@@ -423,10 +426,11 @@
 
   /* ── Warm launchpad — greeting · project strip · resume · new-to-rift ──── */
   /* spec-margined children, so the .wel-inner column gap is dropped here. */
-  .wel-inner.home-launchpad { position: relative; gap: 0; max-width: 680px; text-align: left; }
+  .wel-inner.home-launchpad { position: relative; gap: 0; max-width: 940px; text-align: left; }
+  .launch-main { min-width: 0; }
   /* No local atmosphere — the canvas (AppShell) owns the lighting model;
      page-level washes stacked on it read as blotches (owner call 2026-07-16). */
-  .wel-inner.home-launchpad > :nth-child(4) { animation-delay: 200ms; }
+  .wel-inner.home-launchpad > .newrift { animation-delay: 200ms; }
   .greet { display: flex; flex-direction: column; gap: 8px; }
   .greet-eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 10.5px; font-weight: 700;
     letter-spacing: 0.14em; text-transform: uppercase; color: var(--fg-subtle); }
@@ -447,11 +451,15 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
   .ctx-actions { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
   /* Facts ride the shared .ctx-chip (app.css) — same dialect as the composer. */
-  .greet-switch { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 11px; border-radius: 999px;
+  .greet-switch { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border-radius: 999px;
     border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 3%, transparent); color: var(--fg-muted);
     font: inherit; font-size: 12px; font-weight: 500; cursor: pointer;
     transition: background var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast); }
   .greet-switch:hover { background: var(--surface-hover); color: var(--fg-2); border-color: var(--border-strong); }
+  .greet-switch:focus-visible, .resume-item:focus-visible, .newrift-toggle:focus-visible, .newrift-hide:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--ring);
+  }
   .greet-switch :global(svg) { color: var(--fg-faint); }
 
   /* Continue latest — one title-led row, not a second history list. The section
@@ -462,14 +470,14 @@
     background: var(--island-fill); }
   .resume > :global(.wo-label) { padding: 0 9px; }
   .resume-list { display: flex; flex-direction: column; gap: 1px; }
-  .resume-item { display: flex; align-items: center; gap: 9px; width: 100%; height: 32px; padding: 0 9px;
+  .resume-item { display: flex; align-items: center; gap: 9px; width: 100%; height: 38px; padding: 0 9px;
     border-radius: 8px; border: 0; background: transparent; color: var(--fg-2); font: inherit; text-align: left;
     cursor: pointer; min-width: 0; transition: background var(--dur-fast), color var(--dur-fast); }
   .resume-item:hover { background: var(--surface-hover); color: var(--fg); }
   .resume-item > :global(svg:first-child) { color: var(--fg-faint); flex: none; }
-  /* Boot skeleton row — matches .resume-item footprint (32px, same gap/pad) so
+  /* Boot skeleton row — matches .resume-item footprint (38px, same gap/pad) so
      the swap to real rows doesn't shift the strip. */
-  .resume-skel { display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 9px; }
+  .resume-skel { display: flex; align-items: center; gap: 9px; height: 38px; padding: 0 9px; }
   .resume-skel > :global(:nth-child(2)) { flex: 1; }
   .ri-t { flex: 1; min-width: 0; font-size: 12.5px; font-weight: 500;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -484,12 +492,12 @@
   .newrift { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 14px; }
   .newrift-head { display: flex; align-items: center; gap: 2px; }
   .newrift-hide { flex: none; display: inline-flex; align-items: center; justify-content: center;
-    width: 22px; height: 22px; border: 0; background: transparent; border-radius: 6px;
+    width: 30px; height: 30px; border: 0; background: transparent; border-radius: 7px;
     color: var(--fg-faint); cursor: pointer; opacity: 0;
     transition: opacity var(--dur-fast), color var(--dur-fast), background var(--dur-fast); }
   .newrift:hover .newrift-hide, .newrift-hide:focus-visible { opacity: 1; }
   .newrift-hide:hover { color: var(--fg-2); background: var(--surface-hover); }
-  .newrift-toggle { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; font: inherit; font-size: 12.5px; font-weight: 500;
+  .newrift-toggle { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; min-height: 34px; font: inherit; font-size: 12.5px; font-weight: 500;
     color: var(--fg-muted); padding: 3px 2px; cursor: pointer; background: none; border: 0; transition: color var(--dur-fast); }
   .newrift-toggle:hover { color: var(--fg-2); }
   .newrift-toggle :global(.nr-chev) { margin-left: auto; transition: transform var(--dur-fast); }
@@ -505,6 +513,16 @@
     font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .nr-ct { font-size: 12.5px; font-weight: 600; color: var(--fg); }
   .nr-cx { font-size: 11.5px; line-height: 1.5; color: var(--fg-subtle); text-wrap: pretty; }
+  @container (min-width: 820px) {
+    .home-launchpad {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.85fr);
+      column-gap: 28px;
+      align-items: end;
+    }
+    .resume { margin-top: 0; }
+    .newrift { grid-column: 1 / -1; }
+  }
   @keyframes gcReveal { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
 
   /* ── Cold welcome (no folder) — branded hero · viewfinder · primer ─────── */

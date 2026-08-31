@@ -812,7 +812,7 @@
   {/if}
 
   {#if tabId && !showEmpty && exchangeCount >= 2}
-    <div class="turnrail" aria-label="Jump between turns">
+    <div class="turnrail" role="navigation" aria-label={`Conversation turns — ${activeXch + 1} of ${exchangeCount}`}>
       <button class="tr-chev" type="button" disabled={activeXch <= 0} onclick={() => stepXch(-1)} aria-label="Previous turn">
         <ChevronUp size={14} />
       </button>
@@ -1128,7 +1128,7 @@
   .csurf-col.is-home::after { content: ""; flex: 46 0 0; }
   .csurf-col.is-home::-webkit-scrollbar { width: 0; height: 0; display: none; }
   .csurf-col.is-home > :global(*) {
-    width: 100%; max-width: 680px;
+    width: 100%; max-width: 940px;
     margin-left: auto; margin-right: auto;
     flex: none;
   }
@@ -1358,8 +1358,7 @@
      signal "new below". Replaced the centered text-pill, which read as bulky. */
   .jump-latest {
     position: absolute;
-    left: 50%;
-    transform: translateX(-50%);
+    right: max(24px, calc((100% - var(--chat-col-max)) / 2 + 18px));
     display: inline-flex; align-items: center; gap: 7px;
     height: 32px; padding: 0 14px 0 12px;
     border-radius: 999px;
@@ -1382,36 +1381,38 @@
     background: var(--accent); color: var(--accent-fg);
   }
   @keyframes jump-in {
-    from { opacity: 0; transform: translateX(-50%) translateY(8px); }
-    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
   }
   @media (prefers-reduced-motion: reduce) {
     .jump-latest { animation: none; }
   }
   .turnrail {
-    position: absolute; right: 9px; top: 50%; transform: translateY(-50%); z-index: 4;
-    display: flex; flex-direction: column; align-items: flex-end; gap: 5px; padding: 5px 3px;
-    opacity: 0.45; transition: opacity var(--dur-base);
+    position: absolute; right: max(12px, calc((100% - var(--chat-col-max)) / 2 - 38px)); top: 50%; transform: translateY(-50%); z-index: 4;
+    display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 4px;
+    border-radius: 12px; opacity: 0.68;
+    transition: opacity var(--dur-base), background var(--dur-base), box-shadow var(--dur-base);
   }
-  .turnrail:hover { opacity: 1; }
+  .turnrail:hover, .turnrail:focus-within { opacity: 1; background: color-mix(in oklab, var(--bg-elev-2) 84%, transparent); box-shadow: var(--shadow-float); }
   .tr-chev {
-    width: 24px; height: 18px; display: grid; place-items: center;
+    width: 34px; height: 30px; display: grid; place-items: center;
     background: none; border: 0; cursor: pointer;
     color: var(--fg-faint); border-radius: 6px;
     transition: color var(--dur-fast), background var(--dur-fast);
   }
+  .tr-chev:focus-visible, .tr-tick:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--ring); }
   .tr-chev:hover:not(:disabled) { color: var(--fg-2); background: var(--surface-hover); }
   .tr-chev:disabled { opacity: 0.3; cursor: default; }
-  .tr-ticks { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; padding: 3px 6px; }
+  .tr-ticks { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 2px 0; }
   .tr-tick {
-    position: relative; height: 11px; display: flex; align-items: center; justify-content: flex-end;
+    position: relative; width: 34px; height: 24px; display: flex; align-items: center; justify-content: center;
     background: none; border: 0; padding: 0; cursor: pointer;
   }
   .tr-tick::after {
     content: ""; height: 2px; width: 12px; border-radius: 2px; background: var(--fg-faint); opacity: 0.55;
     transition: width var(--dur-fast), background var(--dur-fast), opacity var(--dur-fast);
   }
-  .tr-tick:hover::after { width: 18px; opacity: 1; background: var(--fg-muted); }
+  .tr-tick:hover::after { width: 20px; opacity: 1; background: var(--fg-muted); }
   .tr-tick.on::after { width: 20px; background: var(--accent); opacity: 1; }
 
   .alerts {

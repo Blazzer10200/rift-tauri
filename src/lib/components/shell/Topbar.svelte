@@ -30,8 +30,8 @@
         onmouseenter={() => shell.beginPeek()}
         onmouseleave={() => shell.schedulePeekClose()}
         onclick={() => shell.toggleCollapsed()}
-        use:tooltip={"Open sidebar — hover to peek"}
-        aria-label="Open sidebar"
+        use:tooltip={"Pin sidebar open — hover to peek"}
+        aria-label="Pin sidebar open"
       >
         <PanelLeftOpen size={15} />
       </button>

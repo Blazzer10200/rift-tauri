@@ -454,6 +454,17 @@
   border: 1px solid color-mix(in oklab, var(--border) 78%, transparent); border-top: 0;
   border-radius: 0 0 9px 9px; background: color-mix(in oklab, var(--bg-inset) 42%, transparent);
 }
+.sactivity-tools {
+  min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 4px 2px 5px 18px; color: var(--fg-faint); font-size: 10.5px;
+  border-bottom: 1px solid color-mix(in oklab, var(--border) 62%, transparent);
+}
+.sactivity-tools button {
+  min-height: 28px; padding: 0 9px; border-radius: 6px; color: var(--fg-subtle);
+  font: inherit; font-weight: 600; background: transparent; border: 1px solid transparent;
+}
+.sactivity-tools button:hover { color: var(--fg-2); background: var(--surface-hover); border-color: var(--border); }
+.sactivity-tools button:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--ring); }
 .sactivity-body .sturn-body > :first-child { margin-top: 8px; }
 .sactivity-body .sturn-body > :last-child { margin-bottom: 5px; }
 .sanswer { min-width: 0; }
@@ -476,12 +487,13 @@
 }
 
 /* per-turn hover actions (copy / retry) */
-.msg-acts { display: flex; align-items: center; gap: 2px; margin-top: 13px; height: 28px;
+.msg-acts { display: flex; align-items: center; gap: 3px; margin-top: 13px; min-height: 32px;
   opacity: 0.62; transform: none; transition: opacity var(--dur-fast), transform var(--dur-fast); }
 .sturn:hover .msg-acts, .sturn:focus-within .msg-acts { opacity: 1; transform: none; }
-.msg-act { display: inline-flex; align-items: center; gap: 6px; height: 27px; padding: 0 9px; border-radius: 7px;
+.msg-act { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 10px; border-radius: 7px;
   font-size: var(--fs-xs); font-weight: 500; color: var(--fg-subtle); transition: background var(--dur-fast), color var(--dur-fast); }
 .msg-act:hover { background: var(--surface-hover); color: var(--fg-2); }
+.msg-act:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--ring); }
 .msg-act.copied { color: var(--ok); }
 .msg-act svg { flex: none; }
 @media (prefers-reduced-motion: reduce) { .msg-acts { transition: none; } }

@@ -209,6 +209,12 @@ export const shellLabel = (cmd: string): string =>
     // leading env assignments (SNAPSHOT_FILE=… etc.), possibly quote-opened
     .replace(/^['"]?(?:[A-Z_][A-Z0-9_]*=\S+\s+)*/, "");
 
+// Some provider envelopes preserve Windows command arguments in their
+// serialized form (`C:\\Users\\name`) even after the surrounding tool JSON has
+// been decoded. Keep the raw command for copy/replay, but collapse doubled path
+// separators in the display layer so history reads like a terminal, not JSON.
+export const shellDisplay = (cmd: string): string => cmd.replace(/\\\\/g, "\\");
+
 export const trimCmd = (s: string, n = 70): string => {
   const cmd = s.replace(/^cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*(?:&&|;)\s*/, "");
   if (cmd.length <= n) return cmd;
@@ -356,7 +362,7 @@ function caption(tb: ToolBlock): string {
   if (n === "NotebookEdit") return fp ?? "notebook";
   // Forming fallback: never the literal "shell" — a still-streaming block
   // rendering "PS> shell" reads as broken (#100).
-  if (n === "Bash" || n === "remote_bash" || n === "PowerShell") return typeof inp.command === "string" ? trimCmd(inp.command, 70) : "running…";
+  if (n === "Bash" || n === "remote_bash" || n === "PowerShell") return typeof inp.command === "string" ? trimCmd(shellDisplay(inp.command), 70) : "running…";
   if (n === "Glob") {
     // "searching…" not "?": the pattern field lands late in the streamed
     // input JSON, so the placeholder is what users see while it forms.

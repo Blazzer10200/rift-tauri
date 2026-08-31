@@ -116,6 +116,30 @@
   const recentLabels = $derived(new Set(recentGroups.map((g) => g.label)));
   const olderGroups = $derived(groups.filter((g) => !recentLabels.has(g.label)));
   const olderCount = $derived(olderGroups.reduce((n, g) => n + g.items.length, 0));
+  const HISTORY_BATCH = 40;
+  let olderLimit = $state(HISTORY_BATCH);
+  const visibleOlderGroups = $derived.by<Group[]>(() => {
+    let left = olderLimit;
+    const out: Group[] = [];
+    for (const group of olderGroups) {
+      if (left <= 0) break;
+      const items = group.items.slice(0, left);
+      if (items.length) out.push({ label: group.label, items });
+      left -= items.length;
+    }
+    return out;
+  });
+  const olderShown = $derived(visibleOlderGroups.reduce((n, g) => n + g.items.length, 0));
+  const olderRemaining = $derived(Math.max(0, olderCount - olderShown));
+
+  function toggleOlderHistory() {
+    if (!shell.historyExpanded) olderLimit = Math.min(HISTORY_BATCH, olderCount);
+    shell.toggleHistoryExpanded();
+  }
+
+  function showMoreOlder() {
+    olderLimit = Math.min(olderCount, olderLimit + HISTORY_BATCH);
+  }
 
   // Mini peek: one flat priority-ordered slice (pinned first — groups are
   // already ordered pinned → newest bucket → older).
@@ -318,7 +342,7 @@
     {#if miniMore > 0}
       <button class="showmore" type="button" onclick={() => shell.toggleCollapsed()} use:tooltip={"Pin the sidebar open"}>
         <span class="sm-rule" aria-hidden="true"></span>
-        <span class="sm-lbl">All chats <span class="sm-ct">{flatAll.length}</span></span>
+        <span class="sm-lbl">Pin sidebar <span class="sm-ct">{flatAll.length} chats</span></span>
         <span class="sm-rule" aria-hidden="true"></span>
       </button>
     {/if}
@@ -336,7 +360,14 @@
 
     <!-- Everything older tucks behind one quiet "Show earlier" toggle. -->
     {#if olderCount > 0}
-      <button class="showmore conv-showmore" class:x={shell.historyExpanded} type="button" onclick={() => shell.toggleHistoryExpanded()}>
+      <button
+        class="showmore conv-showmore"
+        class:x={shell.historyExpanded}
+        type="button"
+        onclick={toggleOlderHistory}
+        aria-expanded={shell.historyExpanded}
+        aria-controls="older-conversations"
+      >
         <span class="sm-rule" aria-hidden="true"></span>
         <span class="sm-lbl">
           <ChevronDown size={12} class="sm-ch" />
@@ -346,10 +377,19 @@
         <span class="sm-rule" aria-hidden="true"></span>
       </button>
       {#if shell.historyExpanded}
-        {#each olderGroups as g (g.label)}
-          <div class="conv-group-label plain"><span class="cgl-txt">{g.label}</span><span class="cgl-ct">{g.items.length}</span></div>
-          {#each g.items as c, i (c.id)}{@render convRow(c, i)}{/each}
-        {/each}
+        <div id="older-conversations">
+          {#each visibleOlderGroups as g (g.label)}
+            <div class="conv-group-label plain"><span class="cgl-txt">{g.label}</span><span class="cgl-ct">{g.items.length}</span></div>
+            {#each g.items as c, i (c.id)}{@render convRow(c, i)}{/each}
+          {/each}
+          {#if olderRemaining > 0}
+            <button class="showmore conv-loadmore" type="button" onclick={showMoreOlder}>
+              <span class="sm-rule" aria-hidden="true"></span>
+              <span class="sm-lbl">Show {Math.min(HISTORY_BATCH, olderRemaining)} more <span class="sm-ct">{olderRemaining} left</span></span>
+              <span class="sm-rule" aria-hidden="true"></span>
+            </button>
+          {/if}
+        </div>
       {/if}
     {/if}
   {/if}
@@ -384,6 +424,7 @@
   .showmore :global(.sm-ch) { color: var(--fg-faint); transition: transform 0.22s var(--ease-page), color var(--dur-fast); }
   .showmore.x :global(.sm-ch) { transform: rotate(180deg); }
   .showmore:hover { color: var(--fg-2); }
+  .conv-loadmore { padding-top: 10px; padding-bottom: 10px; }
   .showmore:hover .sm-rule { background: color-mix(in oklab, var(--fg) 14%, transparent); }
   .showmore:hover :global(.sm-ch) { color: var(--fg-2); }
   .sm-ct { font-size: 9.5px; font-weight: 600; padding: 1px 6px; border-radius: 999px; color: var(--fg-faint);

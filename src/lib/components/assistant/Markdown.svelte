@@ -543,8 +543,9 @@
     return tpl.innerHTML;
   }
 
-  // Tag flat short lists (e.g., 8 short filenames) so CSS can flow them
-  // into columns. Keeps long-prose lists single-column.
+  // Tag compact path/code inventories so CSS can flow them into columns.
+  // Natural-language bullets always remain single-column: short prose still
+  // has a reading order, while filenames and code identifiers scan as a grid.
   function tagFlatShortLists(html: string): string {
     if (typeof document === "undefined") return html;
     if (!html.includes("<ul")) return html;
@@ -552,12 +553,14 @@
     tpl.innerHTML = html;
     tpl.content.querySelectorAll("ul").forEach((ul) => {
       const items = ul.querySelectorAll(":scope > li");
-      if (items.length < 5) return;
+      if (items.length < 8) return;
       let qualifies = true;
       items.forEach((li) => {
         if (li.querySelector("ul, ol, pre, blockquote, table, img, h1, h2, h3, h4, h5, h6")) qualifies = false;
         const txt = (li.textContent ?? "").trim();
         if (txt.length > 60) qualifies = false;
+        const pathOrCode = !!li.querySelector("code") || /[\\/]/.test(txt) || /\.[a-z0-9]{1,8}(?::\d+)?$/i.test(txt);
+        if (!pathOrCode) qualifies = false;
       });
       if (qualifies) ul.classList.add("flat-short");
     });

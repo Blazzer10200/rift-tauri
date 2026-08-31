@@ -100,9 +100,10 @@
             <button type="button" onclick={() => retryLoad(id)}>Try again</button>
           </div>
         {:else}
-          <div class="ws-load-state" aria-busy="true" aria-label={`Loading ${def.title}`}>
-            <span class="ws-load-mark"></span>
-            <span>Loading {def.title}</span>
+          <div class="ws-load-state ws-load-skeleton" aria-busy="true" aria-label={`Loading ${def.title}`}>
+            <span class="ws-skel-title"></span>
+            <span class="ws-skel-tabs"><i></i><i></i><i></i></span>
+            <span class="ws-skel-card"><i></i><i></i><i></i><i></i></span>
           </div>
         {/if}
       </div>
@@ -155,14 +156,24 @@
     font-size: 12px;
     text-align: center;
   }
-  .ws-load-mark {
-    width: 24px;
-    height: 24px;
-    border: 2px solid color-mix(in srgb, var(--accent) 22%, transparent);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: ws-load-spin 700ms linear infinite;
+  .ws-load-skeleton { justify-items: stretch; gap: 14px; }
+  .ws-load-skeleton > span,
+  .ws-load-skeleton i {
+    display: block;
+    border-radius: 7px;
+    background: linear-gradient(90deg, var(--surface-hover), color-mix(in oklab, var(--fg) 8%, transparent), var(--surface-hover));
+    background-size: 220% 100%;
+    animation: ws-load-shimmer 1.4s ease-in-out infinite;
   }
+  .ws-skel-title { width: 42%; height: 18px; }
+  .ws-skel-tabs { display: flex !important; gap: 8px; background: transparent !important; animation: none !important; }
+  .ws-skel-tabs i { width: 68px; height: 28px; }
+  .ws-skel-card { height: 150px; padding: 20px; display: grid !important; align-content: start; gap: 12px; border: 1px solid var(--border); background: var(--island-fill) !important; animation: none !important; }
+  .ws-skel-card i { height: 11px; }
+  .ws-skel-card i:nth-child(1) { width: 34%; }
+  .ws-skel-card i:nth-child(2) { width: 86%; }
+  .ws-skel-card i:nth-child(3) { width: 72%; }
+  .ws-skel-card i:nth-child(4) { width: 54%; }
   .ws-load-error strong { color: var(--text-primary); font-size: 13px; }
   .ws-load-error span { overflow-wrap: anywhere; }
   .ws-load-error button {
@@ -174,10 +185,10 @@
     cursor: pointer;
   }
   .ws-load-error button:hover { color: var(--text-primary); border-color: var(--border-strong); }
-  @keyframes ws-load-spin { to { transform: rotate(360deg); } }
+  @keyframes ws-load-shimmer { to { background-position: -220% 0; } }
   @media (prefers-reduced-motion: reduce) {
     .ws-page { transition: none; transform: none; }
-    .ws-load-mark { animation: none; }
+    .ws-load-skeleton > span, .ws-load-skeleton i { animation: none; }
   }
 
   /* Staggered-rise: direct children of a .rising page animate upward + fade
