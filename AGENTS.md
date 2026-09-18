@@ -1,8 +1,11 @@
 # Rift Codex Instructions
 
-This file is the Codex-native entrypoint for Rift. `CLAUDE.md` remains useful
-project reference material; direct user requests and this file control Codex
-workflow.
+This file is the Codex-native entrypoint for Rift, and the shared project
+contract: the stack, verification, provider rules, and guardrails below apply to
+every agent working in this repo. `CLAUDE.md` is the Claude-native peer — it
+defers to this file and adds only Claude-specific notes. Keep shared rules here
+so the two entrypoints cannot drift apart. Direct user requests and this file
+control Codex workflow.
 
 ## Start Here
 
