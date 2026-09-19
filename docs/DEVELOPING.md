@@ -70,6 +70,8 @@ is stopped.
 | `src-tauri/capabilities/` | Tauri WebView permission grants |
 | `design-system/` | static visual reference and token mirror |
 | `scripts/cdp/` | local WebView inspection bridge |
+| `AGENTS.md`, `CLAUDE.md` | agent entrypoints; `AGENTS.md` holds the shared contract |
+| `.agents/skills/`, `.claude/skills/` | repo-local agent skills (`rift-ui` drives the running app) |
 | `docs/` | architecture, security, current changelog, local handoff/issues |
 
 For task-specific entrypoints, use the fast-navigation table in
@@ -88,9 +90,32 @@ cargo test --manifest-path src-tauri/Cargo.toml
 with a running Tauri dev process. `npm run verify:frontend` and
 `npm run verify:rust` are the focused variants.
 
+`npm run check` and `npm test` both run `svelte-kit sync` first, because
+`tsconfig.json` extends the generated `.svelte-kit/tsconfig.json`. Without it
+Vite fails at startup with a misleading `Could not resolve 'node:module'`. Keep
+those prefixes.
+
 Do not hand-edit version files independently. `pwsh scripts/bump.ps1 X.Y.Z`
 keeps `package.json`, `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and
 `src-tauri/Cargo.lock` aligned.
+
+#### Non-Windows and container environments
+
+The PowerShell gates (`verify`, `doctor`, `cargo-test`) and the CDP bridge assume
+a Windows desktop. In a Linux checkout or a cloud container only the frontend
+gates are reachable:
+
+```bash
+npm ci
+npm run check
+npm test
+```
+
+Cargo will not build there: Tauri's Linux target needs GTK development packages
+(`gdk-3.0`) that a bare container lacks, and Rift ships Windows-only regardless.
+A Rust change authored in such an environment is unverified until CI or a Windows
+machine runs Clippy and `cargo test` — report it that way rather than implying a
+green suite.
 
 ## Provider routes
 

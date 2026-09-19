@@ -17,8 +17,11 @@ src-tauri/src/state/*.json
 src-tauri/src/state/*.log
 src-tauri/src/state/rift-edits/
 
-# Claude Code workspace-local agent state (worktrees, transient).
-.claude/
+# Claude Code workspace-local agent state (worktrees, settings, transient).
+# `.claude/skills/` is the exception: a skill is a tracked project contract,
+# the Claude-side peer of `.agents/skills/`, not per-machine state.
+.claude/*
+!.claude/skills/
 
 # CDP wrapper scratch (screenshots, ws snapshots).
 scripts/cdp/.tmp/
@@ -47,7 +50,6 @@ scripts/cdp/.audit/
 .secrets/
 
 # Internal working docs — local only, not part of the public tree
-/CLAUDE.md
 /docs/HANDOFF.md
 /docs/ISSUES.md
 /docs/IDEAS.md
