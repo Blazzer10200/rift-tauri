@@ -38,7 +38,7 @@
 2. Per-user install, no admin needed. Rift self-updates from then on (background download, apply on restart, one-click consent).
 3. On first launch, connect Claude and/or ChatGPT from Settings → Providers. Keys entered in Rift are stored in Windows Credential Manager—never in app files or the WebView. ChatGPT subscription sign-in uses the local Codex CLI; optional ChatGPT API access uses a separately billed OpenAI API key.
 
-**Requirements:** Windows 11 x64 and at least one provider: the [Claude Code CLI](https://claude.com/claude-code) with a Claude login/API key, or ChatGPT through the standalone Codex CLI and optional [OpenAI API key](https://platform.openai.com/api-keys). ChatGPT subscriptions and API usage are billed separately. macOS/Linux build from source but are not packaged or tested yet.
+**Requirements:** Windows 11 x64 and at least one provider: the [Claude Code CLI](https://claude.com/claude-code) with a Claude login/API key, or ChatGPT through the standalone Codex CLI and optional [OpenAI API key](https://platform.openai.com/api-keys). ChatGPT subscriptions and API usage are billed separately. Linux builds from source for development (see [`docs/DEVELOPING.md`](docs/DEVELOPING.md)); neither macOS nor Linux is packaged or tested as a product.
 
 ## What it does
 
@@ -75,7 +75,11 @@ Yes. Sign the standalone Codex CLI into ChatGPT and Rift uses the models offered
 Only to the provider selected for that turn and to any external tool action you approve. Rift has no intermediary server, telemetry, or analytics. Details in [`docs/SECURITY.md`](docs/SECURITY.md).
 
 **Windows only?**
-Packaged and tested for Windows 11 today. macOS / Linux build from source; packaging them is on the roadmap.
+Packaged and tested for Windows 11 today. Linux builds and runs from source with
+`--no-default-features` (on-device speech needs a Windows-only ONNX runtime) — useful for
+development, but unpackaged, untested as a product, and rendered by WebKitGTK rather than
+WebView2. macOS is untried. See [`docs/DEVELOPING.md`](docs/DEVELOPING.md); packaging both
+is on the roadmap.
 
 ## Building from source
 

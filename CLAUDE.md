@@ -46,13 +46,19 @@ reachable from where:
 | Environment | Available |
 |---|---|
 | Windows dev machine | Everything. `npm run verify` is the complete gate. |
-| Linux / cloud container | Frontend only: `npm run check` and `npm test`. |
+| Linux / cloud container | `npm run check`, `npm test`, and `cargo build` after installing the system deps in `docs/DEVELOPING.md`. |
 
-Cargo cannot build here: Tauri's Linux target needs GTK system libraries
-(`gdk-3.0`) that a bare container lacks, and Rift targets Windows regardless. A
-Rust change made in a cloud session is **unverified** — say so plainly rather
-than implying the suite passed. CI (self-hosted Windows) runs
+Clippy and `cargo test` still need Windows or CI. A Rust change made in a cloud
+session is **unverified** in that sense even when it compiles — say so plainly
+rather than implying the suite passed. CI (self-hosted Windows) runs
 `cargo clippy -D warnings` plus the Rust tests and is the real signal.
+
+The Linux build needs `--no-default-features` (the default `parakeet` feature
+pulls an ONNX Runtime with no Linux prebuilt for the Windows-only `directml`
+provider) and the GTK/WebKit/ALSA packages listed in `docs/DEVELOPING.md`. It
+can be run headless under Xvfb to check layout, flows, and provider detection —
+but the renderer is WebKitGTK, not WebView2, so never present it as evidence
+about pixels, blur, or font rendering.
 
 `npm test` and `npm run check` both run `svelte-kit sync` first by design:
 `tsconfig.json` extends the generated `.svelte-kit/tsconfig.json`, and without it
