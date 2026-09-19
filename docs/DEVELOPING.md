@@ -111,42 +111,11 @@ npm run check
 npm test
 ```
 
-Cargo needs system libraries a bare container lacks. On Debian/Ubuntu:
-
-```bash
-apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
-  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
-  libasound2-dev libudev-dev
-cargo build --manifest-path src-tauri/Cargo.toml --no-default-features
-```
-
-`--no-default-features` is required. The default `parakeet` feature pulls ONNX
-Runtime through `ort`, whose prebuilt binaries are requested with the
-Windows-only `directml` execution provider; no Linux build satisfies that
-feature set, so the link fails on `OrtGetApiBase`. Dropping the feature drops
-on-device STT and nothing else.
-
-To run it headless — useful for checking layout and flows without a Windows
-desktop — serve the frontend and point the binary at it:
-
-```bash
-Xvfb :99 -screen 0 1600x1000x24 &
-npm run dev &                       # debug builds load devUrl, not frontendDist
-DISPLAY=:99 LIBGL_ALWAYS_SOFTWARE=1 ./src-tauri/target/debug/rift-tauri
-```
-
-Velopack logs a `NotInstalled` warning and self-suppresses; that is expected for
-an unpackaged binary and does not block startup.
-
-What this is good for: compile errors, cross-platform regressions, layout, copy,
-state, and provider-detection logic. What it is **not** good for: pixels. The
-renderer is WebKitGTK, not WebView2, and the `rift-ui` CDP bridge does not
-attach. Windows-only paths — Credential Manager, elevation, the updater, the
-COM spellchecker — are stubbed or inert.
-
-A Rust change authored this way is still unverified in the sense that matters:
-Clippy and `cargo test` need a Windows machine or CI. Say so plainly rather than
-implying a green suite.
+Cargo will not build there: Tauri's Linux target needs GTK development packages
+(`gdk-3.0`) that a bare container lacks, and Rift ships Windows-only regardless.
+A Rust change authored in such an environment is unverified until CI or a Windows
+machine runs Clippy and `cargo test` — report it that way rather than implying a
+green suite.
 
 ## Provider routes
 
