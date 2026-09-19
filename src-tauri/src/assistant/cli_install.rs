@@ -207,15 +207,6 @@ fn npm_global_prefix() -> Option<PathBuf> {
     Some(PathBuf::from(s))
 }
 
-/// Non-Windows stub. `enumerate_claude_installs` gates its Windows drop-site
-/// probing with the RUNTIME `cfg!(windows)`, so that block still has to compile
-/// off Windows even though it never runs there. Mirrors the `registry_path_dirs`
-/// pair above.
-#[cfg(not(windows))]
-fn npm_global_prefix() -> Option<PathBuf> {
-    None
-}
-
 /// Classify how a `claude` binary at `p` was installed, from its path.
 /// npm-global installs must update via `npm install -g …@latest`; native
 /// installs self-update and accept `claude update`.
