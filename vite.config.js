@@ -25,8 +25,22 @@ export default defineConfig(async () => ({
         }
       : undefined,
     watch: {
-      // 3. tell Vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+      // 3. tell Vite to ignore watching `src-tauri`, plus trees the app never
+      //    imports (docs, the download site, build output, agent/CDP scratch)
+      ignored: [
+        "**/src-tauri/**",
+        "**/build/**",
+        "**/docs/**",
+        "**/web/**",
+        "**/scripts/**",
+        "**/.claude/**",
+        "**/.agents/**",
+      ],
+    },
+    // 4. transform the app shell up front so the first window paint after
+    //    `tauri dev` doesn't wait on on-demand compilation
+    warmup: {
+      clientFiles: ["./src/routes/+layout.svelte", "./src/lib/components/AppShell.svelte"],
     },
   },
 }));

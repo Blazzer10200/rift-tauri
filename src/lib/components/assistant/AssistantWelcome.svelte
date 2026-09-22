@@ -14,7 +14,7 @@
   import OpenAiConnect from "$lib/components/onboarding/OpenAiConnect.svelte";
   import { isOpenAIModel } from "$lib/state/assistant/helpers";
   import { CHATGPT, modelProviderLabel } from "$lib/state/assistant/providerDisplay";
-  import { leafName, shortPath } from "$lib/components/shell/tabsbar/helpers";
+  import { leafName, shortPath } from "$lib/utils/path";
   import { greeting, fmtAgo } from "$lib/components/workspace/hubHelpers";
   import Skeleton from "$lib/components/shell/Skeleton.svelte";
   import { bootLoad } from "$lib/state/bootLoad.svelte";

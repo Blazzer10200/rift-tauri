@@ -117,8 +117,20 @@ below are relative to that directory.
   product settings surface.
 - `components/workspace/`, `ai-health/`, `diagnostics/`, `webview/`,
   `onboarding/`, and `shell/` own the remaining screens and chrome.
-- `components/workspaces/index.ts` is the lazy screen registry. The legacy
-  `projects` ID remains only as a persisted-state migration alias.
+- `components/shell/workspaceRegistry.ts` is the lazy screen registry. The
+  legacy `projects` ID remains only as a persisted-state migration alias.
+- `components/shared/` holds generic building blocks (`Select`, `LimitBar`);
+  `utils/` holds pure helpers, including the canonical path helpers in
+  `utils/path.ts`.
+
+## Other top-level folders
+
+- `web/` is the Cloudflare Pages download site (see `web/README.md`), not part
+  of the app bundle.
+- `design-system/` holds the token source and `check-tokens.mjs`, run by
+  `npm run check`.
+- `scripts/` holds dev, verify, release, and CDP tooling; `scripts/cdp/` is
+  the live-UI bridge used by the `rift-ui` skill.
 
 ## Load-bearing invariants
 

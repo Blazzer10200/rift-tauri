@@ -61,10 +61,12 @@ $dirtyCount = @(git status --short 2>$null).Count
 Add-Result 'Repository' 'ready' "branch=$branch; changed files=$dirtyCount" $true
 
 $repoPattern = [regex]::Escape($repoRoot)
+$targetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $repoRoot 'src-tauri\target' }
+$devExePattern = '^' + [regex]::Escape((Join-Path $targetDir 'debug\rift-tauri.exe')) + '$'
 $devProcesses = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
     ($_.CommandLine -and $_.CommandLine -match $repoPattern -and
         ($_.CommandLine -match 'tauri(\.js|\.exe)?["'']?\s+dev' -or $_.CommandLine -match 'run-dev.*\.ps1')) -or
-    ($_.Name -eq 'rift-tauri.exe' -and $_.ExecutablePath -match '\\cargo-targets\\debug\\rift-tauri\.exe$')
+    ($_.Name -eq 'rift-tauri.exe' -and $_.ExecutablePath -match $devExePattern)
 })
 if ($devProcesses.Count -gt 0) {
     Add-Result 'Tauri dev' 'running' ("PID " + (($devProcesses.ProcessId | Sort-Object -Unique) -join ', '))

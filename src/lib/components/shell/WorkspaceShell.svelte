@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { WORKSPACES, type WorkspaceComponent } from "../workspaces";
+  import { WORKSPACES, type WorkspaceComponent } from "./workspaceRegistry";
   import { workspace, WORKSPACE_IDS, type WorkspaceId } from "$lib/state/workspace.svelte";
   import { onMount, untrack } from "svelte";
 

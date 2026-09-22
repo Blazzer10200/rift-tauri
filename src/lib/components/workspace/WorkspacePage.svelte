@@ -20,7 +20,7 @@
   import { assistant } from "../../state/assistant.svelte";
   import { workspace } from "../../state/workspace.svelte";
   import { goHome } from "../../state/nav";
-  import { prettyPath, leafName, shortPath } from "../shell/tabsbar/helpers";
+  import { prettyPath, leafName, shortPath } from "$lib/utils/path";
   import { projectHue } from "$lib/utils/projectHue";
   import { notify } from "../../state/toast.svelte";
   import { tooltip } from "$lib/actions/tooltip";

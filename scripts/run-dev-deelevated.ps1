@@ -55,11 +55,12 @@ function Stop-StaleDev {
   # Wait for the WebView2 singleton to FULLY exit — a surviving browser process for
   # this user-data-dir makes the next launch attach to it (missing the CDP flag).
   $t = 0
-  do {
-    Start-Sleep -Milliseconds 700
+  while ($true) {
     $n = @(Get-CimInstance Win32_Process -Filter "Name='msedgewebview2.exe'" | Where-Object { $_.CommandLine -like $DEV_UDD_GLOB }).Count
+    if ($n -eq 0 -or $t -ge 20) { break }
+    Start-Sleep -Milliseconds 700
     $t++
-  } while ($n -gt 0 -and $t -lt 20)
+  }
   if ($killed -gt 0) { Write-Output "[dev] cleaned $killed stale dev instance(s); webview singleton drained (n=$n)" }
   else { Write-Output "[dev] no stale dev instances (clean slate)" }
 }
@@ -119,14 +120,16 @@ if (Test-Elevated) {
 
 if ($WaitForCdp) {
   Write-Output "[dev] waiting for CDP :$CdpPort to bind (WebView2 must finish first paint)..."
+  # 1s cadence, two consecutive 200s = stable bind. Same ~180s ceiling as before.
   $bound = 0
-  for ($i = 0; $i -lt 60; $i++) {
+  $sw = [System.Diagnostics.Stopwatch]::StartNew()
+  while ($sw.Elapsed.TotalSeconds -lt 180) {
     try {
       $r = Invoke-WebRequest -Uri "http://127.0.0.1:$CdpPort/json/version" -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
       if ($r.StatusCode -eq 200) { $bound++; if ($bound -ge 2) { break } }
     } catch { $bound = 0 }
-    Start-Sleep -Seconds 3
+    Start-Sleep -Seconds 1
   }
-  if ($bound -ge 2) { Write-Output "[dev] OK - CDP :$CdpPort is UP (~$($i*3)s). Start a wrapper for that port if not already running." }
+  if ($bound -ge 2) { Write-Output "[dev] OK - CDP :$CdpPort is UP (~$([int]$sw.Elapsed.TotalSeconds)s). Start a wrapper for that port if not already running." }
   else { Write-Output "[dev] FAIL - CDP :$CdpPort did NOT bind in ~180s. Run: bash scripts/cdp/c.sh doctor" }
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { agentNowLine, basename, captionForGroup, captionForTool } from "./toolCaption";
 
-// basename is a deliberate sibling of tabsbar/helpers.ts::leafName — these cases
+// basename is a deliberate sibling of utils/path.ts::leafName — these cases
 // mirror leafName's vitest so the two cannot silently drift.
 describe("basename", () => {
   it("returns the last path segment for posix and windows paths", () => {

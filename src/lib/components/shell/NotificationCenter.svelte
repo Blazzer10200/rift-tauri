@@ -11,7 +11,7 @@
   import { portal } from "$lib/actions/portal";
   import { relTime as sharedRelTime } from "$lib/utils/relTime";
   import { prefersReducedMotion } from "$lib/state/accessibility.svelte";
-  import "$lib/styles/severityTone.css";
+  import "$lib/styles/severity-tone.css";
 
   let { label = "Notifications", footer = false }:
     { label?: string; footer?: boolean } = $props();

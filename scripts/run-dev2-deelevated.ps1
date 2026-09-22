@@ -29,7 +29,8 @@ $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
 $DEV2_UDD_GLOB = '*Rift?EBWebView-Dev2*'   # -like wildcard; ? matches the backslash
 $CDP_PORT = 9224
-$EXE = 'C:\cargo-targets\debug\rift-tauri.exe'
+$targetDir = if ($env:CARGO_TARGET_DIR) { $env:CARGO_TARGET_DIR } else { Join-Path $repo 'src-tauri\target' }
+$EXE = Join-Path $targetDir 'debug\rift-tauri.exe'
 
 if (-not (Test-Path $EXE)) { throw "[dev2] dev exe not found at $EXE — run instance 1's dev (which builds it) first." }
 try {

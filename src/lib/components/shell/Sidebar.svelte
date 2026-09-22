@@ -4,7 +4,7 @@
   import { assistant } from "$lib/state/assistant.svelte";
   import { shell } from "$lib/state/shell.svelte";
   import { commandPalette } from "$lib/state/command-palette.svelte";
-  import { WORKSPACES } from "../workspaces";
+  import { WORKSPACES } from "./workspaceRegistry";
   import RiftLogo from "./RiftLogo.svelte";
   import ConversationList from "./ConversationList.svelte";
   import ProjectSwitcher from "./ProjectSwitcher.svelte";

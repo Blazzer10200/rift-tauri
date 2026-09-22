@@ -29,7 +29,7 @@
   import { sliderBubble } from "$lib/actions/sliderBubble";
   import { diagnostics } from "../../state/diagnostics.svelte";
   import { workspace } from "../../state/workspace.svelte";
-  import Select from "../Select.svelte";
+  import Select from "../shared/Select.svelte";
   import PageHero from "../shared/PageHero.svelte";
   import { MODEL_OPTIONS } from "../assistant/composer/modelMatrix";
   import { CHATGPT } from "$lib/state/assistant/providerDisplay";

@@ -13,7 +13,7 @@
   import UpdateDialog from "./dialogs/UpdateDialog.svelte";
   import WorkspaceShell from "./shell/WorkspaceShell.svelte";
   import { shell } from "../state/shell.svelte";
-  import { WORKSPACES } from "./workspaces";
+  import { WORKSPACES } from "./shell/workspaceRegistry";
   import { workspace, type WorkspaceId } from "../state/workspace.svelte";
   import { browserDock } from "../state/browserDock.svelte";
   import { diagnostics } from "../state/diagnostics.svelte";

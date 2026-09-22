@@ -9,7 +9,7 @@
   import { flip } from "svelte/animate";
   import { toast } from "../state/toast.svelte";
   import { prefersReducedMotion } from "../state/accessibility.svelte";
-  import "$lib/styles/severityTone.css";
+  import "$lib/styles/severity-tone.css";
 
   const reducedMotion = prefersReducedMotion();
 

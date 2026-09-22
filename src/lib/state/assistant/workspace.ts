@@ -11,7 +11,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type { ModelSel, WorkspaceState } from "./types";
 import { loadModel } from "./helpers";
 import { notify } from "../toast.svelte";
-import { prettyPath } from "../../components/shell/tabsbar/helpers";
+import { prettyPath } from "$lib/utils/path";
 import { setWorkspaceVocabFromPaths } from "$lib/utils/autocorrect";
 
 /** Shape of the bits of AssistantStore the workspace fns mutate. Structural

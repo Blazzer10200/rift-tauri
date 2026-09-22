@@ -28,6 +28,14 @@
 - Internal cleanup: one shared limit bar replaces three copies, usage-stat
   helpers moved to `utils`, duplicated time and severity helpers consolidated,
   and the splash handoff no longer fires twice.
+- Faster development loop: an incremental Rust rebuild drops from ~13s to
+  ~6s (the library builds as `rlib` only, and dev builds carry line tables
+  instead of full debug info). Vite skips watching docs, scripts, and other
+  non-app folders and pre-warms the app shell, and `npm run cdp:dev`
+  reports a ready window a few seconds sooner.
+- Source tidy: the screen registry lives at `shell/workspaceRegistry.ts`,
+  `Select` moved to `components/shared/`, the path-helper re-export shim is
+  gone, and three unreferenced dev scripts were removed.
 
 ## v0.158.0 — Calmer chat, clearer control
 

@@ -9,7 +9,10 @@ edition = "2021"
 
 [lib]
 name = "rift_tauri_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# rlib only: Rift is Windows-desktop-only. The Tauri template's staticlib +
+# cdylib exist for mobile targets and made every dev rebuild emit and link two
+# extra artifacts nothing consumes.
+crate-type = ["rlib"]
 
 [features]
 # Default build = no native Whisper. Every other STT subsystem (mic capture,
@@ -188,3 +191,12 @@ winreg = "0.55"
 lto = "thin"
 codegen-units = 1
 strip = "symbols"
+
+# Dev-loop speed. Full debug info across ~700 crates made every link write a
+# ~325 MB PDB; line tables keep file:line in panics/backtraces for Rift's own
+# code, and dependencies carry none. `cargo test` inherits this profile.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
