@@ -90,6 +90,25 @@
   --island-border: var(--border);
   --island-fill:   color-mix(in oklab, var(--fg) 2.8%, transparent);
 
+  /* tile — the ONE machinery-block recipe INSIDE an island (tool runs, shell,
+     diffs, code blocks, agents, plans, prompts). See `.tile*` utilities below
+     and DESIGN.md §7 "Stream tiles". Consumers reference these, never re-roll. */
+  --tile-radius:       var(--radius-lg);
+  --tile-radius-inner: var(--radius-sm);   /* rows/wells nested in a tile */
+  --tile-fill:         color-mix(in oklab, var(--fg) 2.8%, transparent);
+  --tile-fill-hover:   color-mix(in oklab, var(--fg) 4%, transparent);
+  --tile-border:       var(--border);
+  --tile-border-hover: var(--border-strong);
+  --tile-border-live:  color-mix(in oklab, var(--accent) 30%, var(--border));
+  --tile-border-bad:   color-mix(in oklab, var(--danger) 40%, var(--border));
+  --tile-border-ask:   color-mix(in oklab, var(--accent) 42%, var(--border));
+  --tile-well:         color-mix(in oklab, var(--bg-inset) 70%, transparent);
+  --tile-head-pad:     7px 11px;
+  --tile-head-pad-compact: 5px 10px;
+  --tile-head-fs:      var(--fs-sm);
+  --tile-meta-fs:      10px;
+  --tile-edge:         2px;                /* stationary status edge (bad / ask) */
+
   /* shadow */
   --shadow-sm: 0 1px 2px oklch(0 0 0 / 0.40);
   --shadow:    0 4px 14px oklch(0 0 0 / 0.45);
@@ -358,6 +377,102 @@ input.slider-zoom::-webkit-slider-thumb { transform: scale(1.35); }
   background: var(--island-fill);
 }
 .island-float { box-shadow: var(--shadow-float); }
+
+/* ─── stream tiles ───────────────────────────────────────────────────────────
+   Every machinery block in a chat turn is a TILE: one shell, four variants.
+     .tile                  card — shell output, diffs, code, agents, reasoning
+     .tile.is-compact       row  — one-line tool runs (Read, Glob, Grep, quick $)
+     .tile.is-ask           prompt — needs the user (ask_user, permission, plan OK)
+     .hud-float             float — pinned HUDs + jump pill (floating tier)
+   State is STATIONARY (DESIGN §8: no traveling light): .is-live tints the
+   border; .is-bad / .is-ask add a 2px inset status edge on the left, so a
+   glance down the transcript finds failures (danger) and waits (accent).
+   Anatomy: .tile > .tile-head [.tile-glyph] [title] [.tile-meta: pills · dur ·
+   copy · .tile-chev] + optional .tile-body / .tile-well. Chevrons are
+   ChevronRight rotating 90° when open — one disclosure grammar everywhere.
+   Glyphs are neutral; color on a glyph means STATUS (live/ok/bad), never kind. */
+.tile {
+  position: relative;
+  min-width: 0;
+  border: 1px solid var(--tile-border);
+  border-radius: var(--tile-radius);
+  background: var(--tile-fill);
+  transition: border-color var(--dur-base) var(--ease-soft), background var(--dur-base) var(--ease-soft), box-shadow var(--dur-base) var(--ease-soft);
+}
+.tile:hover { border-color: var(--tile-border-hover); }
+.tile.is-live { border-color: var(--tile-border-live); }
+.tile.is-bad {
+  border-color: var(--tile-border-bad);
+  box-shadow: inset var(--tile-edge) 0 0 0 var(--danger);
+}
+.tile.is-ask {
+  border-color: var(--tile-border-ask);
+  background: color-mix(in oklab, var(--accent) 4%, var(--tile-fill));
+  box-shadow: inset var(--tile-edge) 0 0 0 var(--accent);
+}
+.tile-head {
+  display: flex; align-items: center; gap: 8px;
+  min-width: 0; width: 100%;
+  padding: var(--tile-head-pad);
+  font: inherit; font-size: var(--tile-head-fs); color: var(--fg-2);
+  background: transparent; border: 0; text-align: left;
+}
+button.tile-head { cursor: pointer; }
+button.tile-head:disabled { cursor: default; }
+.tile.is-compact > .tile-head { padding: var(--tile-head-pad-compact); }
+.tile-head + .tile-body,
+.tile-head + .tile-well { border-top: 1px solid color-mix(in oklab, var(--tile-border) 80%, transparent); }
+.tile-well {
+  background: var(--tile-well);
+  border-bottom-left-radius: calc(var(--tile-radius) - 1px);
+  border-bottom-right-radius: calc(var(--tile-radius) - 1px);
+}
+.tile-title { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tile-meta { flex: none; display: inline-flex; align-items: center; gap: 7px; }
+/* Glyph: 18px neutral tile for the tool icon. Status tones only. */
+.tile-glyph {
+  flex: none; width: 18px; height: 18px; display: inline-grid; place-items: center;
+  border-radius: var(--radius-xs);
+  color: var(--fg-muted);
+  background: color-mix(in oklab, var(--fg) 6%, transparent);
+  transition: color var(--dur-fast), background var(--dur-fast);
+}
+.tile-glyph.is-live { color: var(--accent); background: var(--accent-soft); }
+.tile-glyph.is-ok   { color: var(--ok);     background: var(--ok-soft); }
+.tile-glyph.is-bad  { color: var(--danger); background: var(--danger-soft); }
+/* Section label inside a tile (DESIGN §3 recipe) — replaces ad-hoc 8.5px caps. */
+.tile-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-faint); }
+/* Pills — one shape, status tones. `.is-new/.is-edit/.is-del` badge file ops. */
+.tile-pill {
+  flex: none; display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--font-mono); font-size: var(--tile-meta-fs); font-weight: 600;
+  letter-spacing: 0.02em; font-variant-numeric: tabular-nums;
+  padding: 1px 7px; border-radius: 999px;
+  color: var(--fg-subtle); background: color-mix(in oklab, var(--fg) 6%, transparent);
+}
+.tile-pill.is-live, .tile-pill.is-edit { color: var(--accent); background: var(--accent-soft); }
+.tile-pill.is-ok,   .tile-pill.is-new  { color: var(--ok);     background: var(--ok-soft); }
+.tile-pill.is-bad,  .tile-pill.is-del  { color: var(--danger); background: var(--danger-soft); }
+.tile-pill.is-warn { color: var(--warn); background: var(--warn-soft); }
+.tile-dur {
+  flex: none; font-family: var(--font-mono); font-size: var(--tile-meta-fs); font-weight: 600;
+  font-variant-numeric: tabular-nums; color: var(--fg-subtle);
+}
+.tile-chev { flex: none; display: inline-flex; color: var(--fg-faint); transition: transform var(--dur-fast) var(--ease-soft), color var(--dur-fast); }
+.tile-chev.open { transform: rotate(90deg); }
+.tile-head:hover .tile-chev, .tile:hover > .tile-head .tile-chev { color: var(--fg-muted); }
+.tile-head:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); border-radius: var(--tile-radius); }
+/* Floating tier for pinned HUDs + the jump pill: frosted surface, firmer edge,
+   float shadow (DESIGN §8 island note: HUDs keep surface 84–94% + border-strong). */
+.hud-float {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  background: color-mix(in oklab, var(--surface) 94%, transparent);
+  box-shadow: var(--shadow-float);
+}
+@media (prefers-reduced-motion: reduce) {
+  .tile, .tile-glyph, .tile-chev { transition: none; }
+}
 
 /* ─── dialog shell ─── */
 /* No backdrop-filter anywhere in the dialog stack — WebView2 mis-composites it

@@ -14,8 +14,8 @@
   }
 </script>
 
-<div class="sweb">
-  <span class="sweb-ic"><Globe size={12} strokeWidth={2} /></span>
+<div class="tile is-compact sweb">
+  <span class="tile-glyph" class:is-live={pending}><Globe size={12} strokeWidth={2} /></span>
   <div class="sweb-main">
     <span class="sweb-q {pending ? 'sweb-pending' : ''}">
       {tool.kind === "fetch" ? "Fetched " : "Searched "}<b>{tool.query ?? tool.cap}</b>

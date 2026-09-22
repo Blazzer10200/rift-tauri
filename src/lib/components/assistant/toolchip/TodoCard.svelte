@@ -14,18 +14,21 @@
     todoCounts: TodoCounts;
     status: "pending" | "done" | "error";
   } = $props();
+
+  // Mirrors AgentCard/AskUserCard — glyph tone is STATUS only, never kind.
+  const glyphTone = $derived(status === "pending" ? "is-live" : status === "error" ? "is-bad" : "is-ok");
 </script>
 
-<!-- TodoWrite card head -->
-<div class="todo-head">
-  <span class="agent-icon"><ListChecks size={13} /></span>
+<!-- TodoWrite card head — shared `.tile-head` chrome + this card's own tint. -->
+<div class="tile-head todo-head">
+  <span class="todo-icon"><ListChecks size={13} /></span>
   <span class="todo-title">Tasks</span>
   <span class="todo-counts mono">
     <span class="todo-count done" use:tooltip={"completed"}>{todoCounts.done}</span>
     <span class="todo-sep">/</span>
     <span class="todo-count total" use:tooltip={"total"}>{todoCounts.total}</span>
   </span>
-  <span class="chip-status" aria-label={status === "pending" ? "Running" : status === "error" ? "Error" : "Done"}>
+  <span class="tile-glyph {glyphTone}" aria-label={status === "pending" ? "Running" : status === "error" ? "Error" : "Done"}>
     {#if status === "pending"}<Loader2 size={11} class="chip-spin" />
     {:else if status === "error"}<AlertCircle size={11} />
     {:else}<CheckCircle2 size={11} />{/if}
@@ -33,7 +36,7 @@
 </div>
 
 <!-- TodoWrite card body -->
-<div class="todo-body">
+<div class="tile-body todo-body">
   <ul class="todo-list">
     {#each todoItems as item, i (i + item.content)}
       <li class="todo-item" data-status={item.status}>
@@ -49,22 +52,14 @@
 </div>
 
 <style>
-  /* Todo head + checklist */
-  .todo-head {
-    display: flex; align-items: center; gap: 8px;
-    padding: 6px 11px;
-    border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
-    background: color-mix(in oklab, var(--accent) 6%, transparent);
-  }
-  .agent-icon {
-    display: inline-flex;
-    color: var(--accent);
-    flex-shrink: 0;
-  }
+  /* Head padding/font/hairline are the shared `.tile-head` recipe (app.css);
+     this file only owns the accent identity wash + the checklist body. */
+  .todo-head { background: color-mix(in oklab, var(--accent) 6%, transparent); }
+  .todo-icon { display: inline-flex; color: var(--fg-muted); flex-shrink: 0; }
   .todo-title {
     color: var(--fg-2);
     font-weight: 600;
-    font-size: 11px;
+    font-size: var(--fs-xs);
     letter-spacing: 0.01em;
   }
   .todo-counts {
@@ -90,8 +85,8 @@
     align-items: start;
     gap: 8px;
     padding: 3px 4px;
-    border-radius: 4px;
-    font-size: 12px;
+    border-radius: var(--radius-xs);
+    font-size: var(--fs-sm);
     line-height: 1.45;
     color: var(--fg-2);
     transition: color var(--dur-base) ease-out, opacity var(--dur-base) ease-out;
@@ -123,13 +118,8 @@
     animation: chip-spin 1.1s linear infinite;
     color: var(--accent);
   }
+  .tile-glyph :global(.chip-spin) { animation: chip-spin 1s linear infinite; }
   @keyframes chip-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
-
-  .chip-status {
-    display: inline-flex;
-    flex-shrink: 0;
-  }
-  .chip-status :global(.chip-spin) { animation: chip-spin 1s linear infinite; }
 
   .mono { font-family: var(--font-mono, monospace); }
 </style>

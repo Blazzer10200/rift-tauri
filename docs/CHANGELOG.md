@@ -33,6 +33,14 @@
   instead of full debug info). Vite skips watching docs, scripts, and other
   non-app folders and pre-warms the app shell, and `npm run cdp:dev`
   reports a ready window a few seconds sooner.
+- Chat blocks are one family now. Terminal runs, diffs, agents, plans,
+  web lookups, reasoning, code blocks, and saved-history tool chips share
+  one set of shapes, borders, headers, and badges. State is shown the same way
+  everywhere: a tinted border while something runs, a red edge when it fails,
+  and an accent edge when it needs you. File changes are labelled **new**,
+  **edit**, or **deleted** instead of a tiny coloured dot. The activity
+  summary leads with what happened and keeps time and cost quiet. The
+  floating panels and the jump-to-latest button use one frosted style.
 - Source tidy: the screen registry lives at `shell/workspaceRegistry.ts`,
   `Select` moved to `components/shared/`, the path-helper re-export shim is
   gone, and three unreferenced dev scripts were removed.

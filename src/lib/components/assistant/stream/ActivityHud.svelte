@@ -17,7 +17,7 @@
   // a streaming turn (streaming = the honest liveness signal; the turn-end
   // sweep closes every spawn + clears shellRows), then a brief linger showing
   // the settled fleet.
-  import { Bot, Check, ChevronDown, AlertCircle, Brain, Loader2, Square, Terminal, X } from "@lucide/svelte";
+  import { Bot, Check, ChevronRight, AlertCircle, Brain, Loader2, Square, Terminal, X } from "@lucide/svelte";
   import { fade } from "svelte/transition";
   import { invoke } from "@tauri-apps/api/core";
   import { agentNowLine } from "../toolCaption";
@@ -227,7 +227,7 @@
 
 <span class="ahud-sentinel" bind:this={sentinelEl} aria-hidden="true"></span>
 {#if visible}
-  <div class="ahud" class:complete={allDone && shells.length === 0} class:open bind:this={hudEl}
+  <div class="ahud hud-float" class:complete={allDone && shells.length === 0} class:open bind:this={hudEl}
     out:fade={{ duration: reduceMotion ? 0 : 160 }}>
     <div class="ahud-bar">
       <button
@@ -256,7 +256,7 @@
           {/if}
         </span>
         {#if total > 0}<span class="ahud-count">{done}/{total}</span>{/if}
-        <span class="ahud-chev" aria-hidden="true"><ChevronDown size={12} /></span>
+        <span class="tile-chev" class:open aria-hidden="true"><ChevronRight size={12} /></span>
       </button>
       {#if streaming && anyLive}
         <button class="ahud-stop" type="button" onclick={stopTurn}
@@ -280,7 +280,7 @@
                 {:else if s.isError}<AlertCircle size={12} />
                 {:else}<Check size={12} strokeWidth={2.5} />{/if}
               </span>
-              <span class="ahud-pill">{s.subagentType}</span>
+              <span class="tile-pill is-live">{s.subagentType}</span>
               <span class="ahud-desc" class:settled={!live}>{s.description}</span>
               {#if nowL}
                 <span class="ahud-now">
@@ -297,7 +297,7 @@
           <li>
             <div class="ahud-row ahud-shell">
               <span class="ahud-mark" aria-hidden="true"><Terminal size={12} /></span>
-              <span class="ahud-pill ahud-pid">PID {sh.pid}</span>
+              <span class="tile-pill">PID {sh.pid}</span>
               <span class="ahud-cmd" title={sh.cmd}>{trimCmd(shellLabel(sh.cmd), 90)}</span>
               {#if secs != null}<span class="ahud-dur">{fmtDur(secs)}</span>{/if}
               <button class="ahud-kill" type="button" onclick={() => killShell(sh.pid)}
@@ -315,23 +315,16 @@
 <style>
   .ahud-sentinel { display: none; }
 
-  /* Same glassy chrome family as .phud — this renders inside the shared
-     .hud-stack (AssistantPane), which owns centering/width/stacking. */
+  /* Frosted floating-tier shell → global .hud-float (app.css "stream tiles":
+     radius, border-strong, surface 94%, --shadow-float — same chrome family
+     as .phud). Local additions only: extra blur texture + entrance motion. */
   .ahud {
     position: relative;
     width: 100%;
-    border-radius: 12px;
-    background: color-mix(in oklch, var(--surface) 94%, transparent);
     backdrop-filter: blur(20px) saturate(150%);
     -webkit-backdrop-filter: blur(20px) saturate(150%);
-    border: 1px solid var(--border-strong);
-    /* Layered depth + top catch-light — matches .phud (shared chrome family). */
-    box-shadow:
-      inset 0 1px 0 color-mix(in oklab, var(--fg) 6%, transparent),
-      0 12px 32px -10px rgb(0 0 0 / 0.55),
-      var(--shadow-float);
     overflow: hidden;
-    animation: ahud-in var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: ahud-in var(--dur-base) var(--ease-page) both;
     transition: border-color var(--dur-base) ease-out;
     pointer-events: auto;
   }
@@ -357,7 +350,7 @@
     display: flex; align-items: center; gap: 9px;
     padding: 0 12px 0 11px;
     background: none; border: 0; cursor: pointer;
-    font-size: 12px; color: var(--fg-2); text-align: left;
+    font-size: var(--fs-sm); color: var(--fg-2); text-align: left;
   }
   .ahud-toggle:hover { background: color-mix(in oklab, var(--fg) 4%, transparent); }
   /* Whole-turn stop — quiet until hovered, then honest danger. */
@@ -367,7 +360,7 @@
     padding: 0 11px;
     background: none; border: 0; cursor: pointer;
     border-left: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
-    font-size: 11px; font-weight: 600; color: var(--fg-subtle);
+    font-size: var(--fs-xs); font-weight: 600; color: var(--fg-subtle);
     transition: color var(--dur-fast), background var(--dur-fast);
   }
   .ahud-stop:hover {
@@ -388,13 +381,10 @@
   .ahud.complete .ahud-text { color: var(--ok); font-weight: 600; }
   .ahud-count {
     flex: none;
-    font-family: var(--font-mono, monospace); font-size: 10.5px;
+    font-family: var(--font-mono, monospace); font-size: var(--tile-meta-fs);
     font-variant-numeric: tabular-nums;
     color: var(--fg-subtle);
   }
-  .ahud-chev { display: grid; place-items: center; flex: none; color: var(--fg-faint);
-    transition: transform var(--dur-fast); }
-  .ahud.open .ahud-chev { transform: rotate(180deg); }
 
   .ahud-list {
     margin: 0; padding: 5px 6px 7px;
@@ -412,20 +402,13 @@
     display: flex; align-items: center; gap: 8px;
     width: 100%; padding: 4px 6px;
     background: none; border: 0; border-radius: 7px; cursor: pointer;
-    font-size: 12px; color: var(--fg-muted); text-align: left;
+    font-size: var(--fs-sm); color: var(--fg-muted); text-align: left;
     transition: background var(--dur-fast);
   }
   .ahud-row:hover { background: color-mix(in oklab, var(--fg) 5%, transparent); }
   .ahud-mark { width: 14px; height: 14px; display: grid; place-items: center; flex: none; color: var(--status-busy); }
   .ahud-row .ahud-mark :global(.ahud-spin) { animation: ringspin 1s linear infinite; }
   li:has(.ahud-desc.settled) .ahud-mark { color: var(--ok); }
-  .ahud-pill {
-    display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 999px;
-    background: color-mix(in oklab, var(--accent) 16%, transparent);
-    border: 1px solid color-mix(in oklab, var(--accent) 32%, var(--border));
-    color: var(--accent-hover); font-size: 10px; font-weight: 600; letter-spacing: 0.02em;
-    font-family: var(--font-mono); flex: none;
-  }
   .ahud-desc {
     flex: none; min-width: 0; max-width: 34%;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -436,27 +419,22 @@
     flex: 1; min-width: 0;
     display: inline-flex; align-items: center; gap: 5px;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    color: var(--fg-subtle); font-size: 11.5px;
+    color: var(--fg-subtle); font-size: var(--fs-xs);
   }
   .ahud-now :global(svg) { flex: none; color: var(--status-busy); }
   .ahud-dur {
     flex: none; margin-left: auto;
-    font-family: var(--font-mono); font-size: 10px;
+    font-family: var(--font-mono); font-size: var(--tile-meta-fs);
     font-variant-numeric: tabular-nums; color: var(--fg-faint);
   }
 
   /* Shell rows — same rhythm as agent rows; div (not button: the kill nests). */
   .ahud-shell { cursor: default; }
   .ahud-shell .ahud-mark { color: var(--fg-subtle); }
-  .ahud-pid {
-    background: color-mix(in oklab, var(--fg) 7%, transparent);
-    border-color: var(--border);
-    color: var(--fg-muted);
-  }
   .ahud-cmd {
     flex: 1; min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    font-family: var(--font-mono); font-size: 11px; color: var(--fg-2);
+    font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-2);
   }
   .ahud-kill {
     flex: none;

@@ -51,7 +51,7 @@
   // over the body — shiki-highlighted, diff, unsupported-lang, and bare
   // fences alike, so blocks read as one family regardless of grammar.
   function codeHead(label: string, lineCount: number): string {
-    return `<div class="shiki-head"><span class="shiki-lang">${esc(label)}</span><span class="shiki-sep">·</span><span class="shiki-lines">${lineCount} line${lineCount === 1 ? "" : "s"}</span><span class="code-copy" role="button" tabindex="0" aria-label="Copy code">Copy</span></div>`;
+    return `<div class="shiki-head tile-head"><span class="shiki-lang tile-label">${esc(label)}</span><span class="shiki-sep">·</span><span class="shiki-lines tile-dur">${lineCount} line${lineCount === 1 ? "" : "s"}</span><span class="code-copy" role="button" tabindex="0" aria-label="Copy code">Copy</span></div>`;
   }
   function codeLines(text: string): number {
     return text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
@@ -102,7 +102,7 @@
             }
             return `<span class="${cls}"><span class="diff-gutter old">${oldCol}</span><span class="diff-gutter new">${newCol}</span><span class="diff-code">${code}</span></span>`;
           });
-          return `<div class="shiki-block" data-lang="diff">${codeHead("diff", codeLines(text))}<pre class="diff-block"><code>${rows.join("")}</code></pre></div>`;
+          return `<div class="shiki-block tile" data-lang="diff">${codeHead("diff", codeLines(text))}<pre class="diff-block"><code>${rows.join("")}</code></pre></div>`;
         }
         // Supported language → shiki-highlighted body. Unsupported language
         // or highlighter not warm yet → plain escaped body, but SAME wrapper
@@ -112,10 +112,10 @@
         const html = norm ? highlightSync(text, lang) : null;
         const lineCount = codeLines(text);
         if (html) {
-          return `<div class="shiki-block" data-lang="${esc(norm!)}">${codeHead(norm!, lineCount)}${html}</div>`;
+          return `<div class="shiki-block tile" data-lang="${esc(norm!)}">${codeHead(norm!, lineCount)}${html}</div>`;
         }
         const label = (norm ?? (lang ?? "").trim().split(/\s+/)[0].slice(0, 24)) || "text";
-        return `<div class="shiki-block" data-lang="${esc(label)}">${codeHead(label, lineCount)}<pre class="shiki"><code>${esc(text)}</code></pre></div>`;
+        return `<div class="shiki-block tile" data-lang="${esc(label)}">${codeHead(label, lineCount)}<pre class="shiki"><code>${esc(text)}</code></pre></div>`;
       },
       codespan({ text }: { text: string }) {
         // Clickable file path — a code span that LOOKS like a workspace path
@@ -758,19 +758,22 @@
     line-height: inherit;
     white-space: nowrap;
   }
-  /* Legacy / untagged code blocks (no shiki grammar) — share the modern Rift
-     code surface so they match shiki blocks + terminal output exactly. */
+  /* Legacy / untagged code blocks (no shiki grammar) — same tile chrome as
+     .shiki-block (border/radius from --tile-* tokens, see app.css "stream
+     tiles"), so both code surfaces match exactly. No head bar here, so the
+     well tone (DESIGN §7 "wells sit on --bg-inset") stands in for the tile
+     fill: content sinks straight into the block. */
   .md :global(pre) {
     position: relative;
     margin: 14px 0;
     padding: 12px 15px;
-    background: color-mix(in oklab, var(--fg) 2%, transparent);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-xl);
+    background: var(--tile-well);
+    border: 1px solid var(--tile-border);
+    border-radius: var(--tile-radius);
     overflow-x: auto;
     font-size: var(--fs-sm);
     line-height: 1.6;
-    box-shadow: var(--shadow), inset 0 1px 0 color-mix(in oklch, #fff 4%, transparent);
+    box-shadow: var(--shadow), inset 0 1px 0 color-mix(in oklch, white 4%, transparent);
     animation: code-rise var(--dur-rise) var(--ease-page) both;
   }
   .md :global(pre code) {
@@ -942,10 +945,10 @@
   .md :global(blockquote) {
     margin: 6px 0;
     padding: 4px 12px;
-    border-left: 3px solid var(--accent);
+    border-left: var(--tile-edge) solid var(--accent);
     color: var(--fg-2);
     background: var(--accent-soft);
-    border-radius: 0 6px 6px 0;
+    border-radius: 0 var(--tile-radius-inner) var(--tile-radius-inner) 0;
   }
   .md :global(blockquote > p) { margin: 0; }
   .md :global(hr) {
@@ -1010,8 +1013,8 @@
     gap: 10px;
     margin: 8px 0;
     padding: 6px 12px;
-    border-left: 2px solid var(--fg-muted);
-    border-radius: 0 6px 6px 0;
+    border-left: var(--tile-edge) solid var(--fg-muted);
+    border-radius: 0 var(--tile-radius-inner) var(--tile-radius-inner) 0;
     background: color-mix(in oklch, var(--fg-muted) 7%, transparent);
   }
   .md :global(.markdown-alert > p) {
@@ -1080,16 +1083,10 @@
      ToolChip can reuse the exact same look. ─────────────────────────────── */
   .md :global(.shiki-block) {
     margin: 14px 0;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
     overflow: hidden;
-    background: color-mix(in oklab, var(--fg) 2.8%, transparent);
     position: relative;
-    box-shadow: none;
     animation: code-rise var(--dur-rise) var(--ease-page) both;
-    transition: border-color 240ms var(--ease-soft, ease-out);
   }
-  .md :global(.shiki-block:hover) { border-color: var(--border-strong); }
   @keyframes code-rise {
     from { opacity: 0; transform: translateY(6px) scale(0.992); }
     to   { opacity: 1; transform: translateY(0) scale(1); }
@@ -1101,10 +1098,8 @@
      no accent pill, copy reveals on hover. Chrome never takes color — the code
      body is the content and owns the tint. */
   .md :global(.shiki-head) {
-    display: flex;
-    align-items: center;
     gap: 10px;
-    padding: 6px 13px 4px;
+    padding: var(--tile-head-pad);
     font-size: 9.5px;
     font-weight: 600;
     letter-spacing: 0.09em;
@@ -1112,15 +1107,11 @@
     color: var(--fg-faint);
   }
   .md :global(.shiki-lang) {
-    color: var(--fg-faint);
     font-family: var(--font-mono, ui-monospace, monospace);
   }
   .md :global(.shiki-sep) { display: none; }
   .md :global(.shiki-lines) {
-    color: var(--fg-faint);
     opacity: 0.75;
-    font-variant-numeric: tabular-nums;
-    font-family: var(--font-mono, ui-monospace, monospace);
     letter-spacing: 0.04em;
   }
   .md :global(.shiki-head .code-copy) {

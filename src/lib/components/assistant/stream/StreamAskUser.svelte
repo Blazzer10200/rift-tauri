@@ -43,6 +43,10 @@
   // Live turn, but the tool input is still streaming in (questions [] until the
   // input JSON finishes forming) — hold the buttons until there's a question.
   const askForming = $derived(!askAnswered && !askExpired && askQuestions.length === 0);
+  // Still genuinely awaiting the user — the moment the tile's is-ask (accent,
+  // stationary status edge) treatment applies. Settled (answered/expired)
+  // drops back to a plain tile so a resolved question stops reading as live.
+  const awaiting = $derived(!askAnswered && !askExpired);
 
   // The backend tool_result is plain text Claude reads ("Q: …\nA: …" pairs, or
   // a dismissal sentence). Rendering it raw in a <pre> read as an unstyled
@@ -137,246 +141,206 @@
   });
 </script>
 
-<div class="sask" class:answered={askAnswered} class:expired={askExpired} class:dismissed={askDismissed}>
-  <div class="sask-head">
+<div class="tile sask" class:is-ask={awaiting} class:answered={askAnswered} class:expired={askExpired} class:dismissed={askDismissed}>
+  <div class="tile-head sask-head">
     <span class="sask-head-ic" aria-hidden="true">
       {#if askAnswered && !askDismissed}<Check size={13} strokeWidth={2.5} />
       {:else if !askAnswered && !askExpired}<span class="sask-dot"></span>
       {:else}<MessageCircleQuestion size={13} />{/if}
     </span>
-    <span class="sask-head-label">{askAnswered ? (askDismissed ? "Dismissed" : "Your answer") : askExpired ? "Question expired" : "Rift needs your input"}</span>
+    <span class="tile-label sask-head-label">{askAnswered ? (askDismissed ? "Dismissed" : "Your answer") : askExpired ? "Question expired" : "Rift needs your input"}</span>
   </div>
 
-  {#if askExpired}
-    <!-- Inert post-mortem: keep the question readable, drop every affordance. -->
-    {#each askQuestions as q, qi (qi)}
-      <div class="sask-question">
-        {#if q.header}<span class="sask-q-header">{q.header}</span>{/if}
-        <div class="sask-q-text">{q.question}</div>
-      </div>
-    {/each}
-    <div class="sask-hint">The turn ended before this was answered — reply in chat to continue.</div>
-  {:else if askAnswered}
-    {#if askDismissed}
-      <div class="sask-empty">Dismissed — no answer given.</div>
-    {:else if answeredPairs.length > 0}
-      {#each answeredPairs as p (p.question)}
-        <div class="sask-answered">
-          {#if p.header}<span class="sask-q-header">{p.header}</span>{/if}
-          <div class="sask-q-text">{p.question}</div>
-          <div class="sask-chips">
-            {#each p.answers as a, ai (ai)}
-              <span class="sask-chip"><Check size={11} strokeWidth={2.5} />{a}</span>
-            {/each}
-          </div>
+  <div class="sask-body tile-body">
+    {#if askExpired}
+      <!-- Inert post-mortem: keep the question readable, drop every affordance. -->
+      {#each askQuestions as q, qi (qi)}
+        <div class="sask-question">
+          {#if q.header}<span class="tile-pill is-live">{q.header}</span>{/if}
+          <div class="sask-q-text">{q.question}</div>
         </div>
       {/each}
+      <div class="sask-hint">The turn ended before this was answered — reply in chat to continue.</div>
+    {:else if askAnswered}
+      {#if askDismissed}
+        <div class="sask-empty">Dismissed — no answer given.</div>
+      {:else if answeredPairs.length > 0}
+        {#each answeredPairs as p (p.question)}
+          <div class="sask-answered">
+            {#if p.header}<span class="tile-pill is-live">{p.header}</span>{/if}
+            <div class="sask-q-text">{p.question}</div>
+            <div class="sask-chips">
+              {#each p.answers as a, ai (ai)}
+                <span class="tile-pill is-ok"><Check size={11} strokeWidth={2.5} />{a}</span>
+              {/each}
+            </div>
+          </div>
+        {/each}
+      {:else}
+        <div class="sask-empty">(no answer recorded)</div>
+      {/if}
+    {:else if askForming}
+      <div class="sask-empty">Preparing the question…</div>
     {:else}
-      <div class="sask-empty">(no answer recorded)</div>
-    {/if}
-  {:else if askForming}
-    <div class="sask-empty">Preparing the question…</div>
-  {:else}
-    {#each askQuestions as q, qi (qi)}
-      <div class="sask-question">
-        {#if q.header}<span class="sask-q-header">{q.header}</span>{/if}
-        <div class="sask-q-text">{q.question}</div>
-        <div class="sask-options" role={q.multiSelect ? "group" : "radiogroup"} aria-label={q.question}>
-          {#each q.options as opt, oi (oi)}
-            {@const selected =
+      {#each askQuestions as q, qi (qi)}
+        <div class="sask-question">
+          {#if q.header}<span class="tile-pill is-live">{q.header}</span>{/if}
+          <div class="sask-q-text">{q.question}</div>
+          <div class="sask-options" role={q.multiSelect ? "group" : "radiogroup"} aria-label={q.question}>
+            {#each q.options as opt, oi (oi)}
+              {@const selected =
+                q.multiSelect
+                  ? (askMultiSet[qi] ?? new Set()).has(oi)
+                  : askSingleIdx[qi] === oi}
+              <button
+                type="button"
+                class="sask-option"
+                class:selected
+                disabled={askSubmitting || askAnswered}
+                role={q.multiSelect ? "checkbox" : "radio"}
+                aria-checked={selected}
+                onclick={() => {
+                  if (q.multiSelect) {
+                    toggleAskMulti(qi, oi);
+                  } else {
+                    askSingleIdx = askSingleIdx.map((v, i) => (i === qi ? oi : v));
+                  }
+                }}
+              >
+                <span class="sask-marker" aria-hidden="true">
+                  {#if q.multiSelect}
+                    {#if selected}<CheckCircle2 size={12} />{:else}<Square size={12} />{/if}
+                  {:else}
+                    {#if selected}<CheckCircle2 size={12} />{:else}<Circle size={12} />{/if}
+                  {/if}
+                </span>
+                <span class="sask-opt-text">
+                  <span class="sask-opt-label">{opt.label}</span>
+                  {#if opt.description}
+                    <span class="sask-opt-desc">{opt.description}</span>
+                  {/if}
+                </span>
+              </button>
+            {/each}
+            <!-- "Other" — auto-added per AskUserQuestion contract.
+                 {#if true} scopes the {@const} (required: @const must be an
+                 immediate child of a block, not a sibling after the {#each}). -->
+            {#if true}
+            {@const otherSelected =
               q.multiSelect
-                ? (askMultiSet[qi] ?? new Set()).has(oi)
-                : askSingleIdx[qi] === oi}
+                ? (askMultiSet[qi] ?? new Set()).has(OTHER_IDX)
+                : askSingleIdx[qi] === OTHER_IDX}
             <button
               type="button"
-              class="sask-option"
-              class:selected
+              class="sask-option sask-option-other"
+              class:selected={otherSelected}
               disabled={askSubmitting || askAnswered}
               role={q.multiSelect ? "checkbox" : "radio"}
-              aria-checked={selected}
+              aria-checked={otherSelected}
               onclick={() => {
                 if (q.multiSelect) {
-                  toggleAskMulti(qi, oi);
+                  toggleAskMulti(qi, OTHER_IDX);
                 } else {
-                  askSingleIdx = askSingleIdx.map((v, i) => (i === qi ? oi : v));
+                  askSingleIdx = askSingleIdx.map((v, i) => (i === qi ? OTHER_IDX : v));
                 }
               }}
             >
               <span class="sask-marker" aria-hidden="true">
                 {#if q.multiSelect}
-                  {#if selected}<CheckCircle2 size={12} />{:else}<Square size={12} />{/if}
+                  {#if otherSelected}<CheckCircle2 size={12} />{:else}<Square size={12} />{/if}
                 {:else}
-                  {#if selected}<CheckCircle2 size={12} />{:else}<Circle size={12} />{/if}
+                  {#if otherSelected}<CheckCircle2 size={12} />{:else}<Circle size={12} />{/if}
                 {/if}
               </span>
               <span class="sask-opt-text">
-                <span class="sask-opt-label">{opt.label}</span>
-                {#if opt.description}
-                  <span class="sask-opt-desc">{opt.description}</span>
-                {/if}
+                <span class="sask-opt-label">Other (custom)</span>
               </span>
             </button>
-          {/each}
-          {#if true}
-          {@const otherSelected =
-            q.multiSelect
-              ? (askMultiSet[qi] ?? new Set()).has(OTHER_IDX)
-              : askSingleIdx[qi] === OTHER_IDX}
-          <button
-            type="button"
-            class="sask-option sask-option-other"
-            class:selected={otherSelected}
-            disabled={askSubmitting || askAnswered}
-            role={q.multiSelect ? "checkbox" : "radio"}
-            aria-checked={otherSelected}
-            onclick={() => {
-              if (q.multiSelect) {
-                toggleAskMulti(qi, OTHER_IDX);
-              } else {
-                askSingleIdx = askSingleIdx.map((v, i) => (i === qi ? OTHER_IDX : v));
-              }
-            }}
-          >
-            <span class="sask-marker" aria-hidden="true">
-              {#if q.multiSelect}
-                {#if otherSelected}<CheckCircle2 size={12} />{:else}<Square size={12} />{/if}
-              {:else}
-                {#if otherSelected}<CheckCircle2 size={12} />{:else}<Circle size={12} />{/if}
-              {/if}
-            </span>
-            <span class="sask-opt-text">
-              <span class="sask-opt-label">Other (custom)</span>
-            </span>
-          </button>
-          {#if otherSelected}
-            <input
-              type="text"
-              class="sask-other-input"
-              placeholder="Type your answer…"
-              disabled={askSubmitting || askAnswered}
-              bind:value={askOtherText[qi]}
-            />
-          {/if}
-          {/if}
+            {#if otherSelected}
+              <input
+                type="text"
+                class="sask-other-input"
+                placeholder="Type your answer…"
+                disabled={askSubmitting || askAnswered}
+                bind:value={askOtherText[qi]}
+              />
+            {/if}
+            {/if}
+          </div>
         </div>
+      {/each}
+      <!-- In-card action bar (DESIGN §7): one solid primary, quiet secondary —
+           reuses the same perm-btn-family idiom as PermissionBar/StreamExitPlan. -->
+      <div class="sask-actions">
+        <button
+          type="button"
+          class="sask-btn cancel"
+          disabled={askSubmitting || !askRequestId}
+          onclick={cancelAskUser}
+        >Dismiss</button>
+        <button
+          type="button"
+          class="sask-btn submit"
+          disabled={!askCanSubmit || askSubmitting || !askRequestId}
+          onclick={submitAskUser}
+        >
+          {#if askSubmitting}<Loader2 size={11} class="chip-spin" /> Sending…
+          {:else}Submit{/if}
+        </button>
       </div>
-    {/each}
-    <div class="sask-actions">
-      <button
-        type="button"
-        class="sask-btn cancel"
-        disabled={askSubmitting || !askRequestId}
-        onclick={cancelAskUser}
-      >Dismiss</button>
-      <button
-        type="button"
-        class="sask-btn submit"
-        disabled={!askCanSubmit || askSubmitting || !askRequestId}
-        onclick={submitAskUser}
-      >
-        {#if askSubmitting}<Loader2 size={11} class="chip-spin" /> Sending…
-        {:else}Submit{/if}
-      </button>
-    </div>
-    {#if askError}
-      <div class="sask-hint" style="color:var(--danger)">{askError}</div>
-    {:else if !askRequestId}
-      <div class="sask-hint">Connecting to the chat session…</div>
-    {:else if askQuestions.length === 1}
-      <div class="sask-hint">Or just type in the composer below — your message becomes the answer.</div>
+      {#if askError}
+        <div class="sask-hint" style="color:var(--danger)">{askError}</div>
+      {:else if !askRequestId}
+        <div class="sask-hint">Connecting to the chat session…</div>
+      {:else if askQuestions.length === 1}
+        <div class="sask-hint">Or just type in the composer below — your message becomes the answer.</div>
+      {/if}
     {/if}
-  {/if}
+  </div>
 </div>
 
 <style>
-  /* The one card the turn is blocked on — same tile family as every block,
-     with the live-border accent tint (shell "running" language) instead of a
-     gradient panel. Liveness = breathing dot + warm hairline, not a glow. */
+  /* The one card the turn is blocked on — global `tile` shell (border/radius/
+     fill/hover from app.css "stream tiles"). `.is-ask` (awaiting) adds the
+     accent stationary status edge; settled (answered/expired) drops it and
+     reads as a plain quiet tile — a resolved question must not keep competing
+     with the live conversation below it (DESIGN §8: stationary state only). */
   .sask {
-    display: flex;
-    flex-direction: column;
-    gap: 11px;
     margin: 10px 0;
-    padding: 12px 14px 13px;
-    border: 1px solid color-mix(in oklab, var(--accent) 32%, var(--border));
-    border-radius: var(--radius-lg);
-    background: color-mix(in oklab, var(--fg) 2.8%, transparent);
-    transition: border-color 240ms var(--ease-soft, ease-out);
     animation: blockIn var(--dur-base) var(--ease-page) both;
   }
-  /* Answered: drop the call-to-action accent, settle into a quiet "done" card. */
-  .sask.answered,
-  .sask.expired {
-    border-color: var(--border, color-mix(in oklab, var(--fg) 12%, transparent));
-    background: color-mix(in oklab, var(--fg) 3%, transparent);
-    box-shadow: none;
-  }
-  /* Expired: everything demotes to muted — a dead question must not compete
-     with the live conversation below it. */
-  .sask.expired .sask-head { color: var(--fg-muted, color-mix(in oklab, var(--fg) 45%, transparent)); }
-  .sask.expired .sask-head-ic {
-    color: var(--fg-muted, color-mix(in oklab, var(--fg) 45%, transparent));
-    background: color-mix(in oklab, var(--fg) 7%, transparent);
-  }
-  .sask.expired .sask-q-header {
-    color: var(--fg-muted, color-mix(in oklab, var(--fg) 45%, transparent));
-    background: color-mix(in oklab, var(--fg) 7%, transparent);
-  }
-  .sask.expired .sask-q-text { color: var(--fg-2, color-mix(in oklab, var(--fg) 62%, transparent)); }
-  /* Dismissed: answered-quiet card, but no green "success" tint — a dismissal
-     is neutral, not an achievement. */
-  .sask.dismissed .sask-head-ic {
-    color: var(--fg-muted, color-mix(in oklab, var(--fg) 45%, transparent));
-    background: color-mix(in oklab, var(--fg) 7%, transparent);
-  }
 
-  /* card header — quiet uppercase eyebrow + breathing dot, same status
-     vocabulary as the stream footer. */
-  .sask-head {
-    display: flex; align-items: center; gap: 8px;
-    font-size: 10px; font-weight: 600;
-    letter-spacing: 0.08em; text-transform: uppercase;
-    color: var(--accent);
-  }
-  .sask.answered .sask-head { color: var(--fg-2, color-mix(in oklab, var(--fg) 62%, transparent)); }
+  /* card header — quiet eyebrow (tile-label recipe) + breathing dot while
+     awaiting; settles to the tile-head default (fg-2) once resolved. */
+  .sask-head-label { color: var(--accent); }
+  .sask.answered .sask-head-label,
+  .sask.expired .sask-head-label { color: var(--fg-2); }
   .sask-head-ic {
     display: grid; place-items: center; flex: none;
     color: var(--accent);
   }
   .sask.answered .sask-head-ic { color: var(--ok); }
+  .sask.expired .sask-head-ic,
+  .sask.dismissed .sask-head-ic { color: var(--fg-muted); }
   .sask-dot {
     width: 6px; height: 6px; border-radius: 50%; display: block;
     background: var(--accent);
     animation: streamLivePulse var(--pulse-live) ease-out infinite;
   }
 
+  .sask-body {
+    padding: 11px 14px 13px;
+    display: flex; flex-direction: column;
+    gap: 11px;
+  }
+
   /* answered summary — chips, not a monospace dump */
   .sask-answered { display: flex; flex-direction: column; gap: 6px; }
   .sask-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 1px; }
-  .sask-chip {
-    display: inline-flex; align-items: center; gap: 5px;
-    padding: 3px 9px 3px 7px;
-    font-size: 12px; line-height: 1.3;
-    border-radius: 999px;
-    color: var(--fg, inherit);
-    border: 1px solid color-mix(in oklab, var(--ok) 40%, transparent);
-    background: color-mix(in oklab, var(--ok) 11%, transparent);
-  }
-  .sask-chip :global(svg) { color: var(--ok); flex: none; }
+  .sask-chips :global(svg) { color: var(--ok); flex: none; }
 
   .sask-question { display: flex; flex-direction: column; gap: 6px; }
-  .sask-q-header {
-    align-self: flex-start;
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    padding: 2px 7px;
-    border-radius: 5px;
-    color: var(--accent);
-    background: var(--accent-soft);
-  }
-  .sask-q-text { font-size: 13.5px; font-weight: 500; color: var(--fg, inherit); }
+  .sask-q-text { font-size: var(--fs-md); font-weight: 500; color: var(--fg, inherit); }
   .sask-options { display: flex; flex-direction: column; gap: 6px; }
   /* Options are tint tiles inside the island (one level deep, per DESIGN §8) —
      quiet at rest, accent only on the picked one. */
@@ -388,7 +352,7 @@
     text-align: left;
     padding: 8px 11px;
     border: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
-    border-radius: 8px;
+    border-radius: var(--radius);
     background: color-mix(in oklab, var(--fg) 2.5%, transparent);
     cursor: pointer;
     transition: border-color var(--dur-fast), background var(--dur-fast);
@@ -406,23 +370,23 @@
   .sask-option:hover:not(:disabled) .sask-marker { color: var(--fg-subtle); }
   .sask-option.selected .sask-marker { color: var(--accent); animation: dotPop 420ms var(--ease-spring, var(--ease-page)) both; }
   .sask-opt-text { display: flex; flex-direction: column; gap: 2px; }
-  .sask-opt-label { font-size: 12.5px; color: var(--fg, inherit); }
-  .sask-opt-desc { font-size: 11px; color: var(--fg-2, color-mix(in oklab, var(--fg) 60%, transparent)); }
+  .sask-opt-label { font-size: var(--fs-sm); color: var(--fg, inherit); }
+  .sask-opt-desc { font-size: var(--fs-xs); color: var(--fg-2, color-mix(in oklab, var(--fg) 60%, transparent)); }
   .sask-other-input {
     width: 100%;
     padding: 7px 10px;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     border: 1px solid var(--accent);
-    border-radius: 8px;
+    border-radius: var(--radius);
     background: var(--bg-0, transparent);
     color: var(--fg, inherit);
   }
   .sask-actions { display: flex; gap: 8px; justify-content: flex-end; }
   .sask-btn {
     padding: 6px 14px;
-    font-size: 12px;
+    font-size: var(--fs-sm);
     font-weight: 500;
-    border-radius: 8px;
+    border-radius: var(--radius);
     border: 1px solid transparent;
     cursor: pointer;
     display: inline-flex;
@@ -436,6 +400,9 @@
   }
   .sask-btn.submit { background: var(--accent); color: var(--accent-fg); }
   .sask-btn:disabled { opacity: 0.5; cursor: default; }
-  .sask-hint { font-size: 11px; color: var(--fg-2, color-mix(in oklab, var(--fg) 55%, transparent)); }
-  .sask-empty { font-size: 12px; color: var(--fg-2, inherit); font-style: italic; }
+  .sask-btn.submit :global(.chip-spin) { animation: sask-spin 1s linear infinite; }
+  @keyframes sask-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .sask-btn.submit :global(.chip-spin) { animation: none; } }
+  .sask-hint { font-size: var(--fs-xs); color: var(--fg-2, color-mix(in oklab, var(--fg) 55%, transparent)); }
+  .sask-empty { font-size: var(--fs-sm); color: var(--fg-2, inherit); font-style: italic; }
 </style>

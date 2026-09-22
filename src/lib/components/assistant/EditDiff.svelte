@@ -213,6 +213,27 @@
     return { adds, dels };
   });
 
+  // File-op kind for the header badge (2026-09-22 tile migration — Created vs
+  // Edited vs Deleted used to be only the +N/−N counts, easy to miss at a
+  // glance). Unified diffs (Codex) carry an explicit add/update/delete kind;
+  // old/new_string diffs only ever create (Write) or edit (Edit/MultiEdit
+  // never delete a whole file through this shape).
+  const opKind = $derived.by<"new" | "edit" | "del">(() => {
+    if (typeof input.unified_diff === "string") {
+      const rawKind = input.codex_diff_kind;
+      if (rawKind === "add") return "new";
+      if (rawKind === "delete") return "del";
+      return "edit";
+    }
+    const isWrite = typeof input.content === "string" && !input.new_string;
+    return isWrite ? "new" : "edit";
+  });
+  const opPill = $derived(
+    opKind === "new" ? { cls: "is-new", label: "new" }
+    : opKind === "del" ? { cls: "is-del", label: "deleted" }
+    : { cls: "is-edit", label: "edit" },
+  );
+
   // Small edits auto-expand so the change is visible at a glance — hiding a
   // 1-line edit behind a chevron is worse than just showing it. Large diffs
   // (>SMALL_DIFF changed lines) stay collapsed so they don't eat the column;
@@ -348,12 +369,12 @@
 </script>
 
 {#if pairs}
-  <div class="edit-diff" class:compact class:collapsed={!expanded} class:embedded={hideHead}>
+  <div class="edit-diff tile" class:compact class:collapsed={!expanded} class:embedded={hideHead}>
     {#if !compact && !hideHead && filePath}
-      <div class="edit-head">
+      <div class="tile-head">
         <button
           type="button"
-          class="edit-chev"
+          class="tile-chev"
           class:open={expanded}
           onclick={toggleExpanded}
           use:tooltip={expanded ? "Collapse diff" : "Show diff"}
@@ -366,6 +387,7 @@
           {#if dirLabel}<span class="dir">{dirLabel}</span>{/if}<span class="name">{baseName}</span>
           <CornerDownLeft size={11} class="edit-open" />
         </button>
+        <span class="tile-pill {opPill.cls}">{opPill.label}</span>
         {#if lang}<span class="edit-lang mono">{lang}</span>{/if}
         <span class="edit-head-right">
           <span class="edit-counts mono">
@@ -381,7 +403,7 @@
       </div>
     {/if}
     {#if expanded}
-      <div class="diff-body" class:no-nums={!numbered} transition:slide={{ duration: reducedMotion ? 0 : 200 }}>
+      <div class="diff-body tile-well" class:no-nums={!numbered} transition:slide={{ duration: reducedMotion ? 0 : 200 }}>
         {#each visibleLines as l, li (li)}
           {#if l.kind === "meta"}
             <div class="diff-meta" style="--ri: {Math.min(li, 14)}">{l.text}</div>
@@ -412,20 +434,18 @@
 {/if}
 
 <style>
+  /* Card chrome (border/radius/fill/hover) comes from the global `.tile`
+     recipe (app.css "stream tiles") — this block only keeps what the recipe
+     doesn't cover: the diff font-size var, spacing, and overflow clipping. */
   .edit-diff {
     --diff-fs: 12px;
     margin: 8px 0;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg, 10px);
     overflow: hidden;
-    background: color-mix(in oklab, var(--fg) 2.8%, transparent);
-    transition: border-color 240ms var(--ease-soft, ease-out);
   }
-  .edit-diff:hover { border-color: var(--border-strong); }
   .edit-diff.compact {
     --diff-fs: 10px;
     margin: 0;
-    border-radius: 8px;
+    border-radius: var(--tile-radius-inner);
   }
   /* Header-suppressed (hideHead) — no card chrome, the host owns it. */
   .edit-diff.embedded {
@@ -437,33 +457,19 @@
   .edit-diff.embedded .diff-body { max-height: none; }
 
   /* ── Breadcrumb header ─────────────────────────────────────────────────── */
-  /* Flat header over the inset well — same two-tone as the reskinned shell. */
-  .edit-head {
-    display: flex; align-items: center; gap: 8px;
-    width: 100%;
-    padding: 7px 11px 5px;
-    background: transparent;
-    border: 0;
-    border-bottom: 1px solid var(--border);
-    font: inherit;
-    text-align: left;
-  }
-  .edit-diff.collapsed .edit-head { border-bottom-color: transparent; }
-  .edit-chev {
-    display: inline-flex;
+  /* Layout/spacing/color come from `.tile-head`; the bottom separator is the
+     global `.tile-head + .tile-well` auto-border, so it only appears when a
+     body actually follows (collapsed → no body → no stray rule). */
+  /* Chevron look (color/hover/rotate/transition) comes from global
+     `.tile-chev`; only the button reset + focus ring are local. */
+  .tile-chev {
     padding: 0; border: 0; background: transparent;
-    color: var(--fg-faint);
-    flex-shrink: 0;
     cursor: pointer;
-    transition: transform var(--dur-fast) ease, color var(--dur-fast) ease;
   }
-  .edit-chev:hover { color: var(--fg-muted); }
-  .edit-chev.open { transform: rotate(90deg); }
-  .edit-chev:focus-visible {
+  .tile-chev:focus-visible {
     outline: 2px solid color-mix(in oklab, var(--accent) 60%, transparent);
     outline-offset: 2px; border-radius: 4px;
   }
-  @media (prefers-reduced-motion: reduce) { .edit-chev { transition: color var(--dur-fast) ease; } }
 
   .edit-crumb {
     display: inline-flex; align-items: center; gap: 6px;
@@ -531,6 +537,7 @@
   .ct-del { color: var(--danger); }
 
   /* ── Unified body ──────────────────────────────────────────────────────── */
+  /* Background/bottom-radius come from global `.tile-well`. */
   .diff-body {
     padding: 6px 0;
     font-family: var(--font-mono, monospace);
@@ -538,10 +545,13 @@
     line-height: 1.65;
     max-height: 480px;
     overflow: auto;
-    background: var(--bg-inset);
   }
   .edit-diff.embedded .diff-body { background: transparent; }
-  .edit-diff.compact .diff-body { max-height: 280px; }
+  .edit-diff.compact .diff-body {
+    max-height: 280px;
+    border-bottom-left-radius: calc(var(--tile-radius-inner) - 1px);
+    border-bottom-right-radius: calc(var(--tile-radius-inner) - 1px);
+  }
 
   .diff-line {
     display: grid;

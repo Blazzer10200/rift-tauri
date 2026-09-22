@@ -3,7 +3,7 @@
   // floating at the top of the conversation, so the plan never scrolls away
   // with the stream. Collapsed: icon + current task + progress + count.
   // Click expands the full checklist. All-done → brief green linger, then gone.
-  import { Check, ChevronDown, ListChecks } from "@lucide/svelte";
+  import { Check, ChevronRight, ListChecks } from "@lucide/svelte";
   import { fade } from "svelte/transition";
   import { tasksToPlanItems } from "./streamModel";
   import type { TabState } from "$lib/state/assistant.svelte";
@@ -169,7 +169,7 @@
 
 <span class="phud-sentinel" bind:this={sentinelEl} aria-hidden="true"></span>
 {#if visible}
-  <div class="phud" class:complete={allDone} class:open bind:this={hudEl}
+  <div class="phud hud-float" class:complete={allDone} class:open bind:this={hudEl}
     out:fade={{ duration: reduceMotion ? 0 : 160 }}>
     <button
       class="phud-bar"
@@ -190,7 +190,7 @@
       <span class="phud-text">{allDone ? "Plan complete" : activeText}</span>
       <span class="phud-track"><span class="phud-fill" style="width:{pct}%"></span></span>
       <span class="phud-count">{done}/{total}</span>
-      <span class="phud-chev" aria-hidden="true"><ChevronDown size={12} /></span>
+      <span class="tile-chev" class:open aria-hidden="true"><ChevronRight size={12} /></span>
     </button>
     {#if open}
       <ul class="phud-list">
@@ -214,24 +214,17 @@
 
   /* Positioning moved to the shared .hud-stack in AssistantPane (2026-07-08,
      ActivityHud arrival) — the stack owns centering/width/z so plan + agent bars
-     stack with a gap instead of overlapping at the same absolute spot. */
+     stack with a gap instead of overlapping at the same absolute spot.
+     Frosted floating-tier shell → global .hud-float (app.css "stream tiles":
+     radius, border-strong, surface 94%, --shadow-float — same chrome family
+     as .ahud). Local additions only: extra blur texture + entrance motion. */
   .phud {
     position: relative;
     width: 100%;
-    border-radius: 12px;
-    background: color-mix(in oklch, var(--surface) 94%, transparent);
     backdrop-filter: blur(20px) saturate(150%);
     -webkit-backdrop-filter: blur(20px) saturate(150%);
-    border: 1px solid var(--border-strong);
-    /* Layered depth: inner top highlight (glass catch-light) + deep ambient +
-       the shared float shadow — the 84%-surface single-shadow version melted
-       into the stream behind it. */
-    box-shadow:
-      inset 0 1px 0 color-mix(in oklab, var(--fg) 6%, transparent),
-      0 12px 32px -10px rgb(0 0 0 / 0.55),
-      var(--shadow-float);
     overflow: hidden;
-    animation: phud-in var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: phud-in var(--dur-base) var(--ease-page) both;
     transition: border-color var(--dur-base) ease-out;
   }
   /* Accent hairline along the top edge — the "live instrument" signature. */
@@ -255,7 +248,7 @@
     display: flex; align-items: center; gap: 9px;
     width: 100%; height: 32px; padding: 0 12px 0 11px;
     background: none; border: 0; cursor: pointer;
-    font-size: 12px; color: var(--fg-2); text-align: left;
+    font-size: var(--fs-sm); color: var(--fg-2); text-align: left;
     transition: background var(--dur-fast);
   }
   .phud-bar:hover { background: color-mix(in oklab, var(--fg) 4%, transparent); }
@@ -292,13 +285,10 @@
   .phud.complete .phud-fill { background: var(--ok); }
   .phud-count {
     flex: none;
-    font-family: var(--font-mono, monospace); font-size: 10.5px;
+    font-family: var(--font-mono, monospace); font-size: var(--tile-meta-fs);
     font-variant-numeric: tabular-nums;
     color: var(--fg-subtle);
   }
-  .phud-chev { display: grid; place-items: center; flex: none; color: var(--fg-faint);
-    transition: transform var(--dur-fast); }
-  .phud.open .phud-chev { transform: rotate(180deg); }
 
   .phud-list {
     margin: 0; padding: 6px 12px 9px;
@@ -314,7 +304,7 @@
   .phud-item {
     display: flex; align-items: center; gap: 9px;
     padding: 3px 0;
-    font-size: 12px; line-height: 1.45;
+    font-size: var(--fs-sm); line-height: 1.45;
     color: var(--fg-muted);
   }
   .phud-mark { width: 15px; height: 15px; display: grid; place-items: center; flex: none; }

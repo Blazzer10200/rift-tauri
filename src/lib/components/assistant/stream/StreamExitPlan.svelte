@@ -11,7 +11,7 @@
   // round-tripped (old CLI, race, timeout), a settled last-turn card keeps
   // Approve/Refine as send-shaped fallbacks. One component, two transports.
   import { untrack } from "svelte";
-  import { ScrollText, ChevronDown, Check, X, MessageSquareText, Loader2, Pencil } from "@lucide/svelte";
+  import { ScrollText, ChevronRight, Check, X, MessageSquareText, Loader2, Pencil } from "@lucide/svelte";
   import Markdown from "../Markdown.svelte";
   import type { StreamTool } from "./streamModel";
   import { assistant, type TabState } from "$lib/state/assistant.svelte";
@@ -112,11 +112,11 @@
   }
 </script>
 
-<div class="sxplan" class:pending>
+<div class="tile sxplan" class:pending class:is-ask={showActions}>
   <button class="sxplan-head" type="button" onclick={toggle} aria-expanded={open}>
-    <ScrollText size={14} strokeWidth={2} class={drafting ? "sxplan-write" : ""} />
+    <span class="tile-glyph" class:is-live={live}><ScrollText size={12} strokeWidth={2} class={drafting ? "sxplan-write" : ""} /></span>
     <span class="sxplan-title">{drafting ? "Drafting plan…" : live ? "Plan proposed — approve to build" : pending ? "Plan proposed — review to continue" : "Proposed plan"}</span>
-    <span class="sxplan-chev" class:open><ChevronDown size={13} strokeWidth={2.25} /></span>
+    <span class="sxplan-chev tile-chev" class:open><ChevronRight size={13} strokeWidth={2.25} /></span>
   </button>
   {#if !plan}
     <div class="sxplan-empty">Drafting plan…</div>

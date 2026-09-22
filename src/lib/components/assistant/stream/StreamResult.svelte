@@ -28,7 +28,7 @@
   });
 </script>
 
-<div class="sresult" class:ok={!running && !failed} class:bad={failed}>
+<div class="tile sresult" class:is-bad={failed} class:is-live={running}>
   <BlockHeader
     expandable={hasOut}
     expanded={open}
@@ -38,7 +38,7 @@
     copyText={hasOut ? () => stripAnsi(tool.result ?? "") : null}
   >
     {#snippet lead()}
-      <span class="sr-ic"><Icon size={12} strokeWidth={2} /></span>
+      <span class="tile-glyph" class:is-ok={!running && !failed} class:is-bad={failed} class:is-live={running}><Icon size={12} strokeWidth={2} /></span>
     {/snippet}
     {#snippet title()}
       <span class="sr-label">{tool.cap}</span>

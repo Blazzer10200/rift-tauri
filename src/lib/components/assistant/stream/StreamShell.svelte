@@ -165,7 +165,7 @@
   };
 </script>
 
-<div class="sshell" class:bad={failed} class:running>
+<div class="sshell tile" class:is-bad={failed} class:is-live={running}>
   <!-- IN: prompt glyph + command (Shiki-tinted) + the shared meta cluster. -->
   <BlockHeader
     expandable={hasOut && mode !== "minimal"}
@@ -186,8 +186,8 @@
   </BlockHeader>
 
   {#if showWait}
-    <div class="ssh-outwrap">
-      <div class="ssh-outlabel"><span>output</span></div>
+    <div class="ssh-outwrap tile-well">
+      <div class="ssh-outlabel"><span class="tile-label">output</span></div>
       <div class="ssh-wait"><span class="ssh-cursor" aria-hidden="true"></span></div>
     </div>
   {/if}
@@ -195,8 +195,8 @@
   {#if hasOut && mode !== "minimal"}
     {#if mode === "peek" && !open}
       <!-- Peek (OUT, collapsed): a few trailing lines under the output rule. -->
-      <div class="ssh-peekwrap">
-        <div class="ssh-outlabel"><span>output</span>{#if outLineCount > 0}<span class="ssh-outlabel-meta">{outLineCount} line{outLineCount === 1 ? "" : "s"}</span>{/if}{#if failed}<span class="ssh-outlabel-bad">error</span>{/if}</div>
+      <div class="ssh-peekwrap tile-well">
+        <div class="ssh-outlabel"><span class="tile-label">output</span>{#if outLineCount > 0}<span class="ssh-outlabel-meta">{outLineCount} line{outLineCount === 1 ? "" : "s"}</span>{/if}{#if failed}<span class="ssh-outlabel-bad">error</span>{/if}</div>
         <div class="ssh-peek">
           <!-- Index key, NEVER (ln): two identical trailing lines (git push "remote:",
                gh run watch reprints) threw each_key_duplicate, aborting the whole Svelte
@@ -208,8 +208,8 @@
       </div>
     {:else if open}
       <!-- OUT: the command's output, under a labeled rule so IN vs OUT is clear. -->
-      <div class="ssh-outwrap" transition:slide={{ duration: 140 }}>
-        <div class="ssh-outlabel"><span>output</span>{#if outLineCount > 0}<span class="ssh-outlabel-meta">{outLineCount} line{outLineCount === 1 ? "" : "s"}</span>{/if}{#if failed}<span class="ssh-outlabel-bad">error</span>{/if}</div>
+      <div class="ssh-outwrap tile-well" transition:slide={{ duration: 140 }}>
+        <div class="ssh-outlabel"><span class="tile-label">output</span>{#if outLineCount > 0}<span class="ssh-outlabel-meta">{outLineCount} line{outLineCount === 1 ? "" : "s"}</span>{/if}{#if failed}<span class="ssh-outlabel-bad">error</span>{/if}</div>
         <OutputBlock text={tool.result ?? ""} start={mode === "full" ? "expanded" : "collapsed"} live={running} cursor={running || ride} tone="shell" fold="head-tail" />
       </div>
     {/if}
@@ -218,35 +218,32 @@
 
 <style>
   /* A shell block reads as a mini terminal: an IN row (prompt glyph + command)
-     on a slightly raised "chrome" fill, then the OUT below it under a labeled
-     rule. The two-tone fill + the prompt glyph make input-vs-output obvious at a
-     glance. Meta cluster (pill/duration/copy/chevron) comes from BlockHeader. */
-  .sshell { display: flex; flex-direction: column; margin: var(--stream-gap, 12px) 0; border-radius: var(--radius-lg);
-    border: 1px solid var(--border); background: color-mix(in oklab, var(--fg) 2.8%, transparent); overflow: hidden;
-    animation: blockIn var(--dur-base) var(--ease-page) both;
-    transition: border-color 240ms var(--ease-soft, ease-out); }
-  .sshell:hover { border-color: var(--border-strong); }
-  /* a live command tints the whole frame toward the accent — the block itself
-     reads as in-flight, not just the glyph */
-  .sshell.running { border-color: color-mix(in oklab, var(--accent) 28%, var(--border)); }
-  .sshell.bad { border-color: color-mix(in oklab, var(--danger) 34%, var(--border)); }
+     on the tile head, then the OUT below it under a labeled rule in the tile's
+     well. Card chrome (border/radius/fill/hover/live/bad) is the global `.tile`
+     recipe (app.css) — this file only owns layout + the terminal-specific bits
+     (prompt glow, cursor, IN/OUT split). Meta cluster (pill/duration/copy/
+     chevron) comes from BlockHeader. */
+  .sshell { display: flex; flex-direction: column; margin: var(--stream-gap, 12px) 0; overflow: hidden;
+    animation: blockIn var(--dur-base) var(--ease-page) both; }
   /* the prompt glyph breathes while the command is still running — a soft glow
      halo makes a live command read as genuinely in-flight (terminal cursor
-     energy). The glow is keyed to the flavor color. */
-  .sshell.running .ssh-prompt { animation: sshPromptPulse 1.4s ease-in-out infinite; }
-  .sshell.running .ssh-prompt.bash { text-shadow: 0 0 9px color-mix(in oklab, var(--ok) 60%, transparent); }
-  .sshell.running .ssh-prompt.pwsh { text-shadow: 0 0 9px color-mix(in oklab, var(--info) 60%, transparent); }
-  .sshell.running .ssh-prompt.cmd { text-shadow: 0 0 9px color-mix(in oklab, var(--warn) 60%, transparent); }
+     energy). The glow is keyed to the flavor color. Stationary (opacity
+     breathing only, DESIGN §8) — no traveling light. */
+  .sshell.is-live .ssh-prompt { animation: sshPromptPulse 1.4s ease-in-out infinite; }
+  .sshell.is-live .ssh-prompt.bash { text-shadow: 0 0 9px color-mix(in oklab, var(--ok) 60%, transparent); }
+  .sshell.is-live .ssh-prompt.pwsh { text-shadow: 0 0 9px color-mix(in oklab, var(--info) 60%, transparent); }
+  .sshell.is-live .ssh-prompt.cmd { text-shadow: 0 0 9px color-mix(in oklab, var(--warn) 60%, transparent); }
   @keyframes sshPromptPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
   @media (prefers-reduced-motion: reduce) {
-    .sshell.running .ssh-prompt { animation: none; }
+    .sshell.is-live .ssh-prompt { animation: none; }
     .ssh-cursor { animation: none; }
   }
 
   /* IN row container chrome — layout/cluster mechanics live in BlockHeader.
      Header sits flat on the tile; the OUTPUT well is the inset (comp: the two-
      tone reads terminal-paper-under-prompt, not raised-toolbar-over-body). */
-  .sshell :global(.bh) { padding: 8px 11px; gap: 9px;
+  .sshell :global(.bh) { padding: var(--tile-head-pad); gap: 9px;
+    font-size: var(--tile-head-fs);
     background: transparent;
     transition: background var(--dur-fast); }
   .sshell :global(.bh:hover:not(:disabled)) { background: color-mix(in oklab, var(--fg) 4%, transparent); }
@@ -271,30 +268,32 @@
 
   /* Poll count — a coalesced wait-loop (3+ identical runs) shows once with
      this quiet tally instead of stacking near-identical terminal cards. */
-  .ssh-poll { flex: none; font-size: 10px; font-family: var(--font-mono);
+  .ssh-poll { flex: none; font-size: var(--tile-meta-fs); font-family: var(--font-mono);
     color: var(--fg-faint); padding: 1px 6px; border-radius: 999px;
     border: 1px solid color-mix(in oklch, var(--border) 80%, transparent);
     background: color-mix(in oklab, var(--fg) 3%, transparent); }
 
-  /* OUT — the command's output, on the base (darker) fill so it recedes behind
-     the raised IN row. The line-capping / fold tiers live in OutputBlock. */
-  .ssh-outwrap { border-top: 1px solid var(--border); background: var(--bg-inset); }
-  /* "output" boundary label — a tiny uppercase rule so IN vs OUT is spelled out,
-     not just implied by the fill shift. */
-  .ssh-outlabel { display: flex; align-items: center; gap: 7px; padding: 5px 11px 2px;
-    font-size: 8.5px; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; color: var(--fg-faint); }
-  .ssh-outlabel-meta { margin-left: auto; font-family: var(--font-mono); font-size: 9px; font-weight: 500;
-    letter-spacing: 0.02em; text-transform: none; color: var(--fg-faint); opacity: 0.78; }
+  /* OUT — the command's output, on the tile-well fill so it recedes behind the
+     raised IN row (.tile-well from app.css; local rule only adds the hairline
+     that separates it from the head since this head is BlockHeader's `.bh`,
+     not `.tile-head`, so the global auto-border-top doesn't key off it). The
+     line-capping / fold tiers live in OutputBlock. */
+  .ssh-outwrap { border-top: 1px solid color-mix(in oklab, var(--tile-border) 80%, transparent); }
+  /* "output" boundary label — the label text is the shared `.tile-label`
+     (app.css); this row is just its flex layout + the trailing meta bits. */
+  .ssh-outlabel { display: flex; align-items: center; gap: 7px; padding: 5px 11px 2px; }
+  .ssh-outlabel-meta { margin-left: auto; font-family: var(--font-mono); font-size: var(--tile-meta-fs); font-weight: 500;
+    letter-spacing: 0.02em; color: var(--fg-faint); opacity: 0.78; }
   .ssh-outlabel-bad { color: var(--danger); }
 
   /* tty-wait well — blank output line with the cursor parked on it. */
   .ssh-wait { padding: 2px 11px 8px; line-height: 1.55; display: flex; align-items: center; }
 
-  .ssh-peekwrap { border-top: 1px solid var(--border); background: var(--bg-inset); }
+  .ssh-peekwrap { border-top: 1px solid color-mix(in oklab, var(--tile-border) 80%, transparent); }
   .ssh-peek { padding: 2px 11px 7px;
     font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.5; color: var(--fg-subtle); }
   .ssh-line { white-space: pre-wrap; word-break: break-word; }
   /* Cursor parked after the last peeked line for a beat when output lands live. */
   .ssh-peek-cursorline { display: flex; align-items: center; min-height: 15px; }
-  .ssh-more { margin-top: 2px; font-size: 10.5px; color: var(--fg-faint); }
+  .ssh-more { margin-top: 2px; font-size: var(--tile-meta-fs); color: var(--fg-faint); }
 </style>

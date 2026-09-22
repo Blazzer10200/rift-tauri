@@ -174,8 +174,10 @@
    like it was repeatedly mounting/unmounting during long reasoning passes. */
 .sthink-row.live { color: var(--fg-muted); }
 .sthink-row.live svg:first-child { color: var(--accent); }
-.sthink-chev { transition: transform var(--dur-fast); }
-.sthink-chev.open { transform: rotate(180deg); }
+/* Chevron is the shared `.tile-chev` (app.css: ChevronRight, rotates 90° open)
+   — was a bespoke 180° ChevronDown flip, the disclosure grammar this file's
+   migration is unifying. Boxless row stays boxless (DESIGN §8 "if boxed"
+   qualifier — .sthink never earned a card); only the chevron converged. */
 /* Thinking body — Markdown now (parity w/ MessageBubble's thinking block), in
    a dimmed italic "inner monologue" voice. */
 .sthink-text { margin: 8px 0 0; max-width: 64ch; font-size: var(--fs-sm); line-height: 1.55; color: var(--fg-faint); font-style: italic; }
@@ -233,9 +235,16 @@
 /* Compaction progress card — a manual /compact (or the CLI's silent mid-turn
    auto-compact) streams zero events, so this is the only honest signal: an
    estimate-paced bar + what's being summarized + a plain-words note. Every
-   estimate is ~-labeled; the card leaves when the boundary lands. */
-.scompact-card { margin: 6px 0 2px; max-width: 52ch; display: flex; flex-direction: column;
-  gap: 7px; animation: blockIn var(--dur-base) var(--ease-page) both; }
+   estimate is ~-labeled; the card leaves when the boundary lands. Framed with
+   the tile recipe (border/radius/fill from app.css tokens, applied here since
+   this rule owns the element even though the markup lives in StreamTurn) so it
+   reads as the same machinery family as every other stream block. */
+.scompact-card { margin: var(--stream-gap) 0; max-width: 52ch; display: flex; flex-direction: column;
+  gap: 7px; padding: var(--tile-head-pad);
+  border: 1px solid var(--tile-border); border-radius: var(--tile-radius);
+  background: var(--tile-fill); transition: border-color var(--dur-fast);
+  animation: blockIn var(--dur-base) var(--ease-page) both; }
+.scompact-card:hover { border-color: var(--tile-border-hover); }
 .scompact-track { height: 2px; border-radius: 2px; overflow: hidden;
   background: color-mix(in oklab, var(--fg) 8%, transparent); }
 .scompact-fill { display: block; height: 100%; transform-origin: left; border-radius: 2px;
@@ -266,38 +275,20 @@
    receipt chip sized to its summary; opening unfolds it into a full-width
    ledger (interpolate-size animates the stretch where the engine supports it,
    discrete jump elsewhere). Still the framed-island family per the 2026-07-15
-   owner call — never bare rows. */
-.wline { width: fit-content; max-width: 100%; margin: var(--stream-gap) 0;
-  border: 1px solid var(--border); border-radius: 11px;
-  background: color-mix(in oklab, var(--fg) 2.5%, transparent); overflow: hidden;
+   owner call — never bare rows. Chrome (border/radius/fill/hover) now comes
+   from the global `.tile` recipe (app.css) via the `tile` class in markup —
+   only the width-morph + layout stay local. */
+.wline { width: fit-content; max-width: 100%; margin: var(--stream-gap) 0; overflow: hidden;
   interpolate-size: allow-keywords;
   animation: blockIn var(--dur-base) var(--ease-page) both;
-  transition: width var(--dur-base) var(--ease-page), border-color var(--dur-fast); }
-.wline:hover { border-color: var(--border-strong); }
+  transition: width var(--dur-base) var(--ease-page); }
 .wline.open { width: 100%; }
-.wline-head { display: flex; width: 100%; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--fg-muted);
-  background: none; border: 0; cursor: pointer; padding: 5.5px 9px 5.5px 10px;
-  transition: color var(--dur-fast), background var(--dur-fast);
-  max-width: 100%; min-width: 0; text-align: left; }
-.wline-head:hover { color: var(--fg); background: color-mix(in oklab, var(--fg) 3.5%, transparent); }
-.wline-head:hover .wline-ic { color: var(--accent); }
-/* Bare tinted glyph — the old bordered icon box stacked chip-in-chip chrome. */
-.wline-ic { display: grid; place-items: center;
-  color: color-mix(in oklab, var(--info) 55%, var(--fg-muted)); flex: none;
-  transition: color var(--dur-fast); }
+/* Head reuses the global `.tile-head` class (markup) for chrome; only the
+   hover accent-on-glyph touch is local (tile-head has no opinion on icons). */
+.wline .tile-head:hover .tile-glyph { color: var(--accent); }
 /* Long summaries (regex patterns, absolute paths) truncate instead of running
    off the right edge of the message column — full text via the head's title. */
 .wline-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-/* Trailing meta cluster — step count · total time · chevron. Sits flush after
-   the label while collapsed; rides the right edge once the card is open. */
-.wline-meta { display: inline-flex; align-items: center; gap: 7px; flex: none; margin-left: auto; padding-left: 4px; }
-.wline-count { min-width: 17px; height: 15px; padding: 0 4.5px; display: grid; place-items: center;
-  border-radius: 999px; font-size: 9.5px; font-weight: 650; font-variant-numeric: tabular-nums;
-  color: var(--fg-subtle); background: color-mix(in oklab, var(--fg) 6%, transparent); }
-.wline-dur { font-size: var(--fs-xs); color: var(--fg-faint); font-variant-numeric: tabular-nums; }
-.wline-chev { color: var(--fg-faint); flex: none; transition: transform var(--dur-fast); }
-.wline-chev.open { transform: rotate(180deg); }
-.wline.open .wline-head { border-bottom: 1px solid color-mix(in oklab, var(--border) 55%, transparent); }
 /* Open ledger — rows hang off a hairline spine dropped from the lead glyph. */
 .wline-list { position: relative; margin: 0; padding: 6px 11px 9px 30px; display: flex; flex-direction: column; gap: 5px;
   animation: workOpen 0.3s var(--ease-page) both; }
@@ -325,9 +316,10 @@
 .wline-row .wr-meta.bad { color: var(--danger); }
 .wline-row .wr-dur { color: var(--fg-faint); margin-left: 6px; opacity: 0.75; }
 /* Result body — a proper inset well (family two-tone), not a translucent
-   left-rail float; opens per-row via the chevron. */
-.wr-out { margin: 3px 0 8px; border: 1px solid color-mix(in oklab, var(--border) 70%, transparent);
-  border-radius: 8px; background: var(--bg-inset); overflow: hidden;
+   left-rail float; opens per-row via the chevron. Tokens, not raw literals —
+   same well recipe as every other nested tool-output body. */
+.wr-out { margin: 3px 0 8px; border: 1px solid color-mix(in oklab, var(--tile-border) 70%, transparent);
+  border-radius: var(--tile-radius-inner); background: var(--tile-well); overflow: hidden;
   animation: workOpen 0.24s var(--ease-page) both; }
 .wr-out .oblock-out { padding: 5px 10px; color: var(--fg-muted); font-size: var(--fs-xs); }
 .wr-out .oblock-acts { padding: 3px 9px 4px; border-top: 0; }
@@ -339,13 +331,11 @@
 /* in-flight tool — single active line, now on the same island shell as .wline
    (a live read/grep is the one row the eye hunts for during a working turn; a
    bare line under framed siblings read as a glitch, not a design). The pulsing
-   dot + verb shimmer + accent-tinted hairline carry the live state — NO
-   traveling light-band across the card (DESIGN.md §8, 2026-07-21). */
-.wline-active { position: relative; display: flex; align-items: center; gap: 8px; margin: var(--stream-gap) 0;
-  padding: 7px 11px; font-size: var(--fs-sm); color: var(--fg-muted);
-  border: 1px solid color-mix(in oklab, var(--accent) 22%, var(--border));
-  border-radius: var(--radius-lg); background: color-mix(in oklab, var(--fg) 2.5%, transparent);
-  max-width: 100%; min-width: 0; overflow: hidden;
+   dot + verb shimmer + accent-tinted border carry the live state — NO
+   traveling light-band across the card (DESIGN.md §8, 2026-07-21). Chrome is
+   the global `.tile.is-compact.is-live` recipe (app.css) via markup classes;
+   this element doubles as its own tile-head (no separate head/body split). */
+.wline-active { margin: var(--stream-gap) 0; max-width: 100%; min-width: 0; overflow: hidden;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
 .wline-active .wa-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; animation: streamLivePulse var(--pulse-live) ease-out infinite; }
 .wline-active .wa-text { flex: none; }
@@ -374,8 +364,10 @@
 /* ── file-write batch — island shell like .wline/.sshell; rows + their inline
    diff cards live inside one framed card so an edit burst reads as one unit ── */
 .wbatch { margin: var(--stream-gap) 0; display: flex; flex-direction: column; gap: 2px;
-  border: 1px solid var(--border); border-radius: var(--radius-lg);
-  background: color-mix(in oklab, var(--fg) 2.5%, transparent); padding: 5px 11px; }
+  border: 1px solid var(--tile-border); border-radius: var(--tile-radius);
+  background: var(--tile-fill); padding: 5px 11px;
+  transition: border-color var(--dur-fast); }
+.wbatch:hover { border-color: var(--tile-border-hover); }
 .wbrow { display: flex; align-items: center; gap: 9px; padding: 3px 0; font-size: var(--fs-sm);
   animation: blockIn var(--dur-base) var(--ease-page) both; }
 .wb-verb { color: var(--fg-muted); }
@@ -409,7 +401,6 @@
   .wline, .wline-list, .wline-active, .wbrow, .splan, .sxplan, .sweb, .sresult { animation: none; }
   .scompact-fill { transition: none; }
   .sturn-head.live .sh-dot, .wline-active .wa-dot, .wb-dot.live { animation: none; }
-  .wline-active::after { animation: none; background: none; }
   .sturn-body.railed.live::after { animation: none; background: none; }
 }
 
@@ -418,49 +409,31 @@
    only framed element at rest; expanding it unfolds the detailed ledger below. */
 .sactivity { width: fit-content; max-width: 100%; margin: 2px 0 var(--stream-gap-turn); }
 .sactivity.open { width: 100%; }
-.sactivity-head {
-  display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0;
-  min-height: 30px; padding: 5px 9px; border-radius: 9px;
-  border: 1px solid color-mix(in oklab, var(--border) 78%, transparent);
-  background: color-mix(in oklab, var(--fg) 3.5%, transparent);
-  color: var(--fg-subtle); font: inherit; font-size: var(--fs-sm); text-align: left;
-  cursor: pointer; transition: color var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast), border-radius var(--dur-fast);
-}
-.sactivity-head:hover { color: var(--fg-2); border-color: var(--border-strong); background: color-mix(in oklab, var(--fg) 5%, transparent); }
-.sactivity-head:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--ring); }
-.sactivity.open .sactivity-head { border-radius: 9px 9px 0 0; }
-.sactivity[data-outcome="applied"] .sactivity-head { border-color: color-mix(in oklab, var(--ok) 20%, var(--border)); }
-.sactivity[data-outcome="failed"] .sactivity-head { border-color: color-mix(in oklab, var(--danger) 28%, var(--border)); }
-.sactivity-chev { display: inline-flex; flex: none; color: var(--fg-faint); transition: transform var(--dur-fast), color var(--dur-fast); }
-.sactivity-chev.open { transform: rotate(90deg); }
-.sactivity-head:hover .sactivity-chev { color: var(--accent); }
-.sactivity-mark { display: inline-grid; place-items: center; flex: none; color: var(--ok); }
-.sactivity[data-outcome="failed"] .sactivity-mark { color: var(--danger); }
-.sactivity-title { min-width: 0; font-weight: 600; color: var(--fg-muted); white-space: nowrap; }
-.sactivity-detail { flex: none; padding-left: 1px; font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-faint); white-space: nowrap; }
-.sactivity-meta { display: inline-flex; align-items: center; gap: 7px; flex: none; margin-left: auto;
-  font-family: var(--font-mono); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; color: var(--fg-faint); }
+/* Chrome comes from .tile / .tile-head (app.css). Local rules only set the
+   receipt's hierarchy: outcome + count lead, provenance trails. */
+.sactivity-head { min-height: 30px; }
+.sactivity-title { min-width: 0; font-weight: 600; color: var(--fg-2); white-space: nowrap; }
+.sactivity-meta { display: inline-flex; align-items: center; gap: 7px; flex: none; margin-left: auto; padding-left: 6px;
+  font-family: var(--font-mono); font-size: var(--tile-meta-fs); font-variant-numeric: tabular-nums; color: var(--fg-faint); }
 .sactivity-meta > span + span::before { content: "·"; margin-right: 7px; opacity: 0.45; }
-.sactivity-cost, .sactivity-fast { color: color-mix(in oklab, var(--accent) 72%, var(--fg-muted)); }
-.sactivity-fast { display: inline-flex; align-items: center; gap: 3px; }
-/* Keep the timestamp in layout at low emphasis. The receipt is fit-content, so
-   animating max-width here made the whole chip resize whenever its turn was
-   hovered. Opacity-only emphasis preserves stable geometry without a blank
-   reserved tail at rest. */
-.sactivity-time { opacity: 0.5; transition: opacity var(--dur-fast); }
-.sturn:hover .sactivity-time, .sactivity-head:focus-visible .sactivity-time { opacity: 0.85; }
-.sactivity-body {
-  padding: 2px 12px 7px;
-  border: 1px solid color-mix(in oklab, var(--border) 78%, transparent); border-top: 0;
-  border-radius: 0 0 9px 9px; background: color-mix(in oklab, var(--bg-inset) 42%, transparent);
-}
+/* Cost is provenance, not a call to action — neutral, one step above faint. */
+.sactivity-cost { color: var(--fg-muted); }
+.sactivity-fast { display: inline-flex; align-items: center; gap: 3px; color: var(--fg-muted); }
+/* Keep tokens + timestamp in layout at low emphasis. The receipt is
+   fit-content, so animating max-width here made the whole chip resize
+   whenever its turn was hovered. Opacity-only emphasis preserves stable
+   geometry without a blank reserved tail at rest. */
+.sactivity-quiet { opacity: 0.45; transition: opacity var(--dur-fast); }
+.sturn:hover .sactivity-quiet, .sactivity-head:focus-visible .sactivity-quiet { opacity: 0.9; }
+.sactivity-body { padding: 2px 12px 7px; background: var(--tile-well);
+  border-radius: 0 0 calc(var(--tile-radius) - 1px) calc(var(--tile-radius) - 1px); }
 .sactivity-tools {
   min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  padding: 4px 2px 5px 18px; color: var(--fg-faint); font-size: 10.5px;
-  border-bottom: 1px solid color-mix(in oklab, var(--border) 62%, transparent);
+  padding: 4px 2px 5px 18px; color: var(--fg-faint); font-size: var(--tile-meta-fs);
+  border-bottom: 1px solid color-mix(in oklab, var(--tile-border) 80%, transparent);
 }
 .sactivity-tools button {
-  min-height: 28px; padding: 0 9px; border-radius: 6px; color: var(--fg-subtle);
+  min-height: 28px; padding: 0 9px; border-radius: var(--radius-sm); color: var(--fg-subtle);
   font: inherit; font-weight: 600; background: transparent; border: 1px solid transparent;
 }
 .sactivity-tools button:hover { color: var(--fg-2); background: var(--surface-hover); border-color: var(--border); }
@@ -475,14 +448,14 @@
 .sreceipt { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 5px 0 0;
   font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-faint); font-variant-numeric: tabular-nums; }
 .sreceipt > span + span::before { content: "·"; margin-right: 8px; opacity: 0.45; }
-.sreceipt-cost, .sreceipt-fast { color: color-mix(in oklab, var(--accent) 72%, var(--fg-muted)); }
+.sreceipt-cost, .sreceipt-fast { color: var(--fg-muted); }
 .sreceipt-fast { display: inline-flex; align-items: center; gap: 3px; }
 .sreceipt-time { opacity: 0; transition: opacity var(--dur-fast); }
 .sturn:hover .sreceipt-time, .sturn:focus-within .sreceipt-time { opacity: 0.85; }
 
 @media (max-width: 720px) {
   .sactivity-head { flex-wrap: wrap; }
-  .sactivity-meta { width: 100%; margin-left: 27px; }
+  .sactivity-meta { width: 100%; margin-left: 26px; padding-left: 0; }
   .sactivity-time { display: none; }
 }
 
@@ -498,17 +471,12 @@
 .msg-act svg { flex: none; }
 @media (prefers-reduced-motion: reduce) { .msg-acts { transition: none; } }
 
-/* ── plan / todo checklist ── boxless, transparent (matches the inline diff):
-   no card fill, a thin left rule instead of a full border so the page texture
-   reads through it. ── */
-/* Island card like every other machinery block (DESIGN §8) — was a left rail. */
-.splan { margin: var(--stream-gap) 0; border: 1px solid var(--border); border-radius: var(--radius-lg);
-  background: color-mix(in oklab, var(--fg) 2.8%, transparent); padding: 9px 13px 10px;
-  transition: border-color 240ms var(--ease-soft);
+/* ── plan / todo checklist ── Tile card like every other machinery block
+   (DESIGN §8) — was a left rail, then a hand-rolled border; now the shared
+   `.tile` recipe (app.css) via the markup class, tokens only. ── */
+.splan { margin: var(--stream-gap) 0; padding: 9px 13px 10px;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
-.splan:hover { border-color: var(--border-strong); }
 .splan-head { display: flex; align-items: center; gap: 9px; padding: 2px 0 8px; font-size: var(--fs-sm); color: var(--fg-2); }
-.splan-head > svg { color: var(--accent); flex: none; }
 .splan-title { font-weight: 650; letter-spacing: -0.006em; }
 .splan-track { flex: 1; height: 4px; border-radius: 999px; background: color-mix(in oklab, var(--fg) 8%, transparent); overflow: hidden; }
 .splan-fill { display: block; height: 100%; border-radius: 999px; background: var(--accent); transition: width var(--dur-base) var(--ease-page); }
@@ -535,19 +503,15 @@
 .splan-fold .splan-fold-ch { color: var(--fg-faint); transition: transform 200ms var(--ease-soft); }
 .splan-fold.x .splan-fold-ch { transform: rotate(180deg); }
 
-/* ── ExitPlanMode proposal card (plan-mode deliverable, matches .splan chrome) ── */
-.sxplan { margin: var(--stream-gap) 0; border: 1px solid var(--border); border-radius: var(--radius-lg);
-  background: color-mix(in oklab, var(--fg) 2.8%, transparent); padding: 8px 13px 9px;
-  transition: border-color 240ms var(--ease-soft);
+/* ── ExitPlanMode proposal card (plan-mode deliverable, matches .splan chrome) ──
+   Tile recipe via markup (`tile` class); `.is-ask` (app.css) is the pending-
+   approval state — replaces the old hand-rolled `.pending` accent border. */
+.sxplan { margin: var(--stream-gap) 0; padding: 8px 13px 9px;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
-.sxplan:hover { border-color: var(--border-strong); }
-.sxplan.pending { border-color: color-mix(in oklab, var(--accent) 32%, var(--border)); }
 .sxplan-head { display: flex; align-items: center; gap: 9px; width: 100%; padding: 2px 0 4px; font-size: var(--fs-sm); color: var(--fg-2); background: none; border: none; cursor: pointer; text-align: left; }
-.sxplan-head > svg { color: var(--accent); flex: none; }
 .sxplan-title { font-weight: 650; letter-spacing: -0.006em; }
 .sxplan.pending .sxplan-title { color: var(--fg); }
-.sxplan-chev { margin-left: auto; display: grid; place-items: center; color: var(--fg-faint); transition: transform var(--dur-base) var(--ease-page); }
-.sxplan-chev.open { transform: rotate(180deg); }
+.sxplan-chev { margin-left: auto; }
 .sxplan-empty { padding: 2px 0 6px; font-size: var(--fs-sm); color: var(--fg-faint); font-style: italic; }
 .sxplan-body { padding: 2px 0 6px; font-size: 13px; }
 /* Approval action bar — the card's footer row, hairline-separated (no new depth
@@ -581,9 +545,11 @@
   .sxplan-write, .sxplan-caret { animation: none; }
 }
 
-/* ── web search / fetch ── */
-.sweb { display: flex; gap: 9px; margin: var(--stream-gap) 0; font-size: var(--fs-sm); color: var(--fg-muted); animation: blockIn var(--dur-base) var(--ease-page) both; }
-.sweb-ic { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; background: color-mix(in oklab, var(--info) 12%, transparent); color: var(--info); flex: none; }
+/* ── web search / fetch ── Tile-compact card (was boxless — DESIGN §8 wants
+   every tool block framed); glyph is neutral `.tile-glyph` now, not an
+   info-tinted box (a second chromatic voice the rejection log bans). */
+.sweb { display: flex; gap: 9px; margin: var(--stream-gap) 0; padding: var(--tile-head-pad);
+  font-size: var(--fs-sm); color: var(--fg-muted); animation: blockIn var(--dur-base) var(--ease-page) both; }
 .sweb-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding-top: 1px; }
 .sweb-q b { color: var(--fg); font-weight: 600; }
 .sweb-q.sweb-pending { color: var(--fg-faint); font-style: italic; }
@@ -598,20 +564,18 @@
 .sweb-more { font-size: var(--fs-xs); color: var(--fg-faint); align-self: center; }
 
 /* ── test / type-check result ── */
-/* Column now: a BlockHeader row (icon · command · pill/dur/copy/chev) with an
-   expandable failure body under it — the old pill-only row was a dead end. */
+/* Column: a BlockHeader row (icon · command · pill/dur/copy/chev) with an
+   expandable failure body under it — the old pill-only row was a dead end.
+   Now a tile card (`.tile` in markup; was unframed) — `.bh` (BlockHeader,
+   shared, not owned here) gets tile-head padding by descendant selector since
+   it can't carry the class itself. Outcome tone is `.is-bad`/`.is-live` on
+   the tile (app.css); the icon glyph carries its own is-ok/is-bad/is-live. */
 .sresult { display: flex; flex-direction: column; gap: 0; margin: var(--stream-gap) 0; font-size: var(--fs-sm); color: var(--fg-muted); animation: blockIn var(--dur-base) var(--ease-page) both; }
-.sresult .bh { gap: 9px; }
-.sresult .sr-out { margin-top: 4px; border: 1px solid var(--border); border-radius: var(--radius-lg);
-  background: color-mix(in oklab, var(--fg) 2%, transparent); overflow: hidden; }
-.sresult.bad .sr-out { border-color: color-mix(in oklab, var(--danger) 30%, var(--border)); }
-/* Icon glyph takes the semantic hue of the outcome (green pass · red fail ·
-   neutral running) so it reads as one unit with the pill beside it, instead of
-   a grey box that fights the colored pill. Set via .sresult modifier below. */
-.sr-ic { width: 18px; height: 18px; border-radius: 5px; display: grid; place-items: center; background: color-mix(in oklab, var(--fg) 6%, transparent); color: var(--fg-2); flex: none; transition: color var(--dur-fast), background var(--dur-fast); }
-.sresult.ok .sr-ic { color: var(--ok); background: var(--ok-soft); }
-.sresult.bad .sr-ic { color: var(--danger); background: var(--danger-soft); }
-.sr-label { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sresult .bh { gap: 9px; padding: var(--tile-head-pad); }
+.sresult .sr-out { margin-top: 4px; border: 1px solid var(--tile-border); border-radius: var(--tile-radius-inner);
+  background: var(--tile-well); overflow: hidden; }
+.sresult.is-bad .sr-out { border-color: color-mix(in oklab, var(--danger) 30%, var(--tile-border)); }
+.sr-label { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-2); }
 /* (pill + duration render via BlockHeader's shared meta cluster now) */
 
 /* (delegated-subagent `.sagent*` rules removed 2026-07-01 — StreamAgent.svelte

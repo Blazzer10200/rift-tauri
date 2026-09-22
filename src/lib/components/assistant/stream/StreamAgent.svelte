@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Bot, Loader2, CheckCircle2, AlertCircle, ChevronDown, ArrowRight, Brain,
+  import { Bot, Loader2, CheckCircle2, AlertCircle, ChevronRight, ArrowRight, Brain,
     FileSearch, FilePen, FilePlus, Search, FolderTree, Terminal, Globe, AppWindow, GitBranch, ListChecks, Wrench } from "@lucide/svelte";
   import { fmtDur, type StreamTool } from "./streamModel";
   import { captionForTool, agentNowLine } from "../toolCaption";
@@ -39,6 +39,14 @@
       ? spawn.completedAt == null ? "running" : spawn.isError ? "error" : "done"
       : tool.status === "pending" ? "running" : tool.status,
   );
+  // Pill tone tracks the card's own status — mirrors BlockHeader's PILL_TONE map
+  // (app.css .tile-pill status classes): accent while live, danger once failed,
+  // neutral once settled ok. Keeps the identity pill in the same status
+  // vocabulary as the tile's own border (is-live / is-bad).
+  const pillTone = $derived(status === "running" ? "is-live" : status === "error" ? "is-bad" : "");
+  function kidTone(kid: Spawn): string {
+    return kid.completedAt == null ? "is-live" : kid.isError ? "is-bad" : "";
+  }
   const agentType = $derived(spawn?.subagentType ?? (tool.task ?? tool.cap ?? "task").split(" · ")[0]);
   const desc = $derived(
     spawn?.description ??
@@ -96,21 +104,21 @@
   });
 </script>
 
-<div class="sacard" data-status={status} id={"sacard-" + tool.id}>
-  <button class="sa-head" class:sa-clickable={expandable} type="button"
+<div class="tile sacard" class:is-live={status === "running"} class:is-bad={status === "error"} id={"sacard-" + tool.id}>
+  <button class="tile-head sa-head" class:sa-clickable={expandable} type="button"
     onclick={() => expandable && (open = !open)} aria-expanded={open}>
     <span class="sa-bot" aria-hidden="true"><Bot size={14} strokeWidth={2} /></span>
-    <span class="sa-pill">{agentType}</span>
+    <span class="tile-pill {pillTone}">{agentType}</span>
     {#if desc}<span class="sa-desc">{desc}</span>{/if}
-    {#if toolSteps.length > 0 && !open}<span class="sa-dur">{toolSteps.length} step{toolSteps.length === 1 ? "" : "s"}</span>{/if}
-    {#if spawn?.tokens}<span class="sa-dur">{fmtTokens(spawn.tokens)} tok</span>{/if}
-    {#if durSecs != null}<span class="sa-dur">{fmtDur(durSecs)}</span>{/if}
+    {#if toolSteps.length > 0 && !open}<span class="tile-dur">{toolSteps.length} step{toolSteps.length === 1 ? "" : "s"}</span>{/if}
+    {#if spawn?.tokens}<span class="tile-dur">{fmtTokens(spawn.tokens)} tok</span>{/if}
+    {#if durSecs != null}<span class="tile-dur">{fmtDur(durSecs)}</span>{/if}
     <span class="sa-stat" aria-label={status}>
       {#if status === "running"}<Loader2 size={13} class="sa-spin" />
       {:else if status === "error"}<AlertCircle size={13} />
       {:else}<CheckCircle2 size={13} />{/if}
     </span>
-    {#if expandable}<span class="sa-chev" class:open><ChevronDown size={13} strokeWidth={2} /></span>{/if}
+    {#if expandable}<span class="tile-chev" class:open><ChevronRight size={13} strokeWidth={2} /></span>{/if}
   </button>
 
   {#if nowLine}
@@ -139,9 +147,9 @@
             <span class="sa-beat" title="CLI heartbeat — tool confirmed alive" aria-hidden="true"></span>
           {/if}
           {#if b.status === "pending" && typeof b.startedAt === "number" && now > 0 && now - b.startedAt >= 3000}
-            <span class="sa-step-dur">{fmtDur((now - b.startedAt) / 1000)}</span>
+            <span class="tile-dur">{fmtDur((now - b.startedAt) / 1000)}</span>
           {:else if b.status !== "pending" && typeof b.durationMs === "number" && b.durationMs >= 1000}
-            <span class="sa-step-dur">{fmtDur(b.durationMs / 1000)}</span>
+            <span class="tile-dur">{fmtDur(b.durationMs / 1000)}</span>
           {/if}
         </div>
         {#if b.status === "error" && b.result}
@@ -159,9 +167,9 @@
                 {:else if kid.isError}<AlertCircle size={10} />
                 {:else}<CheckCircle2 size={10} />{/if}
               </span>
-              <span class="sa-kid-pill">{kid.subagentType}</span>
+              <span class="tile-pill {kidTone(kid)}">{kid.subagentType}</span>
               {#if kid.description}<span class="sa-kid-desc">{kid.description}</span>{/if}
-              {#if kid.tokens}<span class="sa-step-dur">{fmtTokens(kid.tokens)} tok</span>{/if}
+              {#if kid.tokens}<span class="tile-dur">{fmtTokens(kid.tokens)} tok</span>{/if}
             </div>
             {@render timeline(kid.blocks as Block[], [])}
           </div>
@@ -178,7 +186,7 @@
   {/snippet}
 
   {#if open && expandable}
-    <div class="sa-body" bind:this={bodyEl} onscroll={onBodyScroll}>
+    <div class="sa-body tile-well" bind:this={bodyEl} onscroll={onBodyScroll}>
       {@render timeline(blocks, childSpawns)}
       {#if result}
         <div class="sa-result"><ArrowRight size={13} strokeWidth={2} /><div class="sa-result-md"><Markdown text={result} {workspaceRoot} /></div></div>
@@ -188,68 +196,37 @@
 </div>
 
 <style>
-  /* Bordered card — first-class, distinct from the boxless tool rows around it
-     (CC-UI ref §5). Translucent surface so it blends into the transcript rather
-     than reading as a pasted panel; running state warms the hairline. */
-  /* Same tile family as every block; running warms the hairline with the
-     shell "running" accent tint. The pill + bot glyph carry delegation —
-     no wash, no seam (atmosphere doctrine). */
+  /* Sub-agent card — the global `tile` shell (app.css "stream tiles") carries
+     border/radius/fill/hover/is-live tint; this file owns only the agent-
+     specific anatomy (bot glyph, identity pill, timeline, nested child rail).
+     Running/failed state is the tile's own is-live/is-bad, not a local
+     data-status selector — CC-UI ref §5, stationary status per DESIGN §8. */
   .sacard {
     margin: var(--stream-gap, 13px) 0;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    background: color-mix(in oklab, var(--fg) 2.8%, transparent);
     overflow: hidden;
-    transition: border-color 240ms var(--ease-soft);
     animation: blockIn var(--dur-base) var(--ease-page) both;
   }
-  .sacard:hover { border-color: var(--border-strong); }
-  .sacard[data-status="running"] {
-    border-color: color-mix(in oklab, var(--accent) 28%, var(--border));
-  }
 
-  .sa-head {
-    display: flex; align-items: center; gap: 9px; width: 100%;
-    padding: 8px 11px; border: 0; text-align: left;
-    color: var(--fg-2); font: inherit;
-    background: transparent;
-    transition: background var(--dur-fast);
-  }
-  .sa-clickable { cursor: pointer; }
   .sa-clickable:hover { background: color-mix(in oklab, var(--fg) 4%, transparent); }
   .sa-bot { display: inline-flex; color: var(--accent); flex: none; }
-  .sa-pill {
-    display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px;
-    background: var(--accent-soft);
-    color: var(--accent); font-size: 10.5px; font-weight: 600; letter-spacing: 0.02em;
-    font-family: var(--font-mono); flex: none;
-  }
   .sa-desc {
-    flex: 1; min-width: 0; color: var(--fg-2); font-size: 12.5px;
+    flex: 1; min-width: 0; color: var(--fg-2); font-size: var(--fs-sm);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  .sa-dur {
-    flex: none; font-size: 10px; padding: 1px 6px; border-radius: 999px;
-    background: color-mix(in oklch, var(--bg-elev-2) 70%, transparent);
-    color: var(--fg-muted); border: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
-    font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-weight: 600;
   }
   /* Status lives in the glyph, never a row-background tint (CC-UI ref §4/§9):
      activity green while running, outcome tokens once settled. */
   .sa-stat { display: inline-flex; flex: none; }
-  .sacard[data-status="running"] .sa-stat { color: var(--status-busy); }
-  .sacard[data-status="done"] .sa-stat { color: var(--ok); }
-  .sacard[data-status="error"] .sa-stat { color: var(--danger); }
-  .sa-chev { display: inline-flex; color: var(--fg-faint); flex: none; transition: transform var(--dur-fast); }
-  .sa-chev.open { transform: rotate(180deg); }
+  .sacard.is-live .sa-stat { color: var(--status-busy); }
+  .sacard:not(.is-live):not(.is-bad) .sa-stat { color: var(--ok); }
+  .sacard.is-bad .sa-stat { color: var(--danger); }
   :global(.sa-spin) { animation: ringspin 1s linear infinite; }
 
   /* Live "now-doing" line — the momentum signal while the agent is in flight. */
   .sa-now {
     display: flex; align-items: center; gap: 8px;
     padding: 7px 12px 9px;
-    border-top: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
-    font-size: 12px;
+    border-top: 1px solid color-mix(in oklch, var(--tile-border) 80%, transparent);
+    font-size: var(--fs-sm);
   }
   .sa-now-ic { display: inline-flex; flex: none; color: var(--status-busy); }
   .sa-now-label { color: var(--fg-muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -257,7 +234,7 @@
   /* The agent's own newest words — the live feed the forwarded frames carry. */
   .sa-now-snip {
     flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    color: var(--fg-faint); font-size: 11.5px; font-style: italic;
+    color: var(--fg-faint); font-size: var(--fs-xs); font-style: italic;
   }
   .sa-dots { display: inline-flex; gap: 3px; margin-left: 6px; vertical-align: middle; }
   .sa-dots span { width: 3px; height: 3px; border-radius: 50%; background: var(--status-busy); animation: sa-dot 1.1s ease-in-out infinite; }
@@ -267,12 +244,12 @@
 
   /* Expanded timeline — the sub-agent's own thinking/prose/tool steps in
      arrival order. Scroll-clamped so a chatty agent stays a card, not a wall
-     (bell-portal maxH precedent). */
+     (bell-portal maxH precedent). `.tile-well` supplies the sunken fill +
+     matching bottom corners (stream tiles anatomy, app.css). */
   .sa-body {
     display: flex; flex-direction: column; gap: 5px;
     padding: 7px 12px 10px;
-    border-top: 1px solid color-mix(in oklch, var(--border) 55%, transparent);
-    background: var(--bg-inset);
+    border-top: 1px solid color-mix(in oklch, var(--tile-border) 80%, transparent);
     animation: workOpen 0.3s var(--ease-page) both;
     max-height: 300px; overflow-y: auto;
   }
@@ -280,16 +257,16 @@
      visually below the tool rows (fg-muted) so steps keep primacy. */
   .sa-think {
     display: flex; align-items: flex-start; gap: 8px;
-    font-size: 11px; color: var(--fg-faint); font-style: italic; line-height: 1.45;
+    font-size: var(--fs-xs); color: var(--fg-faint); font-style: italic; line-height: 1.45;
     padding-left: 19px; /* align under step labels (stat glyph width + gap) */
   }
   .sa-think > span:last-child { min-width: 0; }
   .sa-prose {
-    font-size: 11.5px; color: var(--fg-muted); line-height: 1.45;
+    font-size: var(--fs-xs); color: var(--fg-muted); line-height: 1.45;
     padding-left: 19px;
   }
   .sa-step-err {
-    font-size: 10.5px; color: var(--danger); font-family: var(--font-mono);
+    font-size: var(--tile-meta-fs); color: var(--danger); font-family: var(--font-mono);
     line-height: 1.4; padding-left: 39px; /* indent under the step label */
     overflow-wrap: anywhere;
   }
@@ -299,14 +276,13 @@
     from { opacity: 0; transform: translateY(3px); }
     to { opacity: 1; transform: none; }
   }
-  .sa-step { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--fg-muted); }
+  .sa-step { display: flex; align-items: center; gap: 8px; font-size: var(--fs-xs); color: var(--fg-muted); }
   .sa-step-stat { display: inline-flex; flex: none; color: var(--fg-faint); }
   .sa-step[data-status="pending"] .sa-step-stat { color: var(--status-busy); }
   .sa-step[data-status="done"] .sa-step-stat { color: color-mix(in oklch, var(--ok) 78%, var(--fg-faint)); }
   .sa-step[data-status="error"] .sa-step-stat { color: var(--danger); }
   .sa-step-ic { display: inline-flex; flex: none; color: var(--fg-subtle); }
   .sa-step-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .sa-step-dur { flex: none; font-size: 10px; color: var(--fg-faint); font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
   /* Heartbeat — the CLI's "still alive" ping for a long-silent call; breathing
      live dot (sanctioned stationary liveness signal, DESIGN §8). */
   .sa-beat {
@@ -315,12 +291,13 @@
     animation: sa-beat var(--pulse-live) ease-in-out infinite;
   }
   @keyframes sa-beat { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
-  /* Depth-2 child agent — indented tint-group with a hairline rail. */
+  /* Depth-2 child agent — indented tint-group with a hairline rail (island
+     nesting ceiling, DESIGN §8 — never a second full tile). */
   .sa-kid {
     display: flex; flex-direction: column; gap: 4px;
     margin: 1px 0 3px 19px; padding: 5px 8px 6px;
     border-left: 2px solid color-mix(in oklab, var(--accent) 25%, var(--border));
-    border-radius: 0 6px 6px 0;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
     background: color-mix(in oklab, var(--fg) 2.5%, transparent);
   }
   .sa-kid-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
@@ -328,19 +305,14 @@
   .sa-kid[data-status="running"] .sa-kid-stat { color: var(--status-busy); }
   .sa-kid[data-status="done"] .sa-kid-stat { color: color-mix(in oklch, var(--ok) 78%, var(--fg-faint)); }
   .sa-kid[data-status="error"] .sa-kid-stat { color: var(--danger); }
-  .sa-kid-pill {
-    display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 999px;
-    background: var(--accent-soft); color: var(--accent);
-    font-size: 9.5px; font-weight: 600; font-family: var(--font-mono); flex: none;
-  }
   .sa-kid-desc {
-    flex: 1; min-width: 0; font-size: 11px; color: var(--fg-faint);
+    flex: 1; min-width: 0; font-size: var(--fs-xs); color: var(--fg-faint);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .sa-result {
     display: flex; align-items: flex-start; gap: 7px; margin-top: 3px; padding-top: 8px;
-    border-top: 1px dashed color-mix(in oklch, var(--border) 60%, transparent);
-    font-size: 12px; color: var(--fg-2); line-height: 1.5;
+    border-top: 1px dashed color-mix(in oklch, var(--tile-border) 85%, transparent);
+    font-size: var(--fs-sm); color: var(--fg-2); line-height: 1.5;
   }
   .sa-result > :global(svg) { color: var(--fg-subtle); flex: none; margin-top: 2px; }
   .sa-result-md { flex: 1; min-width: 0; }

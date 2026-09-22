@@ -1,8 +1,8 @@
 <script lang="ts">
   // The "Claude is asking you" card. Extracted verbatim from ToolChip so the
   // chip stays a router; this owns all AskUser state, the store round-trip, and
-  // the emerald card styling. The parent `.chip.as-card.is-ask` frame (border,
-  // max-width, pending pulse) lives in ToolChip — this renders the head + body.
+  // the card styling (the parent `.tile.is-ask` frame — border/max-width — is
+  // just the shared ask tone from ToolChip; head/body chrome lives here).
   import { Loader2, CheckCircle2, AlertCircle, HelpCircle, Square, Circle } from "@lucide/svelte";
   import { assistant, type ToolBlock } from "../../../state/assistant.svelte";
   import { parseAskQuestions } from "../../../state/assistant/askQuestions";
@@ -46,6 +46,13 @@
   // unparseable text).
   const answeredPairs = $derived(askAnswered ? parseAskUserResult(tool.result) : []);
   const askDismissed = $derived(askAnswered && /^User dismissed the question/i.test(tool.result ?? ""));
+
+  // Status pill/glyph tone — same STATUS-only vocabulary as the other cards
+  // (DESIGN §8). "awaiting"/"sending"/"connecting" all read as in-progress.
+  const statusTone = $derived(askAnswered ? "is-ok" : tool.status === "error" ? "is-bad" : "is-live");
+  const statusText = $derived(
+    askAnswered ? "answered" : askSubmitting ? "sending…" : !askRequestId ? "connecting…" : "awaiting reply",
+  );
 
   function toggleAskMulti(qi: number, oi: number) {
     const cur = askMultiSet[qi] ?? new Set<number>();
@@ -123,20 +130,14 @@
   });
 </script>
 
-<!-- AskUser card head — purple-ish meta tone, "Question" pill + status. -->
-<div class="ask-head">
+<!-- AskUser card head — shared `.tile-head` chrome; the ask tint is local
+     (previously reached in from ToolChip via :global(), now owned here since
+     this card has `tool` in scope). -->
+<div class="tile-head ask-head" data-status={tool.status}>
   <span class="ask-icon"><HelpCircle size={14} /></span>
-  <span class="ask-pill">{askQuestions.length > 1 ? `${askQuestions.length} Questions` : "Question"}</span>
-  {#if askAnswered}
-    <span class="ask-status-text answered">answered</span>
-  {:else if askSubmitting}
-    <span class="ask-status-text submitting">sending…</span>
-  {:else if !askRequestId}
-    <span class="ask-status-text waiting">connecting…</span>
-  {:else}
-    <span class="ask-status-text awaiting">awaiting reply</span>
-  {/if}
-  <span class="chip-status">
+  <span class="tile-pill">{askQuestions.length > 1 ? `${askQuestions.length} Questions` : "Question"}</span>
+  <span class="tile-pill ask-status {statusTone}">{statusText}</span>
+  <span class="tile-glyph {statusTone}">
     {#if askAnswered}<CheckCircle2 size={12} />
     {:else if tool.status === "error"}<AlertCircle size={12} />
     {:else}<Loader2 size={12} class="chip-spin" />{/if}
@@ -144,7 +145,7 @@
 </div>
 
 {#if expanded}
-  <div class="ask-body">
+  <div class="tile-body ask-body">
     {#if askAnswered}
       <!-- Final state — parse the model's "Q:/A:" tool_result into clean
            question + answer-chip rows; fall back to the raw text on a
@@ -286,44 +287,19 @@
 {/if}
 
 <style>
-  /* AskUser card — emerald-only, ties the "Claude is asking you" card to the
-     same --accent vocabulary as the avatar, rail, and composer. The outer
-     `.chip.as-card.is-ask` frame (border / max-width / pending pulse) lives in
-     ToolChip; --ask resolves on `.chip` and descendants inherit it. */
-  .ask-head {
-    display: flex; align-items: center; gap: 9px;
-    padding: 7px 12px;
-    border-bottom: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
-  }
+  /* AskUser card — ties every accent use to the plain `--accent` token (no more
+     local `--ask` alias) so it stays in lockstep with the rest of the app if
+     the accent hue changes in Settings. Head padding/font/hairline are the
+     shared `.tile-head` recipe (app.css); the outer `.tile.is-ask` frame
+     (border tint, max-width, stationary status edge) lives in ToolChip. */
+  .ask-head { background: color-mix(in oklab, var(--accent) 8%, transparent); }
+  .ask-head[data-status="pending"] { background: color-mix(in oklab, var(--accent) 12%, transparent); }
   .ask-icon {
     display: inline-flex;
-    color: var(--ask);
-    flex-shrink: 0;
-  }
-  .ask-pill {
-    display: inline-flex; align-items: center;
-    padding: 2px 9px;
-    border-radius: 999px;
-    background: color-mix(in oklch, var(--ask) 16%, transparent);
-    border: 1px solid color-mix(in oklch, var(--ask) 38%, var(--border));
-    color: color-mix(in oklch, var(--ask) 72%, var(--fg));
-    font-size: 10.5px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    flex-shrink: 0;
-  }
-  .ask-status-text {
-    margin-left: auto;
-    font-size: 10.5px;
     color: var(--fg-muted);
-    font-variant: small-caps;
-    letter-spacing: 0.04em;
+    flex-shrink: 0;
   }
-  /* Answered = done = the one place green (success) is semantically right. */
-  .ask-status-text.answered { color: var(--ok); font-weight: 600; }
-  .ask-status-text.submitting { color: var(--ask); }
-  .ask-status-text.waiting { color: var(--fg-faint); font-style: italic; }
-  .ask-status-text.awaiting { color: color-mix(in oklch, var(--ask) 70%, var(--fg-muted)); }
+  .ask-status { margin-left: auto; }
 
   .ask-body {
     padding: 11px 13px 13px;
@@ -337,9 +313,9 @@
   .ask-q-header {
     align-self: flex-start;
     padding: 1px 7px;
-    border-radius: 4px;
-    background: color-mix(in oklch, var(--ask) 13%, transparent);
-    color: color-mix(in oklch, var(--ask) 65%, var(--fg));
+    border-radius: var(--radius-xs);
+    background: color-mix(in oklch, var(--accent) 13%, transparent);
+    color: color-mix(in oklch, var(--accent) 65%, var(--fg));
     font-size: 9.5px;
     font-weight: 700;
     letter-spacing: 0.06em;
@@ -374,17 +350,17 @@
   }
   .ask-option:hover:not(:disabled) {
     background: var(--surface-hover);
-    border-color: color-mix(in oklch, var(--ask) 35%, var(--border));
+    border-color: color-mix(in oklch, var(--accent) 35%, var(--border));
   }
   .ask-option:active:not(:disabled) { transform: translateY(1px); }
   .ask-option:disabled { opacity: 0.55; cursor: default; }
   .ask-option.selected {
-    background: color-mix(in oklch, var(--ask) 13%, var(--bg-elev-1));
-    border-color: color-mix(in oklch, var(--ask) 55%, var(--border));
+    background: color-mix(in oklch, var(--accent) 13%, var(--bg-elev-1));
+    border-color: color-mix(in oklch, var(--accent) 55%, var(--border));
     color: var(--fg);
-    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--ask) 22%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--accent) 22%, transparent);
   }
-  .ask-option.selected .ask-opt-marker { color: var(--ask); }
+  .ask-option.selected .ask-opt-marker { color: var(--accent); }
   .ask-opt-marker {
     display: inline-flex; align-items: center; justify-content: center;
     color: var(--fg-faint);
@@ -413,8 +389,8 @@
     margin-top: 2px;
     padding: 6px 10px;
     background: var(--bg-elev-1);
-    border: 1px solid color-mix(in oklch, var(--ask) 38%, var(--border));
-    border-radius: 6px;
+    border: 1px solid color-mix(in oklch, var(--accent) 38%, var(--border));
+    border-radius: var(--radius-sm);
     color: var(--fg);
     font: inherit;
     font-size: 12px;
@@ -422,8 +398,8 @@
     transition: border-color var(--dur-fast) ease-out, box-shadow var(--dur-fast) ease-out;
   }
   .ask-other-input:focus {
-    border-color: color-mix(in oklch, var(--ask) 65%, transparent);
-    box-shadow: 0 0 0 2px color-mix(in oklch, var(--ask) 14%, transparent);
+    border-color: color-mix(in oklch, var(--accent) 65%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 14%, transparent);
   }
 
   .ask-actions {
@@ -449,13 +425,13 @@
   }
   .ask-btn:disabled { opacity: 0.5; cursor: default; }
   .ask-btn.submit {
-    background: color-mix(in oklch, var(--ask) 20%, var(--bg-elev-1));
-    border-color: color-mix(in oklch, var(--ask) 50%, var(--border));
-    color: color-mix(in oklch, var(--ask) 82%, var(--fg));
+    background: color-mix(in oklch, var(--accent) 20%, var(--bg-elev-1));
+    border-color: color-mix(in oklch, var(--accent) 50%, var(--border));
+    color: color-mix(in oklch, var(--accent) 82%, var(--fg));
   }
   .ask-btn.submit:hover:not(:disabled) {
-    background: color-mix(in oklch, var(--ask) 30%, var(--bg-elev-1));
-    border-color: color-mix(in oklch, var(--ask) 68%, var(--border));
+    background: color-mix(in oklch, var(--accent) 30%, var(--bg-elev-1));
+    border-color: color-mix(in oklch, var(--accent) 68%, var(--border));
     color: var(--fg);
   }
   .ask-btn.submit :global(.chip-spin) { animation: chip-spin 1s linear infinite; }
@@ -502,8 +478,8 @@
     margin: 0;
     padding: 8px 10px;
     background: var(--bg-elev-1);
-    border: 1px solid color-mix(in oklch, var(--ask) 25%, var(--border));
-    border-radius: 6px;
+    border: 1px solid color-mix(in oklch, var(--accent) 25%, var(--border));
+    border-radius: var(--radius-sm);
     font-family: var(--font-mono, monospace);
     font-size: 11px;
     line-height: 1.55;
@@ -522,6 +498,6 @@
   /* chip-spin is scoped per-component in Svelte — define it here (sibling cards
      do the same) so both the head status spinner and the submit-button spinner
      rotate. */
-  .chip-status :global(.chip-spin) { animation: chip-spin 1s linear infinite; }
+  .tile-glyph :global(.chip-spin) { animation: chip-spin 1s linear infinite; }
   @keyframes chip-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
 </style>

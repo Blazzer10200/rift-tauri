@@ -3,6 +3,7 @@
   import type { PlanItem } from "./streamModel";
   let { items = [] }: { items?: PlanItem[] } = $props();
   const done = $derived(items.filter((i) => i.status === "done").length);
+  const anyActive = $derived(items.some((i) => i.status === "active"));
   const pct = $derived(items.length ? Math.round((done / items.length) * 100) : 0);
   // Long-session guard: the plan accretes all session (one TaskCreate per
   // item), so past this size the completed rows fold behind one summary line —
@@ -17,9 +18,9 @@
   );
 </script>
 
-<div class="splan">
+<div class="tile splan">
   <div class="splan-head">
-    <ListChecks size={14} strokeWidth={2} />
+    <span class="tile-glyph" class:is-live={anyActive}><ListChecks size={12} strokeWidth={2} /></span>
     <span class="splan-title">Plan</span>
     <span class="splan-track"><span class="splan-fill" style="width:{pct}%"></span></span>
     <span class="splan-count">{done}/{items.length}</span>

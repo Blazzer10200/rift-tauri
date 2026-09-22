@@ -147,32 +147,6 @@
     return n;
   });
 
-  // Category drives the icon-color + border tint. Lets the eye distinguish
-  // read-only (cheap, blue), mutation (accent), side-effect (warm),
-  // agentic/meta (purple-ish) at a glance without parsing the tool name.
-  type Category = "read" | "write" | "shell" | "agent" | "meta";
-  const category = $derived.by<Category>(() => {
-    const n = shortName(tool.name);
-    if (n === "Edit" || n === "MultiEdit" || n === "Write" || n === "NotebookEdit") return "write";
-    if (n === "Bash" || n === "PowerShell" || n === "remote_bash" || n === "BashOutput" || n === "KillBash" || n === "KillShell" || n === "TaskOutput" || n === "TaskStop" || n === "Monitor" || n === "REPL") return "shell";
-    if (n === "Agent" || n === "Task" || n === "Skill" || n === "SlashCommand" || n === "Workflow" || n === "SendMessage") return "agent";
-    if (n === "TodoWrite" || n === "TaskCreate" || n === "TaskUpdate" || n === "AskUserQuestion" || n === "ask_user" || n === "ExitPlanMode" || n === "EnterPlanMode" || n === "EndConversation" || n === "ReportFindings") return "meta";
-    // Cloud publish + repo/worktree mutation read as consequential.
-    if (n === "Artifact" || n === "EnterWorktree" || n === "ExitWorktree") return "write";
-    // Local git: mutating ops read as consequential (write tint); read-only
-    // status/diff/log stay cheap (read).
-    if (n === "git_commit" || n === "git_push" || n === "git_pull") return "write";
-    if (n === "git_status" || n === "git_diff" || n === "git_log") return "read";
-    // Bridge side-effects — opening the dock / firing a toast.
-    if (n === "open_browser" || n === "notify") return "shell";
-    if (n === "DesignSync") {
-      const m = typeof tool.input?.method === "string" ? tool.input.method as string : "";
-      // Cloud-publishing methods read as consequential (write tint); reads stay cheap.
-      return ["finalize_plan","write_files","delete_files","create_project","register_assets","unregister_assets"].includes(m) ? "write" : "read";
-    }
-    return "read";
-  });
-
   // Format the result's first non-empty line as an inline preview when the
   // result is short and structurally a single line of useful text. Skips
   // when result is empty, multi-line w/ substance, or expansion would
@@ -448,7 +422,15 @@
   });
 </script>
 
-<div class="chip" data-status={tool.status} data-category={category} data-variant={variant} class:as-card={isCard} class:is-ask={isAskUser}>
+<div
+  class="tile"
+  class:is-compact={!isCard}
+  class:is-ask={isAskUser}
+  class:is-live={tool.status === "pending"}
+  class:is-bad={tool.status === "error"}
+  data-status={tool.status}
+  data-variant={variant}
+>
   {#if isAgent}
     <AgentCard
       {agentSubtype}
@@ -539,116 +521,74 @@
 </div>
 
 <style>
-  .chip {
+  /* Shell chrome (radius/border/fill, is-live/is-bad/is-ask edges) is the
+     global `.tile`/`.tile.is-compact` recipe (app.css "stream tiles") — this
+     file only owns layout, the timeline-rail flavor, and the expand panel.
+     `.tile.is-compact` = the "row" variant (one-line tool runs); the card
+     variants (Agent/TodoWrite/Ask) render full `.tile` via their own
+     components and never carry `.is-compact`. */
+  .tile {
     align-self: stretch;
     width: 100%;
     margin: 2px 0;
-    background: color-mix(in oklch, var(--bg-elev-1) 70%, transparent);
-    border: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
-    border-radius: 5px;
     overflow: hidden;
-    transition: border-color var(--dur-fast) ease-out, background var(--dur-fast) ease-out, opacity var(--dur-fast) ease-out;
     animation: enter var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1);
   }
-  .chip[data-status="done"] { opacity: 0.85; }
-  .chip[data-status="done"]:hover { opacity: 1; }
+  .tile[data-status="done"] { opacity: 0.85; }
+  .tile[data-status="done"]:hover { opacity: 1; }
 
   /* Timeline variant — naked head; the bullet on the rail (drawn by the
-     parent .tl-node) carries the category + status signal. Card variants
-     (Agent + TodoWrite) keep their chrome regardless. */
-  .chip[data-variant="timeline"]:not(.as-card) {
+     parent .tl-node) carries the status signal, so the tile itself stays
+     borderless here (no resting edge to compete with the rail spine). */
+  .tile[data-variant="timeline"].is-compact {
     background: transparent;
     border: 0;
-    border-left: 0;
-    border-radius: 4px;
+    border-radius: var(--radius-xs);
     margin: 0;
     animation: none;
   }
-  /* Persistent faint surface + left-accent so each tool row reads as its own
-     "action" lane, distinct from the plain narration prose above/below it.
-     Previously transparent-until-hover, which left tool calls visually flat
-     against the text. Hover brightens the lane + lifts the accent to the
-     model hue. */
-  .chip[data-variant="timeline"]:not(.as-card) :global(.bh) {
-    padding: 3px 8px;
-    min-height: 22px;
-    border-radius: 8px;
-    background: color-mix(in oklch, var(--bg-elev-1) 45%, transparent);
-    /* No resting left-bar — the node circle on the rail is the spine now, so
-       the chip's own inset accent only competes with it. Hover still lifts the
-       model-hue bar to signal interactivity. */
-    transition: background var(--dur-fast) ease-out, transform var(--dur-fast) ease-out, box-shadow var(--dur-fast) ease-out;
+  .tile[data-variant="timeline"].is-compact.is-live,
+  .tile[data-variant="timeline"].is-compact.is-bad,
+  .tile[data-variant="timeline"].is-compact.is-ask {
+    box-shadow: none;
+    background: transparent;
   }
-  .chip[data-variant="timeline"]:not(.as-card) :global(.bh:hover:not(:disabled)) {
+  /* Persistent faint surface + hover lift so each tool row reads as its own
+     "action" lane, distinct from the plain narration prose above/below it. */
+  .tile[data-variant="timeline"].is-compact :global(.bh) {
+    border-radius: var(--radius);
+    background: color-mix(in oklch, var(--bg-elev-1) 45%, transparent);
+  }
+  .tile[data-variant="timeline"].is-compact :global(.bh:hover:not(:disabled)) {
     background: color-mix(in oklch, var(--surface-hover) 80%, transparent);
-    box-shadow: inset 2px 0 0 color-mix(in oklch, var(--border) 90%, transparent);
+    box-shadow: inset 2px 0 0 color-mix(in oklch, var(--tile-border) 90%, transparent);
     transform: translateX(1px);
   }
-  /* Chip-tool name gets a bit more weight; summary stays muted for hierarchy. */
-  .chip[data-variant="timeline"]:not(.as-card) .chip-tool {
-    color: var(--fg);
-    font-weight: 600;
-  }
-  .chip[data-variant="timeline"]:not(.as-card) .chip-sum { color: var(--fg-muted); }
-  .chip[data-variant="timeline"]:not(.as-card)[data-status="error"] .chip-tool { color: oklch(0.85 0.13 22); }
-  .chip[data-variant="timeline"]:not(.as-card) .chip-body {
+  .tile[data-variant="timeline"].is-compact .chip-tool { color: var(--fg); font-weight: 600; }
+  .tile[data-variant="timeline"].is-compact .chip-sum { color: var(--fg-muted); }
+  .tile[data-variant="timeline"].is-compact[data-status="error"] .chip-tool { color: var(--danger); }
+  .tile[data-variant="timeline"].is-compact .chip-body {
     margin-top: 4px;
-    border: 1px solid color-mix(in oklch, var(--border) 60%, transparent);
-    border-radius: 8px;
+    border: 1px solid color-mix(in oklch, var(--tile-border) 60%, transparent);
+    border-radius: var(--radius);
     background: color-mix(in oklch, var(--bg-elev-1) 80%, transparent);
   }
-  .chip[data-variant="timeline"]:not(.as-card)[data-status="pending"] {
-    background: transparent;
-    animation: none;
-  }
-  .chip[data-variant="timeline"]:not(.as-card)[data-status="error"] {
-    background: transparent;
-  }
-  .chip[data-status="pending"] {
-    /* Neutral resting surface like every other block; a faint accent border is
-       the only "running now" cue (status signal, not a card color). */
-    background: color-mix(in oklch, var(--bg-elev-1) 70%, transparent);
-    border-color: color-mix(in oklab, var(--accent) 22%, var(--border));
-    opacity: 1;
-  }
-  .chip[data-status="error"] {
-    background: color-mix(in oklch, var(--danger-soft) 45%, var(--bg-elev-1));
-    border-color: color-mix(in oklab, var(--danger) 38%, var(--border));
-    opacity: 1;
-  }
-  /* Head chrome — layout + the meta cluster (pill/duration/copy/chevron) live
-     in the shared BlockHeader; only the chip-specific container fill is here. */
-  .chip :global(.bh) {
-    gap: 5px;
-    padding: 3px 8px;
+
+  /* Head chrome for the compact "row" tile — the meta cluster (pill/duration/
+     copy/chevron) lives in the shared BlockHeader; this just applies the
+     row-density padding token, since BlockHeader's `.bh` isn't the global
+     `.tile-head` class (`.tile.is-compact > .tile-head` can't key off it). */
+  .tile.is-compact :global(.bh) {
+    padding: var(--tile-head-pad-compact);
     font-size: var(--fs-xs);
     min-height: 22px;
   }
-  .chip :global(.bh:hover:not(:disabled)) { background: var(--surface-hover); }
+  .tile.is-compact :global(.bh:hover:not(:disabled)) { background: var(--tile-fill-hover); }
   .chip-icon {
     display: inline-flex;
     color: var(--fg-2);
     flex-shrink: 0;
     opacity: 0.85;
-  }
-  /* Neutral left rule — calm/boxless, matching the stream blocks. Accent is
-     reserved for the live (pending) and error states below, which are real
-     signals; idle categories don't claim the model hue. */
-  .chip { border-left-width: 2px; }
-  .chip[data-category="read"],
-  .chip[data-category="write"],
-  .chip[data-category="shell"],
-  .chip[data-category="agent"],
-  .chip[data-category="meta"]  { border-left-color: color-mix(in oklch, var(--border) 80%, transparent); }
-  .chip[data-status="error"] .chip-icon { color: var(--danger); opacity: 1; }
-  .chip[data-status="error"] { border-left-color: var(--danger) !important; }
-  .chip[data-status="pending"] {
-    border-left-color: var(--accent) !important;
-    animation: chip-pulse 1.8s ease-in-out infinite;
-  }
-  @keyframes chip-pulse {
-    0%, 100% { background: color-mix(in oklch, var(--accent-soft) 45%, var(--bg-elev-1)); }
-    50%      { background: color-mix(in oklch, var(--accent-soft) 25%, var(--bg-elev-1)); }
   }
   .chip-tool {
     font-weight: 600;
@@ -664,7 +604,7 @@
     font-size: var(--fs-xs);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .chip[data-status="error"] .chip-cap { color: oklch(0.85 0.10 22); }
+  .tile[data-status="error"] .chip-cap { color: var(--danger); }
   .chip-sep { color: var(--fg-faint); flex-shrink: 0; font-size: 10px; }
   .chip-sum {
     flex: 1; min-width: 0;
@@ -687,7 +627,7 @@
 
   .chip-body {
     padding: 8px 10px 10px;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid color-mix(in oklab, var(--tile-border) 80%, transparent);
     background: color-mix(in oklch, var(--surface) 96%, transparent);
   }
   /* Section labels (input / result) — lowercase to match the kv keys below
@@ -819,61 +759,15 @@
     border-color: color-mix(in oklab, var(--danger) 35%, var(--border));
     background: color-mix(in oklch, var(--danger-soft) 25%, var(--bg-elev-1));
   }
-  .error-frame :global(pre) { color: oklch(0.88 0.07 22); }
+  .error-frame :global(pre) { color: var(--danger); }
 
   .mono { font-family: var(--font-mono, monospace); }
 
-  /* ── Card variants (Agent + TodoWrite) ─────────────────────────────── */
-  .chip.as-card {
-    max-width: 100%;
-    width: 100%;
-    background: color-mix(in oklch, var(--bg-elev-1) 60%, transparent);
-    border-radius: 8px;
-    border-width: 1px;
-    border-left-width: 3px;
-  }
-  .chip.as-card[data-category="agent"] {
-    border-left-color: color-mix(in oklab, var(--accent) 65%, var(--border));
-  }
-  .chip.as-card[data-category="meta"] {
-    border-left-color: color-mix(in oklab, var(--accent) 55%, var(--border));
-  }
-
-  /* AskUser card OUTER FRAME — the head/body + .ask-* element styling live in
-     ./toolchip/AskUserCard.svelte. These rules style the parent .chip wrapper
-     (border / max-width / pending pulse); the crossings into the child head use
-     :global() since .ask-head/.ask-status-text are now scoped to the child. */
-  .chip.as-card.is-ask {
-    --ask: var(--accent);
-    max-width: min(100%, 560px);
-    border-left-color: color-mix(in oklch, var(--ask) 55%, var(--border)) !important;
-  }
-  .chip.as-card.is-ask :global(.ask-head) {
-    background: color-mix(in oklch, var(--ask) 8%, transparent);
-  }
-
-  /* Pending — gentle model-tinted outer glow. Signals "needs your input"
-     using the assistant's own accent, not a semantic-green alarm. */
-  .chip.as-card.is-ask[data-status="pending"] {
-    animation: ask-card-pulse 2.4s ease-in-out infinite;
-    background: color-mix(in oklch, var(--ask) 7%, var(--bg-elev-1));
-    border-color: color-mix(in oklch, var(--ask) 40%, var(--border));
-    border-left-color: var(--ask) !important;
-  }
-  .chip.as-card.is-ask[data-status="pending"] :global(.ask-head) {
-    background: color-mix(in oklch, var(--ask) 12%, transparent);
-    border-bottom-color: color-mix(in oklch, var(--ask) 35%, var(--border));
-  }
-  .chip.as-card.is-ask[data-status="pending"] :global(.ask-status-text.awaiting) {
-    color: color-mix(in oklch, var(--ask) 85%, white);
-    font-weight: 600;
-  }
-  @keyframes ask-card-pulse {
-    0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--ask) 0%, transparent); }
-    50%      { box-shadow: 0 0 16px -2px color-mix(in oklch, var(--ask) 22%, transparent),
-                          0 0 0 1px color-mix(in oklch, var(--ask) 16%, transparent); }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .chip.as-card.is-ask[data-status="pending"] { animation: none; }
-  }
+  /* ── Card variants (Agent + TodoWrite + Ask) ───────────────────────────
+     Chrome (radius/border/fill) is the plain `.tile` (no `.is-compact`) —
+     the previous `.chip.as-card` + per-category left-border + the `.is-ask`
+     glow/pulse duplicated exactly what app.css's `.tile`/`.is-ask` already
+     do. AskUserCard needs a narrower reading column; that's the one local
+     override left. */
+  .tile.is-ask { max-width: min(100%, 560px); }
 </style>

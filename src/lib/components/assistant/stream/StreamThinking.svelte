@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Brain, ChevronDown } from "@lucide/svelte";
+  import { Brain, ChevronRight } from "@lucide/svelte";
   import { fmtDur } from "./streamModel";
   import Markdown from "../Markdown.svelte";
   let { active = false, durSecs = 0, text = "", workspaceRoot = null }:
@@ -16,7 +16,7 @@
   <button class="sthink-row" class:bare={!text} class:live={active} onclick={() => { if (text) open = !open; }} type="button" disabled={!text} aria-expanded={text ? open : undefined}>
     <Brain size={13} strokeWidth={2} />
     <span aria-live="polite">{label}</span>
-    {#if text}<ChevronDown class="sthink-chev {open ? 'open' : ''}" size={13} strokeWidth={2} />{/if}
+    {#if text}<ChevronRight class="tile-chev {open ? 'open' : ''}" size={13} strokeWidth={2} />{/if}
   </button>
   {#if open && text}
     <!-- Markdown, matching MessageBubble's thinking body — reasoning is often

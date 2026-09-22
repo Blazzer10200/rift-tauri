@@ -61,7 +61,7 @@
 </script>
 
 {#if turnStats.files > 0}
-  <div class="turn-summary" data-auto={autoApplied ? "true" : null} class:mode-bypass={bypassApplied} in:fade={{ duration: reducedMotion ? 0 : 160 }}>
+  <div class="turn-summary tile" data-auto={autoApplied ? "true" : null} class:mode-bypass={bypassApplied} in:fade={{ duration: reducedMotion ? 0 : 160 }}>
     <div class="ts-stats">
       {#if autoApplied}
         <span class="ts-applied" class:danger={bypassApplied}><Check size={13} />Applied automatically</span>
@@ -85,21 +85,17 @@
 {/if}
 
 <style>
+  /* Card chrome (border/radius/fill/hover) comes from the global `.tile`
+     recipe (app.css "stream tiles") — only spacing/layout stays local. */
   .turn-summary {
     display: flex; align-items: center; justify-content: space-between; gap: 12px;
     flex-wrap: wrap;
     margin-top: 12px; padding: 9px 13px;
-    background: color-mix(in oklab, var(--surface) 72%, transparent);
-    backdrop-filter: blur(8px) saturate(1.1);
-    -webkit-backdrop-filter: blur(8px) saturate(1.1);
-    border: 1px solid color-mix(in oklab, var(--fg) 9%, transparent);
-    border-radius: 11px;
     font-size: var(--fs-sm);
-    box-shadow: 0 1px 2px rgba(0,0,0,0.18), inset 0 1px 0 color-mix(in oklab, var(--fg) 5%, transparent);
   }
   .turn-summary[data-auto="true"] {
     background: var(--accent-soft);
-    border-color: color-mix(in oklab, var(--accent) 28%, var(--border));
+    border-color: var(--tile-border-live);
   }
   /* bypass permissions = dangerous → amber, matching the composer bypass pill */
   .turn-summary.mode-bypass {

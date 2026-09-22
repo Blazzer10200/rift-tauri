@@ -125,11 +125,11 @@
   .gres-line { color: var(--fg-faint); font-weight: 400; }
   .gres-text { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-word; color: var(--fg-2); }
   .gres-hit { background: color-mix(in oklab, var(--accent) 26%, transparent);
-    color: var(--fg); border-radius: 2px; padding: 0 1px; }
+    color: var(--fg); border-radius: var(--radius-xs); padding: 0 1px; }
   .gres-plain { padding: 1px 10px; color: var(--fg-faint); white-space: pre-wrap; word-break: break-word; }
   .gres-more { align-self: flex-start; margin: 3px 6px 1px; padding: 2px 8px;
-    border: 0; border-radius: 6px; background: none; cursor: pointer;
-    font: inherit; font-size: 10.5px; font-weight: 550; color: var(--fg-subtle);
+    border: 0; border-radius: var(--radius-sm); background: none; cursor: pointer;
+    font: inherit; font-size: var(--tile-meta-fs); font-weight: 550; color: var(--fg-subtle);
     transition: background var(--dur-fast), color var(--dur-fast); }
   .gres-more:hover { background: var(--surface-hover); color: var(--fg-2); }
 </style>

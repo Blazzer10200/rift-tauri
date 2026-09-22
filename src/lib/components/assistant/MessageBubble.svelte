@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, AlertCircle, X, Ban, CornerDownRight } from "@lucide/svelte";
+  import { Sparkles, Copy, Check, Brain, ChevronRight, AlertCircle, X, Ban, CornerDownRight } from "@lucide/svelte";
   import { onDestroy } from "svelte";
   import { fade, slide } from "svelte/transition";
   import { prefersReducedMotion } from "../../state/accessibility.svelte";
@@ -383,10 +383,10 @@
           {@const hasText = b.text.length > 0}
           {@const isOpen = expandedThinking.has(bi)}
           {@const elapsed = elapsedFor(b, tickNow)}
-          <div class="tn-think" class:active={isActive} class:expandable={hasText}>
+          <div class="tn-think tile is-compact" class:active={isActive} class:is-live={isActive} class:expandable={hasText}>
             <button
               type="button"
-              class="tn-think-head"
+              class="tn-think-head tile-head"
               onclick={() => hasText && toggleThinking(bi)}
               disabled={!hasText}
               aria-expanded={isOpen}
@@ -401,7 +401,7 @@
                 </span>
               {/if}
               {#if hasText}
-                <span class="chev" class:open={isOpen}><ChevronDown size={11} /></span>
+                <span class="tile-chev" class:open={isOpen}><ChevronRight size={11} /></span>
               {/if}
             </button>
             {#if hasText && isOpen}
@@ -465,15 +465,17 @@
           {@const open = groupOpen.get(unit.key) ?? defaultOpen}
           {@const groupMs = groupDurationMs(unit.blocks)}
           <div
-            class="tl-node work"
+            class="tl-node work tile"
             class:live={nodeStatus === "pending"}
+            class:is-live={nodeStatus === "pending"}
+            class:is-bad={nodeStatus === "error"}
             data-kind="tool"
             data-status={nodeStatus}
             data-open={open ? "true" : null}
             style="--idx: {Math.min(ui, 6)}"
           >
-            <button class="work-head" type="button" onclick={() => toggleGroup(unit.key, defaultOpen)} aria-expanded={open}>
-              <span class="work-chev" class:open><ChevronRight size={12} /></span>
+            <button class="work-head tile-head" type="button" onclick={() => toggleGroup(unit.key, defaultOpen)} aria-expanded={open}>
+              <span class="work-chev tile-chev" class:open><ChevronRight size={12} /></span>
               <span class="work-spark" aria-hidden="true"><Sparkles size={12} /></span>
               <span class="work-sum">
                 <span class="work-sum-t">{unit.caption ?? `${unit.blocks.length} tools`}</span>
@@ -483,7 +485,7 @@
               <span class="work-count">{unit.blocks.length}</span>
             </button>
             {#if open}
-              <div class="work-body" transition:slide={{ duration: reducedMotion ? 0 : 200 }}>
+              <div class="work-body tile-well" transition:slide={{ duration: reducedMotion ? 0 : 200 }}>
                 <div class="work-rail">
                   {#each unit.blocks.filter((gb) => gb.type !== "thinking") as gb, gi (gb.type === "tool" ? gb.id : gi)}
                     {@render renderBlock(gb, `tg_inner_${ui}_${gi}`)}
@@ -912,15 +914,19 @@
      don't create a wall of "Thought for <1s" noise between tool calls. Smaller
      + dimmer so they read as a faint timestamp, not a content row. Still
      readable and expandable on hover, just not competing for attention. */
-  .tl-node[data-quick="true"] .tn-think-head {
+  .tl-node[data-quick="true"] .tn-think {
     opacity: 0.52;
+    border-color: transparent;
+    background: transparent;
+  }
+  .tl-node[data-quick="true"] .tn-think-head {
     font-size: 10px;
     padding-top: 0; padding-bottom: 0;
   }
   .tl-node[data-quick="true"] .tn-think-label { font-size: 10px; }
   .tl-node[data-quick="true"] .tn-think-meta { font-size: 9.5px; }
   .tl-node[data-quick="true"] .tn-think-head :global(svg) { width: 10px; height: 10px; }
-  .tl-node[data-quick="true"]:hover .tn-think-head {
+  .tl-node[data-quick="true"]:hover .tn-think {
     opacity: 0.72;
   }
   /* The hollow rail bullet on a quick thought is also noise — recede it. */
@@ -956,34 +962,24 @@
      the spine, carrying a left status rail (quiet green when done, accent while
      running, loud red + tinted on error). Replaces the spine bullet so the rail
      isn't double-signalled. */
-  /* Grouped work block (the agentic timeline) — ported 1:1 from the redesign
-     spec (.work / .work-head / .work-body / .work-rail). The card hangs free in
-     the turn (no spine bullet); live state pulses the spark, error tints border. */
+  /* Grouped work block (the agentic timeline) — the stream-tile recipe
+     (`.tile` + `var(--tile-*)` tokens, see app.css "stream tiles" / DESIGN §7).
+     The card hangs free in the turn (no spine bullet); live state tints the
+     border (`.is-live`) and pulses the spark, `.is-bad` adds the inset status
+     edge instead of a hand-rolled danger border+fill. */
   .work {
     position: relative;
     margin: 11px 0;
-    border: 1px solid var(--border);
-    border-radius: 11px;
     overflow: hidden;
-    background: color-mix(in oklab, var(--bg-elev-1) 60%, transparent);
-    transition: border-color var(--dur-fast);
+    min-height: 38px;
   }
   .work::before { display: none; }
-  .work.live { border-color: color-mix(in oklab, var(--accent) 26%, var(--border)); }
-  .work[data-status="error"] {
-    border-color: color-mix(in oklab, var(--danger) 42%, var(--border));
-    background: color-mix(in oklab, var(--danger) 6%, var(--bg));
-  }
   .work-head {
-    display: flex; align-items: center; gap: 9px;
-    width: 100%; padding: 9px 12px; min-height: 38px;
-    background: transparent; border: 0; cursor: pointer;
-    color: inherit; font: inherit; text-align: left;
+    width: 100%; min-height: 38px;
+    cursor: pointer;
     transition: background var(--dur-fast);
   }
-  .work-head:hover { background: var(--surface-hover); }
-  .work-chev { display: inline-flex; color: var(--fg-faint); flex: none; transition: transform var(--dur-fast); }
-  .work-chev.open { transform: rotate(90deg); }
+  .work-head:hover { background: var(--tile-fill-hover); }
   .work-spark {
     display: grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; flex: none;
     background: color-mix(in oklch, var(--fg) 6%, transparent); color: var(--fg-muted);
@@ -1004,7 +1000,7 @@
     background: color-mix(in oklab, var(--fg) 7%, transparent); color: var(--fg-muted); font-size: 10px; font-weight: 700;
   }
   .work-body {
-    border-top: 1px solid var(--border); padding: 10px 12px 11px; background: var(--bg-inset);
+    padding: 10px 12px 11px;
     animation: workOpen 0.34s var(--ease-page) both; overflow: hidden;
   }
   @keyframes workOpen { from { transform: translateY(-4px); } to { transform: none; } }
@@ -1282,31 +1278,24 @@
   .bubble[data-role="assistant"] .user-image-thumb { align-self: flex-start; }
   .bubble[data-role="user"] .user-image-thumb { align-self: flex-end; }
 
-  /* Flat thinking node — no bordered surface; bullet on the rail carries
-     the "this is a reasoning beat" signal. Label is single-line, prose
-     opens inline below on click. */
+  /* Thinking node — stream-tile recipe (`.tile.is-compact`, see app.css
+     "stream tiles" / DESIGN §7): a one-line disclosure row, same shell as a
+     compact tool tile. `.is-live` tints the border while active. Quick/empty
+     thoughts (data-quick, above) stay flat — border+fill dropped to transparent
+     so they recede to a rail timestamp instead of a wall of boxes. */
   .tn-think {
     align-self: flex-start;
     max-width: min(100%, 78ch);
   }
   .tn-think-head {
-    display: flex; align-items: center; gap: 6px;
-    padding: 1px 4px 1px 0;
-    background: transparent;
-    border: 0;
+    gap: 6px;
     color: var(--fg-muted);
     font-size: var(--fs-xs);
     font-weight: 500;
     cursor: default;
-    text-align: left;
-    border-radius: 3px;
-    transition: color var(--dur-fast) ease-out, background var(--dur-fast) ease-out;
   }
   .tn-think.expandable .tn-think-head { cursor: pointer; }
-  .tn-think.expandable .tn-think-head:hover {
-    background: color-mix(in oklch, var(--surface-hover) 60%, transparent);
-    color: var(--fg-2);
-  }
+  .tn-think.expandable .tn-think-head:hover { color: var(--fg-2); }
   .tn-think-head :global(svg) { opacity: 0.7; flex-shrink: 0; }
   .tn-think.active .tn-think-head { color: var(--accent); }
   .tn-think.active .tn-think-head :global(svg) { opacity: 0.9; color: var(--accent); }
@@ -1320,12 +1309,6 @@
     opacity: 0.85;
   }
   .tn-think.active .tn-think-meta { color: color-mix(in oklab, var(--accent) 80%, var(--fg-muted)); }
-  .chev {
-    display: inline-flex;
-    color: var(--fg-faint);
-    transition: transform var(--dur-fast) ease-out;
-  }
-  .chev.open { transform: rotate(180deg); }
   .dots { display: inline-flex; gap: 3px; margin-left: 2px; }
   .dots .dot {
     width: 4px; height: 4px; border-radius: 50%;
@@ -1335,11 +1318,11 @@
   .dots .dot:nth-child(2) { animation-delay: 0.15s; }
   .dots .dot:nth-child(3) { animation-delay: 0.3s; }
   .tn-think-body {
-    margin-top: 4px;
+    margin: 0 10px 8px;
     padding: 6px 10px;
-    border-left: 2px solid color-mix(in oklab, var(--accent) 28%, var(--border));
-    background: color-mix(in oklch, var(--bg-elev-1) 70%, transparent);
-    border-radius: 0 5px 5px 0;
+    border-left: var(--tile-edge) solid color-mix(in oklab, var(--accent) 28%, var(--border));
+    background: var(--tile-well);
+    border-radius: 0 var(--tile-radius-inner) var(--tile-radius-inner) 0;
     font-size: var(--fs-sm);
     line-height: 1.5;
     color: var(--fg-2);

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ChevronDown, ChevronRight, FileText, FolderSearch, FolderTree, Search, Terminal, Wrench } from "@lucide/svelte";
+  import { ChevronRight, FileText, FolderSearch, FolderTree, Search, Terminal, Wrench } from "@lucide/svelte";
   import { fmtDur, groupNames, resultMeta, workLineMode, VERB_PAST, VERB_ING, type StreamTool, type TKind } from "./streamModel";
   import { uiPrefs } from "$lib/state/ui-prefs.svelte";
   import OutputBlock from "./OutputBlock.svelte";
@@ -30,6 +30,7 @@
   const lead = $derived(leadTool?.kind ?? "mcp");
   const Icon = $derived(NAME_ICONS[leadTool?.name ?? ""] ?? ICONS[lead] ?? Wrench);
   const anyActive = $derived(tools.some((t) => t.status === "pending"));
+  const anyFailed = $derived(tools.some((t) => t.status === "error"));
   const summary = $derived(groupNames(tools));
   const totalSecs = $derived(tools.reduce((a, t) => a + t.durSecs, 0));
 
@@ -47,24 +48,24 @@
 </script>
 
 {#if anyActive && tools.length === 1}
-  <div class="wline-active" title={tools[0].path ?? tools[0].cap}>
+  <div class="tile is-compact is-live wline-active" title={tools[0].path ?? tools[0].cap}>
     <span class="wa-dot"></span>
     <span class="wa-text">{VERB_ING[tools[0].kind]}</span>
     <span class="wa-cap">{#if tools[0].dir}<span class="wa-dir">{tools[0].dir}</span>{/if}<b>{tools[0].cap}</b></span>
   </div>
 {:else}
-  <div class="wline" class:open>
-    <button class="wline-head" onclick={() => (userOpen = !userOpen)} type="button" title={summary}>
-      <span class="wline-ic"><Icon size={12} strokeWidth={2} /></span>
-      <span class="wline-label">{summary}</span>
-      <span class="wline-meta">
-        {#if tools.length > 1}<span class="wline-count">{tools.length}</span>{/if}
-        {#if totalSecs >= 1}<span class="wline-dur">{fmtDur(totalSecs)}</span>{/if}
-        <ChevronDown class="wline-chev {open ? 'open' : ''}" size={12} strokeWidth={2} />
+  <div class="tile wline" class:open class:is-compact={!open} class:is-bad={anyFailed}>
+    <button class="tile-head" onclick={() => (userOpen = !userOpen)} type="button" title={summary}>
+      <span class="tile-glyph" class:is-live={anyActive}><Icon size={12} strokeWidth={2} /></span>
+      <span class="tile-title wline-label">{summary}</span>
+      <span class="tile-meta">
+        {#if tools.length > 1}<span class="tile-pill">{tools.length}</span>{/if}
+        {#if totalSecs >= 1}<span class="tile-dur">{fmtDur(totalSecs)}</span>{/if}
+        <ChevronRight class="tile-chev {open ? 'open' : ''}" size={12} strokeWidth={2} />
       </span>
     </button>
     {#if open}
-      <div class="wline-list">
+      <div class="tile-body wline-list">
         {#each tools as t (t.id)}
           {@const meta = resultMeta(t)}
           {@const expandable = hasBody(t)}

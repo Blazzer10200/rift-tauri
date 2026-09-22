@@ -233,10 +233,10 @@
   .oblock-foldbtn {
     display: block; width: 100%; margin: 2px 0; padding: 2px 0;
     border: 0; background: none; cursor: pointer;
-    font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em;
+    font-family: var(--font-mono); font-size: var(--tile-meta-fs); letter-spacing: 0.04em;
     color: var(--fg-faint); text-align: center;
     transition: color var(--dur-fast), background var(--dur-fast);
-    border-radius: 5px;
+    border-radius: var(--radius-sm);
   }
   .oblock-foldbtn:hover { color: var(--fg-2); background: var(--surface-hover); }
 
@@ -246,7 +246,7 @@
   }
   .oblock-btn {
     display: inline-flex; align-items: center; gap: 5px;
-    height: 22px; padding: 0 8px; border-radius: 6px;
+    height: 22px; padding: 0 8px; border-radius: var(--radius-sm);
     border: 0; background: none; cursor: pointer;
     font: inherit; font-size: var(--fs-xs); font-weight: 550;
     color: var(--fg-subtle);
@@ -256,7 +256,7 @@
   .oblock-btn.inspect { color: var(--accent); }
   .oblock-btn.ghost { color: var(--fg-faint); }
   .oblock-btn :global(svg) { flex: none; }
-  .oblock-capnote { margin-left: auto; font-size: 10px; font-style: italic; color: var(--fg-faint); }
+  .oblock-capnote { margin-left: auto; font-size: var(--tile-meta-fs); font-style: italic; color: var(--fg-faint); }
 
   /* Full output leaves the transcript entirely. The inspector owns its own
      viewport, so the conversation never nests one scrollbar inside another. */
@@ -278,9 +278,9 @@
   .oi-title, .oi-actions { display: inline-flex; align-items: center; gap: 8px; }
   .oi-title { min-width: 0; color: var(--fg); font-size: var(--fs-sm); font-weight: 650; }
   .oi-count { font-family: var(--font-mono); font-size: var(--fs-xs); font-weight: 500; color: var(--fg-faint); }
-  .oi-capped { padding: 1px 6px; border-radius: 999px; font-size: 9.5px; color: var(--warn); background: var(--warn-soft); }
+  .oi-capped { padding: 1px 6px; border-radius: 999px; font-size: var(--tile-meta-fs); color: var(--warn); background: var(--warn-soft); }
   .oi-btn, .oi-close { display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-    height: 28px; border: 0; border-radius: 7px; background: transparent; color: var(--fg-muted);
+    height: 28px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg-muted);
     font: inherit; font-size: var(--fs-xs); cursor: pointer; }
   .oi-btn { padding: 0 9px; }
   .oi-close { width: 28px; padding: 0; }

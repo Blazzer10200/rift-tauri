@@ -458,33 +458,36 @@
     </div>
   {:else}
     {#if hasActivity}
-      <section class="sactivity" data-outcome={turn.outcome} class:open={activityOpen}>
+      <section class="sactivity tile" class:is-bad={turn.outcome === "failed"} data-outcome={turn.outcome} class:open={activityOpen}>
         <button
-          class="sactivity-head"
+          class="sactivity-head tile-head"
           type="button"
           aria-expanded={activityOpen}
           onclick={() => (activityOpen = !activityOpen)}
         >
-          <span class="sactivity-chev" class:open={activityOpen}><ChevronRight size={13} /></span>
-          <span class="sactivity-mark" aria-hidden="true">
-            {#if turn.outcome === "failed"}<AlertTriangle size={12} />{:else}<Check size={12} />{/if}
+          <!-- Outcome first (what happened + how much), provenance second:
+               duration and cost stay readable, tokens and clock time recede
+               until the turn is hovered. -->
+          <span class="tile-glyph" class:is-bad={turn.outcome === "failed"} class:is-ok={turn.outcome !== "failed"} aria-hidden="true">
+            {#if turn.outcome === "failed"}<AlertTriangle size={11} />{:else}<Check size={11} strokeWidth={2.5} />{/if}
           </span>
           <span class="sactivity-title">{activityTitle}</span>
           {#if turn.outcome === "applied" && turn.files > 0}
-            <span class="sactivity-detail">{turn.files} file{turn.files === 1 ? "" : "s"}</span>
+            <span class="tile-pill is-edit">{turn.files} file{turn.files === 1 ? "" : "s"}</span>
           {:else if actionCount > 0}
-            <span class="sactivity-detail">{actionCount} action{actionCount === 1 ? "" : "s"}</span>
+            <span class="tile-pill">{actionCount} action{actionCount === 1 ? "" : "s"}</span>
           {/if}
           <span class="sactivity-meta">
-            {#if turn.totalSecs >= 1}<span>{fmtDur(turn.totalSecs)}</span>{/if}
-            {#if completionTokens}<span>↑ {fmtTokens(completionTokens)}</span>{/if}
+            {#if turn.totalSecs >= 1}<span class="tile-dur">{fmtDur(turn.totalSecs)}</span>{/if}
             {#if completionCost}<span class="sactivity-cost">{completionCost}</span>{/if}
             {#if message.fast}<span class="sactivity-fast"><Zap size={10} />fast</span>{/if}
-            {#if turnTime}<span class="sactivity-time" use:tooltip={"When this turn ran"}>{turnTime}</span>{/if}
+            {#if completionTokens}<span class="sactivity-quiet">↑ {fmtTokens(completionTokens)}</span>{/if}
+            {#if turnTime}<span class="sactivity-quiet sactivity-time" use:tooltip={"When this turn ran"}>{turnTime}</span>{/if}
           </span>
+          <span class="tile-chev" class:open={activityOpen}><ChevronRight size={13} /></span>
         </button>
         {#if activityOpen}
-          <div class="sactivity-body" transition:slide={{ duration: 180 }}>
+          <div class="sactivity-body tile-body" transition:slide={{ duration: 180 }}>
             {#if activityShellCount > 0}
               <div class="sactivity-tools">
                 <span>{activityShellCount} terminal {activityShellCount === 1 ? "result" : "results"}</span>

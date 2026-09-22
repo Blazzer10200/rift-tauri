@@ -115,6 +115,16 @@ the canvas recipe.
   a hairline-separated footer row inside the card, buttons borrowing the perm-btn recipe
   (one solid primary CTA, quiet secondaries, destructive quiet + right-aligned). No new
   depth treatment, no modal; the card that shows the thing is the card that approves it.
+- **Stream tiles** (every machinery block in a turn — shell, diff, agent, plan, web,
+  reasoning, receipts, history ToolChip): one family, four variants from `app.css`
+  (`.tile*`, `--tile-*`). **Card** `.tile` (header + optional body/well) · **Row**
+  `.tile.is-compact` (one-line run) · **Prompt** `.tile.is-ask` (needs the user: ask,
+  permission, plan approval) · **Float** `.hud-float` (HUDs, jump-to-latest). State is a
+  stationary class — `is-live` tints the border, `is-bad` / `is-ask` add a 2px inset edge.
+  Header = `[glyph] title … pill · dur · chev`; pills `.tile-pill` (status tones +
+  `is-new`/`is-edit`/`is-del` for file ops), disclosures `.tile-chev` (ChevronRight, 90°).
+  Glyph color = status, never tool kind. Bodies inside a tile use hairlines and
+  `.tile-well`, never a second bordered card. A component owns its content, not its chrome.
 
 ## 8. Do's & Don'ts — the rejection log
 

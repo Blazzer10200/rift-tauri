@@ -804,7 +804,7 @@
   {/if}
 
   {#if tabId && !showEmpty && !stickToBottom}
-    <button class="jump-latest" type="button" style="bottom: {composerH + 12}px" onclick={jumpToLatest} aria-label="Jump to latest message">
+    <button class="jump-latest hud-float" type="button" style="bottom: {composerH + 12}px" onclick={jumpToLatest} aria-label="Jump to latest message">
       <span class="jl-ic" aria-hidden="true"><ChevronDown size={13}/></span>
       Jump to latest
     </button>
@@ -1354,34 +1354,39 @@
     color: var(--accent);
   }
 
-  /* Compact circular "scroll to latest" affordance, parked at the bottom-right
-     of the message area just clear of the composer's top edge — the chat-app
-     convention (Slack/Discord/ChatGPT). Icon-only; the chevron gently bobs to
-     signal "new below". Replaced the centered text-pill, which read as bulky. */
+  /* Quiet floating-tier pill, parked at the bottom-right of the message area
+     just clear of the composer's top edge — the chat-app convention
+     (Slack/Discord/ChatGPT). Material comes from the shared .hud-float
+     (app.css "stream tiles": border-strong, surface 94%, --shadow-float) —
+     999px pill radius overrides the default --radius-xl since this reads as
+     a badge-like float, not a card. Neutral fg-2 at rest; accent is scarce
+     (DESIGN §2/§8), so it shows only on hover/focus, never as a standing
+     solid-fill badge (the old accent-filled circular icon was dropped for
+     this — it read as a dated, disconnected "notification dot"). */
   .jump-latest {
     position: absolute;
     right: max(24px, calc((100% - var(--chat-col-max)) / 2 + 18px));
-    display: inline-flex; align-items: center; gap: 7px;
-    height: 32px; padding: 0 14px 0 12px;
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 26px; padding: 0 12px 0 10px;
     border-radius: 999px;
-    background: color-mix(in oklch, var(--surface) 82%, transparent);
     backdrop-filter: blur(16px) saturate(140%);
     -webkit-backdrop-filter: blur(16px) saturate(140%);
-    border: 1px solid var(--border-strong);
     color: var(--fg-2);
-    font-size: 12px; font-weight: 550;
+    font-size: var(--fs-sm); font-weight: 550;
     cursor: pointer;
-    box-shadow: var(--shadow-float);
     z-index: 3;
-    animation: jump-in var(--dur-base) cubic-bezier(0.22, 1, 0.36, 1);
+    animation: jump-in var(--dur-base) var(--ease-page);
     transition: color var(--dur-fast) ease, border-color var(--dur-fast) ease;
   }
-  .jump-latest:hover { color: var(--fg); border-color: var(--accent); }
+  .jump-latest:hover, .jump-latest:focus-visible { color: var(--fg); border-color: var(--accent); }
+  .jump-latest:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
   .jl-ic {
     display: grid; place-items: center;
-    width: 18px; height: 18px; border-radius: 50%;
-    background: var(--accent); color: var(--accent-fg);
+    width: 14px; height: 14px;
+    color: var(--fg-faint);
+    transition: color var(--dur-fast) ease;
   }
+  .jump-latest:hover .jl-ic, .jump-latest:focus-visible .jl-ic { color: var(--accent); }
   @keyframes jump-in {
     from { opacity: 0; transform: translateY(8px); }
     to   { opacity: 1; transform: translateY(0); }

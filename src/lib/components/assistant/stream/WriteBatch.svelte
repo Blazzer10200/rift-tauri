@@ -37,12 +37,22 @@
   function toggle(t: StreamTool) {
     openMap = { ...openMap, [t.id]: !isOpen(t) };
   }
+
+  // Created/Edited/Deleted badge — the verb text already says it, but a
+  // color-coded mono pill lets you scan a batch of rows without reading each
+  // one (2026-09-22 tile migration; matches EditDiff's header badge).
+  function kindPill(k: StreamTool["kind"]): { cls: string; label: string } {
+    if (k === "create") return { cls: "is-new", label: "new" };
+    if (k === "delete") return { cls: "is-del", label: "deleted" };
+    return { cls: "is-edit", label: "edit" };
+  }
 </script>
 
 <div class="wbatch">
   {#each tools as t (t.id)}
     {@const live = t.status === "pending"}
     {@const open = hasDiff(t) && isOpen(t)}
+    {@const kp = kindPill(t.kind)}
     <div class="wbrow {live ? 'active' : ''}">
       {#if hasDiff(t)}
         <button class="wb-chev" class:open type="button" onclick={() => toggle(t)} aria-label={open ? "Hide diff" : "Show diff"}>
@@ -50,6 +60,7 @@
         </button>
       {/if}
       <span class="wb-verb">{live ? VERB_ING[t.kind] : VERB_PAST[t.kind]}</span>
+      <span class="tile-pill {kp.cls}">{kp.label}</span>
       <span class="wb-label" title={t.path ?? t.cap}>
         {#if t.dir && t.dir.trim()}<span class="wb-dir">{t.dir}</span>{/if}<span class="wb-name">{t.cap}</span>
       </span>
@@ -89,22 +100,17 @@
   }
   .wb-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .wb-dir { color: var(--fg-faint); opacity: 0.6; font-family: var(--font-mono); font-size: 11px; }
-  /* Diff preview card — neutral-gray surface shared with every other block
-     (terminal, reads, results). No accent tint/glow, so a create/edit block
-     reads as part of the same family. */
+  /* Diff preview — a borderless well inside the .wbatch tile (DESIGN §5: never
+     a bordered card inside a card). Inner radius + well fill, like ReadResult. */
   .wb-diffwrap {
     position: relative;
     margin: 4px 0 9px 0;
     padding: 4px 0;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
+    border-radius: var(--tile-radius-inner);
     overflow: hidden;
-    background: var(--bg-inset);
-    box-shadow: none;
+    background: var(--tile-well);
     animation: wb-rise var(--dur-rise) var(--ease-page) both;
-    transition: border-color 240ms var(--ease-soft, ease-out);
   }
-  .wb-diffwrap:hover { border-color: var(--border-strong); }
   @keyframes wb-rise {
     from { opacity: 0; transform: translateY(5px); }
     to   { opacity: 1; transform: translateY(0); }
