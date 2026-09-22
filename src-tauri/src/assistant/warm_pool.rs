@@ -172,6 +172,11 @@ pub(super) struct SpawnKey {
     /// baked at spawn like effort. Holds the flag actually SENT (false for
     /// ineligible models / gated CLIs), so identical-argv spawns share a key.
     pub fast_mode: bool,
+    /// Project extra folders baked in as `--add-dir` (roots[1..], in order).
+    /// Editing a project's folders must respawn, not reuse a narrower child.
+    pub extra_dirs: Vec<String>,
+    /// `--settings {"outputStyle":…}` actually SENT (None when unset/default).
+    pub output_style: Option<String>,
 }
 
 /// Cheap stable fingerprint for a secret/URL string, for `SpawnKey.cred_fp` —
@@ -643,6 +648,8 @@ mod tests {
             addendum_ptr: 0,
             max_budget_bits: None,
             fast_mode: false,
+            extra_dirs: Vec::new(),
+            output_style: None,
         }
     }
 

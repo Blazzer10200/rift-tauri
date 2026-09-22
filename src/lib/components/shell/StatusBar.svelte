@@ -8,6 +8,7 @@
   import { elevation } from "$lib/state/elevation.svelte";
   import { commandPalette } from "$lib/state/command-palette.svelte";
   import UsagePanel from "../assistant/composer/UsagePanel.svelte";
+  import LimitBar from "../shared/LimitBar.svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import { onMount } from "svelte";
   import Skeleton from "./Skeleton.svelte";
@@ -202,7 +203,7 @@
             use:tooltip={`${l.label} — ${l.u}% used${fmtReset(l.r)}`}
           >
             <span class="rl-t">{l.t}</span>
-            <span class="rl-bar"><i style="width:{l.u}%"></i></span>
+            <LimitBar pct={l.u} zone={l.z} variant="compact" />
           </button>
         {/each}
         {#if usageOpen}
@@ -260,12 +261,7 @@
   .sb-usage { display: inline-flex; align-items: center; gap: 16px; position: relative; -webkit-app-region: no-drag; }
   .rl { display: inline-flex; align-items: center; gap: 7px; color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
   .rl-t { color: var(--fg-faint); }
-  .rl-bar { width: 46px; height: 4px; border-radius: 999px; background: color-mix(in oklab, var(--fg) 8%, transparent); overflow: hidden; }
-  .rl-bar i { display: block; height: 100%; background: var(--accent); border-radius: 999px;
-    transition: width var(--dur-slow) var(--ease-soft); }
-  .rl[data-zone="warn"] .rl-bar i { background: var(--warn); }
   .rl[data-zone="warn"] .rl-t { color: var(--warn); }
-  .rl[data-zone="hot"] .rl-bar i { background: var(--danger); box-shadow: 0 0 6px color-mix(in oklab, var(--danger) 55%, transparent); }
   .rl[data-zone="hot"] .rl-t { color: var(--danger); }
   @media (max-width: 920px) {
     .sb-note { display: none; }
@@ -276,10 +272,8 @@
     .sb-date { display: none; }
     .sb-right { gap: 9px; }
     .sb-usage { gap: 10px; }
-    .rl-bar { width: 34px; }
   }
   @media (max-width: 540px) {
     .sb-branch { display: none; }
   }
-  @media (prefers-reduced-motion: reduce) { .rl-bar i { transition: none; } }
 </style>

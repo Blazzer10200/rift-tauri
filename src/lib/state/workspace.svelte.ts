@@ -13,7 +13,7 @@ export const WORKSPACE_IDS: readonly WorkspaceId[] = [
 // it is no longer an active destination. Keeping it out of the ordered route
 // list prevents a duplicate Workspace entry and leaves every Ctrl+number slot
 // pointing at a real current destination.
-export const NAVIGABLE_WORKSPACE_IDS: readonly WorkspaceId[] = [
+const NAVIGABLE_WORKSPACE_IDS: readonly WorkspaceId[] = [
   "home", "chat", "settings", "ai-health", "diagnostics",
 ] as const;
 

@@ -156,8 +156,8 @@ describe("model access", () => {
 });
 
 describe("effort capability", () => {
-  it("renders the full X-High ladder for capable models", () => {
-    expect(dialStopsFor(claude).map((stop) => stop.label)).toEqual(["Low", "Medium", "High", "X-High"]);
+  it("renders the full ladder through Max for capable Claude models", () => {
+    expect(dialStopsFor(claude).map((stop) => stop.label)).toEqual(["Low", "Medium", "High", "X-High", "Max"]);
   });
 
   it("hides effort when live OpenAI metadata says reasoning is unsupported", () => {

@@ -5,6 +5,7 @@
   // completion"). Used for the live token readout + diff +N/−M counts so the
   // numbers *climb* instead of popping. `format` lets callers reuse fmtTokens.
   import { untrack } from "svelte";
+  import { prefersReducedMotion } from "$lib/state/accessibility.svelte";
 
   let {
     value,
@@ -19,9 +20,7 @@
     durationMs?: number;
   } = $props();
 
-  const reduced =
-    typeof window !== "undefined" &&
-    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+  const reduced = prefersReducedMotion();
 
   let shown = $state(0);
   let raf = 0;

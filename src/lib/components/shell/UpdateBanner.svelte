@@ -16,10 +16,9 @@
   import { assistant } from "$lib/state/assistant.svelte";
   import { isOpenAIModel } from "$lib/state/assistant/helpers";
   import { workspace } from "$lib/state/workspace.svelte";
+  import { prefersReducedMotion } from "$lib/state/accessibility.svelte";
 
-  const reducedMotion =
-    typeof window !== "undefined" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reducedMotion = prefersReducedMotion();
 
   // ── CLI update inputs (mirrors how SettingsPage derives them) ──────────
   const cliInstalls = $derived(assistant.auth?.installs ?? null);

@@ -49,6 +49,11 @@ pub struct Project {
     /// Glob exclude list, applied on top of the always-on `SKIP_DIRS` baseline.
     #[serde(default)]
     pub exclude: Vec<String>,
+    /// Extra folders the CLI may read/write beyond `root` — passed as
+    /// `--add-dir` on every Claude spawn for this project and appended to the
+    /// MCP child's RIFT_MCP_ROOTS. Canonicalized on write like `root`.
+    #[serde(default)]
+    pub extra_dirs: Vec<PathBuf>,
     /// Creation timestamp (epoch ms), set by the renderer. Used only for stable
     /// display ordering; never load-bearing.
     #[serde(default)]
@@ -66,6 +71,7 @@ pub struct ProjectDto {
     pub root: String,
     pub include: Vec<String>,
     pub exclude: Vec<String>,
+    pub extra_dirs: Vec<String>,
     pub created_at: u64,
 }
 
@@ -77,9 +83,40 @@ impl From<&Project> for ProjectDto {
             root: p.root.to_string_lossy().into_owned(),
             include: p.include.clone(),
             exclude: p.exclude.clone(),
+            extra_dirs: p.extra_dirs.iter().map(|d| d.to_string_lossy().into_owned()).collect(),
             created_at: p.created_at,
         }
     }
+}
+
+/// Max `--add-dir` folders per project. Each one widens the CLI's write
+/// surface; a project needing more than this is a sign the root is wrong.
+const EXTRA_DIRS_MAX: usize = 8;
+
+/// Validate + canonicalize the extra-dir list: trim, drop blanks, require an
+/// existing directory, canonicalize (same as `root`), drop the root itself and
+/// duplicates, cap the count.
+fn sanitize_extra_dirs(dirs: Vec<String>, root: &std::path::Path) -> Result<Vec<PathBuf>, String> {
+    let mut out: Vec<PathBuf> = Vec::with_capacity(dirs.len().min(EXTRA_DIRS_MAX));
+    for d in dirs {
+        let d = d.trim();
+        if d.is_empty() {
+            continue;
+        }
+        let raw = PathBuf::from(d);
+        if !raw.is_dir() {
+            return Err(format!("extra folder is not a directory: {}", raw.display()));
+        }
+        let canonical = super::canonicalize_root(raw)?;
+        if canonical == root || out.contains(&canonical) {
+            continue;
+        }
+        if out.len() >= EXTRA_DIRS_MAX {
+            return Err(format!("too many extra folders (max {EXTRA_DIRS_MAX})"));
+        }
+        out.push(canonical);
+    }
+    Ok(out)
 }
 
 /// Reject ids that aren't the hex/dash uuid shape the renderer generates — same
@@ -141,6 +178,18 @@ pub(super) fn patterns_for_root(cfg: &AssistantConfig, root: &std::path::Path) -
     (Vec::new(), Vec::new())
 }
 
+/// The extra `--add-dir` folders for the project whose canonical root matches
+/// `root`; empty when no project owns this root. Mirrors `patterns_for_root`.
+pub(super) fn extra_dirs_for_root(cfg: &AssistantConfig, root: &std::path::Path) -> Vec<PathBuf> {
+    let target = super::canonicalize_clean(root)
+        .unwrap_or_else(|_| root.to_path_buf());
+    cfg.projects
+        .iter()
+        .find(|p| p.root == target)
+        .map(|p| p.extra_dirs.clone())
+        .unwrap_or_default()
+}
+
 #[tauri::command]
 pub fn assistant_list_projects() -> Result<Vec<ProjectDto>, String> {
     Ok(projects_dto(&load_config()))
@@ -156,6 +205,7 @@ pub fn assistant_save_project(
     root: String,
     include: Vec<String>,
     exclude: Vec<String>,
+    extra_dirs: Option<Vec<String>>,
     created_at: Option<u64>,
 ) -> Result<Vec<ProjectDto>, String> {
     let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
@@ -176,6 +226,7 @@ pub fn assistant_save_project(
     let canonical = super::canonicalize_root(raw)?;
     let include = sanitize_patterns(include)?;
     let exclude = sanitize_patterns(exclude)?;
+    let extra_dirs = sanitize_extra_dirs(extra_dirs.unwrap_or_default(), &canonical)?;
 
     let mut cfg = load_config();
     if let Some(existing) = cfg.projects.iter_mut().find(|p| p.id == id) {
@@ -183,6 +234,7 @@ pub fn assistant_save_project(
         existing.root = canonical;
         existing.include = include;
         existing.exclude = exclude;
+        existing.extra_dirs = extra_dirs;
     } else {
         if cfg.projects.len() >= PROJECTS_MAX {
             return Err(format!("project limit reached (max {PROJECTS_MAX})"));
@@ -193,6 +245,7 @@ pub fn assistant_save_project(
             root: canonical,
             include,
             exclude,
+            extra_dirs,
             created_at: created_at.unwrap_or(0),
         });
     }
@@ -282,6 +335,7 @@ mod tests {
                 root: root.clone(),
                 include: vec![],
                 exclude: vec![],
+                extra_dirs: vec![],
                 created_at: 0,
             }],
             recent_roots: vec![root.clone(), PathBuf::from("/ws/other")],
@@ -309,6 +363,7 @@ mod tests {
                 root: crate::assistant::canonicalize_clean(&here).unwrap(),
                 include: vec!["src/**".into()],
                 exclude: vec![],
+                extra_dirs: vec![],
                 created_at: 0,
             }],
             ..Default::default()

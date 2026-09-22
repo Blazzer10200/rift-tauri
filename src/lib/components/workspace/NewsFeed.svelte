@@ -9,7 +9,7 @@
   } from "@lucide/svelte";
   import { news, type DigestItem } from "../../state/news.svelte";
   import { assistant } from "../../state/assistant.svelte";
-  import { fmtAgo } from "./welcomeShared";
+  import { fmtAgo } from "./hubHelpers";
   import { tooltip } from "$lib/actions/tooltip";
 
   // When embedded under a disclosure that already labels the section (the

@@ -5,10 +5,9 @@
   import type { ChatMessage } from "../../../state/assistant.svelte";
   import type { PermissionMode } from "../../../state/assistant/types";
   import { formatDuration, lineDelta } from "./helpers";
+  import { prefersReducedMotion } from "../../../state/accessibility.svelte";
 
-  const reducedMotion =
-    typeof window !== "undefined" &&
-    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+  const reducedMotion = prefersReducedMotion();
 
   let { message, costLabel = null, fallbackPermissionMode }:
     { message: ChatMessage; costLabel?: string | null; fallbackPermissionMode: PermissionMode } = $props();

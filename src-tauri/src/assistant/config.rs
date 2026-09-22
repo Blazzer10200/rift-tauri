@@ -45,6 +45,12 @@ pub(super) struct AssistantConfig {
     /// notice. `None` or `<= 0` = no cap.
     #[serde(default)]
     pub(super) max_budget_usd: Option<f64>,
+    /// Claude Code output style, passed as `--settings {"outputStyle":…}` on
+    /// every spawn. Built-ins: `default` / `Explanatory` / `Learning`; any
+    /// user-defined style name from `~/.claude/output-styles` also works.
+    /// `None` / blank / `"default"` = the CLI default (no key sent).
+    #[serde(default)]
+    pub(super) output_style: Option<String>,
     /// Effort tier for extended thinking on non-Haiku models, mapped to the
     /// CLI's `--effort` flag in turn.rs: `"none"`→low · `"smart"`→medium
     /// (responsive interactive default) · `"deep"`→high · `"ultra"`→xhigh +
@@ -173,11 +179,16 @@ pub(super) fn is_valid_effort_tier(s: &str) -> bool {
 }
 
 /// Highest effort tier a model honors server-side. Mirrors `MODEL_MAX_EFFORT`
-/// in state/assistant/helpers.ts. Unknown ids default to the top (no clamp).
+/// in state/assistant/helpers.ts. Claude models take the full CLI `--effort`
+/// ladder through `max`; `agentic` is the Codex-only `ultra` level (no Claude
+/// CLI flag exists for it), so it clamps to `max` here. Codex ids are left at
+/// the top (the ChatGPT route clamps frontend-side); unknown Claude ids → `max`.
 pub(super) fn model_max_effort(model: &str) -> &'static str {
     match model {
         "haiku" => "none",
-        _ => "ultra", // opus / sonnet / claude-opus-4-7 / claude-fable-5 / unknown
+        m if m.starts_with("claude-haiku") => "none",
+        m if m.starts_with("gpt-") => "agentic",
+        _ => "max", // opus / sonnet / claude-fable-5-1 / unknown Claude id
     }
 }
 
@@ -240,10 +251,12 @@ pub(super) fn is_valid_local_base_url(s: &str) -> bool {
     !host.is_empty()
 }
 
-/// Claude Fable 5 — limited run Rift offers only through 2026-06-22. Past
-/// sunset a stale pref/session pin falls back to `opus` instead of firing at
-/// a retired model id.
-pub(super) const FABLE_MODEL: &str = "claude-fable-5";
+/// Claude Fable 5.1 — limited-run model. No sunset is currently scheduled (the
+/// epoch below is a far-future placeholder); if one lands, set it here and a
+/// stale pref/session pin falls back to `opus` instead of firing at a retired
+/// model id. The guard in turn.rs matches any `claude-fable*` id so the retired
+/// `claude-fable-5` pin is covered too.
+pub(super) const FABLE_MODEL: &str = "claude-fable-5-1";
 pub(super) const FABLE_SUNSET_EPOCH_SECS: u64 = 4_070_908_800; // 2099-01-01T00:00:00Z
 /// Manual kill-switch. Owner call 2026-07-01: keep Fable ALWAYS VISIBLE (flag
 /// `false`) even while the upstream Fable/Mythos access gate is up — so the row
@@ -326,14 +339,14 @@ pub(super) fn cli_model_arg(model: &str) -> String {
     }
 }
 
-/// Models the CLI's fast-output mode applies to — the Opus family only (the
-/// bare `opus` alias + pinned `claude-opus-4-x` ids). Fable shares Opus's
-/// visual family but is NOT fast-eligible upstream. Gating here keeps an
+/// Models the CLI's fast-output mode applies to — Opus 5 and Opus 4.8 only
+/// (the bare `opus` alias resolves to Opus 5). Older Opus snapshots, Sonnet,
+/// Haiku and Fable are NOT fast-eligible upstream. Gating here keeps an
 /// ineligible model from baking a no-op `fastMode` key into `--settings`
 /// (which would still churn the SpawnKey → pointless respawns). Mirrors
 /// `fastEligible` in state/assistant/helpers.ts.
 pub(super) fn model_fast_eligible(model: &str) -> bool {
-    model == "opus" || model.starts_with("claude-opus-4-")
+    model == "opus" || model.starts_with("claude-opus-5") || model == "claude-opus-4-8"
 }
 
 /// Read config.json with NO side effects — does not run the keychain
@@ -501,6 +514,37 @@ pub fn assistant_set_max_budget_usd(value: Option<f64>) -> Result<(), String> {
     save_config(&cfg)
 }
 
+/// Output style name cap — a style is a filename stem, not prose.
+const OUTPUT_STYLE_MAX_LEN: usize = 64;
+
+/// Normalize a stored/requested output style to the value actually sent:
+/// trimmed, non-empty, not the CLI's own `default`, no control characters
+/// (it lands inside a `--settings` JSON arg). Anything else → `None`.
+pub(super) fn effective_output_style(raw: &Option<String>) -> Option<String> {
+    let s = raw.as_deref()?.trim();
+    if s.is_empty()
+        || s.eq_ignore_ascii_case("default")
+        || s.len() > OUTPUT_STYLE_MAX_LEN
+        || s.chars().any(char::is_control)
+    {
+        return None;
+    }
+    Some(s.to_string())
+}
+
+#[tauri::command]
+pub fn assistant_get_output_style() -> Result<Option<String>, String> {
+    Ok(effective_output_style(&load_config().output_style))
+}
+
+#[tauri::command]
+pub fn assistant_set_output_style(value: Option<String>) -> Result<(), String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let mut cfg = load_config();
+    cfg.output_style = effective_output_style(&value);
+    save_config(&cfg)
+}
+
 // F48: assistant_{get,set}_thinking_effort and _permission_mode commands removed
 // — the frontend persists both via localStorage and passes them per-send through
 // assistant_send's args; the config-file round-trip these commands wrote was a
@@ -580,7 +624,8 @@ mod tests {
     use super::{
         canonical_model_alias, clamp_effort, cli_model_arg, effort_tier_to_flag, model_fast_eligible,
         is_valid_effort_tier, is_valid_local_base_url, is_valid_model_name, model_max_effort,
-        normalize_effort_tier, send_effort_flag, DEFAULT_MODEL, FABLE_FALLBACK_MODEL, SONNET_MODEL,
+        normalize_effort_tier, send_effort_flag, DEFAULT_MODEL, FABLE_FALLBACK_MODEL, FABLE_MODEL,
+        SONNET_MODEL,
     };
 
     #[test]
@@ -605,24 +650,30 @@ mod tests {
     // across the Rust/TS boundary in review.
     #[test]
     fn model_ceilings_match_capability_matrix() {
-        assert_eq!(model_max_effort("opus"), "ultra");
-        assert_eq!(model_max_effort("claude-opus-4-7"), "ultra");
-        assert_eq!(model_max_effort("claude-fable-5"), "ultra");
-        assert_eq!(model_max_effort("sonnet"), "ultra"); // Sonnet 5 honors xhigh
+        assert_eq!(model_max_effort("opus"), "max");
+        assert_eq!(model_max_effort("claude-opus-5"), "max");
+        assert_eq!(model_max_effort("claude-fable-5-1"), "max");
+        assert_eq!(model_max_effort("sonnet"), "max"); // Sonnet 5 honors xhigh + max
         assert_eq!(model_max_effort("haiku"), "none");
-        assert_eq!(model_max_effort("some-future-model"), "ultra"); // unknown → top
+        assert_eq!(model_max_effort("claude-haiku-4-5"), "none");
+        assert_eq!(model_max_effort("gpt-5.6"), "agentic"); // Codex ladder, no clamp here
+        assert_eq!(model_max_effort("some-future-model"), "max"); // unknown Claude → top
     }
 
     #[test]
-    fn clamp_caps_haiku_and_leaves_full_effort_models_untouched() {
-        // Haiku floors to none; Sonnet 5/Opus/Fable all reach ultra now, so an
-        // ultra(xhigh) pref passes through untouched.
+    fn clamp_caps_haiku_and_agentic_and_leaves_full_effort_models_untouched() {
+        // Haiku floors to none; Sonnet 5/Opus/Fable all reach max, so an
+        // ultra(xhigh) or max pref passes through untouched. `agentic` is the
+        // Codex-only level — on Claude it clamps to max (the CLI has no flag).
         assert_eq!(clamp_effort("ultra", "haiku"), "none"); // floored
         assert_eq!(clamp_effort("ultra", "sonnet"), "ultra"); // Sonnet 5 in range
+        assert_eq!(clamp_effort("max", "sonnet"), "max");
         assert_eq!(clamp_effort("deep", "sonnet"), "deep"); // in range
         assert_eq!(clamp_effort("smart", "sonnet"), "smart"); // already in range
         assert_eq!(clamp_effort("ultra", "opus"), "ultra");
-        assert_eq!(clamp_effort("ultra", "claude-fable-5"), "ultra");
+        assert_eq!(clamp_effort("agentic", "opus"), "max"); // Codex-only tier clamps
+        assert_eq!(clamp_effort("agentic", "gpt-5.6"), "agentic"); // Codex keeps it
+        assert_eq!(clamp_effort("max", "claude-fable-5-1"), "max");
     }
 
     #[test]
@@ -689,7 +740,8 @@ mod tests {
         // Fable substitute must be a real non-Fable model; default must be set.
         assert_eq!(FABLE_FALLBACK_MODEL, "opus");
         assert_eq!(DEFAULT_MODEL, "sonnet");
-        assert_ne!(FABLE_FALLBACK_MODEL, "claude-fable-5");
+        assert_ne!(FABLE_FALLBACK_MODEL, FABLE_MODEL);
+        assert_eq!(FABLE_MODEL, "claude-fable-5-1");
     }
 
     // The shipped CLI alias `sonnet` resolves to claude-sonnet-4-6, so the bare
@@ -706,8 +758,9 @@ mod tests {
         // Other aliases resolve correctly in the CLI already — leave untouched.
         assert_eq!(canonical_model_alias("opus"), "opus");
         assert_eq!(canonical_model_alias("haiku"), "haiku");
-        assert_eq!(canonical_model_alias("claude-fable-5"), "claude-fable-5");
-        // Already-explicit ids (incl. an explicit Sonnet pin) pass through.
+        assert_eq!(canonical_model_alias("claude-fable-5-1"), "claude-fable-5-1");
+        // Already-explicit ids (incl. an explicit Sonnet pin + legacy resume
+        // pins) pass through.
         assert_eq!(canonical_model_alias("claude-sonnet-5"), "claude-sonnet-5");
         assert_eq!(canonical_model_alias("claude-sonnet-4-6"), "claude-sonnet-4-6");
         assert_eq!(canonical_model_alias("claude-opus-4-8"), "claude-opus-4-8");
@@ -726,23 +779,26 @@ mod tests {
         assert_eq!(cli_model_arg("claude-sonnet-5"), "claude-sonnet-5[1m]");
         assert_eq!(cli_model_arg("claude-sonnet-4-6"), "claude-sonnet-4-6[1m]");
         // 1M-native or 200K-only models pass through unchanged.
-        assert_eq!(cli_model_arg("claude-opus-4-8"), "claude-opus-4-8");
-        assert_eq!(cli_model_arg("claude-opus-4-7"), "claude-opus-4-7");
-        assert_eq!(cli_model_arg("claude-fable-5"), "claude-fable-5");
+        assert_eq!(cli_model_arg("opus"), "opus");
+        assert_eq!(cli_model_arg("claude-opus-5"), "claude-opus-5");
+        assert_eq!(cli_model_arg("claude-opus-4-8"), "claude-opus-4-8"); // legacy resume pin
+        assert_eq!(cli_model_arg("claude-fable-5-1"), "claude-fable-5-1");
         assert_eq!(cli_model_arg("haiku"), "haiku");
         // Sonnet 4.5 is excluded (flaky [1m] support, not in Rift's resume path).
         assert_eq!(cli_model_arg("claude-sonnet-4-5"), "claude-sonnet-4-5");
     }
 
-    // Fast mode is Opus-family only: alias + pinned ids qualify; Fable shares
-    // the opus VISUAL family but is not fast-eligible upstream — a regression
-    // here would bake a no-op fastMode key into --settings for it.
+    // Fast mode is Opus 5 / Opus 4.8 only: the alias + those pinned ids
+    // qualify; older Opus snapshots don't, and Fable shares the opus VISUAL
+    // family but is not fast-eligible upstream — a regression here would bake
+    // a no-op fastMode key into --settings for it.
     #[test]
     fn fast_eligibility_is_opus_family_only() {
         assert!(model_fast_eligible("opus"));
+        assert!(model_fast_eligible("claude-opus-5"));
         assert!(model_fast_eligible("claude-opus-4-8"));
-        assert!(model_fast_eligible("claude-opus-4-7"));
-        assert!(!model_fast_eligible("claude-fable-5"));
+        assert!(!model_fast_eligible("claude-opus-4-7"));
+        assert!(!model_fast_eligible("claude-fable-5-1"));
         assert!(!model_fast_eligible("sonnet"));
         assert!(!model_fast_eligible("claude-sonnet-5"));
         assert!(!model_fast_eligible("haiku"));

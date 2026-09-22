@@ -17,7 +17,7 @@
   import type { ToolBlock } from "../../state/assistant.svelte";
   import { slide } from "svelte/transition";
   import { untrack } from "svelte";
-  import { basename } from "./toolCaption";
+  import { basename, shortName } from "./toolCaption";
   import AgentCard from "./toolchip/AgentCard.svelte";
   import TodoCard from "./toolchip/TodoCard.svelte";
   import AskUserCard from "./toolchip/AskUserCard.svelte";
@@ -27,11 +27,10 @@
   import GrepResult from "./stream/GrepResult.svelte";
   import { stripAnsi, shortScope, trimCmd, RESULT_TEXT_CAP } from "./stream/streamModel";
   import { isCardTool } from "./bubble/helpers";
+  import { prefersReducedMotion } from "../../state/accessibility.svelte";
 
   import { tooltip } from "$lib/actions/tooltip";
-  const reducedMotion =
-    typeof window !== "undefined" &&
-    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+  const reducedMotion = prefersReducedMotion();
   let { tool, variant = "card", caption = null, workspaceRoot = null }:
     { tool: ToolBlock; variant?: "card" | "timeline"; caption?: string | null; workspaceRoot?: string | null } = $props();
   // Agent + TodoWrite + AskUser are first-class card variants — default-expanded
@@ -45,7 +44,6 @@
   // AskUser is fully owned by AskUserCard (state, store round-trip, card CSS) —
   // ToolChip just routes to it. See ./toolchip/AskUserCard.svelte.
 
-  function shortName(name: string): string { return name.replace(/^mcp__rift__/, ""); }
   function trim(s: string, n = 60): string {
     return s.length > n ? s.slice(0, n - 1) + "…" : s;
   }

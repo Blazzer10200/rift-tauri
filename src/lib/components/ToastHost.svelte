@@ -8,8 +8,10 @@
   import { fly } from "svelte/transition";
   import { flip } from "svelte/animate";
   import { toast } from "../state/toast.svelte";
+  import { prefersReducedMotion } from "../state/accessibility.svelte";
+  import "$lib/styles/severityTone.css";
 
-  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const reducedMotion = prefersReducedMotion();
 
   // DEV-ONLY: CDP hook for driving toasts from scripts/cdp (same pattern as
   // window.__riftDiag). Tree-shaken out of production builds.
@@ -133,10 +135,6 @@
     transform: translateY(1px);
   }
 
-  .toast[data-severity="ok"]     { --tone: var(--ok); }
-  .toast[data-severity="warn"]   { --tone: var(--warn); }
-  .toast[data-severity="danger"] { --tone: var(--danger); }
-  .toast[data-severity="info"]   { --tone: var(--info); }
   .toast[data-severity="muted"]  { --tone: var(--border-strong); }
 
   .dot {

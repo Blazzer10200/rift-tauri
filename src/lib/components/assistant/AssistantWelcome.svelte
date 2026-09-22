@@ -15,7 +15,7 @@
   import { isOpenAIModel } from "$lib/state/assistant/helpers";
   import { CHATGPT, modelProviderLabel } from "$lib/state/assistant/providerDisplay";
   import { leafName, shortPath } from "$lib/components/shell/tabsbar/helpers";
-  import { greeting, fmtAgo } from "$lib/components/workspace/welcomeShared";
+  import { greeting, fmtAgo } from "$lib/components/workspace/hubHelpers";
   import Skeleton from "$lib/components/shell/Skeleton.svelte";
   import { bootLoad } from "$lib/state/bootLoad.svelte";
 
@@ -426,7 +426,10 @@
 
   /* ── Warm launchpad — greeting · project strip · resume · new-to-rift ──── */
   /* spec-margined children, so the .wel-inner column gap is dropped here. */
-  .wel-inner.home-launchpad { position: relative; gap: 0; max-width: 940px; text-align: left; }
+  /* 844px = the composer box below it (composer-wrap 880px minus its 18px side
+     padding), so greeting, context row, resume strip, and composer share one
+     left and right edge — one column, nothing floating (owner call 2026-09-18). */
+  .wel-inner.home-launchpad { position: relative; gap: 0; max-width: 844px; text-align: left; }
   .launch-main { min-width: 0; }
   /* No local atmosphere — the canvas (AppShell) owns the lighting model;
      page-level washes stacked on it read as blotches (owner call 2026-07-16). */
@@ -474,6 +477,9 @@
     border-radius: 8px; border: 0; background: transparent; color: var(--fg-2); font: inherit; text-align: left;
     cursor: pointer; min-width: 0; transition: background var(--dur-fast), color var(--dur-fast); }
   .resume-item:hover { background: var(--surface-hover); color: var(--fg); }
+  /* Hover invite: the whole tile lifts a hair and the chevron leads right. */
+  .resume { transition: border-color var(--dur-base) var(--ease-soft), transform var(--dur-base) var(--ease-page); }
+  .resume:hover { border-color: color-mix(in oklab, var(--accent) 28%, var(--island-border)); transform: translateY(-1px); }
   .resume-item > :global(svg:first-child) { color: var(--fg-faint); flex: none; }
   /* Boot skeleton row — matches .resume-item footprint (38px, same gap/pad) so
      the swap to real rows doesn't shift the strip. */
@@ -485,8 +491,12 @@
     background: var(--bg-elev-2); color: var(--fg-subtle); font-size: 9.5px; font-weight: 600; line-height: 1.4; }
   .ri-m { flex: none; font-size: 10.5px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
   .ri-act { flex: none; font-size: 10.5px; font-weight: 600; color: var(--accent); }
-  :global(.resume-item .ri-go) { flex: none; color: var(--accent); opacity: 0.55; transition: opacity var(--dur-fast); }
-  .resume-item:hover :global(.ri-go) { opacity: 1; }
+  :global(.resume-item .ri-go) { flex: none; color: var(--accent); opacity: 0.55; transition: opacity var(--dur-fast), transform var(--dur-base) var(--ease-spring); }
+  .resume-item:hover :global(.ri-go) { opacity: 1; transform: translateX(3px); }
+  @media (prefers-reduced-motion: reduce) {
+    .resume, .resume:hover { transform: none; }
+    .resume-item:hover :global(.ri-go) { transform: none; }
+  }
 
   /* new to rift? — collapsible orientation footer, dismissible for good */
   .newrift { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 14px; }
@@ -513,16 +523,9 @@
     font-size: 10.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .nr-ct { font-size: 12.5px; font-weight: 600; color: var(--fg); }
   .nr-cx { font-size: 11.5px; line-height: 1.5; color: var(--fg-subtle); text-wrap: pretty; }
-  @container (min-width: 820px) {
-    .home-launchpad {
-      display: grid;
-      grid-template-columns: minmax(0, 1.35fr) minmax(300px, 0.85fr);
-      column-gap: 28px;
-      align-items: end;
-    }
-    .resume { margin-top: 0; }
-    .newrift { grid-column: 1 / -1; }
-  }
+  /* The wide two-column variant (resume card beside the greeting) was removed
+     2026-09-18: the card read as a floating island wider than the composer.
+     The launchpad is one stacked column at every width now. */
   @keyframes gcReveal { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
 
   /* ── Cold welcome (no folder) — branded hero · viewfinder · primer ─────── */

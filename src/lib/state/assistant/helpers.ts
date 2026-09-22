@@ -5,11 +5,24 @@
 import type { ChatGptRoute, CodexModel, ModelFamily, ModelSel, OpenAiModel, PermissionMode, RiftPlan, ThinkingEffort } from "./types";
 
 const MODEL_SELS: readonly ModelSel[] = [
-  "sonnet", "opus", "claude-opus-4-8", "claude-opus-4-7", "haiku", "claude-fable-5",
-  "claude-opus-4-6", "claude-opus-4-5", "claude-sonnet-4-6", "claude-sonnet-4-5",
+  "sonnet", "opus", "haiku", "claude-fable-5-1",
   "gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
   "gpt-5.3-codex",
 ] as const;
+
+/** Fold a retired pinned Claude id (pre-2026-09 catalog: claude-opus-4-x,
+ *  claude-sonnet-4-x, claude-fable-5, bare "fable") into its current alias so
+ *  a stored pref / saved conversation still lands on a picker row. Explicit
+ *  current ids (claude-opus-5 …) fold too — the alias IS that snapshot. The
+ *  backend keeps a resumed session on its pinned id (turn.rs pin resolution
+ *  runs before the alias), so this only steers the selector + new chats. */
+export function normalizeLegacyModel(v: string): string {
+  if (/^claude-opus-(4-\d+|5)$/.test(v)) return "opus";
+  if (/^claude-sonnet-(4-\d+|5)$/.test(v)) return "sonnet";
+  if (v.startsWith("claude-haiku-")) return "haiku";
+  if (v === "claude-fable-5" || v === "fable") return "claude-fable-5-1";
+  return v;
+}
 
 // Claude Fable 5 — owner call 2026-07-01: keep it ALWAYS VISIBLE (flag `false`)
 // even while the upstream Fable/Mythos access gate is up, so the picker row is
@@ -106,10 +119,11 @@ export function asPermissionMode(v: unknown): PermissionMode | null {
 
 /** Validate an untrusted string (e.g. a saved convo's model) into a ModelSel.
  *  Returns null for unknown values and for Fable past its sunset. */
-export function asModelSel(v: unknown): ModelSel | null {
-  if (typeof v !== "string") return null;
+export function asModelSel(raw: unknown): ModelSel | null {
+  if (typeof raw !== "string") return null;
+  const v = normalizeLegacyModel(raw);
   if (!(MODEL_SELS as readonly string[]).includes(v) && !isOpenAIModel(v)) return null;
-  if (v === "claude-fable-5" && !fableAvailable()) return null;
+  if (v === "claude-fable-5-1" && !fableAvailable()) return null;
   if (v === "haiku" && !haikuAvailable()) return null;
   return v as ModelSel;
 }
@@ -118,9 +132,10 @@ export function loadModel(ws?: string | null): ModelSel {
   try {
     if (typeof localStorage !== "undefined") {
       const k = wsKey(MODEL_KEY, ws);
-      const v = (k ? localStorage.getItem(k) : null) ?? localStorage.getItem(MODEL_KEY);
+      const raw = (k ? localStorage.getItem(k) : null) ?? localStorage.getItem(MODEL_KEY);
+      const v = raw ? normalizeLegacyModel(raw) : null;
       if (v && ((MODEL_SELS as readonly string[]).includes(v) || isOpenAIModel(v))) {
-        if (v === "claude-fable-5" && !fableAvailable()) return "opus"; // matches backend FABLE_FALLBACK_MODEL (turn.rs)
+        if (v === "claude-fable-5-1" && !fableAvailable()) return "opus"; // matches backend FABLE_FALLBACK_MODEL (turn.rs)
         if (v === "haiku" && !haikuAvailable()) return "sonnet"; // Haiku pulled → fast-tier fallback (mirror config.rs)
         return v as ModelSel;
       }
@@ -167,7 +182,7 @@ export function migrateClaudeModelPinsTo(next: ModelSel) {
 export function modelFamily(model: ModelSel): ModelFamily {
   if (isOpenAIModel(model)) return "openai";
   if (model === "haiku") return "haiku";
-  if (model === "opus" || model.includes("opus") || model === "claude-fable-5") return "opus";
+  if (model === "opus" || model.includes("opus") || model.startsWith("claude-fable")) return "opus";
   return "sonnet";
 }
 
@@ -299,12 +314,13 @@ export function planDecision(
   }
 }
 
-/** Models the CLI's fast-output mode applies to — the Opus family only (the
- *  bare `opus` alias + pinned `claude-opus-4-x` ids). Fable shares Opus's
- *  VISUAL family (modelFamily) but is not fast-eligible upstream, so don't
- *  derive this from modelFamily. Mirrors model_fast_eligible in config.rs. */
+/** Models the CLI's fast-output mode applies to — Opus 5 and Opus 4.8 only (the
+ *  bare `opus` alias resolves to Opus 5). Older Opus snapshots, Sonnet, Haiku
+ *  and Fable are not fast-eligible upstream; Fable shares Opus's VISUAL family
+ *  (modelFamily) so don't derive this from modelFamily. Mirrors
+ *  model_fast_eligible in config.rs. */
 export function fastEligible(model: string): boolean {
-  return model === "opus" || model.startsWith("claude-opus-4-");
+  return model === "opus" || model.startsWith("claude-opus-5") || model === "claude-opus-4-8";
 }
 
 /** Route-specific Fast availability. ChatGPT subscription truth comes from
@@ -545,22 +561,15 @@ export const EFFORT_ORDER: readonly ThinkingEffort[] = [
 /** Highest effort tier each model honors server-side — the single source of
  *  truth for the capability ceiling. `MODEL_OPTIONS.maxEffort` (the picker's
  *  slider) and `clampEffort` (the value actually sent) both derive from this so
- *  they can't disagree. Opus/Fable/Sonnet reach `ultra` (xhigh + ultracode) —
- *  Sonnet 5 honors xhigh + max server-side (unlike Sonnet 4.6, which rejected
- *  xhigh and capped at deep); Haiku rejects effort wholesale (`none`). Mirror
- *  the Sonnet ceiling in src-tauri/src/assistant/turn.rs (model_max_effort). */
+ *  they can't disagree. Opus 5 / Fable 5.1 / Sonnet 5 honor the full CLI
+ *  `--effort` ladder low→max, so they reach `max`; `agentic` is the Codex-only
+ *  `ultra` level (the Claude CLI has no such flag) and clamps to `max` on
+ *  Claude. Haiku rejects effort wholesale (`none`). Mirror in
+ *  src-tauri/src/assistant/config.rs (model_max_effort). */
 export const MODEL_MAX_EFFORT: Record<string, ThinkingEffort> = {
-  opus: "ultra",
-  "claude-opus-4-8": "ultra",
-  "claude-opus-4-7": "ultra",
-  "claude-opus-4-6": "ultra",
-  "claude-opus-4-5": "ultra",
-  "claude-fable-5": "ultra",
-  sonnet: "ultra",
-  // Legacy Sonnets honor xhigh too — the old "4.6 rejects xhigh" ruling is
-  // stale (live probe 2026-07-22: 4-5/4-6 both accept `--effort xhigh`).
-  "claude-sonnet-4-6": "ultra",
-  "claude-sonnet-4-5": "ultra",
+  opus: "max",
+  "claude-fable-5-1": "max",
+  sonnet: "max",
   haiku: "none",
   "gpt-5.6": "max",
   "gpt-5.6-sol": "max",

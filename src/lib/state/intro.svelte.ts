@@ -2,15 +2,13 @@
 // actually play (cold boot only — dev HMR / watchdog reload start settled).
 // SplashOverlay flips veil → handoff as its veil lifts; AppShell/Sidebar CSS
 // keys off `data-intro` on .app so the islands assemble under the veil.
+import { prefersReducedMotion } from "./accessibility.svelte";
+
 class Intro {
   phase = $state<"veil" | "handoff" | "settled">("settled");
 
   arm() {
-    if (
-      typeof window !== "undefined" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches
-    )
-      return;
+    if (prefersReducedMotion()) return;
     this.phase = "veil";
   }
 

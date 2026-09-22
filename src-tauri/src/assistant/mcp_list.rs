@@ -127,17 +127,19 @@ pub(crate) fn parse_mcp_list(out: &str) -> Vec<McpListRow> {
     strip_ansi(out).lines().filter_map(parse_line).collect()
 }
 
-/// Run `claude mcp list` and return the parsed rows. `root` = the open
-/// workspace folder (project-scope `.mcp.json` servers and their per-project
-/// approval state resolve exactly like the user's turns do); falls back to a
-/// neutral cwd so a no-folder chat still answers from user scope.
-#[tauri::command]
-pub async fn list_mcp_servers(root: Option<String>) -> Result<Vec<McpListRow>, String> {
+/// Run one `claude mcp <args…>` subcommand in `root` (or the neutral fallback
+/// cwd) and return its stdout. Shared by list/add/remove: same env hygiene,
+/// same cwd rule, same 30s guard, same error shaping.
+async fn run_mcp_cli(root: Option<String>, args: &[&str]) -> Result<String, String> {
+    let label = format!("claude mcp {}", args.first().copied().unwrap_or(""));
     let mut cmd = claude_command().ok_or_else(|| {
         "Claude CLI not found on this machine — install Claude Code, then retry /mcp.".to_string()
     })?;
-    cmd.arg("mcp").arg("list");
-    // Status read, not a turn: skip autoupdate/telemetry startup work, and
+    cmd.arg("mcp");
+    for a in args {
+        cmd.arg(a);
+    }
+    // Config op, not a turn: skip autoupdate/telemetry startup work, and
     // force plain output so the parser never sees color codes.
     cmd.env("DISABLE_AUTOUPDATER", "1")
         .env("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
@@ -157,18 +159,132 @@ pub async fn list_mcp_servers(root: Option<String>) -> Result<Vec<McpListRow>, S
     cmd.stdin(std::process::Stdio::null());
     let out = tokio::time::timeout(std::time::Duration::from_secs(30), cmd.output())
         .await
-        .map_err(|_| "`claude mcp list` timed out after 30s — a server health check hung.".to_string())?
-        .map_err(|e| format!("run `claude mcp list`: {e}"))?;
+        .map_err(|_| format!("`{label}` timed out after 30s."))?
+        .map_err(|e| format!("run `{label}`: {e}"))?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         let err = err.trim();
-        return Err(if err.is_empty() {
-            format!("`claude mcp list` exited with {}", out.status)
+        // The CLI prints some config errors to stdout, not stderr.
+        let out_txt = String::from_utf8_lossy(&out.stdout);
+        let out_txt = out_txt.trim();
+        let detail = if !err.is_empty() { err } else { out_txt };
+        return Err(if detail.is_empty() {
+            format!("`{label}` exited with {}", out.status)
         } else {
-            format!("`claude mcp list` failed: {err}")
+            format!("`{label}` failed: {detail}")
         });
     }
-    Ok(parse_mcp_list(&String::from_utf8_lossy(&out.stdout)))
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Run `claude mcp list` and return the parsed rows. `root` = the open
+/// workspace folder (project-scope `.mcp.json` servers and their per-project
+/// approval state resolve exactly like the user's turns do); falls back to a
+/// neutral cwd so a no-folder chat still answers from user scope.
+#[tauri::command]
+pub async fn list_mcp_servers(root: Option<String>) -> Result<Vec<McpListRow>, String> {
+    let out = run_mcp_cli(root, &["list"]).await?;
+    Ok(parse_mcp_list(&out))
+}
+
+const MCP_NAME_MAX: usize = 64;
+const MCP_ARGS_MAX: usize = 32;
+const MCP_SCOPES: [&str; 3] = ["user", "project", "local"];
+const MCP_TRANSPORTS: [&str; 3] = ["stdio", "http", "sse"];
+
+/// Server names land in the CLI's JSON config AND as a positional argv token —
+/// keep them to the shape `claude mcp add` itself accepts (no spaces/flags).
+fn validate_mcp_name(name: &str) -> Result<String, String> {
+    let n = name.trim();
+    if n.is_empty() {
+        return Err("server name is required".into());
+    }
+    if n.len() > MCP_NAME_MAX {
+        return Err(format!("server name too long (max {MCP_NAME_MAX})"));
+    }
+    if n.starts_with('-')
+        || !n.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+    {
+        return Err("server name may only use letters, digits, '-', '_' and '.'".into());
+    }
+    Ok(n.to_string())
+}
+
+fn validate_mcp_scope(scope: &str) -> Result<&'static str, String> {
+    MCP_SCOPES
+        .iter()
+        .copied()
+        .find(|s| *s == scope.trim())
+        .ok_or_else(|| "scope must be user, project or local".to_string())
+}
+
+/// `claude mcp add` — register a server in the user's Claude Code config
+/// (the same file a terminal `claude mcp add` writes). `project` scope writes
+/// `.mcp.json` in `root`, so it requires an open folder. stdio servers take
+/// `target` as the command plus `args`; http/sse take a URL.
+#[tauri::command]
+pub async fn add_mcp_server(
+    root: Option<String>,
+    name: String,
+    transport: String,
+    target: String,
+    args: Vec<String>,
+    scope: String,
+) -> Result<(), String> {
+    let name = validate_mcp_name(&name)?;
+    let scope = validate_mcp_scope(&scope)?;
+    let transport = MCP_TRANSPORTS
+        .iter()
+        .copied()
+        .find(|t| *t == transport.trim())
+        .ok_or_else(|| "transport must be stdio, http or sse".to_string())?;
+    let target = target.trim().to_string();
+    if target.is_empty() {
+        return Err(if transport == "stdio" { "command is required" } else { "URL is required" }.into());
+    }
+    if target.contains('\n') || target.contains('\r') {
+        return Err("target may not contain newlines".into());
+    }
+    if transport != "stdio" && !(target.starts_with("http://") || target.starts_with("https://")) {
+        return Err(format!("{transport} servers need an http(s):// URL"));
+    }
+    if scope == "project" && !root.as_deref().map(std::path::Path::new).is_some_and(|p| p.is_dir()) {
+        return Err("project scope needs an open folder (it writes .mcp.json there)".into());
+    }
+    let args: Vec<String> = if transport == "stdio" {
+        let cleaned: Vec<String> = args
+            .into_iter()
+            .map(|a| a.trim().to_string())
+            .filter(|a| !a.is_empty())
+            .collect();
+        if cleaned.len() > MCP_ARGS_MAX {
+            return Err(format!("too many arguments (max {MCP_ARGS_MAX})"));
+        }
+        if cleaned.iter().any(|a| a.contains('\n') || a.contains('\r')) {
+            return Err("arguments may not contain newlines".into());
+        }
+        cleaned
+    } else {
+        Vec::new()
+    };
+
+    let mut argv: Vec<&str> = vec!["add", "--transport", transport, "--scope", scope, &name];
+    if transport == "stdio" {
+        // `--` keeps a command that starts with `-` from being read as a flag.
+        argv.push("--");
+    }
+    argv.push(&target);
+    argv.extend(args.iter().map(String::as_str));
+    run_mcp_cli(root, &argv).await.map(|_| ())
+}
+
+/// `claude mcp remove <name> -s <scope>` — the scope is required so a name
+/// that exists in two scopes removes exactly the one the user pointed at.
+#[tauri::command]
+pub async fn remove_mcp_server(root: Option<String>, name: String, scope: String) -> Result<(), String> {
+    let name = validate_mcp_name(&name)?;
+    let scope = validate_mcp_scope(&scope)?;
+    run_mcp_cli(root, &["remove", "--scope", scope, &name]).await.map(|_| ())
 }
 
 #[cfg(test)]

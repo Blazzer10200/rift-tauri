@@ -46,6 +46,28 @@ class McpPanelState {
       if (seq === this.#seq) this.loading = false;
     }
   }
+
+  /** `claude mcp add` via the backend, then re-list. Throws on failure so the
+   *  dialog can keep the form open with the CLI's error. */
+  async add(
+    root: string | null,
+    session: SessionMcpRow[] | null,
+    spec: { name: string; transport: McpTransport; target: string; args: string[]; scope: McpScope },
+  ): Promise<void> {
+    await invoke("add_mcp_server", { root, ...spec });
+    await this.refresh(root, session);
+  }
+
+  /** `claude mcp remove` via the backend, then re-list. */
+  async remove(root: string | null, session: SessionMcpRow[] | null, name: string, scope: McpScope): Promise<void> {
+    await invoke("remove_mcp_server", { root, name, scope });
+    await this.refresh(root, session);
+  }
 }
+
+export type McpTransport = "stdio" | "http" | "sse";
+export type McpScope = "user" | "project" | "local";
+export const MCP_SCOPES: readonly McpScope[] = ["user", "project", "local"];
+export const MCP_TRANSPORTS: readonly McpTransport[] = ["stdio", "http", "sse"];
 
 export const mcpPanel = new McpPanelState();

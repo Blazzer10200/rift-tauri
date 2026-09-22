@@ -15,7 +15,7 @@
     filterRange, summarize, streaks, peakHour, perModel, topModel,
     dailySeries, dayLabel, summaryLine, funFact,
     fmtInt, fmtCompact, fmtCost,
-  } from "../home/statsHelpers";
+  } from "$lib/utils/usageStats";
   import { projects, projectRootKey } from "../../state/projects.svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { workspace } from "../../state/workspace.svelte";
@@ -25,9 +25,8 @@
   import { notify } from "../../state/toast.svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import { globSummary } from "./globPreview";
-  import { fmtAgo } from "./welcomeShared";
   import { news } from "../../state/news.svelte";
-  import { EMPTY_PULSE, pulseByRoot, relTime } from "./hubHelpers";
+  import { EMPTY_PULSE, fmtAgo, pulseByRoot, relTime } from "./hubHelpers";
   import type { Project } from "../../state/assistant/types";
 
   // ── Active-folder band ──────────────────────────────────────────────────────
@@ -180,6 +179,8 @@
   let dRoot = $state("");
   let dInclude = $state("");
   let dExclude = $state("");
+  // Extra folders (one absolute path per line) → `--add-dir` on every spawn.
+  let dExtra = $state("");
   let recentOpen = $state(false);
   // Scope globs are power-user territory — folded behind a disclosure so the
   // default flow is just Folder → Create. Forced open while a pattern is invalid
@@ -234,12 +235,13 @@
 
   function startNew(seedRoot?: string) {
     isNew = true;
-    editing = { id: "", name: "", root: "", include: [], exclude: [], createdAt: 0 };
+    editing = { id: "", name: "", root: "", include: [], exclude: [], extraDirs: [], createdAt: 0 };
     const root = seedRoot ?? assistant.activeRoot ?? "";
     dRoot = prettyPath(root);
     dName = root ? folderName(root) : "";
     dInclude = "";
     dExclude = DEFAULT_EXCLUDE.join("\n");
+    dExtra = "";
     recentOpen = false;
     advOpen = false;
     nameTouched = false;
@@ -255,6 +257,7 @@
     dRoot = prettyPath(p.root);
     dInclude = listToLines(p.include);
     dExclude = listToLines(p.exclude);
+    dExtra = listToLines(p.extraDirs ?? []);
     recentOpen = false;
     advOpen = false;
     nameTouched = true;
@@ -298,6 +301,7 @@
       root: dRoot.trim(),
       include: linesToList(dInclude),
       exclude: linesToList(dExclude),
+      extraDirs: linesToList(dExtra),
       createdAt: isNew ? undefined : editing.createdAt || undefined,
     });
     saving = false;
@@ -515,6 +519,11 @@
               <textarea class="rift-input mono pat" class:bad={excGlobs.invalid > 0}
                 placeholder={"**/node_modules/**\n*.lock\ndist/**"} bind:value={dExclude} spellcheck="false"></textarea>
               {#if excGlobs.invalid > 0}<span class="glob-err">{excGlobs.invalid} invalid · {excGlobs.firstError}</span>{/if}
+            </label>
+            <label class="fld fld-wide">
+              <span class="fld-lbl">Extra folders <span class="fld-hint">one full path per line · Claude can read + edit these too (--add-dir)</span></span>
+              <textarea class="rift-input mono pat"
+                placeholder={"C:/shared/design-system\nD:/notes"} bind:value={dExtra} spellcheck="false"></textarea>
             </label>
           </div>
           {/if}
@@ -1049,6 +1058,7 @@
   .adv-sum.bad { color: var(--danger); font-weight: 600; }
 
   .pat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .fld-wide { grid-column: 1 / -1; }
   @media (max-width: 680px) { .pat-grid { grid-template-columns: minmax(0, 1fr); } }
   .glob-ct { margin-left: auto; font-size: var(--fs-xs); font-weight: 500; color: var(--fg-subtle); font-variant-numeric: tabular-nums; }
   .ed-foot { display: flex; align-items: center; justify-content: space-between; padding-top: 4px; }
@@ -1129,7 +1139,11 @@
   .pcard:hover .pcard-act { opacity: 1; }
   .pcard-act:hover { background: var(--surface-hover); color: var(--fg); opacity: 1; }
   .pcard-actions { position: absolute; top: 14px; right: 13px; display: flex; align-items: center; gap: 2px; }
-  .pcard-foot { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  /* Wraps: every item is flex:none, and on the ACTIVE card "chats · ago · cost ·
+     scope · Continue" can outrun a 3-column card (measured 27px over at 1455px
+     wide). Wrapping drops Continue to its own right-aligned line instead of
+     spilling past the card border. */
+  .pcard-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; }
   .pmeta { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--fg-muted);
     font-variant-numeric: tabular-nums; flex: none; }
   .pmeta :global(svg) { color: var(--fg-faint); }

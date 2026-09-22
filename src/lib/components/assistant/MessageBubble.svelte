@@ -2,9 +2,8 @@
   import { Sparkles, Copy, Check, Brain, ChevronDown, ChevronRight, AlertCircle, X, Ban, CornerDownRight } from "@lucide/svelte";
   import { onDestroy } from "svelte";
   import { fade, slide } from "svelte/transition";
-  const reducedMotion =
-    typeof window !== "undefined" &&
-    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+  import { prefersReducedMotion } from "../../state/accessibility.svelte";
+  const reducedMotion = prefersReducedMotion();
   import { assistant, type Block, type ChatMessage, type TabState } from "../../state/assistant.svelte";
   import { RotateCcw } from "@lucide/svelte";
   import Markdown from "./Markdown.svelte";

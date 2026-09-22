@@ -24,6 +24,8 @@ export type Project = {
   include: string[];
   /** Glob blocklist, on top of the always-on SKIP_DIRS baseline. */
   exclude: string[];
+  /** Extra folders the CLI may touch beyond `root` (`--add-dir` per spawn). */
+  extraDirs: string[];
   createdAt: number;
 };
 
@@ -486,14 +488,16 @@ export type ThinkingEffort =
   | "agentic";
 
 /** Model selection — stored value IS the string handed to the CLI's `--model`,
- *  so it flows through `assistant_send` untouched. `opus` is the short alias
- *  that always resolves to the newest Opus (currently 5) with the 1M-ctx
- *  window; `claude-opus-4-8` pins the prior Opus. `sonnet`/`haiku` stay aliases.
+ *  so it flows through `assistant_send` untouched. `opus`/`sonnet`/`haiku` are
+ *  the short aliases that always resolve to the newest snapshot of each family
+ *  (Opus 5 / Sonnet 5 / Haiku 4.5, 1M ctx for the first two); `claude-fable-5-1`
+ *  is the explicit Fable id. Retired pinned ids (claude-opus-4-x,
+ *  claude-sonnet-4-x, claude-fable-5) fold into their alias via
+ *  `normalizeLegacyModel` on load — the backend keeps a RESUMED session on its
+ *  pinned id, so this only steers the picker + new chats.
  *  Must satisfy the Rust `is_valid_model_name` validator (no brackets). */
 export type ModelSel =
-  | "sonnet" | "opus" | "haiku" | "claude-fable-5"
-  | "claude-opus-4-8" | "claude-opus-4-7" | "claude-opus-4-6" | "claude-opus-4-5"
-  | "claude-sonnet-4-6" | "claude-sonnet-4-5"
+  | "sonnet" | "opus" | "haiku" | "claude-fable-5-1"
   | `gpt-${string}`;
 
 /** Visual family for the per-model aurora hue (sonnet=blue, opus=purple,

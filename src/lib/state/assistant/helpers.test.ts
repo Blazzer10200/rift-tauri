@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  FABLE_DISABLED, FABLE_SUNSET_MS, clampEffort, effortToFlag, fableAvailable,
-  fastEligible, flattenToolResult, isStaleTurnEpoch, loadEffort,
+  FABLE_DISABLED, FABLE_SUNSET_MS, asModelSel, clampEffort, effortToFlag, fableAvailable,
+  fastEligible, flattenToolResult, isStaleTurnEpoch, loadEffort, normalizeLegacyModel,
   migrateClaudeModelPinsTo, migrateThinkingPins, modelFamily, previewToolInput, ctxWindowForModelId,
   modelNativeWindow, planContextCap, autoCompactTriggerTokens, planDecision,
   partialPlanMd,
@@ -215,18 +215,41 @@ describe("modelFamily", () => {
   it("maps every selector to its aurora family", () => {
     expect(modelFamily("haiku")).toBe("haiku");
     expect(modelFamily("opus")).toBe("opus");
-    expect(modelFamily("claude-opus-4-7")).toBe("opus");
-    expect(modelFamily("claude-fable-5")).toBe("opus");
+    expect(modelFamily("claude-fable-5-1")).toBe("opus");
     expect(modelFamily("sonnet")).toBe("sonnet");
   });
 });
 
+describe("normalizeLegacyModel / asModelSel (retired pins fold into the alias)", () => {
+  it("folds retired + explicit Claude ids into the current alias", () => {
+    expect(normalizeLegacyModel("claude-opus-4-7")).toBe("opus");
+    expect(normalizeLegacyModel("claude-opus-4-8")).toBe("opus");
+    expect(normalizeLegacyModel("claude-opus-5")).toBe("opus");
+    expect(normalizeLegacyModel("claude-sonnet-4-6")).toBe("sonnet");
+    expect(normalizeLegacyModel("claude-sonnet-5")).toBe("sonnet");
+    expect(normalizeLegacyModel("claude-haiku-4-5")).toBe("haiku");
+    expect(normalizeLegacyModel("claude-fable-5")).toBe("claude-fable-5-1");
+    expect(normalizeLegacyModel("fable")).toBe("claude-fable-5-1");
+    // Current aliases + ChatGPT ids pass through untouched.
+    expect(normalizeLegacyModel("opus")).toBe("opus");
+    expect(normalizeLegacyModel("gpt-5.6-terra")).toBe("gpt-5.6-terra");
+  });
+  it("asModelSel accepts a legacy pin as its alias and rejects junk", () => {
+    expect(asModelSel("claude-opus-4-7")).toBe("opus");
+    expect(asModelSel("claude-sonnet-4-5")).toBe("sonnet");
+    expect(asModelSel("claude-fable-5-1")).toBe("claude-fable-5-1");
+    expect(asModelSel("some-future-model")).toBeNull();
+    expect(asModelSel(42)).toBeNull();
+  });
+});
+
 describe("fastEligible (must mirror config.rs model_fast_eligible)", () => {
-  it("is Opus-family only — Fable shares the opus VISUAL family but is not fast-eligible", () => {
+  it("is Opus 5 / Opus 4.8 only — Fable shares the opus VISUAL family but is not fast-eligible", () => {
     expect(fastEligible("opus")).toBe(true);
+    expect(fastEligible("claude-opus-5")).toBe(true);
     expect(fastEligible("claude-opus-4-8")).toBe(true);
-    expect(fastEligible("claude-opus-4-7")).toBe(true);
-    expect(fastEligible("claude-fable-5")).toBe(false);
+    expect(fastEligible("claude-opus-4-7")).toBe(false);
+    expect(fastEligible("claude-fable-5-1")).toBe(false);
     expect(fastEligible("sonnet")).toBe(false);
     expect(fastEligible("claude-sonnet-5")).toBe(false);
     expect(fastEligible("haiku")).toBe(false);
@@ -241,23 +264,28 @@ describe("effortToFlag (must mirror src-tauri assistant turn.rs mapping)", () =>
     expect(effortToFlag("none", "opus")).toBe("low");
     expect(effortToFlag("smart", "opus")).toBe("medium"); // responsive default
     expect(effortToFlag("deep", "opus")).toBe("high");
-    expect(effortToFlag("ultra", "claude-fable-5")).toBe("xhigh");
+    expect(effortToFlag("ultra", "claude-fable-5-1")).toBe("xhigh");
+    expect(effortToFlag("max", "opus")).toBe("max");
   });
   it("clamps an out-of-range tier to the model ceiling before mapping", () => {
     // Sonnet 5 reaches ultra(xhigh) — an ultra pref passes straight through.
     expect(effortToFlag("ultra", "sonnet")).toBe("xhigh");
     // smart on Sonnet is the responsive default → medium (not the old high).
     expect(effortToFlag("smart", "sonnet")).toBe("medium");
+    // "agentic" is the Codex-only level — on Claude it clamps to max.
+    expect(effortToFlag("agentic", "opus")).toBe("max");
   });
 });
 
 describe("clampEffort (model effort ceiling)", () => {
-  it("leaves Sonnet 5/Opus/Fable at ultra (all reach xhigh)", () => {
+  it("leaves Sonnet 5/Opus/Fable through max; agentic clamps on Claude", () => {
     expect(clampEffort("ultra", "sonnet")).toBe("ultra"); // Sonnet 5 accepts xhigh
+    expect(clampEffort("max", "sonnet")).toBe("max");
     expect(clampEffort("deep", "sonnet")).toBe("deep");  // in range
     expect(clampEffort("smart", "sonnet")).toBe("smart"); // already in range
     expect(clampEffort("ultra", "opus")).toBe("ultra");
-    expect(clampEffort("ultra", "claude-fable-5")).toBe("ultra");
+    expect(clampEffort("agentic", "opus")).toBe("max");
+    expect(clampEffort("max", "claude-fable-5-1")).toBe("max");
   });
   it("floors Haiku to none (rejects effort wholesale)", () => {
     expect(clampEffort("ultra", "haiku")).toBe("none");

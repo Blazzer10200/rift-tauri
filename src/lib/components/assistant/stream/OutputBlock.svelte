@@ -7,6 +7,7 @@
     stripAnsi, OUTPUT_CHAR_CAP,
     type RevealTier, type AnsiSeg,
   } from "./streamModel";
+  import { prefersReducedMotion } from "$lib/state/accessibility.svelte";
 
   // Progressive-reveal tool output — THE shared output body for both trees
   // (live stream + history ToolChip). Long output caps at a glanceable head,
@@ -38,9 +39,7 @@
     cursor?: boolean;
   } = $props();
 
-  const reducedMotion =
-    typeof window !== "undefined" &&
-    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+  const reducedMotion = prefersReducedMotion();
 
   // A pathological single-line blob (minified JSON, base64) has few lines but
   // can still freeze layout — hard char cap before any line math.

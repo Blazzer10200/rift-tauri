@@ -7,10 +7,10 @@
   import { fade } from "svelte/transition";
   import { tasksToPlanItems } from "./streamModel";
   import type { TabState } from "$lib/state/assistant.svelte";
+  import { prefersReducedMotion } from "$lib/state/accessibility.svelte";
 
   // Svelte transitions don't respect prefers-reduced-motion on their own.
-  const reduceMotion =
-    typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduceMotion = prefersReducedMotion();
 
   let { tab = null, streaming = false }:
     { tab?: TabState | null; streaming?: boolean } = $props();

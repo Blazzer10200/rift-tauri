@@ -8,6 +8,7 @@
   import { portal } from "$lib/actions/portal";
   import { tooltip } from "$lib/actions/tooltip";
   import { leafName, rootKey } from "$lib/utils/path";
+  import { relTime as sharedRelTime } from "$lib/utils/relTime";
   import { projectHue } from "$lib/utils/projectHue";
   import Skeleton from "./Skeleton.svelte";
   import { bootLoad } from "$lib/state/bootLoad.svelte";
@@ -148,12 +149,7 @@
   const miniMore = $derived(Math.max(0, flatAll.length - MINI_CAP));
 
   function relTime(ts: number): string {
-    const s = Math.max(0, (Date.now() - ts) / 1000);
-    if (s < 60) return "now";
-    if (s < 3600) return `${Math.floor(s / 60)}m`;
-    if (s < 86_400) return `${Math.floor(s / 3600)}h`;
-    if (s < 604_800) return `${Math.floor(s / 86_400)}d`;
-    return `${Math.floor(s / 604_800)}w`;
+    return sharedRelTime(ts, Date.now(), "short");
   }
 
   // ── row state ────────────────────────────────────────────────────────

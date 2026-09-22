@@ -97,3 +97,10 @@ class Accessibility {
 }
 
 export const accessibility = new Accessibility();
+
+/** SSR-safe `prefers-reduced-motion: reduce` probe — shared by every component
+ *  that needs to skip/short-circuit a JS-driven animation. */
+export function prefersReducedMotion(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+}

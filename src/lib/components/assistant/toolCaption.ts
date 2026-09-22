@@ -10,7 +10,7 @@ type Input = Record<string, unknown>;
 // old local copy (kept duplicated to avoid a shell-boundary import) is gone now
 // that the helper lives in the neutral utils/ home.
 export const basename = leafName;
-function shortName(name: string): string {
+export function shortName(name: string): string {
   return name.replace(/^mcp__rift__/, "");
 }
 function hostOf(u: string): string {

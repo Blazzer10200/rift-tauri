@@ -2,12 +2,89 @@
   import { tick } from "svelte";
   import { fade, scale } from "svelte/transition";
   import { quintOut } from "svelte/easing";
-  import { Plug, RefreshCw } from "@lucide/svelte";
-  import { mcpPanel } from "../../state/mcp-panel.svelte";
+  import { Plug, Plus, RefreshCw, Trash2 } from "@lucide/svelte";
+  import {
+    mcpPanel,
+    MCP_SCOPES,
+    MCP_TRANSPORTS,
+    type McpScope,
+    type McpTransport,
+  } from "../../state/mcp-panel.svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { mcpHint, statusMeta } from "../../state/assistant/mcpStatus";
 
   let panelEl: HTMLDivElement | undefined = $state();
+
+  // ── Add / remove (claude mcp add|remove through the backend) ───────────────
+  let adding = $state(false);
+  let addBusy = $state(false);
+  let addError = $state<string | null>(null);
+  let fName = $state("");
+  let fTransport = $state<McpTransport>("stdio");
+  let fTarget = $state("");
+  let fArgs = $state("");
+  let fScope = $state<McpScope>("user");
+  // Name of the row whose inline remove-confirm strip is open.
+  let removing = $state<string | null>(null);
+  let removeScope = $state<McpScope>("user");
+  let removeBusy = $state(false);
+  let removeError = $state<string | null>(null);
+
+  const hasRoot = $derived(!!assistant.workspace.current);
+  const canAdd = $derived(fName.trim().length > 0 && fTarget.trim().length > 0 && !addBusy);
+
+  function openAdd() {
+    adding = true;
+    addError = null;
+    removing = null;
+  }
+  function closeAdd() {
+    adding = false;
+    addError = null;
+    fName = ""; fTarget = ""; fArgs = ""; fTransport = "stdio"; fScope = "user";
+  }
+
+  async function submitAdd() {
+    if (!canAdd) return;
+    addBusy = true;
+    addError = null;
+    try {
+      await mcpPanel.add(assistant.workspace.current, assistant.activeTab?.mcpServers ?? null, {
+        name: fName.trim(),
+        transport: fTransport,
+        target: fTarget.trim(),
+        // Whitespace-split; quoted args aren't supported — one token per arg.
+        args: fTransport === "stdio" ? fArgs.split(/\s+/).map((a) => a.trim()).filter(Boolean) : [],
+        scope: fScope,
+      });
+      closeAdd();
+    } catch (e) {
+      addError = String(e);
+    } finally {
+      addBusy = false;
+    }
+  }
+
+  function openRemove(name: string) {
+    removing = name;
+    removeScope = "user";
+    removeError = null;
+    adding = false;
+  }
+
+  async function submitRemove() {
+    if (!removing || removeBusy) return;
+    removeBusy = true;
+    removeError = null;
+    try {
+      await mcpPanel.remove(assistant.workspace.current, assistant.activeTab?.mcpServers ?? null, removing, removeScope);
+      removing = null;
+    } catch (e) {
+      removeError = String(e);
+    } finally {
+      removeBusy = false;
+    }
+  }
 
   // Pull focus into the panel on open — the composer textarea otherwise keeps
   // focus and its own Escape handling eats the close key before it bubbles.
@@ -36,7 +113,10 @@
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
-      mcpPanel.hide();
+      // Esc peels one layer: open form/confirm first, then the dialog.
+      if (adding) closeAdd();
+      else if (removing) removing = null;
+      else mcpPanel.hide();
     }
   }
 
@@ -78,8 +158,54 @@
           <span class="mcp-recheck-icon" class:spin={mcpPanel.loading}><RefreshCw size={12} /></span>
           {mcpPanel.loading ? "Checking…" : "Re-check"}
         </button>
+        <button type="button" class="mcp-recheck" onclick={adding ? closeAdd : openAdd} aria-expanded={adding} aria-controls="mcp-add-form">
+          <span class="mcp-recheck-icon"><Plus size={12} /></span>
+          {adding ? "Cancel" : "Add"}
+        </button>
         <kbd class="mcp-kbd">Esc</kbd>
       </header>
+
+      {#if adding}
+        <form class="mcp-add" id="mcp-add-form" onsubmit={(e) => { e.preventDefault(); void submitAdd(); }}>
+          <div class="mcp-add-grid">
+            <label class="mcp-fld">
+              <span>Name</span>
+              <!-- svelte-ignore a11y_autofocus -->
+              <input class="mcp-in mono" type="text" bind:value={fName} placeholder="my-server" spellcheck="false" autocomplete="off" autofocus />
+            </label>
+            <label class="mcp-fld">
+              <span>Transport</span>
+              <select class="mcp-in" bind:value={fTransport}>
+                {#each MCP_TRANSPORTS as t (t)}<option value={t}>{t}</option>{/each}
+              </select>
+            </label>
+            <label class="mcp-fld">
+              <span>Scope</span>
+              <select class="mcp-in" bind:value={fScope}>
+                {#each MCP_SCOPES as s (s)}
+                  <option value={s} disabled={s === "project" && !hasRoot}>{s}{s === "project" && !hasRoot ? " (open a folder)" : ""}</option>
+                {/each}
+              </select>
+            </label>
+            <label class="mcp-fld mcp-fld-wide">
+              <span>{fTransport === "stdio" ? "Command" : "URL"}</span>
+              <input class="mcp-in mono" type="text" bind:value={fTarget}
+                placeholder={fTransport === "stdio" ? "npx" : "https://example.com/mcp"} spellcheck="false" autocomplete="off" />
+            </label>
+            {#if fTransport === "stdio"}
+              <label class="mcp-fld mcp-fld-wide">
+                <span>Arguments <em>space-separated</em></span>
+                <input class="mcp-in mono" type="text" bind:value={fArgs} placeholder="-y @scope/server --port 3000" spellcheck="false" autocomplete="off" />
+              </label>
+            {/if}
+          </div>
+          {#if addError}<div class="mcp-add-err">{addError}</div>{/if}
+          <div class="mcp-add-foot">
+            <span class="mcp-add-hint">Runs <code>claude mcp add</code> — same config a terminal writes.</span>
+            <button type="submit" class="mcp-btn primary" disabled={!canAdd}>{addBusy ? "Adding…" : "Add server"}</button>
+          </div>
+        </form>
+      {/if}
 
       <div class="mcp-list" role="list" aria-label="MCP servers">
         {#if mcpPanel.rows == null && mcpPanel.loading}
@@ -90,14 +216,14 @@
           <div class="mcp-empty">
             <span class="mcp-empty-t">No MCP servers configured</span>
             <span class="mcp-empty-s">
-              Add one with <code>claude mcp add</code> in a terminal (or a project
+              Use <strong>Add</strong> above, or <code>claude mcp add</code> in a terminal (or a project
               <code>.mcp.json</code>) — Rift picks it up automatically.
             </span>
           </div>
         {:else}
           {#each rows as r (r.name)}
             {@const meta = statusMeta(r.status)}
-            <div class="mcp-row" role="listitem">
+            <div class="mcp-row" role="listitem" class:confirming={removing === r.name}>
               <span class="mcp-dot {meta.tint}" aria-hidden="true"></span>
               <span class="mcp-name">{r.name}</span>
               {#if r.live}
@@ -105,7 +231,23 @@
               {/if}
               <span class="mcp-target" title={r.target ?? undefined}>{r.target ?? r.detail ?? ""}</span>
               <span class="mcp-status {meta.tint}" title={r.detail ?? undefined}>{meta.label}</span>
+              <button type="button" class="mcp-rm" title="Remove {r.name}" aria-label="Remove {r.name}"
+                onclick={() => (removing === r.name ? (removing = null) : openRemove(r.name))}>
+                <Trash2 size={13} />
+              </button>
             </div>
+            {#if removing === r.name}
+              <div class="mcp-confirm">
+                <span>Remove <strong>{r.name}</strong> from</span>
+                <select class="mcp-in sm" bind:value={removeScope} aria-label="Scope to remove from">
+                  {#each MCP_SCOPES as s (s)}<option value={s}>{s}</option>{/each}
+                </select>
+                <span>scope?</span>
+                <button type="button" class="mcp-btn danger" disabled={removeBusy} onclick={() => void submitRemove()}>{removeBusy ? "Removing…" : "Remove"}</button>
+                <button type="button" class="mcp-btn" disabled={removeBusy} onclick={() => (removing = null)}>Cancel</button>
+                {#if removeError}<span class="mcp-add-err">{removeError}</span>{/if}
+              </div>
+            {/if}
           {/each}
         {/if}
       </div>
@@ -210,7 +352,98 @@
     padding: 0 10px;
     border-radius: 10px;
   }
-  .mcp-row:hover { background: color-mix(in oklab, var(--fg) 4%, transparent); }
+  .mcp-row:hover,
+  .mcp-row.confirming { background: color-mix(in oklab, var(--fg) 4%, transparent); }
+
+  .mcp-rm {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px;
+    margin-left: 2px;
+    flex-shrink: 0;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--fg-faint);
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast);
+  }
+  .mcp-row:hover .mcp-rm,
+  .mcp-row:focus-within .mcp-rm,
+  .mcp-row.confirming .mcp-rm { opacity: 1; }
+  .mcp-rm:hover { color: var(--danger); border-color: color-mix(in oklab, var(--danger) 40%, transparent); }
+
+  .mcp-confirm {
+    display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+    margin: 0 6px 6px;
+    padding: 8px 10px;
+    font-size: var(--fs-xs);
+    color: var(--fg-muted);
+    background: color-mix(in oklab, var(--danger) 7%, transparent);
+    border: 1px solid color-mix(in oklab, var(--danger) 30%, transparent);
+    border-radius: 10px;
+  }
+  .mcp-confirm strong { color: var(--fg); font-weight: 600; }
+
+  .mcp-add {
+    padding: 10px 14px 12px;
+    border-bottom: 1px solid var(--border);
+    background: color-mix(in oklab, var(--accent) 4%, transparent);
+  }
+  .mcp-add-grid {
+    display: grid;
+    grid-template-columns: 1.4fr 0.8fr 0.8fr;
+    gap: 8px 10px;
+  }
+  .mcp-fld { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .mcp-fld > span { font-size: var(--fs-xs); font-weight: 560; color: var(--fg-muted); }
+  .mcp-fld > span em { font-style: normal; font-weight: 400; color: var(--fg-faint); margin-left: 4px; }
+  .mcp-fld-wide { grid-column: 1 / -1; }
+  .mcp-in {
+    height: 28px;
+    padding: 0 9px;
+    font: inherit; font-size: var(--fs-xs);
+    color: var(--fg);
+    background: var(--bg-elev-3);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    outline: none;
+    min-width: 0;
+  }
+  .mcp-in.mono { font-family: var(--font-mono, ui-monospace, monospace); }
+  .mcp-in.sm { height: 24px; padding: 0 6px; }
+  .mcp-in:focus { border-color: var(--accent); }
+  .mcp-add-err {
+    margin-top: 8px;
+    font-size: var(--fs-xs);
+    color: var(--danger);
+    word-break: break-word;
+  }
+  .mcp-add-foot { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+  .mcp-add-hint { flex: 1; min-width: 0; font-size: var(--fs-xs); color: var(--fg-faint); }
+  .mcp-add-hint code {
+    font-family: var(--font-mono, ui-monospace, monospace);
+    color: var(--fg-muted);
+    background: var(--bg-elev-3);
+    padding: 1px 5px;
+    border-radius: 5px;
+  }
+  .mcp-btn {
+    height: 26px; padding: 0 11px;
+    font: inherit; font-size: var(--fs-xs); font-weight: 560;
+    color: var(--fg-muted);
+    background: var(--bg-elev-3);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    cursor: pointer;
+    transition: color var(--dur-fast), border-color var(--dur-fast), background var(--dur-fast);
+  }
+  .mcp-btn:hover:not(:disabled) { color: var(--fg); border-color: var(--border-strong); }
+  .mcp-btn:disabled { opacity: 0.55; cursor: default; }
+  .mcp-btn.primary { color: var(--accent-fg, var(--bg)); background: var(--accent); border-color: var(--accent); }
+  .mcp-btn.primary:hover:not(:disabled) { color: var(--accent-fg, var(--bg)); filter: brightness(1.08); }
+  .mcp-btn.danger { color: var(--danger); border-color: color-mix(in oklab, var(--danger) 40%, transparent); }
+  .mcp-btn.danger:hover:not(:disabled) { color: var(--danger); background: color-mix(in oklab, var(--danger) 12%, transparent); }
 
   .mcp-dot {
     width: 8px; height: 8px;

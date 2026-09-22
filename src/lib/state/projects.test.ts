@@ -15,6 +15,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     root: "C:/workspace/my-project",
     include: [],
     exclude: [],
+    extraDirs: [],
     createdAt: Date.now(),
     ...overrides,
   };

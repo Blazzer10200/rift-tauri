@@ -48,10 +48,10 @@ export type ModelOpt = {
   // ignores server-side. Grounded in the model capability docs:
   //   • effort     — accepts the CLI `--effort` flag at all. The API rejects
   //                  effort on Haiku 4.5 wholesale, so this is false for Haiku.
-  //   • maxEffort  — highest effort tier the model honors. Opus, Fable, and
-  //                  Sonnet 5 reach "ultra" (xhigh + ultracode); Sonnet 5
-  //                  honors xhigh + max server-side, where Sonnet 4.6 rejected
-  //                  xhigh and stopped at deep. Haiku rejects effort entirely.
+  //   • maxEffort  — highest effort tier the model honors. Opus 5, Fable 5.1
+  //                  and Sonnet 5 take the full CLI ladder through "max";
+  //                  "agentic" (Codex `ultra`) is ChatGPT-only. Haiku rejects
+  //                  effort entirely.
   effort: boolean;
   maxEffort: ThinkingEffort;
   /** Exact Rift effort tiers advertised by a live model source. Omitted for
@@ -65,11 +65,13 @@ export type ModelOpt = {
   inputModalities?: readonly string[];
   supportsPersonality?: boolean;
 };
-// Flat single-column list (Claude-Code-Desktop layout): current models first,
-// legacy generations grouped below. `opus` is the alias → newest Opus (5,
-// 1M-ctx); `claude-opus-4-8` pins the prior generation. The CLI takes
-// the alias / pinned id; name + suffix are display-only.
-// Fable 5 row exists while fableAvailable() (gated by FABLE_DISABLED + the
+// Flat single-column list (Claude-Code-Desktop layout). Claude rows are the
+// current catalog only: `opus`/`sonnet`/`haiku` aliases → newest snapshot of
+// each family (Opus 5 / Sonnet 5 / Haiku 4.5); Fable 5.1 is an explicit id.
+// Retired 4.x pins were dropped 2026-09-18 — helpers.ts normalizeLegacyModel
+// folds stored ones into the alias. The CLI takes the alias / id; name + suffix
+// are display-only.
+// Fable row exists while fableAvailable() (gated by FABLE_DISABLED + the
 // sunset date in helpers.ts). Owner call 2026-07-01: kept always-visible even
 // while the upstream access gate holds — hard-pull only (set FABLE_DISABLED).
 export const MODEL_OPTIONS: ModelOpt[] = [
@@ -82,16 +84,10 @@ export const MODEL_OPTIONS: ModelOpt[] = [
   { id: "gpt-5.4-mini", label: "GPT Mini", version: "5.4", tagline: "Retiring compact model; move new work to Luna", blurb: "Compatibility for existing chats", ctx: "400K ctx", suffix: "400K context", legacy: false, effort: true, maxEffort: "ultra", icon: Orbit, provider: "openai" },
   { id: "gpt-5.3-codex-spark", label: "GPT Codex Spark", version: "5.3", tagline: "Separate ultra-fast, text-only coding model; not Fast mode", blurb: "Quick focused coding work", ctx: "400K ctx", suffix: "400K context", legacy: false, effort: true, maxEffort: "ultra", icon: Code2, provider: "openai" },
   { id: "gpt-5.3-codex", label: "GPT Codex", version: "5.3", tagline: "ChatGPT's agentic coding model", blurb: "Coding-focused reasoning & tools", ctx: "400K ctx", suffix: "400K context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.3-codex"], icon: Code2, provider: "openai" },
-  ...(fableAvailable() ? [{ id: "claude-fable-5" as ModelSel, label: "Fable", version: "5", tagline: "Anthropic's most capable model — limited run", blurb: "Most capable — limited run", ctx: "1M ctx", suffix: "1M context", legacy: false, limited: true, effort: true, maxEffort: MODEL_MAX_EFFORT["claude-fable-5"], icon: Sparkles, provider: "claude" as const }] : []),
+  ...(fableAvailable() ? [{ id: "claude-fable-5-1" as ModelSel, label: "Fable", version: "5.1", tagline: "Anthropic's most capable model — limited run", blurb: "Most capable — limited run", ctx: "1M ctx", suffix: "1M context", legacy: false, limited: true, effort: true, maxEffort: MODEL_MAX_EFFORT["claude-fable-5-1"], icon: Sparkles, provider: "claude" as const }] : []),
   { id: "opus",            label: "Opus",   version: "5",   tagline: "Newest + most capable — complex reasoning & agentic coding", blurb: "Deep reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.opus, icon: Gem, provider: "claude" },
   { id: "sonnet",          label: "Sonnet", version: "5",   tagline: "Best speed + intelligence balance — the default",            blurb: "Everyday default — speed + smarts", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.sonnet, icon: Feather, provider: "claude" },
   ...(haikuAvailable() ? [{ id: "haiku" as ModelSel, label: "Haiku", version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups", blurb: "Fastest — quick edits & lookups", ctx: "200K ctx", suffix: "200K context", legacy: false, effort: false, maxEffort: MODEL_MAX_EFFORT.haiku, icon: Rabbit, provider: "claude" as const }] : []),
-  { id: "claude-opus-4-8", label: "Opus",   version: "4.8", tagline: "Previous-generation Opus — proven for complex reasoning",    blurb: "Previous-generation Opus", ctx: "1M ctx",   suffix: "1M context",   legacy: true,  effort: true,  maxEffort: MODEL_MAX_EFFORT["claude-opus-4-8"], icon: Gem, provider: "claude" },
-  { id: "claude-opus-4-7", label: "Opus",   version: "4.7", tagline: "Earlier Opus generation — proven for complex reasoning",     blurb: "Earlier Opus generation", ctx: "1M ctx",   suffix: "1M context",   legacy: true,  effort: true,  maxEffort: MODEL_MAX_EFFORT["claude-opus-4-7"], icon: Gem, provider: "claude" },
-  { id: "claude-opus-4-6", label: "Opus",   version: "4.6", tagline: "Earlier Opus generation — deep reasoning workhorse",         blurb: "Earlier Opus generation", ctx: "1M ctx",   suffix: "1M context",   legacy: true,  effort: true,  maxEffort: MODEL_MAX_EFFORT["claude-opus-4-6"], icon: Gem, provider: "claude" },
-  { id: "claude-opus-4-5", label: "Opus",   version: "4.5", tagline: "Classic Opus — proven reasoning, 200K context",              blurb: "Classic Opus generation", ctx: "200K ctx", suffix: "200K context", legacy: true,  effort: true,  maxEffort: MODEL_MAX_EFFORT["claude-opus-4-5"], icon: Gem, provider: "claude" },
-  { id: "claude-sonnet-4-6", label: "Sonnet", version: "4.6", tagline: "Previous-generation Sonnet — balanced speed + smarts",     blurb: "Previous-generation Sonnet", ctx: "1M ctx", suffix: "1M context",   legacy: true,  effort: true,  maxEffort: MODEL_MAX_EFFORT["claude-sonnet-4-6"], icon: Feather, provider: "claude" },
-  { id: "claude-sonnet-4-5", label: "Sonnet", version: "4.5", tagline: "Classic Sonnet — everyday workhorse, 200K context",        blurb: "Classic Sonnet generation", ctx: "200K ctx", suffix: "200K context", legacy: true, effort: true,  maxEffort: MODEL_MAX_EFFORT["claude-sonnet-4-5"], icon: Feather, provider: "claude" },
 ];
 
 const CODEX_TO_RIFT_EFFORT: Readonly<Record<string, ThinkingEffort>> = {

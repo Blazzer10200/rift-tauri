@@ -111,16 +111,7 @@ export function addPersonalWord(word: string) {
   savePersonal();
 }
 
-export function removePersonalWord(word: string) {
-  personal().delete(word.toLowerCase());
-  savePersonal();
-}
-
 let WS_VOCAB = new Set<string>();
-/** Tokens harvested from the open workspace (file names, manifest names/deps). */
-export function setWorkspaceVocab(words: string[]) {
-  WS_VOCAB = new Set(words.map((w) => w.toLowerCase()));
-}
 
 /** Harvest vocabulary from workspace file paths: camel/kebab/snake segments of
  *  every path component. A project full of `fivem-loader/` files teaches the

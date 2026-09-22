@@ -871,6 +871,8 @@ class AssistantStore {
    *  detection surfaces track the REAL trigger, not %-of-window. */
   autoCompactCfg = $state<AutoCompactCfg | null>(null);
   maxBudgetUsd = $state<number | null>(null);
+  /** Claude Code output style (`--settings {"outputStyle"}`); null = CLI default. */
+  outputStyle = $state<string | null>(null);
   // Trust level gating the local git tools (mcp__rift__git_*). Loaded from the
   // backend; defaults to "readonly" when unset. Settings seg treats full ⊇ standard.
   trustLevel = $state<TrustLevel>("readonly");
@@ -1314,6 +1316,7 @@ class AssistantStore {
     this.setPlan("free");
     await this.setTrustLevel("readonly");
     await this.setUseFullConfig(true);
+    await this.setOutputStyle(null);
   }
 
   /** Context-window ceiling the user's current plan grants. Derived so the gauge
@@ -1432,6 +1435,11 @@ class AssistantStore {
       this.maxBudgetUsd = await invoke<number | null>("assistant_get_max_budget_usd");
     } catch (e) {
       console.warn("assistant_get_max_budget_usd failed", e);
+    }
+    try {
+      this.outputStyle = await invoke<string | null>("assistant_get_output_style");
+    } catch (e) {
+      console.warn("assistant_get_output_style failed", e);
     }
     try {
       this.trustLevel = await invoke<TrustLevel>("assistant_get_trust_level");
@@ -2235,6 +2243,19 @@ class AssistantStore {
       this.maxBudgetUsd = v;
     } catch (e) {
       notify.danger("Couldn't set budget cap", { detail: humanizeError(e) });
+      throw e;
+    }
+  }
+
+  /** Persist the Claude Code output style. Blank / "default" clears it. */
+  async setOutputStyle(value: string | null) {
+    const v = value?.trim() || null;
+    const send = v && v.toLowerCase() !== "default" ? v : null;
+    try {
+      await invoke("assistant_set_output_style", { value: send });
+      this.outputStyle = send;
+    } catch (e) {
+      notify.danger("Couldn't set output style", { detail: humanizeError(e) });
       throw e;
     }
   }

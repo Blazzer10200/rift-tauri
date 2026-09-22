@@ -8,7 +8,8 @@
 # helpers.ts) so users can't pick a model that hard-errors.
 #
 # This script spawns the `claude` CLI with the SAME flag Rift's turn path uses
-# for the model (turn.rs ~955: --model claude-fable-5) and classifies the result:
+# for the model (turn.rs, the `--model` arg built from config.rs FABLE_MODEL —
+# currently claude-fable-5-1) and classifies the result:
 #   AVAILABLE  -> the API answered a real turn (is_error:false). RE-ENABLE Fable:
 #                 flip FABLE_DISABLED back to false in BOTH files (lockstep), run
 #                 `npm run check` + `cargo test`, then ship.
@@ -32,7 +33,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$modelId = 'claude-fable-5'
+$modelId = 'claude-fable-5-1'
 
 if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
   Write-Error "claude CLI not found on PATH -- install @anthropic-ai/claude-code (DEVELOPING.md section 3)."

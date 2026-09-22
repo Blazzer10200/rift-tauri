@@ -16,6 +16,7 @@
   import type { StreamTool } from "./streamModel";
   import { assistant, type TabState } from "$lib/state/assistant.svelte";
   import type { PlanAction } from "$lib/state/assistant/helpers";
+  import { prefersReducedMotion } from "$lib/state/accessibility.svelte";
 
   let { tool, tab = null, isLast = false, workspaceRoot = null }:
     { tool: StreamTool; tab?: TabState | null; isLast?: boolean; workspaceRoot?: string | null } = $props();
@@ -31,7 +32,7 @@
   // History cards (settled on load) skip straight to the full text.
   const REVEAL_STEP = 20, REVEAL_TICK_MS = 30;
   let reveal = $state(
-    untrack(() => tool.status) === "pending" && !window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : -1,
+    untrack(() => tool.status) === "pending" && !prefersReducedMotion() ? 0 : -1,
   );
   const revealing = $derived(reveal >= 0 && reveal < plan.length);
   $effect(() => {

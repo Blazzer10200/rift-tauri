@@ -256,13 +256,13 @@ export async function send(
     });
   }
   // turn.rs swaps Fable to Opus silently once the limited run ends — warn ahead.
-  if (!fableSunsetNoticed && effModel === "claude-fable-5"
+  if (!fableSunsetNoticed && effModel === "claude-fable-5-1"
       && Date.now() >= FABLE_SUNSET_MS - 7 * 86_400_000) {
     fableSunsetNoticed = true;
     notify.warn(
       Date.now() >= FABLE_SUNSET_MS
         ? "Fable's limited run has ended — this turn falls back to Opus 5."
-        : "Heads up: Fable retires June 22 — chats fall back to Opus 5 after that.",
+        : "Heads up: Fable's limited run ends within a week — chats fall back to Opus 5 after that.",
     );
   }
   // Telemetry: build the turn record + attach to tab. TabState fills it as
@@ -703,7 +703,7 @@ function runSlash(
       // maps to its full id. A disabled model reads as unknown — honest copy.
       const id: ModelSel | null =
         v === "sonnet" || v === "opus" ? v
-        : v === "fable" && fableAvailable() ? "claude-fable-5"
+        : v === "fable" && fableAvailable() ? "claude-fable-5-1"
         : v === "haiku" && haikuAvailable() ? "haiku"
         : v === "gpt" || v === "gpt-5.6" ? "gpt-5.6"
         : v === "sol" || v === "gpt-5.6-sol" ? "gpt-5.6-sol"

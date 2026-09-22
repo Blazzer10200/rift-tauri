@@ -3,6 +3,7 @@
   import RiftLogo from "$lib/components/shell/RiftLogo.svelte";
   import { assistant } from "$lib/state/assistant.svelte";
   import { intro } from "$lib/state/intro.svelte";
+  import { prefersReducedMotion } from "$lib/state/accessibility.svelte";
 
   type Props = {
     onComplete: () => void;
@@ -27,9 +28,7 @@
   let destroyed = false;
   onDestroy(() => { destroyed = true; });
 
-  const prefersReducedMotion =
-    typeof window !== "undefined" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reducedMotion = prefersReducedMotion();
 
   const loaded = $derived(assistant.configLoaded && assistant.workspaceReady);
   const ready = $derived(loaded || capped);
@@ -48,7 +47,7 @@
   $effect(() => {
     if (!showBoot) return;
     const target = stage.p;
-    if (prefersReducedMotion) { shownP = target; return; }
+    if (reducedMotion) { shownP = target; return; }
     let raf = 0;
     let prev = performance.now();
     const step = (t: number) => {
@@ -77,7 +76,7 @@
       // Hand the entrance to the shell just as the seam starts to part —
       // the islands assemble in the opening gap, one continuous move.
       setTimeout(() => intro.handoff(), 80);
-      const exitMs = prefersReducedMotion ? 120 : 680;
+      const exitMs = reducedMotion ? 120 : 680;
       setTimeout(() => { if (!destroyed) onComplete(); }, exitMs);
     }
   });

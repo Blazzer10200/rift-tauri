@@ -1,0 +1,14 @@
+/* Shared severity → --tone CSS custom-property map, imported by ToastHost.svelte
+   and shell/NotificationCenter.svelte so a toast and its archived notification
+   row always agree on ok/warn/danger/info color. "muted" is intentionally
+   NOT here — ToastHost tints it --border-strong (a border-adjacent hue) while
+   NotificationCenter tints it --fg-faint (a dimmer row-dot hue); that one rule
+   stays local to each component. */
+.toast[data-severity="ok"],
+.row[data-severity="ok"]       { --tone: var(--ok); }
+.toast[data-severity="warn"],
+.row[data-severity="warn"]     { --tone: var(--warn); }
+.toast[data-severity="danger"],
+.row[data-severity="danger"]   { --tone: var(--danger); }
+.toast[data-severity="info"],
+.row[data-severity="info"]     { --tone: var(--info); }

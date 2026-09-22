@@ -7,6 +7,7 @@
   import { X, Gauge, RefreshCw, FoldVertical } from "@lucide/svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import { usage, limitZone, type LimitWindow, type ScopedLimit } from "../../../state/usage.svelte";
+  import LimitBar from "../../shared/LimitBar.svelte";
   import { assistant, type TabState } from "../../../state/assistant.svelte";
   import { fmtTokens, isOpenAIModel } from "../../../state/assistant/helpers";
   import { MODEL_OPTIONS } from "./modelMatrix";
@@ -238,9 +239,7 @@
             <span class="up-k">{r.label}{#if r.active}<span class="up-live">in use</span>{/if}</span>
             <span class="up-pct mono" data-zone={limitZone(r.utilization, r.severity)}>{r.utilization.toFixed(0)}<span class="up-pct-u">%</span></span>
           </div>
-          <div class="up-track">
-            <span class="up-fill" data-zone={limitZone(r.utilization, r.severity)} style="width:{Math.min(100, Math.max(2, r.utilization))}%"></span>
-          </div>
+          <LimitBar pct={Math.min(100, Math.max(2, r.utilization))} zone={limitZone(r.utilization, r.severity)} variant="panel" live={r.active} />
           <div class="up-reset">{fmtReset(r.resetsAt)}</div>
         </div>
       {/each}
@@ -312,7 +311,6 @@
   @keyframes up-grow { from { width: 0; } }
   .up-fill[data-zone="hot"] { animation: up-grow 480ms var(--ease-page) backwards, up-pulse 2.2s ease-in-out 600ms infinite; }
   @keyframes up-pulse { 50% { filter: brightness(1.3); } }
-  .up-row.live .up-fill { box-shadow: 0 0 10px color-mix(in oklab, var(--accent) 45%, transparent); }
   .up-fill[data-zone="warn"] { background: linear-gradient(90deg, color-mix(in oklab, var(--warn) 80%, black), var(--warn)); }
   .up-fill[data-zone="hot"] { background: linear-gradient(90deg, color-mix(in oklab, var(--danger) 80%, black), var(--danger)); }
   .up-reset { font-size: 10px; color: var(--fg-faint); font-family: var(--font-mono); letter-spacing: 0.02em; }

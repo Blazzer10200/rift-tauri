@@ -24,10 +24,10 @@
   import { fmtDur, shellLabel, trimCmd } from "./streamModel";
   import { assistant, type Block, type TabState } from "$lib/state/assistant.svelte";
   import type { ShellRow } from "$lib/state/assistant/listeners";
+  import { prefersReducedMotion } from "$lib/state/accessibility.svelte";
 
   // Svelte transitions don't respect prefers-reduced-motion on their own.
-  const reduceMotion =
-    typeof matchMedia !== "undefined" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduceMotion = prefersReducedMotion();
 
   let { tab = null, tabId = null, streaming = false }:
     { tab?: TabState | null; tabId?: string | null; streaming?: boolean } = $props();

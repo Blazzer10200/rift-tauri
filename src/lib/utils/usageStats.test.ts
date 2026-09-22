@@ -3,7 +3,7 @@ import {
   type ConvoStat,
   filterRange, summarize, streaks, peakHour, perModel, topModel,
   intensity, funFact, fmtCompact, fmtCost, fmtInt, hourLabel, modelLabel, localDayIndex,
-} from "./statsHelpers";
+} from "./usageStats";
 
 const DAY = 86_400_000;
 // A fixed "now" at a known local wall-clock (mid-afternoon) so day/hour math is
@@ -131,6 +131,8 @@ describe("funFact", () => {
 
 describe("formatters", () => {
   it("fmtCompact scales magnitudes", () => {
+    expect(fmtCompact(3_958_002_200)).toBe("3.96B");
+    expect(fmtCompact(12_400_000_000)).toBe("12.4B");
     expect(fmtCompact(9_600_000)).toBe("9.6M");
     expect(fmtCompact(12_271)).toBe("12k");
     expect(fmtCompact(980)).toBe("980");

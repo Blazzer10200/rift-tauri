@@ -73,6 +73,7 @@ class ProjectRegistry {
     root: string;
     include: string[];
     exclude: string[];
+    extraDirs?: string[];
     createdAt?: number;
   }): Promise<string | null> {
     const id = p.id ?? crypto.randomUUID();
@@ -84,6 +85,7 @@ class ProjectRegistry {
         root: p.root,
         include: p.include,
         exclude: p.exclude,
+        extraDirs: p.extraDirs ?? [],
         createdAt,
       });
       this.lastError = null;

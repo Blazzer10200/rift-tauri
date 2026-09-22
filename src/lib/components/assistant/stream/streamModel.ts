@@ -11,6 +11,7 @@
 
 import type { Block, ChatMessage, ToolBlock } from "$lib/state/assistant.svelte";
 import { leafName as basename } from "$lib/utils/path";
+import { shortName } from "../toolCaption";
 import { unifiedPatchCounts } from "../diffEmphasis";
 import { diffArrays } from "diff";
 
@@ -189,7 +190,7 @@ export type Group =
 
 // ── helpers (mirror ToolChip.svelte) ────────────────────────────────────────
 // `basename` = canonical `leafName` (imported above) — was a local inline copy.
-const shortName = (n: string) => n.replace(/^mcp__rift__/, "");
+// `shortName` = canonical copy in toolCaption.ts — was a local inline copy.
 const trim = (s: string, n = 60) => (s.length > n ? s.slice(0, n - 1) + "…" : s);
 const hostOf = (u: string) => { try { return new URL(u).host; } catch { return u; } };
 // Shell-command caption: the interesting part of a compound command is rarely

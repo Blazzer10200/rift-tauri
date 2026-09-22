@@ -22,7 +22,8 @@ use super::auth_update::assistant_auth_probe;
 use super::cli_install::{claude_command, resolve_claude_exe};
 use super::config::{
     canonical_model_alias, clamp_effort, cli_model_arg, current_api_key, current_api_key_with,
-    effective_trust_level, effort_tier_to_flag, fable_unavailable, haiku_unavailable,
+    effective_output_style, effective_trust_level, effort_tier_to_flag, fable_unavailable,
+    haiku_unavailable,
     is_valid_effort_tier, is_valid_model_name, is_valid_permission_mode, load_config,
     model_fast_eligible, normalize_effort_tier, send_effort_flag, DEFAULT_MODEL,
     FABLE_FALLBACK_MODEL, FABLE_MODEL, HAIKU_FALLBACK_MODEL, HAIKU_MODEL,
@@ -1184,7 +1185,8 @@ async fn resolve_spawn(
         }
         // Fable guard — after pin resolution so a pinned Fable session also falls
         // back when Fable is unavailable (manual kill-switch or past its sunset).
-        if model == FABLE_MODEL && fable_unavailable() {
+        // Prefix match so the retired `claude-fable-5` resume pin is covered too.
+        if model.starts_with("claude-fable") && fable_unavailable() {
             log::info!("assistant_send: {FABLE_MODEL} unavailable — falling back to {FABLE_FALLBACK_MODEL}");
             model = FABLE_FALLBACK_MODEL.to_string();
         }
@@ -1255,7 +1257,14 @@ async fn resolve_spawn(
     // computation below; recomputed here because that binding is resolved later).
     let scratch_eligible = cfg.use_full_config.unwrap_or(true) && !use_api_key;
     let roots: Vec<PathBuf> = if let Some(r) = session_root {
-        vec![r]
+        // roots[0] is the cwd; any project extra folders follow and ride both
+        // `--add-dir` (CLI write surface) and RIFT_MCP_ROOTS (MCP boundary).
+        // A folder deleted since save is skipped so the spawn can't fail on it.
+        let extra = super::projects::extra_dirs_for_root(&cfg, &r);
+        let mut rs = Vec::with_capacity(1 + extra.len());
+        rs.push(r);
+        rs.extend(extra.into_iter().filter(|d| d.is_dir()));
+        rs
     } else if scratch_eligible {
         match super::workspace::local_scratch_dir() {
             Ok(scratch) => vec![establish_session_workspace(session_id, &scratch)?],
@@ -1482,6 +1491,12 @@ async fn resolve_spawn(
         }
     }
 
+    // Project extra folders (roots[1..]) — `--add-dir` lets the CLI read/write
+    // them alongside the cwd. Ungated: the flag predates Rift's CLI floor.
+    for extra in roots.iter().skip(1) {
+        cmd.arg("--add-dir").arg(extra);
+    }
+
     if !use_full_config {
         // Both gated independently (different floors). Absent `--strict-mcp-config`
         // → the CLI may merge the user's `~/.claude.json` MCP servers (slightly
@@ -1535,12 +1550,17 @@ async fn resolve_spawn(
         // EnterWorktree/ExitWorktree, and the MCP-resource readers. All listed so
         // a current CLI's tools aren't denial-popped; unknown names are harmless
         // on older CLIs (allowlist entries that never match). SlashCommand/
-        // MultiEdit/KillBash/KillShell/BashOutput are GONE from 2.1.201 but stay
-        // listed for older installs. AskUserQuestion stays excluded (see above).
-        // S128 (2026-07-08): + PowerShell (the CLI's dedicated Windows shell
-        // tool — omitting it denial-gated every PowerShell call on Windows) and
-        // LSP (deferred symbol-query tool, loaded via ToolSearch).
-        const BUILTINS: &str = "Agent,Artifact,Bash,BashOutput,CronCreate,CronDelete,CronList,DesignSync,Edit,EnterPlanMode,EnterWorktree,ExitPlanMode,ExitWorktree,Glob,Grep,KillBash,KillShell,ListMcpResources,LSP,Monitor,MultiEdit,NotebookEdit,PowerShell,PushNotification,Read,ReadMcpResource,ReadMcpResourceDir,REPL,RemoteTrigger,ReportFindings,ScheduleWakeup,SendMessage,Skill,SlashCommand,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,TodoWrite,ToolSearch,WebFetch,WebSearch,Workflow,Write";
+        // Refreshed 2026-09-18 against CLI 2.1.277 (Rift's hard floor is 2.1.161,
+        // past the 2.1.201 removal of MultiEdit/KillBash/KillShell/BashOutput/
+        // SlashCommand, so those are dropped). AskUserQuestion stays excluded
+        // (see above). S128 (2026-07-08): + PowerShell (the CLI's dedicated
+        // Windows shell tool — omitting it denial-gated every PowerShell call on
+        // Windows) and LSP (deferred symbol-query tool, loaded via ToolSearch).
+        // Skill/plugin discovery (ListSkills/SearchSkills/SuggestSkills/
+        // ListPlugins/SearchPlugins/SuggestPluginInstall), ListAgents and the
+        // Artifact side tools (ArtifactComments/ArtifactData) are the 2.1.2xx
+        // additions.
+        const BUILTINS: &str = "Agent,Artifact,ArtifactComments,ArtifactData,Bash,CronCreate,CronDelete,CronList,DesignSync,Edit,EnterPlanMode,EnterWorktree,ExitPlanMode,ExitWorktree,Glob,Grep,ListAgents,ListMcpResources,ListPlugins,ListSkills,LSP,Monitor,NotebookEdit,PowerShell,PushNotification,Read,ReadMcpResource,ReadMcpResourceDir,REPL,RemoteTrigger,ReportFindings,ScheduleWakeup,SearchPlugins,SearchSkills,SendMessage,Skill,SuggestPluginInstall,SuggestSkills,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,TodoWrite,ToolSearch,WebFetch,WebSearch,Workflow,Write";
         // Read-only / non-mutating subset always auto-approved even in a
         // prompting mode — these shouldn't interrupt the user. Everything
         // omitted (Bash, Edit, Write, Agent, Skill, Workflow, Monitor/REPL
@@ -1551,7 +1571,10 @@ async fn resolve_spawn(
         // (display-only), CronList (read), PushNotification (user-directed toast,
         // parallel to mcp__rift__notify below), LSP (read-only symbol queries).
         // PowerShell executes commands → BUILTINS only, prompts like Bash here.
-        const SAFE_BUILTINS: &str = "BashOutput,CronList,EnterPlanMode,Glob,Grep,KillBash,KillShell,LSP,PushNotification,Read,ReportFindings,ScheduleWakeup,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,TodoWrite,ToolSearch,WebFetch,WebSearch";
+        // ListAgents + the skill/plugin List/Search/Suggest tools are catalog
+        // reads (SuggestPluginInstall only renders a card — the install itself
+        // is a separate user click), so they sit here too.
+        const SAFE_BUILTINS: &str = "CronList,EnterPlanMode,Glob,Grep,ListAgents,ListPlugins,ListSkills,LSP,PushNotification,Read,ReportFindings,ScheduleWakeup,SearchPlugins,SearchSkills,SuggestPluginInstall,SuggestSkills,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,TodoWrite,ToolSearch,WebFetch,WebSearch";
         // UI-presentation tools (ask_user / open_browser / notify) are safe to
         // auto-approve: scheme-allowlisted, length-capped, no workspace writes.
         // The browser-dock readers (page text / console) are read-only eyes on
@@ -1609,7 +1632,7 @@ async fn resolve_spawn(
         // omitted too (no Rift MCP server is spawned without a root). This makes
         // a no-folder chat behave like `claude` in an empty dir rather than a
         // tools-disabled sandbox.
-        const NO_WS_TOOLS: &str = "Agent,EnterPlanMode,ExitPlanMode,PushNotification,ScheduleWakeup,SendMessage,Skill,SlashCommand,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,TodoWrite,ToolSearch,WebFetch,WebSearch,Workflow";
+        const NO_WS_TOOLS: &str = "Agent,EnterPlanMode,ExitPlanMode,ListAgents,ListPlugins,ListSkills,PushNotification,ScheduleWakeup,SearchPlugins,SearchSkills,SendMessage,Skill,SuggestSkills,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,TodoWrite,ToolSearch,WebFetch,WebSearch,Workflow";
         stash_session_allowlist(session_id, NO_WS_TOOLS);
         cmd.arg("--allowed-tools").arg(NO_WS_TOOLS);
     } else {
@@ -1729,14 +1752,21 @@ async fn resolve_spawn(
     // Built as ONE JSON object: the CLI takes the last `--settings` arg, so two
     // separate args would silently drop a key. Compact single-line JSON
     // (.cmd-shim batch-arg validator, Rust 1.77+ CVE-2024-24576). Haiku is
-    // excluded wholesale (no extended thinking / workflow / fast).
-    if model != "haiku" && caps.settings_flag {
+    // excluded from the thinking/fast keys (no extended thinking / workflow /
+    // fast) but still takes `outputStyle`, which is model-agnostic.
+    let output_style = effective_output_style(&cfg.output_style);
+    if caps.settings_flag {
         let mut settings = serde_json::Map::new();
-        if caps.effort && thinking_on && effort_tier == "ultra" {
-            settings.insert("ultracode".into(), serde_json::Value::Bool(true));
+        if model != "haiku" {
+            if caps.effort && thinking_on && effort_tier == "ultra" {
+                settings.insert("ultracode".into(), serde_json::Value::Bool(true));
+            }
+            if fast_on {
+                settings.insert("fastMode".into(), serde_json::Value::Bool(true));
+            }
         }
-        if fast_on {
-            settings.insert("fastMode".into(), serde_json::Value::Bool(true));
+        if let Some(style) = output_style.as_deref() {
+            settings.insert("outputStyle".into(), serde_json::Value::String(style.to_string()));
         }
         if !settings.is_empty() {
             cmd.arg("--settings")
@@ -1908,6 +1938,12 @@ async fn resolve_spawn(
             .filter(|v| v.is_finite() && *v > 0.0)
             .map(f64::to_bits),
         fast_mode: fast_on,
+        extra_dirs: roots
+            .iter()
+            .skip(1)
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect(),
+        output_style,
     };
 
     Ok(ResolvedSpawn {
@@ -3091,7 +3127,7 @@ const STREAM_TOOL_CEILING_SECS: u64 = 900;
 /// A thinking-ON turn never uses the shim (there's nothing to turn off).
 /// (Local-LLM mode has its own always-on shim branch and is handled separately.)
 fn routes_through_nothink_shim(thinking_on: bool, model: &str) -> bool {
-    !thinking_on && model != HAIKU_MODEL && model != FABLE_MODEL
+    !thinking_on && model != HAIKU_MODEL && !model.starts_with("claude-fable")
 }
 
 /// Pure watchdog decision: on a no-progress fire, do we re-arm or force-stall?

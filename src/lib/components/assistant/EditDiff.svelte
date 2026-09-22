@@ -13,6 +13,7 @@
   import { FileText, ChevronRight, CornerDownLeft, Copy, Check } from "@lucide/svelte";
   import { notify } from "../../state/toast.svelte";
   import { highlightSync, whenReady } from "../../state/highlighter.svelte";
+  import { prefersReducedMotion } from "../../state/accessibility.svelte";
   import FilePathMenu from "./FilePathMenu.svelte";
   import {
     emphasisIntervals,
@@ -23,9 +24,7 @@
     type UnifiedPatchPair,
   } from "./diffEmphasis";
 
-  const reducedMotion =
-    typeof window !== "undefined" &&
-    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+  const reducedMotion = prefersReducedMotion();
 
   import { tooltip } from "$lib/actions/tooltip";
   let {

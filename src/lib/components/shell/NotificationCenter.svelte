@@ -9,13 +9,14 @@
   import { toast, type NotifyRecord } from "$lib/state/toast.svelte";
   import { tooltip } from "$lib/actions/tooltip";
   import { portal } from "$lib/actions/portal";
+  import { relTime as sharedRelTime } from "$lib/utils/relTime";
+  import { prefersReducedMotion } from "$lib/state/accessibility.svelte";
+  import "$lib/styles/severityTone.css";
 
   let { label = "Notifications", footer = false }:
     { label?: string; footer?: boolean } = $props();
 
-  const reducedMotion =
-    typeof window !== "undefined" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reducedMotion = prefersReducedMotion();
 
   let rootEl = $state<HTMLDivElement | null>(null);
   let panelEl = $state<HTMLDivElement | null>(null);
@@ -67,14 +68,7 @@
   });
 
   function relTime(ts: number): string {
-    const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
-    if (s < 45) return "just now";
-    const m = Math.round(s / 60);
-    if (m < 60) return `${m}m ago`;
-    const h = Math.round(m / 60);
-    if (h < 24) return `${h}h ago`;
-    const d = Math.round(h / 24);
-    return `${d}d ago`;
+    return sharedRelTime(ts, Date.now(), "notif");
   }
 
   function fireAction(r: NotifyRecord) {
@@ -323,10 +317,6 @@
     transition: background var(--dur-fast);
   }
   .row:hover { background: var(--surface-hover); }
-  .row[data-severity="ok"]     { --tone: var(--ok); }
-  .row[data-severity="warn"]   { --tone: var(--warn); }
-  .row[data-severity="danger"] { --tone: var(--danger); }
-  .row[data-severity="info"]   { --tone: var(--info); }
   .row[data-severity="muted"]  { --tone: var(--fg-faint); }
 
   .row-dot {

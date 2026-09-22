@@ -9,6 +9,7 @@
   import { browserDock } from "../../state/browserDock.svelte";
   import { notify } from "../../state/toast.svelte";
   import { highlightSync, normalizeLang, whenReady } from "../../state/highlighter.svelte";
+  import { prefersReducedMotion } from "../../state/accessibility.svelte";
   import FilePathMenu from "./FilePathMenu.svelte";
 
   marked.setOptions({ gfm: true, breaks: true });
@@ -154,9 +155,7 @@
   // ever trips on pathological/echoed-file content, never normal chat.
   const MARKDOWN_PARSE_CAP = 500_000;
 
-  const prefersReducedMotion =
-    typeof window !== "undefined" &&
-    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+  const reduceMotion = prefersReducedMotion();
 
   // Paced word reveal — decoupled from token arrival so prose flows in a
   // steady cascade (mockup `splitReveal`: word i reveals at i·42ms) instead of
@@ -196,7 +195,7 @@
   let destroyed = false;
   $effect(() => {
     const t = text;
-    if (!streaming || prefersReducedMotion) { renderText = t; return; }
+    if (!streaming || reduceMotion) { renderText = t; return; }
     if (parseQueued) return;
     parseQueued = true;
     requestAnimationFrame(() => { parseQueued = false; if (!destroyed) renderText = text; });
@@ -213,9 +212,9 @@
   // Single lifetime-persistent rAF loop: drips `shownCount` toward `totalWords`
   // at WORD_MS cadence, time-based so a frame drop or fast burst still paces
   // smoothly. Reads happen in the async callback (untracked) → the effect's
-  // only dep is prefersReducedMotion, so it sets up once and never re-subscribes.
+  // only dep is reduceMotion, so it sets up once and never re-subscribes.
   $effect(() => {
-    if (prefersReducedMotion) return;
+    if (reduceMotion) return;
     let raf = 0;
     let last = 0;
     let parked = false;
@@ -620,7 +619,7 @@
   $effect(() => {
     const baseHtml = parsed.html;
     if (!container) return;
-    const revealActive = (everStreamed || streaming) && !prefersReducedMotion;
+    const revealActive = (everStreamed || streaming) && !reduceMotion;
     container.innerHTML = baseHtml;
     // Re-apply user-expanded collapsible blocks — innerHTML wiped the imperative
     // data-expanded attribute (shikiReady flip / new delta re-runs this effect).

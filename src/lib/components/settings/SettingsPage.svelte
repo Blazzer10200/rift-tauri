@@ -16,7 +16,8 @@
   import { cliUpdate, cmpSemver, CLI_RECOMMENDED_VERSION } from "../../state/cliUpdate.svelte";
   import { assistant as assistantStore } from "../../state/assistant.svelte";
   import { stt, isLocalEngine, type ModelInfo } from "../../state/stt.svelte";
-  import { accessibility } from "../../state/accessibility.svelte";
+  import { accessibility, prefersReducedMotion } from "../../state/accessibility.svelte";
+  import { relTime as sharedRelTime } from "$lib/utils/relTime";
   import { commandPalette } from "../../state/command-palette.svelte";
   import { uiPrefs, ACCENTS, TOOL_DETAILS, DENSITY_PRESETS, VIVIDNESS_MIN, VIVIDNESS_MAX, UI_SCALE_MIN, UI_SCALE_MAX } from "../../state/ui-prefs.svelte";
   import { onboarding } from "../../state/onboarding.svelte";
@@ -48,6 +49,13 @@
   ] as const;
 
   type Section = "appearance" | "chat" | "claude" | "speech" | "about";
+  // DOM ids stay provider-neutral even though the internal section value is
+  // still "claude" (its long-standing meaning: the combined Claude + ChatGPT
+  // provider settings tab) — a CDP/test selector targeting the tab shouldn't
+  // read as Claude-only.
+  function secDomId(id: Section): string {
+    return id === "claude" ? "providers" : id;
+  }
   const ST_SECTIONS: { id: Section; label: string; icon: typeof Info; sub: string; dot?: "ok" | "warn" }[] = [
     { id: "appearance", label: "Appearance", icon: Palette,       sub: "Accent color, density, and code rendering — every change applies instantly." },
     { id: "chat",       label: "Chat",       icon: MessageSquare, sub: "How conversations read — stream layout, detail level, and reading comfort." },
@@ -61,6 +69,35 @@
   let scrollEl = $state<HTMLDivElement>();
   let tabEls = $state<Partial<Record<Section, HTMLButtonElement>>>({});
 
+  // Sliding ink under the active tab — one bar that travels, instead of each
+  // button's border blinking on/off. Measured from the button's offset box so
+  // the responsive margin/padding breakpoints below stay correct.
+  let tabnavEl = $state<HTMLDivElement>();
+  let inkX = $state(0);
+  let inkW = $state(0);
+  function measureInk() {
+    const el = tabEls[activeSec];
+    if (!el) return;
+    inkX = el.offsetLeft;
+    inkW = el.offsetWidth;
+  }
+  $effect(() => {
+    void activeSec;
+    void tabEls;
+    measureInk();
+  });
+  $effect(() => {
+    const host = tabnavEl;
+    if (!host) return;
+    const ro = new ResizeObserver(() => measureInk());
+    ro.observe(host);
+    return () => ro.disconnect();
+  });
+
+  // Status pills: the dot pulses once when a probe lands (and once on mount),
+  // then sits still — a heartbeat for live data, not a permanent blinker.
+  const authPulseKey = $derived(assistantStore.authLastProbed ?? 0);
+
   // ── Settings search — every control indexed, jump-and-flash on pick ──
   // `anchor` is the card's DOM id inside the scroll surface; control-level
   // entries point at their parent card. Engine-dependent Speech cards anchor
@@ -71,7 +108,7 @@
     { tab: "appearance", anchor: "card-accent",    card: "Accent color",      title: "Vividness",           kw: "saturation intensity accent" },
     { tab: "appearance", anchor: "card-interface", card: "Interface & code",  title: "UI scale",            kw: "zoom size bigger smaller resolution scaling percent" },
     { tab: "appearance", anchor: "card-interface", card: "Interface & code",  title: "Interface density",   kw: "spacing compact comfy regular rows" },
-    { tab: "appearance", anchor: "card-interface", card: "Interface & code",  title: "Code font size",      kw: "monospace px code blocks" },
+    { tab: "appearance", anchor: "card-interface", card: "Interface & code",  title: "Font size",           kw: "monospace px code blocks" },
     { tab: "appearance", anchor: "card-interface", card: "Interface & code",  title: "Tab width",           kw: "indentation spaces code" },
     { tab: "appearance", anchor: "card-interface", card: "Interface & code",  title: "Font ligatures",      kw: "glyphs jetbrains mono arrows" },
     { tab: "chat",       anchor: "card-rendering", card: "Chat rendering",    title: "Stream view",         kw: "boxless activity layout working header" },
@@ -85,12 +122,13 @@
     { tab: "chat",       anchor: "card-comfort",   card: "Reading comfort",   title: "Line and letter spacing", kw: "line height readability" },
     { tab: "claude",     anchor: "card-session",   card: "Claude session",    title: "Use my full Claude Code config", kw: "claude.md hooks mcp skills settings piggyback sandbox" },
     { tab: "claude",     anchor: "card-session",   card: "Claude session",    title: "Git tools",           kw: "read-only standard commit push trust" },
+    { tab: "claude",     anchor: "card-session",   card: "Claude session",    title: "Output style",        kw: "outputStyle explanatory learning tone verbosity style" },
     { tab: "claude",     anchor: "card-session",   card: "Claude session",    title: "Plan",                kw: "free pro max context window 200k 1m gauge subscription" },
     { tab: "about",      anchor: "card-admin",     card: "Administrator access", title: "Relaunch as administrator", kw: "admin elevated elevation uac privileges run as administrator sudo" },
     { tab: "about",      anchor: "card-admin",     card: "Administrator access", title: "Always run as administrator", kw: "admin elevated elevation uac no prompt scheduled task startup" },
-    { tab: "claude",     anchor: "card-api",       card: "API key & spending", title: "API-key fallback",   kw: "anthropic console token sk-ant billing keychain" },
-    { tab: "claude",     anchor: "card-api",       card: "API key & spending", title: "Per-turn cost cap",  kw: "budget dollar limit spend guard" },
-    { tab: "claude",     anchor: "card-codex",     card: "ChatGPT", title: "ChatGPT subscription", kw: "chatgpt codex account cli app server subscription login plan limits usage" },
+    { tab: "claude",     anchor: "card-api",       card: "Optional Claude API access", title: "API-key fallback",   kw: "anthropic console token sk-ant billing keychain" },
+    { tab: "claude",     anchor: "card-api",       card: "Optional Claude API access", title: "Per-turn cost cap",  kw: "budget dollar limit spend guard" },
+    { tab: "claude",     anchor: "card-codex",     card: "ChatGPT account", title: "ChatGPT subscription", kw: "chatgpt codex account cli app server subscription login plan limits usage" },
     { tab: "claude",     anchor: "card-chatgpt",   card: "ChatGPT", title: "ChatGPT API access", kw: "chatgpt openai gpt api key billing responses optional" },
     { tab: "speech",     anchor: "card-engine",    card: "Engine",             title: "Speech-to-text",     kw: "voice mic dictation stt enable" },
     { tab: "speech",     anchor: "card-engine",    card: "Engine",             title: "Recognition engine", kw: "web speech whisper parakeet on-device azure" },
@@ -143,7 +181,6 @@
     return scored.slice(0, 8).map((x) => x.e);
   });
   $effect(() => { void searchResults.length; searchIdx = 0; });
-  const prefersReducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
   function jumpTo(e: SearchEntry) {
     searchQ = "";
     activeSec = e.tab;
@@ -370,6 +407,10 @@
   let asstMaxBudgetSaving = $state(false);
   let asstMaxBudgetMsg = $state<string | null>(null);
   const asstMaxBudgetDirty = $derived(asstMaxBudgetDraft !== assistantStore.maxBudgetUsd);
+  let asstOutputStyleDraft = $state("");
+  let asstOutputStyleSaving = $state(false);
+  let asstOutputStyleMsg = $state<string | null>(null);
+  const asstOutputStyleDirty = $derived(asstOutputStyleDraft.trim() !== (assistantStore.outputStyle ?? ""));
   const asstApiKeyDirty = $derived(asstApiKeyDraft.trim().length > 0);
   const openAiApiKeyDirty = $derived(openAiApiKeyDraft.trim().length > 0);
   $effect(() => { if (!asstApiKeyDraft) asstApiKeyVisible = false; });
@@ -436,12 +477,7 @@
     return plan ? `${plan[0].toUpperCase()}${plan.slice(1)} plan` : "ChatGPT plan";
   });
   function fmtAgo(ts: number, now: number): string {
-    const s = Math.max(0, Math.round((now - ts) / 1000));
-    if (s < 10) return "just now";
-    if (s < 60) return `${s}s ago`;
-    const m = Math.round(s / 60);
-    if (m < 60) return `${m}m ago`;
-    return `${Math.round(m / 60)}h ago`;
+    return sharedRelTime(ts, now, "compact");
   }
 
   async function saveAsstApiKey() {
@@ -474,6 +510,21 @@
       openAiApiKeySaving = false;
     }
   }
+  async function saveAsstOutputStyle() {
+    asstOutputStyleSaving = true;
+    asstOutputStyleMsg = null;
+    try {
+      await assistantStore.setOutputStyle(asstOutputStyleDraft);
+      asstOutputStyleDraft = assistantStore.outputStyle ?? "";
+      asstOutputStyleMsg = assistantStore.outputStyle ? `Saved: ${assistantStore.outputStyle}.` : "Cleared (Claude Code default).";
+    } catch (e) {
+      console.error("setOutputStyle failed", e);
+      asstOutputStyleMsg = "Couldn't save the output style. See logs for details.";
+    } finally {
+      asstOutputStyleSaving = false;
+    }
+  }
+
   async function saveAsstMaxBudget() {
     // B11: a typed 0/negative is invalid input, not a clear — the Clear button
     // is the explicit no-cap path (sets draft to null). Reject it loudly
@@ -547,6 +598,7 @@
     void assistantStore.init().then(() => {
       asstApiKeyDraft = "";
       asstMaxBudgetDraft = assistantStore.maxBudgetUsd;
+      asstOutputStyleDraft = assistantStore.outputStyle ?? "";
     }).catch((e) => console.warn("assistantStore.init failed", e)); // F160: no unhandled rejection
     void stt.init();
     void loadAboutPaths();
@@ -574,7 +626,8 @@
   <PageHero eyebrow="Settings" title={activeMeta.label} desc={activeMeta.sub} padBottom={false} maxWidth={820}>
     {#snippet children()}
       <div class="tabrow">
-        <div class="tabnav" role="tablist">
+        <div class="tabnav" role="tablist" bind:this={tabnavEl}>
+          <span class="tab-ink" aria-hidden="true" style="transform: translateX({inkX}px); width: {inkW}px;"></span>
           {#each ST_SECTIONS as s (s.id)}
             {@const Icon = s.icon}
             <!-- Dot is an alert for the route the current chat actually uses,
@@ -584,8 +637,8 @@
               class="snav"
               class:on={activeSec === s.id}
               role="tab"
-              id={`settings-tab-${s.id}`}
-              aria-controls={`settings-panel-${s.id}`}
+              id={`settings-tab-${secDomId(s.id)}`}
+              aria-controls={`settings-panel-${secDomId(s.id)}`}
               aria-selected={activeSec === s.id}
               tabindex={activeSec === s.id ? 0 : -1}
               bind:this={tabEls[s.id]}
@@ -654,8 +707,8 @@
     class="surface-body"
     bind:this={scrollEl}
     role="tabpanel"
-    id={`settings-panel-${activeSec}`}
-    aria-labelledby={`settings-tab-${activeSec}`}
+    id={`settings-panel-${secDomId(activeSec)}`}
+    aria-labelledby={`settings-tab-${secDomId(activeSec)}`}
   >
 
     {#if activeSec === "appearance"}
@@ -900,7 +953,7 @@
           <button type="button" class="provider-switch" class:on={providerFocus === "claude"} role="tab" aria-selected={providerFocus === "claude"} onclick={() => (providerFocus = "claude")}>
             <span class="provider-switch-ic"><Sparkles size={17} /></span>
             <span class="provider-switch-copy"><b>Claude</b><small>{claudeConnected ? `${assistantStore.plan === "free" ? "Free · 200K profile" : "Expanded · 1M profile"}` : assistantStore.authChecking ? "Checking account…" : "Connect Claude Code"}</small></span>
-            <span class="st-pill" class:ok={claudeConnected} class:warn={!claudeConnected}><span class="dot"></span>{claudeConnected ? "Connected" : "Set up"}</span>
+            <span class="st-pill" class:ok={claudeConnected} class:warn={!claudeConnected}>{#key authPulseKey}<span class="dot"></span>{/key}{claudeConnected ? "Connected" : "Set up"}</span>
           </button>
         </div>
 
@@ -1006,6 +1059,18 @@
               <button class:on={assistantStore.trustLevel !== "readonly"} role="radio" aria-checked={assistantStore.trustLevel !== "readonly"} tabindex={assistantStore.trustLevel !== "readonly" ? 0 : -1} type="button" onkeydown={onRadioKey} onclick={() => void assistantStore.setTrustLevel("standard")}>Standard</button>
             </div>
           </div>
+          <div class="ctl-row tight">
+            <div><label class="ctl-t" for="asst-output-style">Output style</label><div class="ctl-s">Claude Code's <code>outputStyle</code>: <code>Explanatory</code>, <code>Learning</code>, or any style in <code>~/.claude/output-styles</code>. Blank = default.</div></div>
+            <div class="ctl-actions">
+              <input id="asst-output-style" class="st-input mono" type="text" list="asst-output-style-list" placeholder="default" autocomplete="off" spellcheck="false" style="width:100%; max-width:150px;" bind:value={asstOutputStyleDraft} onkeydown={(e) => { if (e.key === "Enter") void saveAsstOutputStyle(); }} />
+              <datalist id="asst-output-style-list"><option value="Explanatory"></option><option value="Learning"></option></datalist>
+              <button class="st-btn primary" type="button" onclick={saveAsstOutputStyle} disabled={asstOutputStyleSaving || !asstOutputStyleDirty}>{asstOutputStyleSaving ? "Saving…" : "Save"}</button>
+              {#if assistantStore.outputStyle}
+                <button class="st-btn" type="button" disabled={asstOutputStyleSaving} onclick={() => { asstOutputStyleDraft = ""; void saveAsstOutputStyle(); }}>Clear</button>
+              {/if}
+            </div>
+          </div>
+          {#if asstOutputStyleMsg}<div class="st-note">{asstOutputStyleMsg}</div>{/if}
           <div class="ctl-row tight no-line">
             <div><div class="ctl-t">Context limit</div><div class="ctl-s">Claude Code does not provide a reliable live entitlement check. Set the limit you know your account allows; use 200K when unsure.</div></div>
             <div class="seg" role="radiogroup" aria-label="Claude context limit">
@@ -1526,11 +1591,23 @@
 
   /* hero tab bar + settings search share one row; the hairline lives on the row */
   .tabrow { display: flex; align-items: center; gap: 14px; border-bottom: 1px solid var(--border); }
-  .tabnav { display: flex; gap: 4px; flex: 1; min-width: 0; }
+  .tabnav { display: flex; gap: 4px; flex: 1; min-width: 0; position: relative; }
+  .tab-ink { position: absolute; left: 0; bottom: -1px; height: 2px; border-radius: 2px 2px 0 0; background: var(--accent);
+    transition: transform var(--dur-base) var(--ease-page), width var(--dur-base) var(--ease-page); pointer-events: none; }
   .snav { display: inline-flex; align-items: center; gap: 7px; height: 42px; padding: 0 4px; margin: 0 8px; background: none; border: 0; cursor: pointer; color: var(--fg-muted); font: inherit; font-size: 13px; font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color var(--dur-fast); }
   .tabnav .snav:first-child { margin-left: 0; }
   .snav:hover { color: var(--fg-2); }
-  .snav.on { color: var(--fg); border-bottom-color: var(--accent); }
+  .snav.on { color: var(--fg); }
+  /* Live status dots: one pulse when the probe lands, then still. */
+  .st-pill.ok .dot { animation: pill-ping 900ms var(--ease-page) 1 both; }
+  @keyframes pill-ping {
+    0%   { box-shadow: 0 0 0 0 color-mix(in oklab, var(--ok) 55%, transparent); }
+    100% { box-shadow: 0 0 0 7px color-mix(in oklab, var(--ok) 0%, transparent); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .tab-ink { transition: none; }
+    .st-pill.ok .dot { animation: none; }
+  }
   .snav :global(svg) { flex: none; color: var(--fg-subtle); transition: color var(--dur-fast); }
   .snav.on :global(svg) { color: var(--accent); }
   .snav-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }

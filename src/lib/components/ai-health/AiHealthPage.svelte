@@ -8,13 +8,16 @@
   import { listen } from "@tauri-apps/api/event";
   import { HeartPulse, Gauge, Sparkles, ArrowRight, Wrench, Loader2, AlertTriangle, Check, Undo2, Wifi, Snowflake, Plug } from "@lucide/svelte";
   import PageHero from "../shared/PageHero.svelte";
+  import LimitBar from "../shared/LimitBar.svelte";
+  import AnimatedCount from "../assistant/stream/AnimatedCount.svelte";
+  import { tooltip } from "$lib/actions/tooltip";
   import { usage, type LimitWindow, type AdviceApply } from "../../state/usage.svelte";
   import { assistant, type ModelSel } from "../../state/assistant.svelte";
   import { isOpenAIModel } from "../../state/assistant/helpers";
   import { summarizeSession } from "../../state/assistant/telemetry";
   import {
-    summarize, perModel, streaks, topModel, type ConvoStat,
-  } from "../home/statsHelpers";
+    summarize, perModel, streaks, topModel, fmtCompact, type ConvoStat,
+  } from "$lib/utils/usageStats";
 
   // All-time usage from the persisted convo store (same source the Home stats
   // panel reads) — gives day-one advice something to chew on even before this
@@ -300,6 +303,9 @@
 
   const fmtUsd = (n: number) => (n < 0.01 && n > 0 ? "<$0.01" : `$${n.toFixed(2)}`);
   const fmtNum = (n: number) => n.toLocaleString();
+  // Tile-safe money: a 110px tile fits ~7 glyphs at 20px, so "$8155.57" spilled
+  // past the padding. ≥$1k reads "$8.16k"; the exact figure rides the tooltip.
+  const fmtUsdShort = (n: number) => (n >= 1000 ? `$${(n / 1000).toFixed(n >= 10_000 ? 1 : 2)}k` : fmtUsd(n));
 
   // Hero chip = closest-to-limit window, the "am I OK?" glance.
   const peakLimit = $derived.by(() => {
@@ -630,13 +636,15 @@
   };
   const MODEL_LABEL: Record<string, string> = {
     opus: "Opus", sonnet: "Sonnet", haiku: "Haiku", fable: "Fable",
-    "claude-opus-4-7": "Opus", "claude-opus-4-6": "Opus", "claude-opus-4-5": "Opus",
-    "claude-sonnet-4-6": "Sonnet", "claude-sonnet-4-5": "Sonnet", "claude-fable-5": "Fable",
+    "claude-opus-5": "Opus", "claude-sonnet-5": "Sonnet", "claude-haiku-4-5": "Haiku",
+    "claude-fable-5-1": "Fable", "claude-fable-5": "Fable",
+    "claude-opus-4-8": "Opus", "claude-opus-4-7": "Opus", "claude-opus-4-6": "Opus", "claude-opus-4-5": "Opus",
+    "claude-sonnet-4-6": "Sonnet", "claude-sonnet-4-5": "Sonnet",
   };
-  const modelKey = (m: string) => (m === "opus" || m.startsWith("claude-opus") ? "opus" : m === "haiku" ? "haiku" : m === "claude-fable-5" ? "fable" : "sonnet");
+  const modelKey = (m: string) => (m === "opus" || m.startsWith("claude-opus") ? "opus" : m === "haiku" || m.startsWith("claude-haiku") ? "haiku" : m.startsWith("claude-fable") ? "fable" : "sonnet");
   // Inverse of modelKey: the advisor emits short keys ("fable"), but setModel
-  // wants a ModelSel — and "fable" is NOT a valid ModelSel ("claude-fable-5" is).
-  const applyKeyToModel = (k: string): ModelSel => (k === "fable" ? "claude-fable-5" : (k as ModelSel));
+  // wants a ModelSel — and "fable" is NOT a valid ModelSel ("claude-fable-5-1" is).
+  const applyKeyToModel = (k: string): ModelSel => (k === "fable" ? "claude-fable-5-1" : (k as ModelSel));
   const budgetLabel = (n: number | null) => (n == null ? "No cap" : `$${n.toFixed(2)}/turn`);
 
   // Per-turn dollar budget is only a real knob in API-key mode (pay-per-token).
@@ -763,14 +771,14 @@
                   {@const used = Math.round(limit.primary.usedPercent)}
                   <div class="ah-bar-row">
                     <div class="ah-bar-top"><span class="ah-bar-k">{limit.name ?? rateWindowLabel(limit.primary.windowDurationMins, limit.id === "codex" ? "Coding window" : limit.id)}</span><span class="ah-bar-v">{used}%<span class="ah-bar-reset">{fmtCodexReset(limit.primary.resetsAt)}</span></span></div>
-                    <div class="ah-track"><div class="ah-fill {zone(used)}" style:width="{Math.min(100, used)}%"></div></div>
+                    <LimitBar pct={Math.min(100, used)} zone={zone(used)} variant="card" />
                   </div>
                 {/if}
                 {#if limit.secondary}
                   {@const used = Math.round(limit.secondary.usedPercent)}
                   <div class="ah-bar-row">
                     <div class="ah-bar-top"><span class="ah-bar-k">{rateWindowLabel(limit.secondary.windowDurationMins, `${limit.name ?? limit.id} secondary`)}</span><span class="ah-bar-v">{used}%<span class="ah-bar-reset">{fmtCodexReset(limit.secondary.resetsAt)}</span></span></div>
-                    <div class="ah-track"><div class="ah-fill {zone(used)}" style:width="{Math.min(100, used)}%"></div></div>
+                    <LimitBar pct={Math.min(100, used)} zone={zone(used)} variant="card" />
                   </div>
                 {/if}
               {/each}
@@ -785,8 +793,11 @@
           <div class="ah-card-h"><Wrench size={15} strokeWidth={1.9} />ChatGPT usage</div>
           {#if chatGptAccount?.usage}
             <div class="ah-tiles sm">
-              <div class="ah-tile"><div class="ah-tile-v">{fmtNum(chatGptAccount.usage.lifetimeTokens ?? 0)}</div><div class="ah-tile-k">lifetime tokens</div></div>
-              <div class="ah-tile"><div class="ah-tile-v">{fmtNum(chatGptAccount.usage.peakDailyTokens ?? 0)}</div><div class="ah-tile-k">peak daily tokens</div></div>
+              <!-- Compact + count-up: the raw locale string ("3,958,002,200")
+                   overflowed the tile; the odometer climbs in on mount. Exact
+                   value stays reachable via the tooltip. -->
+              <div class="ah-tile" use:tooltip={`${fmtNum(chatGptAccount.usage.lifetimeTokens ?? 0)} tokens`}><div class="ah-tile-v"><AnimatedCount value={chatGptAccount.usage.lifetimeTokens ?? 0} format={fmtCompact} durationMs={720} /></div><div class="ah-tile-k">lifetime tokens</div></div>
+              <div class="ah-tile" use:tooltip={`${fmtNum(chatGptAccount.usage.peakDailyTokens ?? 0)} tokens`}><div class="ah-tile-v"><AnimatedCount value={chatGptAccount.usage.peakDailyTokens ?? 0} format={fmtCompact} durationMs={720} /></div><div class="ah-tile-k">peak daily tokens</div></div>
               <div class="ah-tile"><div class="ah-tile-v">{chatGptAccount.usage.currentStreakDays ?? 0}d</div><div class="ah-tile-k">current streak</div></div>
               <div class="ah-tile"><div class="ah-tile-v">{chatGptAccount.usage.longestStreakDays ?? 0}d</div><div class="ah-tile-k">longest streak</div></div>
             </div>
@@ -978,8 +989,8 @@
                 <div class="ah-tile-k">conversation reused{#if cacheVerdict}<span class="ah-verdict {cacheTint}">{cacheVerdict}</span>{/if}</div>
               </div>
             {/if}
-            <div class="ah-tile">
-              <div class="ah-tile-v">{fmtNum(perfStats.total_output_tokens)}</div>
+            <div class="ah-tile" use:tooltip={`${fmtNum(perfStats.total_output_tokens)} tokens`}>
+              <div class="ah-tile-v">{fmtCompact(perfStats.total_output_tokens)}</div>
               <div class="ah-tile-k">words written (tokens)</div>
             </div>
           </div>
@@ -1083,7 +1094,7 @@
                   <span class="ah-bar-k">{row.k}</span>
                   <span class="ah-bar-v">{u}%<span class="ah-bar-reset">{fmtReset(row.w.resetsAt)}</span></span>
                 </div>
-                <div class="ah-track"><div class="ah-fill {zone(u)}" style:width="{Math.min(100, u)}%"></div></div>
+                <LimitBar pct={Math.min(100, u)} zone={zone(u)} variant="card" />
                 {#if pace}
                   <div class="ah-pace" class:hot={pace.hot}>
                     {pace.hot ? "at this pace you'll hit the cap before it resets" : `on pace for ~${pace.pct}% by reset`}
@@ -1108,7 +1119,7 @@
                 </span>
               </div>
               {#if xu != null}
-                <div class="ah-track"><div class="ah-fill {zone(xu)}" style:width="{Math.min(100, xu)}%"></div></div>
+                <LimitBar pct={Math.min(100, xu)} zone={zone(xu)} variant="card" />
               {/if}
             </div>
           </div>
@@ -1135,9 +1146,9 @@
         {:else if totals}
           <div class="ah-tiles">
             <div class="ah-tile"><div class="ah-tile-v">{fmtNum(totals.sessions)}</div><div class="ah-tile-k">conversations</div></div>
-            <div class="ah-tile"><div class="ah-tile-v">{fmtNum(totals.messages)}</div><div class="ah-tile-k">messages</div></div>
-            <div class="ah-tile"><div class="ah-tile-v">{fmtNum(totals.toolCalls)}</div><div class="ah-tile-k">tool calls</div></div>
-            <div class="ah-tile"><div class="ah-tile-v">{fmtUsd(totals.cost)}</div><div class="ah-tile-k">est. spend</div></div>
+            <div class="ah-tile" use:tooltip={`${fmtNum(totals.messages)} messages`}><div class="ah-tile-v">{fmtCompact(totals.messages)}</div><div class="ah-tile-k">messages</div></div>
+            <div class="ah-tile" use:tooltip={`${fmtNum(totals.toolCalls)} tool calls`}><div class="ah-tile-v">{fmtCompact(totals.toolCalls)}</div><div class="ah-tile-k">tool calls</div></div>
+            <div class="ah-tile" use:tooltip={fmtUsd(totals.cost)}><div class="ah-tile-v">{fmtUsdShort(totals.cost)}</div><div class="ah-tile-k">est. spend</div></div>
             {#if top}<div class="ah-tile"><div class="ah-tile-v ah-tile-sm">{top}</div><div class="ah-tile-k">most used</div></div>{/if}
           </div>
 
@@ -1199,8 +1210,8 @@
         <div class="ah-card-h"><HeartPulse size={15} strokeWidth={1.9} />This session</div>
           <div class="ah-tiles sm">
             <div class="ah-tile"><div class="ah-tile-v">{fmtNum(session.totalTurns)}</div><div class="ah-tile-k">replies</div></div>
-            <div class="ah-tile"><div class="ah-tile-v">{fmtUsd(session.totalCostUsd)}</div><div class="ah-tile-k">spend</div></div>
-            <div class="ah-tile"><div class="ah-tile-v">{fmtNum(session.toolCallTotal)}</div><div class="ah-tile-k">tool calls</div></div>
+            <div class="ah-tile" use:tooltip={fmtUsd(session.totalCostUsd)}><div class="ah-tile-v">{fmtUsdShort(session.totalCostUsd)}</div><div class="ah-tile-k">spend</div></div>
+            <div class="ah-tile" use:tooltip={`${fmtNum(session.toolCallTotal)} tool calls`}><div class="ah-tile-v">{fmtCompact(session.toolCallTotal)}</div><div class="ah-tile-k">tool calls</div></div>
             {#if session.zeroToolTurns > 0}
               <div class="ah-tile"><div class="ah-tile-v">{fmtNum(session.zeroToolTurns)}</div><div class="ah-tile-k">chat-only replies</div></div>
             {/if}
@@ -1488,7 +1499,10 @@
   .ah-models { display: flex; flex-direction: column; gap: 9px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
   .ah-model-row { display: flex; align-items: center; gap: 12px; }
   .ah-model-k { font-size: var(--fs-sm); color: var(--fg-muted); width: 130px; flex: none; }
-  .ah-model-v { font-size: var(--fs-sm); font-weight: 640; font-variant-numeric: tabular-nums; width: 38px; text-align: right; flex: none; }
+  /* min-width (not width): the share rows hold "69%", the spend rows hold
+     "$3576.96" — a fixed 38px pushed the dollars out of the row. The track is
+     flex:1 and gives up the difference. */
+  .ah-model-v { font-size: var(--fs-sm); font-weight: 640; font-variant-numeric: tabular-nums; min-width: 38px; text-align: right; flex: none; white-space: nowrap; }
   .ah-trend { display: flex; flex-direction: column; gap: 9px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
   .ah-trend-h { font-size: 11.5px; font-weight: 620; color: var(--fg-muted); letter-spacing: -0.005em; margin-bottom: 1px; }
   .ah-trend-row { display: flex; align-items: center; gap: 12px; }

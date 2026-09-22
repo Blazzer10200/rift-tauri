@@ -1,8 +1,28 @@
 // Pure per-project activity aggregation for the Workspace hub. Everything
 // derives client-side from the ConversationMeta cache (workspaceRoot /
 // lastActivityAt / costUsd) — zero IPC. Unit-tested in hubHelpers.test.ts.
+//
+// Also home to the shared time-of-day greeting + coarse "time ago" formatter
+// (merged in from the former welcomeShared.ts) — consumed by the Workspace
+// page hero and the empty-Chat welcome (AssistantWelcome) so the two surfaces
+// can never drift.
 
 import { rootKey } from "$lib/utils/path";
+import { relTime as sharedRelTime } from "$lib/utils/relTime";
+
+export function greeting(hr: number): string {
+  if (hr < 5) return "Still up";
+  if (hr < 12) return "Good morning";
+  if (hr < 18) return "Good afternoon";
+  return "Good evening";
+}
+
+// Coarse "time ago" for conversation cards. Keeps the same buckets both surfaces
+// already used (just-now / m / h / d, then a locale date past a week).
+export function fmtAgo(ms: number, now: number = Date.now()): string {
+  if (now - ms < 7 * 86_400_000) return sharedRelTime(ms, now, "long");
+  return new Date(ms).toLocaleDateString();
+}
 
 /** Structural subset of ConversationMeta the hub needs — keeps this module
  *  free of state imports so it stays pure/testable. */
@@ -32,12 +52,7 @@ export const chatLastAt = (c: ChatLike): number => c.lastActivityAt ?? c.created
 
 /** "just now" / "5m ago" / "3h ago" / "2d ago" / "4w ago". */
 export function relTime(ts: number, now: number): string {
-  const s = Math.max(0, (now - ts) / 1000);
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86_400) return `${Math.floor(s / 3600)}h ago`;
-  if (s < 604_800) return `${Math.floor(s / 86_400)}d ago`;
-  return `${Math.floor(s / 604_800)}w ago`;
+  return sharedRelTime(ts, now, "long");
 }
 
 /** One pass over all conversations → rollup per canonical root key. Unfiled

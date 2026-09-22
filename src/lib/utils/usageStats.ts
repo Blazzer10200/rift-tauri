@@ -1,7 +1,7 @@
 // Pure aggregation for the Home stats dashboard. The backend (`assistant_stats`)
 // hands us one lightweight row per saved conversation; everything time-bucketed
 // (active days, streaks, peak hour, heatmap) is computed HERE so it lands in the
-// user's LOCAL timezone. Zero state, zero IPC — unit-tested in statsHelpers.test.ts.
+// user's LOCAL timezone. Zero state, zero IPC — unit-tested in usageStats.test.ts.
 
 export type ConvoStat = {
   updatedAt: number;
@@ -231,8 +231,9 @@ export function fmtInt(n: number): string {
   return Math.round(n).toLocaleString("en-US");
 }
 
-/** Compact magnitude: 9_600_000 → "9.6M", 12_271 → "12.3k", 980 → "980". */
+/** Compact magnitude: 3_958_002_200 → "3.96B", 9_600_000 → "9.6M", 12_271 → "12k", 980 → "980". */
 export function fmtCompact(n: number): string {
+  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(n >= 10_000_000_000 ? 1 : 2)}B`;
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
   if (n >= 10_000) return `${(n / 1_000).toFixed(0)}k`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
@@ -257,6 +258,10 @@ const KNOWN_MODELS: Record<string, string> = {
   sonnet: "Sonnet 5",
   haiku: "Haiku 4.5",
   opus: "Opus 5",
+  "claude-fable-5-1": "Fable 5.1",
+  "claude-opus-5": "Opus 5",
+  "claude-sonnet-5": "Sonnet 5",
+  "claude-haiku-4-5": "Haiku 4.5",
   "claude-opus-4-8": "Opus 4.8",
   "claude-opus-4-7": "Opus 4.7",
   "claude-opus-4-6": "Opus 4.6",

@@ -8,9 +8,7 @@ import {
   finalWordAutocorrect,
   isBoundaryChar,
   oracleKnows,
-  removePersonalWord,
   setSpellOracle,
-  setWorkspaceVocab,
   setWorkspaceVocabFromPaths,
   warmAutocorrectDictionary,
 } from "./autocorrect";
@@ -211,11 +209,12 @@ describe("brand names + learned vocabulary (the FiveM bug class)", () => {
   });
 
   it("personal dictionary beats even the exact typo map", () => {
-    expect(correctWord("teh")).toBe("the");
-    addPersonalWord("teh");
-    expect(correctWord("teh")).toBeNull();
-    removePersonalWord("teh");
-    expect(correctWord("teh")).toBe("the");
+    // "wrok" (not "teh") — removePersonalWord is gone, so this stays taught
+    // for the rest of the run; picking a word no later test re-checks avoids
+    // polluting them.
+    expect(correctWord("wrok")).toBe("work");
+    addPersonalWord("wrok");
+    expect(correctWord("wrok")).toBeNull();
   });
 
   it("workspace vocabulary from file paths suppresses corrections", () => {
@@ -223,7 +222,7 @@ describe("brand names + learned vocabulary (the FiveM bug class)", () => {
     setWorkspaceVocabFromPaths(["scripts/QuixelLoader/quixel-map.lua"]);
     expect(correctWord("quixel")).toBeNull();
     expect(correctWord("loader")).toBeNull();
-    setWorkspaceVocab([]);
+    setWorkspaceVocabFromPaths([]);
     expect(correctWord("quixel")).not.toBeNull();
   });
 

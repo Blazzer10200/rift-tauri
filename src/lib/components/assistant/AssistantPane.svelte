@@ -6,6 +6,7 @@
   import { projects, projectRootKey } from "$lib/state/projects.svelte";
   import { projectHue } from "$lib/utils/projectHue";
   import { stt } from "../../state/stt.svelte";
+  import { prefersReducedMotion } from "../../state/accessibility.svelte";
   import MessageBubble from "./MessageBubble.svelte";
   import StreamTurn from "./stream/StreamTurn.svelte";
   import PlanHud from "./stream/PlanHud.svelte";
@@ -163,9 +164,7 @@
   // while a real user scroll (position ≠ pinEcho) still un-latches instantly.
   // Big jumps snap — chasing three screens reads worse than a cut.
   let smoothRaf = 0;
-  const paneReducedMotion =
-    typeof window !== "undefined" &&
-    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+  const paneReducedMotion = prefersReducedMotion();
 
   function pinToBottom(instant = false) {
     if (!scrollEl) return;
@@ -321,7 +320,7 @@
   function welcomeOut(node: HTMLElement) {
     const r = welcomeExitRect;
     welcomeExitRect = null;
-    if (!r || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return { duration: 0 };
+    if (!r || prefersReducedMotion()) return { duration: 0 };
     node.style.position = "fixed";
     node.style.top = `${r.top}px`;
     node.style.left = `${r.left}px`;
@@ -338,7 +337,7 @@
   // composer floats up to meet it.
   function welcomeIn(node: HTMLElement) {
     void node;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return { duration: 0 };
+    if (prefersReducedMotion()) return { duration: 0 };
     return {
       duration: 220,
       css: (t: number) => `opacity: ${t}; transform: translateY(${(1 - t) * -10}px)`,
@@ -350,7 +349,7 @@
     const first = flipFirst;
     flipFirst = null;
     if (!host || !first) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (prefersReducedMotion()) return;
     void tick().then(() => {
       if (!host) return;
       const last = host.getBoundingClientRect();
@@ -1132,7 +1131,10 @@
     margin-left: auto; margin-right: auto;
     flex: none;
   }
-  .csurf-col.is-home .composer-host { margin-top: 16px; }
+  /* Fourth beat of the launchpad stagger (greeting 0 · resume 80 · new-to-rift
+     140) — the composer used to pop in at full opacity and break the sequence. */
+  .csurf-col.is-home .composer-host { margin-top: 16px; animation: enter var(--dur-base) var(--ease-page) 200ms both; }
+  @media (prefers-reduced-motion: reduce) { .csurf-col.is-home .composer-host { animation: none; } }
   /* Engaged posture — welcome unmounted, composer sunk to the working edge.
      The FLIP in setEngaged animates the journey; this is the destination. */
   .csurf-col.is-home.engaged { justify-content: flex-end; }

@@ -6,6 +6,7 @@
   import { highlightSync, whenReady } from "$lib/state/highlighter.svelte";
   import OutputBlock from "./OutputBlock.svelte";
   import BlockHeader from "./BlockHeader.svelte";
+  import { prefersReducedMotion } from "$lib/state/accessibility.svelte";
 
   let {
     tool,
@@ -69,9 +70,7 @@
   // result already there (history load, replayed convo) renders instantly —
   // replays never retype. Total type time scales with command length, clamped
   // so long one-liners don't crawl. Reduced motion skips the whole act.
-  const reducedMotion =
-    typeof window !== "undefined" &&
-    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+  const reducedMotion = prefersReducedMotion();
   // svelte-ignore state_referenced_locally -- intentional mount-time snapshot: only a block born pending types
   const mountedLive = tool.status === "pending" && !reducedMotion;
   let typedN = $state(mountedLive ? 0 : Number.MAX_SAFE_INTEGER);

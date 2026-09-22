@@ -4,12 +4,11 @@
   import { VERB_PAST, VERB_ING, isPlanArtifact, type StreamTool } from "./streamModel";
   import EditDiff from "../EditDiff.svelte";
   import AnimatedCount from "./AnimatedCount.svelte";
+  import { prefersReducedMotion } from "$lib/state/accessibility.svelte";
 
   let { tools, workspaceRoot = null }: { tools: StreamTool[]; workspaceRoot?: string | null } = $props();
 
-  const reduced =
-    typeof window !== "undefined" &&
-    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
+  const reduced = prefersReducedMotion();
 
   // Each row can expand to a compact code-diff preview (the real lines that
   // changed), not just a "made an edit" stub. Small edits auto-open; large ones

@@ -244,7 +244,7 @@
     const m = currentModel;
     if (!m) return "";
     if (!m.effort) return `${m.label} ${m.version} responds immediately — it doesn't use extended reasoning.`;
-    if (m.id === "claude-fable-5") return `Fable always reasons before replying — higher effort reasons more deeply. Currently ${currentEffort.label}.`;
+    if (m.id === "claude-fable-5-1") return `Fable always reasons before replying — higher effort reasons more deeply. Currently ${currentEffort.label}.`;
     return CAPTIONS[currentEffort.id] ?? "";
   });
   // Live per-model weekly limit (usage endpoint `limits[]`, model-scoped rows
@@ -253,10 +253,10 @@
   // bucket or limits haven't loaded; the row simply shows no chip.
   function modelLimitFor(m: ModelOpt): ScopedLimit | null {
     if (m.provider === "openai") return null;
-    const fam = m.id === "claude-fable-5" ? "fable"
+    const fam = m.id === "claude-fable-5-1" ? "fable"
       : m.id === "haiku" ? "haiku"
       : m.id.includes("sonnet") ? "sonnet"
-      : "opus"; // opus alias + pinned claude-opus-4-x share the Opus bucket
+      : "opus";
     const ls = usage.rateLimits?.limits ?? [];
     return ls.find((l) => (l.scope?.model?.displayName ?? "").toLowerCase().includes(fam)) ?? null;
   }
@@ -448,7 +448,7 @@
       <span class="effort-head-cur">{currentEffort.label}</span>
       <span
         class="effort-help"
-        use:tooltip={currentModel?.id === "claude-fable-5"
+        use:tooltip={currentModel?.id === "claude-fable-5-1"
           ? "Fable always reasons before replying — effort sets how deeply."
           : "Higher effort reasons longer for better answers. Lower effort responds faster."}
         aria-label="About effort"

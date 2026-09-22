@@ -3,6 +3,32 @@
 > Current release only. Older release notes remain in Git history and on the
 > [GitHub releases page](https://github.com/Blazzer10200/rift-tauri/releases).
 
+## Unreleased — Current Claude, more control
+
+- The model picker and usage views now know the current Claude line-up: Fable
+  5.1, Opus 5, Sonnet 5, and Haiku 4.5, with the full effort ladder through
+  **Max** on capable models.
+- Projects can list up to eight **Extra folders**; Claude can read and edit
+  those alongside the project root (Claude Code `--add-dir`).
+- Settings › Providers › Claude session gains an **Output style** field
+  (Explanatory, Learning, or any style in `~/.claude/output-styles`).
+- The `/mcp` dialog can now **Add** a server (stdio, http, or sse; user,
+  project, or local scope) and **Remove** one, using the same config a
+  terminal `claude mcp add/remove` writes.
+- The home launchpad is a single column matched to the composer width, so
+  recent chats and shortcuts no longer sit awkwardly beside it.
+- Quieter motion where it helps: the composer rises in on the home view,
+  Settings tabs get a sliding underline, the Claude "connected" dot pings on
+  each check, hot usage bars in AI Health get a slow sheen, and lifetime
+  token tiles count up (and read `3.96B` instead of overflowing). All of it
+  respects reduced-motion.
+- AI Health tiles no longer spill their numbers: large counts read `11M` and
+  spend reads `$8.16k`, with the exact figure on hover. The active project
+  card on the Workspace hub keeps its **Continue** button inside the card.
+- Internal cleanup: one shared limit bar replaces three copies, usage-stat
+  helpers moved to `utils`, duplicated time and severity helpers consolidated,
+  and the splash handoff no longer fires twice.
+
 ## v0.158.0 — Calmer chat, clearer control
 
 - Alerts is now one reliable footer destination with a full-size hit target,

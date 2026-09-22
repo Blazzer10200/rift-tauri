@@ -53,5 +53,5 @@
 <ContextMenuHost />
 
 {#if !splashDone}
-  <SplashOverlay onComplete={() => { splashDone = true; intro.handoff(); }} />
+  <SplashOverlay onComplete={() => { splashDone = true; }} />
 {/if}
