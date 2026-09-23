@@ -157,22 +157,27 @@ export function saveModel(v: ModelSel, ws?: string | null) {
   }
 }
 
-/** One release migration from Claude-first defaults to the user's live
- * ChatGPT account default. Existing GPT pins stay untouched; Claude pins move
- * together so opening a different project cannot silently restore Opus. */
-export function migrateClaudeModelPinsTo(next: ModelSel) {
+// Claude is the default again. The retired `chatgptDefault.v1–v5` migration
+// rewrote the baseline and every Claude pin to the account's ChatGPT default
+// once Codex status loaded, so every project kept reopening on GPT. This undoes
+// it once: a GPT baseline is dropped (→ loadModel's "sonnet" fallback) along
+// with project pins that equal it (the migrated ones). A project pinned to a
+// different GPT model was a deliberate pick and stays. One-time, SSR-safe.
+const CLAUDE_DEFAULT_KEY = "rift.assistant.claudeDefault.v1";
+export function restoreClaudeDefault() {
   try {
     if (typeof localStorage === "undefined") return;
-    const keys: string[] = [MODEL_KEY];
+    if (localStorage.getItem(CLAUDE_DEFAULT_KEY)) return;
+    localStorage.setItem(CLAUDE_DEFAULT_KEY, "done");
+    const migrated = localStorage.getItem(MODEL_KEY);
+    if (!migrated || !isOpenAIModel(migrated)) return;
     const prefix = `${MODEL_KEY}::`;
+    const drop: string[] = [MODEL_KEY];
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
-      if (key?.startsWith(prefix)) keys.push(key);
+      if (key?.startsWith(prefix) && localStorage.getItem(key) === migrated) drop.push(key);
     }
-    for (const key of keys) {
-      const current = localStorage.getItem(key);
-      if (!current || !isOpenAIModel(current)) localStorage.setItem(key, next);
-    }
+    for (const key of drop) localStorage.removeItem(key);
   } catch {
     /* storage disabled */
   }

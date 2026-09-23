@@ -53,7 +53,7 @@ import { MAX_PANES, createPaneState } from "./assistant/types";
 import {
   loadModel,
   saveModel,
-  migrateClaudeModelPinsTo,
+  restoreClaudeDefault,
   loadEffort,
   saveEffort,
   clampEffort,
@@ -99,6 +99,9 @@ import {
 // pins so every folder falls back to the off-by-default baseline. One-time,
 // idempotent, SSR-safe (no-ops without localStorage). See helpers.ts.
 migrateThinkingPins();
+// Undo the retired ChatGPT-default migration's pins (helpers.ts). Runs before
+// any tab reads its model.
+restoreClaudeDefault();
 
 // M2 split (2026-05-26): SessionTelemetry class lifted to `./assistant/telemetry`.
 import { SessionTelemetry } from "./assistant/telemetry";
@@ -2085,7 +2088,6 @@ class AssistantStore {
         try {
           this.codexAccount = await invoke<CodexAccountOverview>("assistant_codex_account_overview", { root: this.activeRoot });
           this.codexModels = this.codexAccount.models;
-          this.migrateToChatGptDefault();
         } catch (e) {
           this.codexAccount = null;
           this.codexModels = null;
@@ -2105,20 +2107,6 @@ class AssistantStore {
     } finally {
       this.codexChecking = false;
     }
-  }
-
-  private migrateToChatGptDefault() {
-    const next = this.codexModels?.find((model) => model.isDefault)?.id;
-    if (!next || typeof localStorage === "undefined") return;
-    const migrationKey = "rift.assistant.chatgptDefault.v5";
-    if (localStorage.getItem(migrationKey)) return;
-    localStorage.setItem(migrationKey, "done");
-    migrateClaudeModelPinsTo(next);
-    if (isOpenAIModel(this.modelFor(this.activeTab)) || (this.activeTab?.messages.length ?? 0) > 0) return;
-    this.setModel(next, this.activeTab);
-    notify.info("ChatGPT is now your default", {
-      detail: `${this.codexModels?.find((model) => model.id === next)?.label ?? next} came from your signed-in account.`,
-    });
   }
 
   private normalizeClaudeFreeModel() {

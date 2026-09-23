@@ -37,6 +37,11 @@
   folderless chat mode, like Claude desktop's: new chats run in your Rift
   Workspace folder with full tools, and the sidebar lists every project's
   chats with their project tags. An open conversation keeps its own folder.
+- Claude is the default model again. An older update switched every project
+  to ChatGPT once your ChatGPT account connected; that switch is gone, and
+  projects it moved go back to Claude. A project where you picked a different
+  ChatGPT model yourself keeps it, and ChatGPT stays one click away in the
+  picker.
 - Chat blocks are one family now. Terminal runs, diffs, agents, plans,
   web lookups, reasoning, code blocks, and saved-history tool chips share
   one set of shapes, borders, headers, and badges. State is shown the same way

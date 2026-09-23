@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   FABLE_DISABLED, FABLE_SUNSET_MS, asModelSel, clampEffort, effortToFlag, fableAvailable,
   fastEligible, flattenToolResult, isStaleTurnEpoch, loadEffort, normalizeLegacyModel,
-  migrateClaudeModelPinsTo, migrateThinkingPins, modelFamily, previewToolInput, ctxWindowForModelId,
+  loadModel, restoreClaudeDefault, migrateThinkingPins, modelFamily, previewToolInput, ctxWindowForModelId,
   modelNativeWindow, planContextCap, autoCompactTriggerTokens, planDecision,
   partialPlanMd,
 } from "./helpers";
@@ -12,24 +12,40 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("ChatGPT default migration", () => {
-  it("fills a missing baseline, replaces legacy Claude pins, and preserves ChatGPT choices", () => {
-    const entries = new Map<string, string>([
-      ["rift.assistant.model::C:/legacy", "sonnet"],
-      ["rift.assistant.model::C:/chatgpt", "gpt-5.6-terra"],
-    ]);
+describe("restoreClaudeDefault", () => {
+  const installLS = (seed: Record<string, string>) => {
+    const entries = new Map(Object.entries(seed));
     vi.stubGlobal("localStorage", {
       get length() { return entries.size; },
       key: (index: number) => [...entries.keys()][index] ?? null,
       getItem: (key: string) => entries.get(key) ?? null,
       setItem: (key: string, value: string) => entries.set(key, value),
+      removeItem: (key: string) => entries.delete(key),
     });
+    return entries;
+  };
 
-    migrateClaudeModelPinsTo("gpt-5.6-sol");
+  it("drops a GPT baseline and its migrated pins, keeps deliberate picks", () => {
+    const entries = installLS({
+      "rift.assistant.model": "gpt-5.6-sol",
+      "rift.assistant.model::C:/migrated": "gpt-5.6-sol",
+      "rift.assistant.model::C:/chosen": "gpt-5.6-terra",
+      "rift.assistant.model::C:/claude": "opus",
+    });
+    restoreClaudeDefault();
+    expect(entries.has("rift.assistant.model")).toBe(false);
+    expect(entries.has("rift.assistant.model::C:/migrated")).toBe(false);
+    expect(entries.get("rift.assistant.model::C:/chosen")).toBe("gpt-5.6-terra");
+    expect(entries.get("rift.assistant.model::C:/claude")).toBe("opus");
+    expect(loadModel("C:/migrated")).toBe("sonnet");
+  });
 
+  it("runs once — a GPT baseline picked afterwards survives", () => {
+    const entries = installLS({ "rift.assistant.model": "sonnet" });
+    restoreClaudeDefault();
+    entries.set("rift.assistant.model", "gpt-5.6-sol");
+    restoreClaudeDefault();
     expect(entries.get("rift.assistant.model")).toBe("gpt-5.6-sol");
-    expect(entries.get("rift.assistant.model::C:/legacy")).toBe("gpt-5.6-sol");
-    expect(entries.get("rift.assistant.model::C:/chatgpt")).toBe("gpt-5.6-terra");
   });
 });
 
