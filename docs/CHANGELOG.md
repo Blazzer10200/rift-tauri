@@ -3,7 +3,7 @@
 > Current release only. Older release notes remain in Git history and on the
 > [GitHub releases page](https://github.com/Blazzer10200/rift-tauri/releases).
 
-## Unreleased — Current Claude, more control
+## v0.159.0 — Current Claude, more control
 
 - The model picker and usage views now know the current Claude line-up: Fable
   5.1, **Opus 5.5**, Sonnet 5, and Haiku 4.5, with the full effort ladder
@@ -75,30 +75,6 @@
   share one pending-request registry. `turn.rs` hands its prompt text and tool
   allowlist to their own files, and the enhance-prompt and chat-title helpers
   share one runner. `rustls` 0.23.45 clears RUSTSEC-2026-0285.
-
-## v0.158.0 — Calmer chat, clearer control
-
-- Alerts is now one reliable footer destination with a full-size hit target,
-  readable label, correctly placed unread badge, visible keyboard focus, and a
-  notification panel that stays anchored inside the window.
-- Older conversation history loads in batches of 40 instead of rendering the
-  entire archive at once, keeping large workspaces responsive while preserving
-  access to every chat.
-- Completed-work receipts open as compact summaries. Terminal output stays
-  collapsed until requested, and one **Expand output** action can reveal or
-  collapse every terminal result in the receipt.
-- Message copy and retry actions are easier to find, user messages can be copied
-  directly, and the turn navigator now sits beside the reading column with
-  larger controls and clearer accessibility semantics.
-- The composer has steadier guidance and larger attachment, dictation, model,
-  context, and send targets. Windows commands display readable path separators,
-  while copied command text remains unchanged.
-- The new-chat launchpad makes better use of wide panes, falls back to a calm
-  single-column layout in split view, and gives **Switch folder**, **View
-  activity**, and **Continue** actions more deliberate emphasis.
-- Workspace transitions now use a structured loading skeleton, status actions
-  announce what they open, and natural-language lists keep their intended
-  single-column reading order.
 
 ## Known issues
 
