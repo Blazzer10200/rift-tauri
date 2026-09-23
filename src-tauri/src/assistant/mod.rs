@@ -28,6 +28,7 @@ pub mod news;
 pub mod nothink;
 pub mod oneshot;
 pub mod openai;
+pub mod pending;
 pub mod permission;
 pub mod proc_tree;
 pub mod projects;
