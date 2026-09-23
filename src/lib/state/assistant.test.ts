@@ -663,6 +663,7 @@ describe("pane/workspace identity isolation", () => {
     invokeMock.mockImplementation(async (cmd: string, args?: any) => {
       if (cmd === "assistant_set_tab_root") return args.path;
       if (cmd === "assistant_set_root") return { current: args.path, recent: [args.path] };
+      if (cmd === "assistant_clear_root") return { current: null, recent: (assistant as any).workspace.recent };
       if (cmd === "assistant_get_workspace") return (assistant as any).workspace;
       if (cmd === "assistant_session_cwd") return null;
       return undefined;
@@ -698,6 +699,21 @@ describe("pane/workspace identity isolation", () => {
     ]);
     // All is a history view only; it never becomes a path/project identity.
     expect(shell.conversationScope).toEqual({ kind: "all" });
+  });
+
+  it("No project clears the new-chat default and un-roots only an empty focused tab", async () => {
+    const busyId = await assistant.newTab();
+    assistant.tabFor(busyId)!.messages.push({ role: "user", blocks: [{ type: "text", text: "hi" }] } as any);
+    await assistant.clearRoot();
+    expect(assistant.workspaceCurrent).toBeNull();
+    // A conversation with history keeps the folder its session lives in.
+    expect(assistant.tabFor(busyId)!.workspaceRoot).toBe("C:/proj/a");
+
+    const freshId = await assistant.newTab();
+    // newTab inherits the focused tab's root; clearRoot then un-roots it.
+    expect(assistant.tabFor(freshId)!.workspaceRoot).toBe("C:/proj/a");
+    await assistant.clearRoot();
+    expect(assistant.tabFor(freshId)!.workspaceRoot).toBeNull();
   });
 
   it("treats a null tab root as explicit local mode, not a mutable global fallback", () => {

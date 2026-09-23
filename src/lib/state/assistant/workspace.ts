@@ -42,7 +42,7 @@ type WorkspaceHost = {
   // chosen folder onto the tab rather than the global default.
   activeRoot: string | null;
   tabFor: (id: string | null) => { workspaceRoot: string | null; modelOverride: ModelSel | null } | null;
-  activeTab: { workspaceRoot: string | null; modelOverride: ModelSel | null } | null;
+  activeTab: { workspaceRoot: string | null; modelOverride: ModelSel | null; messages: readonly unknown[] } | null;
 };
 
 /** `applyPrefs: false` refreshes the workspace snapshot (recents MRU etc.)
@@ -155,6 +155,26 @@ export async function setRoot(host: WorkspaceHost, path: string): Promise<void> 
     } else {
       host.lastError = `Set workspace failed: ${msg}`;
     }
+  }
+}
+
+/** Leave the project ("No project"): clears the global new-chat default so
+ *  turns run in the local scratch workspace. Same focused-pane rule as setRoot —
+ *  but only an EMPTY focused tab follows; an existing conversation keeps its
+ *  pinned folder (its session history lives there). */
+export async function clearRoot(host: WorkspaceHost): Promise<void> {
+  try {
+    host.workspace = await invoke<WorkspaceState>("assistant_clear_root");
+    const focused = host.activeTab;
+    if (focused && focused.messages.length === 0) {
+      focused.workspaceRoot = null;
+      focused.modelOverride = loadModel(null);
+    }
+    host.workspaceFiles = [];
+    host.workspaceBranch = null;
+    host.applyWorkspacePrefs();
+  } catch (e) {
+    host.lastError = `Leave project failed: ${String(e)}`;
   }
 }
 

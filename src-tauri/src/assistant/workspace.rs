@@ -81,6 +81,19 @@ pub fn assistant_set_tab_root(path: String) -> Result<String, String> {
     Ok(canonical.to_string_lossy().into_owned())
 }
 
+/// Leave the project: clear the global new-chat default so turns run in the
+/// local scratch workspace (`local_scratch_dir`, full tools). Restored for the
+/// sidebar's "No project" entry after #81 removed it as uncalled; the scratch
+/// fallback that landed since means folderless no longer degrades the assistant.
+#[tauri::command]
+pub fn assistant_clear_root() -> Result<WorkspaceState, String> {
+    let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let mut cfg = load_config();
+    cfg.current_root = None;
+    save_config(&cfg)?;
+    Ok(workspace_state_from(&cfg))
+}
+
 #[tauri::command]
 pub fn assistant_remove_recent_root(path: String) -> Result<WorkspaceState, String> {
     let _cfg_guard = CONFIG_WRITE_LOCK.lock().unwrap_or_else(|p| p.into_inner());

@@ -33,6 +33,10 @@
   instead of full debug info). Vite skips watching docs, scripts, and other
   non-app folders and pre-warms the app shell, and `npm run cdp:dev`
   reports a ready window a few seconds sooner.
+- **No project** replaces "All chats" in the sidebar switcher. It is a
+  folderless chat mode, like Claude desktop's: new chats run in your Rift
+  Workspace folder with full tools, and the sidebar lists every project's
+  chats with their project tags. An open conversation keeps its own folder.
 - Chat blocks are one family now. Terminal runs, diffs, agents, plans,
   web lookups, reasoning, code blocks, and saved-history tool chips share
   one set of shapes, borders, headers, and badges. State is shown the same way

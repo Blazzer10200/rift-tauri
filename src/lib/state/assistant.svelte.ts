@@ -119,6 +119,7 @@ import {
   pickTabFolder as wsPickTabFolder,
   setTabRoot as wsSetTabRoot,
   setRoot as wsSetRoot,
+  clearRoot as wsClearRoot,
   removeRecentRoot as wsRemoveRecentRoot,
   loadWorkspaceFiles as wsLoadFiles,
   loadWorkspaceBranch as wsLoadBranch,
@@ -1925,6 +1926,7 @@ class AssistantStore {
     this.thinkingEnabled = loadThinkingEnabled(ws);
   }
   setRoot(path: string) { return wsSetRoot(this, path); }
+  clearRoot() { return wsClearRoot(this); }
   /** Per-pane folder picker / setter — scopes the chosen folder to one tab. */
   pickTabFolder(tabId: string | null) { return wsPickTabFolder(this, tabId); }
   setTabRoot(tabId: string | null, path: string) { return wsSetTabRoot(this, tabId, path); }

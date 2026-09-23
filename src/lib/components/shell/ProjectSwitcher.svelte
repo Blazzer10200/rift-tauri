@@ -2,7 +2,7 @@
   // Sidebar workspace identity and the single owner of conversation scope. The
   // trigger shows the active project (or All), while its menu preserves focused
   // open, split-open, drag-to-pane, and new-project actions.
-  import { ChevronsUpDown, Plus, SplitSquareHorizontal, FolderOpen, ArrowRight, Layers, GitBranch, Check } from "@lucide/svelte";
+  import { ChevronsUpDown, Plus, SplitSquareHorizontal, FolderOpen, ArrowRight, MessageSquare, GitBranch, Check } from "@lucide/svelte";
   import { projects, projectRootKey } from "$lib/state/projects.svelte";
   import type { Project } from "$lib/state/assistant/types";
   import { assistant } from "$lib/state/assistant.svelte";
@@ -22,6 +22,8 @@
   const isActive = (p: Project) => !!activeKey && projectRootKey(p.root) === activeKey;
   const monogram = (name: string) => (name.trim().match(/[a-z0-9]/i)?.[0] ?? "·").toUpperCase();
   const activeProject = $derived(list.find(isActive) ?? null);
+  // The focused chat has no folder → Rift's folderless "No project" mode.
+  const noProject = $derived(!activeKey);
   const activeHue = $derived(projectHue(activeProject?.name ?? "·"));
   // `assistant.workspaceBranch` is the FOCUSED-tab store field: it transiently
   // clears whenever a non-chat surface (Settings, AI Health) mounts and the
@@ -80,9 +82,18 @@
     workspace.setActive("chat");
     await assistant.openProjectInPane(p.root, { splitNew: true });
   }
-  function chooseAll() {
+  // "No project" — Claude-desktop-style folderless chat. Leaves the project so
+  // new chats run in Rift's local scratch workspace (full tools), and the list
+  // shows every project's chats since there's no project to scope to. Mint the
+  // fresh chat FIRST: clearRoot only un-roots an empty focused tab, so an open
+  // conversation keeps the folder its session lives in.
+  async function chooseNoProject() {
     closeMenu();
-    shell.setAllProjects(true);
+    shell.setAllProjects(false);
+    workspace.setActive("chat");
+    const t = assistant.activeTab;
+    if (!t || t.messages.length > 0) await assistant.newTab();
+    await assistant.clearRoot();
   }
   function newProject() {
     closeMenu();
@@ -137,16 +148,16 @@
   aria-haspopup="menu"
   aria-expanded={menuOpen}
 >
-  <span class="sw-mono" class:all={shell.allProjects} style="--ph:{activeHue}">
-    {#if shell.allProjects}<Layers size={14} />{:else}{monogram(activeProject?.name ?? "·")}{/if}
+  <span class="sw-mono" class:all={noProject} style="--ph:{activeHue}">
+    {#if noProject}<MessageSquare size={14} />{:else}{monogram(activeProject?.name ?? "·")}{/if}
   </span>
   <span class="sw-meta">
-    <span class="sw-name">{shell.allProjects ? "All chats" : (activeProject?.name ?? "No project")}</span>
+    <span class="sw-name">{noProject ? "No project" : (activeProject?.name ?? "Unsaved folder")}</span>
     <span class="sw-sub">
-      {#if !shell.allProjects && branch}
+      {#if noProject}
+        <span class="sw-dim">All chats · no folder</span>
+      {:else if branch}
         <span class="branch"><GitBranch size={9} />{branch}</span>
-      {:else if shell.allProjects}
-        <span class="sw-dim">Every project's chats</span>
       {:else}
         <span class="sw-dim">Local workspace</span>
       {/if}
@@ -160,13 +171,14 @@
   <div class="sw-menu" use:portal style="left:{menuPos.x}px; top:{menuPos.y}px; min-width:{menuPos.w}px" role="menu" tabindex="-1">
     <button
       class="sw-item all"
-      class:on={shell.allProjects}
+      class:on={noProject}
       type="button" role="menuitem"
-      onclick={(e) => { e.stopPropagation(); chooseAll(); }}
+      onclick={(e) => { e.stopPropagation(); void chooseNoProject(); }}
+      use:tooltip={"Chat without a folder — every project's chats in the list"}
     >
-      <span class="sw-item-mk mk-all"><Layers size={13} /></span>
-      <span class="sw-item-nm">All chats</span>
-      {#if shell.allProjects}<Check size={14} class="sw-item-ck" />{/if}
+      <span class="sw-item-mk mk-all"><MessageSquare size={13} /></span>
+      <span class="sw-item-nm">No project</span>
+      {#if noProject}<Check size={14} class="sw-item-ck" />{/if}
     </button>
 
     {#if list.length}<div class="sw-div"></div>{/if}
@@ -174,7 +186,7 @@
     {#each list as p (p.id)}
       <button
         class="sw-item"
-        class:on={!shell.allProjects && isActive(p)}
+        class:on={isActive(p)}
         type="button" role="menuitem"
         draggable="true"
         onclick={(e) => { e.stopPropagation(); void openFocused(p); }}
@@ -185,7 +197,7 @@
       >
         <span class="sw-item-mk" style="--ph:{projectHue(p.name)}">{monogram(p.name)}</span>
         <span class="sw-item-nm">{p.name}</span>
-        {#if !shell.allProjects && isActive(p)}<Check size={14} class="sw-item-ck" />{/if}
+        {#if isActive(p)}<Check size={14} class="sw-item-ck" />{/if}
       </button>
     {/each}
 

@@ -57,6 +57,9 @@
     return r ? leafName(r) : "Unfiled";
   }
   const activeKey = $derived(rootKey(assistant.activeRoot));
+  // Every project's chats are listed (No project open, or the legacy All scope)
+  // → each row carries its project tag so the mixed list stays legible.
+  const showAll = $derived(shell.allProjects || !activeKey);
 
   const groups = $derived.by<Group[]>(() => {
     const now = Date.now();
@@ -289,7 +292,7 @@
           <Clock size={9} />{qn}
         </span>
       {/if}
-      {#if shell.allProjects}
+      {#if showAll}
         {@const lbl = projLabel(c.workspaceRoot)}
         <span class="crow-proj" style="--ph:{projectHue(lbl)}" title={c.workspaceRoot ?? "Unfiled"}>{lbl}</span>
       {/if}
@@ -346,7 +349,7 @@
     <!-- Most-recent day (+ pinned) render FLAT, no date header — implied default.
          Keyed on the scope toggle so flipping This/All remounts the rows and
          replays the stagger-in cascade. -->
-    {#key shell.allProjects}
+    {#key showAll}
       {#each recentGroups as g (g.label)}
         {#if g.label === "Pinned"}<div class="conv-group-label plain"><span class="cgl-txt">Pinned</span></div>
         {:else if g.label !== firstDayLabel}<div class="conv-group-label plain"><span class="cgl-txt">{g.label}</span><span class="cgl-ct">{g.items.length}</span></div>{/if}
