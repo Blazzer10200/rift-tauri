@@ -269,37 +269,65 @@
          branded so the cold "Welcome to Rift" can't flash for a frame before the
          real Home greeting lands (the bug: empty `workspace.current` on reload). -->
     <div class="wel-boot" aria-hidden="true"></div>
-  {:else}
-    <!-- No folder open — branded welcome: viewfinder open-folder target, recents, orientation primer. -->
-    <div class="wel-inner welcome-cold">
-      {#if assistant.isLocalMode}
-        <!-- Local scratch active — no project folder, but turns run with full
-             tools in Documents\Rift Workspace (legacy %LOCALAPPDATA%\Rift\local).
-             The path chip opens it in Explorer; the "Open a project" CTA + recents
-             below let the user switch to a real repo whenever they want. -->
-        <div class="welcome-hero local-hero">
-          <div class="welcome-mark local-mark"><HardDrive size={28} /></div>
-          <h1 class="welcome-title">Working locally</h1>
-          <p class="welcome-tag">No project folder — just start chatting. Everything the assistant makes lands in your Rift Workspace folder, right in Documents. Open a folder below to switch to a real project.</p>
-          {#if assistant.localScratchPath}
-            <button
-              class="local-path"
-              type="button"
-              onclick={() => { const p = assistant.localScratchPath; if (p) void openPath(p); }}
-              use:tooltip={"Show these files in Explorer"}
-            >
-              <Folder size={12} /><span>{shortPath(assistant.localScratchPath)}</span>
-            </button>
-          {/if}
+  {:else if assistant.isLocalMode}
+    <!-- No project ("Working locally"): turns run with full tools in
+         Documents\Rift Workspace. Same launchpad as a project home — greeting,
+         one context row, a short recent list — so it fits above the composer
+         without scrolling. The tall first-run welcome below is for the
+         tool-less no-folder case only (owner call 2026-09-22: no scrolling). -->
+    <div class="wel-inner home-launchpad">
+      <div class="launch-main">
+        <div class="greet">
+          <span class="greet-eyebrow"><span class="ge-dot"></span>{greet}</span>
+          <h1 class="greet-title">What's on your mind?</h1>
         </div>
-      {:else}
-        <!-- Hero — logo over a soft accent aura + a vertical "rift" seam of light. -->
-        <div class="welcome-hero">
-          <div class="welcome-mark"><RiftLogo size={32} /></div>
-          <h1 class="welcome-title">Welcome to Rift</h1>
-          <p class="welcome-tag">{RIFT_TAGLINE}</p>
+        <div class="ctx-row">
+          <span class="ctx-facts">
+            <span class="ctx-chip"><MessageSquare size={11} /><span class="cc-label">No project</span></span>
+            {#if assistant.localScratchPath}
+              <button
+                class="ctx-chip"
+                type="button"
+                onclick={() => { const p = assistant.localScratchPath; if (p) void openPath(p); }}
+                use:tooltip={`Files from these chats are saved here. Click to open.\n${assistant.localScratchPath}`}
+              ><HardDrive size={11} /><span class="cc-label">Saves to Rift Workspace</span></button>
+            {/if}
+          </span>
+          <span class="ctx-actions">
+            <button class="greet-switch" type="button" onclick={() => void assistant.pickTabFolder(tabId)}>
+              <FolderOpen size={13} /> Open a project
+            </button>
+          </span>
+        </div>
+      </div>
+
+      {#if recents.length > 0}
+        <div class="resume">
+          <div class="wo-label">Recent projects</div>
+          <div class="resume-list">
+            {#each recents.slice(0, 3) as r (r)}
+              <button class="resume-item" type="button" onclick={() => void assistant.setTabRoot(tabId, r)} use:tooltip={r}>
+                <Folder size={13} />
+                <span class="ri-t">{leafName(r)}</span>
+                <span class="ri-m">{shortPath(r)}</span>
+                <span class="ri-act">Open</span>
+                <ChevronRight size={13} class="ri-go" />
+              </button>
+            {/each}
+          </div>
         </div>
       {/if}
+    </div>
+  {:else}
+    <!-- No folder and no scratch workspace (tool-less) — first-run welcome:
+         viewfinder open-folder target, recents, orientation primer. -->
+    <div class="wel-inner welcome-cold">
+      <!-- Hero — logo over a soft accent aura + a vertical "rift" seam of light. -->
+      <div class="welcome-hero">
+        <div class="welcome-mark"><RiftLogo size={32} /></div>
+        <h1 class="welcome-title">Welcome to Rift</h1>
+        <p class="welcome-tag">{RIFT_TAGLINE}</p>
+      </div>
 
       <!-- Open-folder action — a crafted viewfinder target + recents. -->
       <div class="openfolder">
@@ -554,15 +582,6 @@
     border: 1px solid var(--ghost-border);
     box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.06), 0 14px 34px -16px color-mix(in oklab, var(--accent) 60%, transparent);
   }
-  .local-mark { color: color-mix(in oklab, var(--accent) 80%, var(--fg)); }
-  /* Quiet mono path chip under the local-hero tag — opens the folder in Explorer. */
-  .local-path {
-    display: inline-flex; align-items: center; gap: 6px; margin-top: 10px;
-    padding: 4px 10px; border-radius: 7px; cursor: pointer;
-    border: 1px solid var(--border); background: var(--bg-inset);
-    color: var(--fg-subtle); font-family: var(--font-mono); font-size: 11px;
-  }
-  .local-path:hover { color: var(--fg-2); border-color: var(--border-strong); background: var(--bg-elev-1); }
   .welcome-title { margin: 5px 0 0; font-size: 28px; font-weight: 600; letter-spacing: -0.024em; color: var(--fg); }
   .welcome-tag {
     margin: 0; max-width: 44ch; color: var(--fg-subtle); font-size: 13.5px;
