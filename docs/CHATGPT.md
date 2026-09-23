@@ -59,9 +59,10 @@ Observed catalog on 2026-08-05 (informational, not hard-coded UI policy):
 | GPT-5.4 mini | Existing compact-model chats; prefer Luna for new work | Low through X-High | Not advertised |
 | GPT-5.3 Codex Spark | Ultra-fast, focused, text-only coding | Low through X-High | Not advertised; Spark is a separate model |
 
-GPT-5.4 and GPT-5.4 mini are scheduled to leave Codex ChatGPT sign-in on
-2026-08-31. Rift displays the live catalog's upgrade target instead of silently
-changing an existing conversation.
+GPT-5.4 and GPT-5.4 mini were announced to leave Codex ChatGPT sign-in on
+2026-08-31; Rift's picker marks them retiring. Whether they are offered is
+decided by the live catalog, and Rift displays its upgrade target instead of
+silently changing an existing conversation.
 
 ## API model contract
 

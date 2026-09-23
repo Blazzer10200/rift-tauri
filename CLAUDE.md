@@ -10,16 +10,14 @@ rule changes, it changes in `AGENTS.md`.
 
 ## Start Here
 
-1. Read `AGENTS.md` — the shared contract.
-2. Read `docs/HANDOFF.md` before project work, and `docs/ISSUES.md` when the task
-   touches a known bug or deferred item. Both are gitignored working notes and
-   are absent from a fresh clone or a cloud container — that is expected, not an
-   error. Treat their absence as "no in-flight context", not as missing files to
-   recreate.
-3. `git status --short` and preserve user-owned changes.
-4. Search before creating files, components, commands, or abstractions. Rift has
-   deliberately removed whole subsystems; `docs/ARCHITECTURE.md` closes with the
-   list that must stay removed. Git history is the archive.
+Read `AGENTS.md` first and follow its Start Here steps. Two Claude-specific
+notes on top of it:
+
+- `docs/HANDOFF.md` and `docs/ISSUES.md` are gitignored working notes, absent
+  from a fresh clone or a cloud container — that is expected, not an error.
+  Treat their absence as "no in-flight context," not as files to recreate.
+- `docs/ARCHITECTURE.md` closes with the list of subsystems that must stay
+  removed; check it before recreating anything Rift has deliberately dropped.
 
 ## Orientation
 
@@ -73,10 +71,10 @@ bridge's commands.
 ## Honesty Requirements
 
 Rift's docs are precise, and its guardrails assume that precision holds.
+AGENTS.md already covers provider-verification honesty; on top of that:
 
-- Do not call a provider path verified until its real authenticated route ran. A
-  passing contract test is not a live account call.
-- Do not report a gate as passing that you could not run in this environment.
+- Do not report a gate as passing that you could not run in this environment
+  (see Verification above).
 - Prefer deleting state that has gone write-only over migrating it. The repo has
   a track record of recording such removals in the code comment that replaces
   them; keep that habit.

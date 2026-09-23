@@ -104,13 +104,14 @@ bodies.
 
 Audit snapshots are not permanent truth; rerun them on every dependency change.
 
-- `npm audit` currently reports **0 vulnerabilities** after the lockfile's
-  PostCSS patch update.
-- `cargo audit` on the full cross-platform lockfile reports two `quick-xml
-  0.39.4` denial-of-service advisories and one `glib 0.18.5` unsoundness advisory.
-  The affected crates enter through Linux Wayland/GTK dependencies and are not
-  present in the active Windows target graph. Re-evaluate and upgrade them before
-  shipping a Linux build.
-- Cargo also reports 19 allowed transitive warnings, including non-Windows
-  GTK3 crates and upstream crates used by Tauri, Velopack, and speech tooling.
-  These remain tracked dependency risk rather than direct Rift code.
+- `npm audit` currently reports **0 vulnerabilities**.
+- `cargo audit` on the full cross-platform lockfile reports one vulnerability:
+  `rustls 0.23.43` (RUSTSEC-2026-0285, medium, TLS 1.3 handshake messages
+  accepted across encryption-level boundaries; fix is `>=0.23.45`). Unlike prior
+  findings, this crate is in the active Windows graph (`reqwest` → `tauri`,
+  `velopack`, `ort`), so it needs an upgrade, not a Linux-only deferral.
+- Cargo also reports 9 allowed transitive warnings: unmaintained `derivative`,
+  `paste`, `proc-macro-error`, and four `unic-*` Unicode crates, plus a
+  `glib 0.18.5` unsoundness advisory that enters only through non-Windows
+  GTK/Wayland dependencies. These remain tracked dependency risk rather than
+  direct Rift code.

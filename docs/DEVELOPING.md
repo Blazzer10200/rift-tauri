@@ -130,9 +130,10 @@ Server. Turns use `initialize`, thread start/resume, and turn start. Rift maps
 streamed text, reasoning, command output, file patches, tool progress, plans,
 approvals, questions, usage, and cancellation into its shared UI while
 persisting only the Codex thread ID. Multi-path file items must remain one card
-per path, and completed items must replace partial state. Rift never reads or
-copies Codex credential files. Model capabilities come from live `model/list`;
-never replace them with a static guessed effort or Fast table.
+per path, and completed items must replace partial state. Model capabilities
+come from live `model/list`; never replace them with a static guessed effort or
+Fast table. Credential and workspace boundaries are in
+[`SECURITY.md`](SECURITY.md#provider-routes).
 
 When App Server event or item shapes change, update the adapter's focused Rust
 contracts plus the frontend playback/diff tests. Generate a fresh schema from
@@ -142,24 +143,23 @@ schemas or infer failure from nullable field presence.
 ### OpenAI API
 
 The optional API route uses `/v1/responses` with streaming and `store: false`.
-Its key lives in Windows Credential Manager. Rift owns the canonical Responses
-history locally, including opaque items required for continuation. Environment
-`OPENAI_API_KEY` values are not silently adopted.
+Rift owns the canonical Responses history locally, including opaque items
+required for continuation. Environment `OPENAI_API_KEY` values are not
+silently adopted.
 
 API model capabilities are reviewed metadata because `/v1/models` reports
 access but not context windows, effort ranges, or Priority-processing support.
 Unknown account-visible models keep unverified capabilities disabled until the
 registry is updated from official model docs.
 
-Each GPT conversation pins one of these two routes on its first turn. If that
-route later becomes unavailable, Rift fails visibly instead of switching billing
-paths.
+Each GPT conversation pins one of the ChatGPT/OpenAI routes on its first turn
+and never switches billing paths silently — see
+[`SECURITY.md`](SECURITY.md#provider-routes).
 
 ### Claude
 
 Claude turns use the official CLI with Rift's workspace-scoped stdio MCP server.
 The prompt travels over stdin, and the CLI owns continuation through session IDs.
-An optional Anthropic key saved in Rift is isolated from the OpenAI key slot.
 
 ## Releases
 
