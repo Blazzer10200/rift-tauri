@@ -282,33 +282,16 @@ pub async fn assistant_list_workspace_files(root: Option<String>) -> Result<Vec<
 /// list_workspace_files_sync). Callers on a Tokio thread MUST wrap in
 /// spawn_blocking — this does real subprocess I/O.
 pub fn workspace_branch_sync(root: &std::path::Path) -> Option<String> {
-    let mut cmd = std::process::Command::new("git");
-    cmd.current_dir(root)
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_ASKPASS", "")
-        // Mirror run_git's env hardening posture (git_local.rs): strip the env
-        // vars that could redirect the git binary (GIT_EXEC_PATH), inject config
-        // (GIT_CONFIG_*), or repoint the repo/work-tree out from under us. A
-        // read-only rev-parse is low-risk, but the parity keeps the defense
-        // consistent across every git invocation.
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_EXEC_PATH")
-        .env_remove("GIT_CONFIG_GLOBAL")
-        .env_remove("GIT_CONFIG_SYSTEM")
-        .env("GIT_CONFIG_NOSYSTEM", "1");
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    let out = cmd.output().ok()?;
-    if !out.status.success() {
+    // Routed through run_git (git_local.rs) instead of building our own git
+    // Command: that's the one place the env hardening (stripped
+    // GIT_DIR/GIT_WORK_TREE/GIT_EXEC_PATH/GIT_CONFIG_*, GIT_CONFIG_NOSYSTEM,
+    // no terminal prompt, CREATE_NO_WINDOW) lives, so a read-only rev-parse
+    // here can't quietly drift out of parity with it.
+    let out = super::git_local::run_git(root, &["rev-parse", "--abbrev-ref", "HEAD"]).ok()?;
+    if !out.ok() {
         return None;
     }
-    let branch = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let branch = out.stdout.trim().to_string();
     if branch.is_empty() || branch == "HEAD" {
         None
     } else {

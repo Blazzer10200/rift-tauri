@@ -156,50 +156,88 @@ fn where_claude_lines() -> Vec<String> {
     }
 }
 
-/// The user's real npm global prefix (`npm config get prefix`), so we probe the
-/// ACTUAL node_modules drop-site, not just the default `%APPDATA%\npm`. A user
-/// who ran `npm config set prefix D:\tools` installs claude elsewhere. None when
-/// npm isn't runnable; the caller falls back to the default site.
-#[cfg(windows)]
-fn npm_global_prefix() -> Option<PathBuf> {
+/// Why a bounded spawn (`run_bounded`) didn't produce output. Only `Timeout`
+/// is distinguished to callers — each logs its own message on that path — the
+/// rest collapse to `None` same as before this was factored out.
+enum BoundedSpawnErr {
+    /// Spawn itself failed (binary missing, permissions, …).
+    Spawn,
+    /// Deadline hit before the child exited; already killed + reaped.
+    Timeout,
+    /// try_wait() I/O error, or stdout couldn't be read back.
+    Io,
+}
+
+/// Spawn `cmd` (already fully configured — stdio, creation flags, env, args),
+/// poll `try_wait` until it exits or `timeout` elapses, and on timeout kill +
+/// reap the child so it can't linger as a zombie/hung process. On success,
+/// returns the exit status plus stdout collected via `cmd`'s piped stdout.
+/// Shared bounded-spawn loop for `npm_global_prefix` and `probe_version_at` —
+/// both need "run this, don't let it hang the turn-send / first-run path
+/// forever" with the exact same poll/kill mechanics.
+fn run_bounded(
+    mut cmd: std::process::Command,
+    timeout: std::time::Duration,
+) -> Result<(std::process::ExitStatus, String), BoundedSpawnErr> {
     use std::io::Read;
-    use std::os::windows::process::CommandExt;
-    use std::time::{Duration, Instant};
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    // Bounded like probe_version_at: a hung npm (AV first-run scan, broken
-    // config prompting) otherwise blocks forever — and this sits on the
-    // turn-send cache-miss path, presenting as "Send spins forever".
-    let mut child = std::process::Command::new("npm.cmd")
-        .args(["config", "get", "prefix"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn()
-        .ok()?;
-    let deadline = Instant::now() + Duration::from_secs(5);
+    use std::time::Instant;
+    let mut child = cmd.spawn().map_err(|_| BoundedSpawnErr::Spawn)?;
+    let deadline = Instant::now() + timeout;
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if Instant::now() >= deadline => {
                 let _ = child.kill();
                 let _ = child.wait();
-                log::warn!("npm config get prefix timed out after 5s");
-                return None;
+                return Err(BoundedSpawnErr::Timeout);
             }
-            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
             Err(_) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return None;
+                return Err(BoundedSpawnErr::Io);
             }
         }
+    };
+    let mut s = String::new();
+    child
+        .stdout
+        .take()
+        .ok_or(BoundedSpawnErr::Io)?
+        .read_to_string(&mut s)
+        .map_err(|_| BoundedSpawnErr::Io)?;
+    Ok((status, s))
+}
+
+/// The user's real npm global prefix (`npm config get prefix`), so we probe the
+/// ACTUAL node_modules drop-site, not just the default `%APPDATA%\npm`. A user
+/// who ran `npm config set prefix D:\tools` installs claude elsewhere. None when
+/// npm isn't runnable; the caller falls back to the default site.
+#[cfg(windows)]
+fn npm_global_prefix() -> Option<PathBuf> {
+    use std::os::windows::process::CommandExt;
+    use std::time::Duration;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    // Bounded like probe_version_at: a hung npm (AV first-run scan, broken
+    // config prompting) otherwise blocks forever — and this sits on the
+    // turn-send cache-miss path, presenting as "Send spins forever".
+    let mut cmd = std::process::Command::new("npm.cmd");
+    cmd.args(["config", "get", "prefix"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW);
+    let (status, s) = match run_bounded(cmd, Duration::from_secs(5)) {
+        Ok(r) => r,
+        Err(BoundedSpawnErr::Timeout) => {
+            log::warn!("npm config get prefix timed out after 5s");
+            return None;
+        }
+        Err(_) => return None,
     };
     if !status.success() {
         return None;
     }
-    let mut s = String::new();
-    child.stdout.take()?.read_to_string(&mut s).ok()?;
     let s = s.trim().to_string();
     if s.is_empty() || s == "undefined" {
         return None;
@@ -243,8 +281,7 @@ fn classify_install_method(p: &Path) -> &'static str {
 /// Bounded at 5s — a hung binary here used to block the auth probe (and with it
 /// the first-run gate) forever.
 fn probe_version_at(exe: &Path) -> Option<String> {
-    use std::io::Read;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
     let mut cmd = std::process::Command::new(exe);
     cmd.arg("--version")
         .stdin(Stdio::null())
@@ -257,30 +294,17 @@ fn probe_version_at(exe: &Path) -> Option<String> {
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    let mut child = cmd.spawn().ok()?;
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                log::warn!("claude --version timed out after 5s: {}", exe.display());
-                return None;
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
-            Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
+    let (status, s) = match run_bounded(cmd, Duration::from_secs(5)) {
+        Ok(r) => r,
+        Err(BoundedSpawnErr::Timeout) => {
+            log::warn!("claude --version timed out after 5s: {}", exe.display());
+            return None;
         }
+        Err(_) => return None,
     };
     if !status.success() {
         return None;
     }
-    let mut s = String::new();
-    child.stdout.take()?.read_to_string(&mut s).ok()?;
     let s = s.trim().to_string();
     (!s.is_empty()).then_some(s)
 }
@@ -723,5 +747,21 @@ mod tests {
         assert_eq!(parse_semver("claude 1.10.0 (Claude Code)"), Some((1, 10, 0)));
         assert_eq!(parse_semver("not a version"), None);
         assert_eq!(parse_semver("1.2"), None, "needs all three components");
+    }
+
+    /// A slow child (ping -n 5 = ~4s of pings) against a short deadline must
+    /// hit the Timeout path, not just eventually succeed — proves the
+    /// kill-on-timeout branch actually fires rather than the poll loop
+    /// quietly outliving a generous deadline.
+    #[cfg(windows)]
+    #[test]
+    fn run_bounded_kills_on_timeout() {
+        let mut cmd = std::process::Command::new("ping");
+        cmd.args(["-n", "5", "127.0.0.1"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        let result = run_bounded(cmd, std::time::Duration::from_millis(200));
+        assert!(matches!(result, Err(BoundedSpawnErr::Timeout)));
     }
 }
