@@ -105,12 +105,10 @@ bodies.
 Audit snapshots are not permanent truth; rerun them on every dependency change.
 
 - `npm audit` currently reports **0 vulnerabilities**.
-- `cargo audit` on the full cross-platform lockfile reports one vulnerability:
-  `rustls 0.23.43` (RUSTSEC-2026-0285, medium, TLS 1.3 handshake messages
-  accepted across encryption-level boundaries; fix is `>=0.23.45`). Unlike prior
-  findings, this crate is in the active Windows graph (`reqwest` → `tauri`,
-  `velopack`, `ort`), so it needs an upgrade, not a Linux-only deferral.
-- Cargo also reports 9 allowed transitive warnings: unmaintained `derivative`,
+- `cargo audit` on the full cross-platform lockfile reports **0
+  vulnerabilities** (2026-09-22, after `rustls` 0.23.43 → 0.23.45 cleared
+  RUSTSEC-2026-0285).
+- Cargo reports 9 allowed transitive warnings: unmaintained `derivative`,
   `paste`, `proc-macro-error`, and four `unic-*` Unicode crates, plus a
   `glib 0.18.5` unsoundness advisory that enters only through non-Windows
   GTK/Wayland dependencies. These remain tracked dependency risk rather than
