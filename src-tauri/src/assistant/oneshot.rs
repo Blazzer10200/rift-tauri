@@ -89,6 +89,149 @@ pub(crate) fn kill_all_enhance_children() {
     }
 }
 
+/// Error from [`run_oneshot_read`]: a hard timeout (the caller decides the
+/// exact message and any extra cleanup, e.g. enhance's PID-registry entry) vs
+/// everything else (`child.wait()` itself failing), which already carries its
+/// own message and can be returned to the Tauri command as-is.
+enum OneshotRunError {
+    Timeout,
+    Wait(String),
+}
+
+/// Shared spawn-aftermath for a one-off headless `claude -p` call: read stdout
+/// as NDJSON against a deadline, drain stderr concurrently (capped at 8K so a
+/// chatty CLI can't deadlock the pipe), kill + reap on timeout, then hand back
+/// the exit status and stderr tail. `assistant_enhance_prompt` and
+/// `assistant_generate_title` differ on everything upstream of this (arg
+/// building, model/effort choice, enhance's PID-registry bookkeeping) and
+/// downstream of it (success/failure/cancellation mapping, text
+/// post-processing) — only the read-loop-with-deadline shape is identical, so
+/// that's all this owns. Spawning + `child.stdout`/`stderr` `.take()` stay in
+/// the caller since their error text ("enhancer stdout unavailable" vs "title
+/// stdout unavailable") is caller-specific.
+///
+/// `on_line` receives each line that parsed as JSON and decides what to keep,
+/// returning `true` to stop the loop early (mirrors both callers' `break` on a
+/// terminal `result` frame). It closes over the caller's accumulator(s),
+/// since what counts as "the text" differs: title ignores the `result`
+/// frame's text and trusts deltas only, and emits no UI events; enhance
+/// prefers the `result` frame's text, harvests cost/duration from it, and
+/// forwards tool-use + delta progress to the frontend as it streams.
+async fn run_oneshot_read(
+    mut child: tokio::process::Child,
+    stdout: tokio::process::ChildStdout,
+    stderr: tokio::process::ChildStderr,
+    op_label: &str,
+    timeout: std::time::Duration,
+    mut on_line: impl FnMut(&Value) -> bool,
+) -> Result<(std::process::ExitStatus, String), OneshotRunError> {
+    // Drain stderr concurrently so a chatty CLI can't deadlock on a full pipe
+    // while we read stdout.
+    let mut stderr_task = tokio::spawn(async move {
+        let mut buf = String::new();
+        let mut lines = BufReader::new(stderr).lines();
+        while let Ok(Some(l)) = lines.next_line().await {
+            // F4: keep draining to EOF even past the cap — `break`ing would let
+            // the child's stderr pipe fill and deadlock it on wait().
+            if buf.len() <= 8192 {
+                buf.push_str(&l);
+                buf.push('\n');
+            }
+        }
+        buf
+    });
+
+    let read_wait = async {
+        let mut lines = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Ok(v) = serde_json::from_str::<Value>(trimmed) else {
+                continue;
+            };
+            if on_line(&v) {
+                break;
+            }
+        }
+        child
+            .wait()
+            .await
+            .map_err(|e| format!("await claude ({op_label}): {e}"))
+    };
+
+    let status = match tokio::time::timeout(timeout, read_wait).await {
+        Ok(r) => r.map_err(OneshotRunError::Wait)?,
+        Err(_) => {
+            let _ = child.start_kill();
+            // Reap the killed child — start_kill alone drops the handle
+            // un-waited (turn.rs::loop_cleanup pairs kill+wait for the same
+            // reason).
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await;
+            stderr_task.abort();
+            return Err(OneshotRunError::Timeout);
+        }
+    };
+
+    // RR-7: surface a panicked stderr-drain task instead of unwrap_or_default()
+    // collapsing it to an empty body (which then reads as a reasonless failure).
+    // RR7 (round 7): bound the drain — a grandchild that inherited the stderr
+    // pipe could otherwise keep it open and wedge this await forever on Windows.
+    const DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
+    let stderr_buf = match tokio::time::timeout(DRAIN_TIMEOUT, &mut stderr_task).await {
+        Ok(Ok(buf)) => buf,
+        Ok(Err(e)) => {
+            log::error!("{op_label} stderr drain task panicked: {e}");
+            format!("(stderr drain task panicked: {e})")
+        }
+        Err(_) => {
+            log::warn!("{op_label} stderr drain timed out (inherited pipe held by a background process?)");
+            stderr_task.abort();
+            String::new()
+        }
+    };
+    Ok((status, stderr_buf))
+}
+
+/// Pulls the incremental text out of a `stream_event` NDJSON line if it's a
+/// `content_block_delta` `text_delta` frame — the one piece of stream-json
+/// extraction enhance and title agree on. They diverge on everything else:
+/// whether a terminal `result` frame's text wins (enhance does; title ignores
+/// it and trusts deltas only) and whether other frame types get forwarded to
+/// the UI (enhance's tool-use progress events; title has none).
+fn extract_text_delta(v: &Value) -> Option<&str> {
+    if v.get("type").and_then(|t| t.as_str()) != Some("stream_event") {
+        return None;
+    }
+    let ev = v.get("event")?;
+    if ev.get("type").and_then(|t| t.as_str()) != Some("content_block_delta") {
+        return None;
+    }
+    let delta = ev.get("delta")?;
+    if delta.get("type").and_then(|t| t.as_str()) != Some("text_delta") {
+        return None;
+    }
+    delta.get("text").and_then(|t| t.as_str())
+}
+
+/// Sanitizes a raw title completion into the short phrase the UI expects:
+/// first line only (a well-behaved model returns exactly one), strip wrapping
+/// quotes, cap length. Guards against a stray quote or trailing newline from
+/// an otherwise-compliant model.
+fn sanitize_title(raw: &str) -> String {
+    raw.trim()
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .trim_matches(|c| c == '"' || c == '\'')
+        .trim()
+        .chars()
+        .take(80)
+        .collect()
+}
+
 /// Cancel an in-flight enhance: tree-kill its CLI child. The running
 /// `assistant_enhance_prompt` sees its registry entry gone after wait() and
 /// resolves as cancelled instead of surfacing the kill as an error.
@@ -301,158 +444,103 @@ names), then output the rewritten prompt. Keep lookups minimal."
     let stdout = child.stdout.take().ok_or("enhancer stdout unavailable")?;
     let stderr = child.stderr.take().ok_or("enhancer stderr unavailable")?;
 
-    // Drain stderr concurrently so a chatty CLI can't deadlock on a full pipe
-    // while we read stdout. Bounded — the enhancer's stderr is tiny.
-    let mut stderr_task = tokio::spawn(async move {
-        let mut buf = String::new();
-        let mut lines = BufReader::new(stderr).lines();
-        while let Ok(Some(l)) = lines.next_line().await {
-            // F4: keep draining to EOF even past the cap — `break`ing would let
-            // the child's stderr pipe fill and deadlock it on wait().
-            if buf.len() <= 8192 {
-                buf.push_str(&l);
-                buf.push('\n');
-            }
-        }
-        buf
-    });
-
     // Read NDJSON stdout, forward each `text_delta` to the UI as it lands, and
-    // accumulate the full rewrite as the authoritative return value.
+    // accumulate the full rewrite as the authoritative return value. Overall
+    // wall-clock budget on the read+wait, mirroring title (30s) and analyze
+    // (90s). The grounded path is multi-turn (--max-turns 6) and can call MCP
+    // tools, so a hung tool/subprocess or stalled CLI would otherwise wedge
+    // this command forever (and keep a billed child alive) if the user
+    // dismisses the panel without clicking Discard. 90s matches the analyze
+    // multi-turn cap.
     let mut acc = String::new();
     let mut cost_usd: Option<f64> = None;
     let mut duration_ms: Option<u64> = None;
-    let mut lines = BufReader::new(stdout).lines();
-    // Overall wall-clock budget on the read+wait, mirroring title (30s) and
-    // analyze (90s). The grounded path is multi-turn (--max-turns 6) and can call
-    // MCP tools, so a hung tool/subprocess or stalled CLI would otherwise wedge
-    // this command forever (and keep a billed child alive) if the user dismisses
-    // the panel without clicking Discard. 90s matches the analyze multi-turn cap.
-    let read_loop = async {
-    while let Ok(Some(line)) = lines.next_line().await {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let Ok(v) = serde_json::from_str::<Value>(trimmed) else {
-            continue;
-        };
-        let ty = v.get("type").and_then(|t| t.as_str());
-        // `result` is the terminal frame — harvest cost/duration + the final
-        // text, then stop. On a grounded multi-turn pass the deltas include
-        // pre-tool commentary; the frame's `result` is the last turn's text
-        // only, so it wins as the authoritative rewrite.
-        if ty == Some("result") {
-            cost_usd = v.get("total_cost_usd").and_then(|c| c.as_f64());
-            duration_ms = v.get("duration_ms").and_then(|d| d.as_u64());
-            if let Some(t) = v.get("result").and_then(|r| r.as_str()) {
-                if !t.trim().is_empty() {
-                    acc = t.to_string();
+    let (status, stderr_buf) = match run_oneshot_read(
+        child,
+        stdout,
+        stderr,
+        "enhance",
+        std::time::Duration::from_secs(90),
+        |v| {
+            let ty = v.get("type").and_then(|t| t.as_str());
+            // `result` is the terminal frame — harvest cost/duration + the
+            // final text, then stop. On a grounded multi-turn pass the deltas
+            // include pre-tool commentary; the frame's `result` is the last
+            // turn's text only, so it wins as the authoritative rewrite.
+            if ty == Some("result") {
+                cost_usd = v.get("total_cost_usd").and_then(|c| c.as_f64());
+                duration_ms = v.get("duration_ms").and_then(|d| d.as_u64());
+                if let Some(t) = v.get("result").and_then(|r| r.as_str()) {
+                    if !t.trim().is_empty() {
+                        acc = t.to_string();
+                    }
                 }
+                return true;
             }
-            break;
-        }
-        // Grounded pass: surface each workspace lookup as a status line so the
-        // panel shows live progress instead of a static "Consulting workspace…".
-        if ty == Some("assistant") {
-            let blocks = v
-                .pointer("/message/content")
-                .and_then(|c| c.as_array())
-                .cloned()
-                .unwrap_or_default();
-            for b in blocks {
-                if b.get("type").and_then(|t| t.as_str()) != Some("tool_use") {
-                    continue;
+            // Grounded pass: surface each workspace lookup as a status line so
+            // the panel shows live progress instead of a static "Consulting
+            // workspace…".
+            if ty == Some("assistant") {
+                let blocks = v
+                    .pointer("/message/content")
+                    .and_then(|c| c.as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                for b in blocks {
+                    if b.get("type").and_then(|t| t.as_str()) != Some("tool_use") {
+                        continue;
+                    }
+                    let name = b.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                    let input = b.get("input");
+                    let arg = |k: &str| {
+                        input
+                            .and_then(|i| i.get(k))
+                            .and_then(|p| p.as_str())
+                            .unwrap_or("")
+                            .to_string()
+                    };
+                    let status = match name.trim_start_matches("mcp__rift__") {
+                        "read_file" => format!("Reading {}", arg("path")),
+                        "grep" => format!("Searching \"{}\"", arg("pattern")),
+                        "list_dir" => format!("Listing {}", arg("path")),
+                        other => format!("Running {other}"),
+                    };
+                    let _ = app.emit(
+                        ENHANCE_STREAM_EVENT,
+                        serde_json::json!({ "request_id": request_id, "status": status }),
+                    );
                 }
-                let name = b.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                let input = b.get("input");
-                let arg = |k: &str| {
-                    input
-                        .and_then(|i| i.get(k))
-                        .and_then(|p| p.as_str())
-                        .unwrap_or("")
-                        .to_string()
-                };
-                let status = match name.trim_start_matches("mcp__rift__") {
-                    "read_file" => format!("Reading {}", arg("path")),
-                    "grep" => format!("Searching \"{}\"", arg("pattern")),
-                    "list_dir" => format!("Listing {}", arg("path")),
-                    other => format!("Running {other}"),
-                };
+                return false;
+            }
+            if let Some(txt) = extract_text_delta(v) {
+                if txt.is_empty() {
+                    return false;
+                }
+                acc.push_str(txt);
                 let _ = app.emit(
                     ENHANCE_STREAM_EVENT,
-                    serde_json::json!({ "request_id": request_id, "status": status }),
+                    serde_json::json!({ "request_id": request_id, "delta": txt }),
                 );
             }
-            continue;
-        }
-        if ty != Some("stream_event") {
-            continue;
-        }
-        let Some(ev) = v.get("event") else { continue };
-        if ev.get("type").and_then(|t| t.as_str()) != Some("content_block_delta") {
-            continue;
-        }
-        let delta = ev.get("delta");
-        let is_text = delta.and_then(|d| d.get("type")).and_then(|t| t.as_str()) == Some("text_delta");
-        if !is_text {
-            continue;
-        }
-        if let Some(txt) = delta.and_then(|d| d.get("text")).and_then(|t| t.as_str()) {
-            if txt.is_empty() {
-                continue;
-            }
-            acc.push_str(txt);
-            let _ = app.emit(
-                ENHANCE_STREAM_EVENT,
-                serde_json::json!({ "request_id": request_id, "delta": txt }),
-            );
-        }
-    }
-    child
-        .wait()
-        .await
-        .map_err(|e| format!("await claude (enhance): {e}"))
-    };
-
-    let status = match tokio::time::timeout(std::time::Duration::from_secs(90), read_loop).await {
-        Ok(r) => r?,
-        Err(_) => {
-            let _ = child.start_kill();
-            // Reap the killed child — start_kill alone drops the handle un-waited
-            // (turn.rs::loop_cleanup pairs kill+wait for the same reason). Bounded
-            // so a kill that somehow fails can't wedge the enhance path.
-            let _ = tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await;
-            stderr_task.abort();
-            // Drop our PID entry so a later cancel doesn't double-kill a recycled PID.
+            false
+        },
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(OneshotRunError::Timeout) => {
+            // Drop our PID entry so a later cancel doesn't double-kill a
+            // recycled PID.
             with_enhance_pids(|m| m.remove(&request_id));
             return Err("prompt enhancement timed out".to_string());
         }
+        Err(OneshotRunError::Wait(e)) => return Err(e),
     };
     // Entry already gone = `assistant_enhance_cancel` took it and killed the
     // child — report the cancel, not the kill's nonzero exit, and skip the
     // empty-output error path.
     let cancelled =
         child_pid.is_some() && with_enhance_pids(|m| m.remove(&request_id)).is_none();
-    // RR-7: surface a panicked stderr-drain task instead of unwrap_or_default()
-    // collapsing it to an empty body (which then reads as a reasonless failure).
-    // RR7 (round 7): bound the drain — on the grounded enhance path the CLI can
-    // spawn subprocesses that inherit the stderr pipe write-end; on Windows those
-    // handles keep the pipe open past the parent's exit, so an unbounded await
-    // would wedge this command forever (mirrors turn.rs's DRAIN_TIMEOUT).
-    const DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
-    let stderr_buf = match tokio::time::timeout(DRAIN_TIMEOUT, &mut stderr_task).await {
-        Ok(Ok(buf)) => buf,
-        Ok(Err(e)) => {
-            log::error!("enhance stderr drain task panicked: {e}");
-            format!("(stderr drain task panicked: {e})")
-        }
-        Err(_) => {
-            log::warn!("enhance stderr drain timed out (inherited pipe held by a background process?)");
-            stderr_task.abort();
-            String::new()
-        }
-    };
     if cancelled {
         return Err("enhance cancelled".into());
     }
@@ -549,90 +637,34 @@ pub async fn assistant_generate_title(prompt: String) -> Result<String, String> 
     let stdout = child.stdout.take().ok_or("title stdout unavailable")?;
     let stderr = child.stderr.take().ok_or("title stderr unavailable")?;
 
-    let mut stderr_task = tokio::spawn(async move {
-        let mut buf = String::new();
-        let mut lines = BufReader::new(stderr).lines();
-        while let Ok(Some(l)) = lines.next_line().await {
-            // F4: keep draining to EOF even past the cap — `break`ing would let
-            // the child's stderr pipe fill and deadlock it on wait().
-            if buf.len() <= 8192 {
-                buf.push_str(&l);
-                buf.push('\n');
-            }
-        }
-        buf
-    });
-
     // Bound the whole read+wait against a wedged CLI (network stall, OAuth
     // re-prompt, broken pipe). Unlike the enhance path, title generation has no
     // cancel registry, so a hang here is unrecoverable without an app restart.
-    let read_wait = async {
-        let mut acc = String::new();
-        let mut lines = BufReader::new(stdout).lines();
-        while let Ok(Some(line)) = lines.next_line().await {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
+    // Ignore the terminal `result` frame's own text — title trusts only the
+    // streamed deltas (see `extract_text_delta`) — and just use `result` to
+    // stop the loop.
+    let mut acc = String::new();
+    let (status, stderr_buf) = match run_oneshot_read(
+        child,
+        stdout,
+        stderr,
+        "title",
+        std::time::Duration::from_secs(30),
+        |v| {
+            if v.get("type").and_then(|t| t.as_str()) == Some("result") {
+                return true;
             }
-            let Ok(v) = serde_json::from_str::<Value>(trimmed) else {
-                continue;
-            };
-            let ty = v.get("type").and_then(|t| t.as_str());
-            if ty == Some("result") {
-                break;
-            }
-            if ty != Some("stream_event") {
-                continue;
-            }
-            let Some(ev) = v.get("event") else { continue };
-            if ev.get("type").and_then(|t| t.as_str()) != Some("content_block_delta") {
-                continue;
-            }
-            let delta = ev.get("delta");
-            let is_text = delta.and_then(|d| d.get("type")).and_then(|t| t.as_str()) == Some("text_delta");
-            if !is_text {
-                continue;
-            }
-            if let Some(txt) = delta.and_then(|d| d.get("text")).and_then(|t| t.as_str()) {
+            if let Some(txt) = extract_text_delta(v) {
                 acc.push_str(txt);
             }
-        }
-        let status = child
-            .wait()
-            .await
-            .map_err(|e| format!("await claude (title): {e}"))?;
-        Ok::<_, String>((acc, status))
-    };
-
-    let (acc, status) =
-        match tokio::time::timeout(std::time::Duration::from_secs(30), read_wait).await {
-            Ok(r) => r?,
-            Err(_) => {
-                let _ = child.start_kill();
-                // Reap the killed child (see enhance path — start_kill alone
-                // drops the handle un-waited).
-                let _ = tokio::time::timeout(std::time::Duration::from_secs(5), child.wait()).await;
-                // RR7: abort the orphaned stderr drain so it doesn't keep
-                // reading the killed child's pipe in the background.
-                stderr_task.abort();
-                return Err("title generation timed out".to_string());
-            }
-        };
-    // RR-7: surface a panicked stderr-drain task (see enhance path above).
-    // RR7 (round 7): bound the drain — a grandchild that inherited the stderr
-    // pipe could otherwise keep it open and wedge this await forever on Windows.
-    const DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
-    let stderr_buf = match tokio::time::timeout(DRAIN_TIMEOUT, &mut stderr_task).await {
-        Ok(Ok(buf)) => buf,
-        Ok(Err(e)) => {
-            log::error!("title stderr drain task panicked: {e}");
-            format!("(stderr drain task panicked: {e})")
-        }
-        Err(_) => {
-            log::warn!("title stderr drain timed out (inherited pipe held by a background process?)");
-            stderr_task.abort();
-            String::new()
-        }
+            false
+        },
+    )
+    .await
+    {
+        Ok(r) => r,
+        Err(OneshotRunError::Timeout) => return Err("title generation timed out".to_string()),
+        Err(OneshotRunError::Wait(e)) => return Err(e),
     };
     if !status.success() {
         let msg = stderr_buf.trim();
@@ -642,20 +674,7 @@ pub async fn assistant_generate_title(prompt: String) -> Result<String, String> 
             format!("title failed: {msg}")
         });
     }
-    // Sanitize: first line only, strip wrapping quotes, cap length. A
-    // well-behaved model returns exactly the phrase, but guard against a
-    // stray quote or trailing newline.
-    let title = acc
-        .trim()
-        .lines()
-        .next()
-        .unwrap_or("")
-        .trim()
-        .trim_matches(|c| c == '"' || c == '\'')
-        .trim()
-        .chars()
-        .take(80)
-        .collect::<String>();
+    let title = sanitize_title(&acc);
     if title.is_empty() {
         return Err("title generation returned empty output".into());
     }
@@ -980,4 +999,62 @@ pub async fn assistant_analyze_usage(app: AppHandle, snapshot_json: String) -> R
         return Err("usage analysis returned empty output".into());
     }
     Ok(cleaned)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_text_delta_pulls_text_from_a_content_block_delta() {
+        let line: Value = serde_json::from_str(
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(extract_text_delta(&line), Some("hi"));
+    }
+
+    #[test]
+    fn extract_text_delta_ignores_non_text_deltas() {
+        let line: Value = serde_json::from_str(
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"input_json_delta","partial_json":"{}"}}}"#,
+        )
+        .unwrap();
+        assert_eq!(extract_text_delta(&line), None);
+    }
+
+    #[test]
+    fn extract_text_delta_ignores_other_frame_types() {
+        // A `result` frame (enhance's authoritative text source) must NOT be
+        // read by this helper — title relies on that to ignore it.
+        let line: Value = serde_json::from_str(r#"{"type":"result","result":"the rewrite"}"#).unwrap();
+        assert_eq!(extract_text_delta(&line), None);
+    }
+
+    #[test]
+    fn extract_text_delta_ignores_malformed_events() {
+        let line: Value = serde_json::from_str(r#"{"type":"stream_event"}"#).unwrap();
+        assert_eq!(extract_text_delta(&line), None);
+    }
+
+    #[test]
+    fn sanitize_title_strips_quotes_and_extra_lines() {
+        assert_eq!(sanitize_title("\"Fix Login Bug\"\nextra line"), "Fix Login Bug");
+    }
+
+    #[test]
+    fn sanitize_title_trims_whitespace_and_single_quotes() {
+        assert_eq!(sanitize_title("  'Project Status Check-In'  "), "Project Status Check-In");
+    }
+
+    #[test]
+    fn sanitize_title_caps_length_at_80_chars() {
+        let long = "A".repeat(200);
+        assert_eq!(sanitize_title(&long).chars().count(), 80);
+    }
+
+    #[test]
+    fn sanitize_title_empty_input_yields_empty_string() {
+        assert_eq!(sanitize_title("   \n  "), "");
+    }
 }
