@@ -56,6 +56,25 @@
 - Source tidy: the screen registry lives at `shell/workspaceRegistry.ts`,
   `Select` moved to `components/shared/`, the path-helper re-export shim is
   gone, and three unreferenced dev scripts were removed.
+- **ChatGPT turns start ~3.5s sooner.** Codex's App Server takes about 3.5
+  seconds to boot, and every ChatGPT-subscription turn used to wait for it.
+  Rift now boots one in the background while you type and hands it to your
+  next turn. It shuts down after 5 idle minutes and never starts unless a
+  ChatGPT-subscription chat is open. The ChatGPT account and limits refresh is
+  also ~0.5s faster.
+- Your chat list no longer re-reads every saved conversation after each
+  message. Only files that changed get parsed again, and one pass now feeds
+  both the list and the usage stats.
+- The Windows certificate store loads off the startup path, once instead of
+  up to four times, so the window appears sooner.
+- Rift's built-in tool server: a file in a project's **second** folder is no
+  longer reported "not found", and every tool now tells Claude whether it is
+  read-only, so safe lookups can run side by side.
+- Backend cleanup: a write-only metrics registry and an unused Windows
+  job-object prototype were removed. The permission and question prompts now
+  share one pending-request registry. `turn.rs` hands its prompt text and tool
+  allowlist to their own files, and the enhance-prompt and chat-title helpers
+  share one runner. `rustls` 0.23.45 clears RUSTSEC-2026-0285.
 
 ## v0.158.0 — Calmer chat, clearer control
 

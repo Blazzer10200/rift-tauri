@@ -34,6 +34,13 @@ stream instead of being rendered as raw protocol JSON:
 - the completed item is authoritative and replaces any partial output or patch
   accumulated during the turn.
 
+Each subscription turn runs on its own App Server process, killed when the
+turn ends. Booting one costs ~3.5s, so Rift keeps at most one pre-booted
+**spare**. The composer warms it (`assistant_codex_prewarm`) only for a tab on
+the subscription route, and it expires after 5 idle minutes. Sign-in and app
+exit drop it. The account overview always boots its own server, so a spare
+started before a sign-in can never report the old account.
+
 Typing `/` opens the route-aware command rail. Rift built-ins stay first in
 stable functional lanes; ChatGPT account skills follow alphabetically with
 their real `$skill-name` invocation. Search covers command names, descriptions,

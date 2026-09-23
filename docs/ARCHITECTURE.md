@@ -155,6 +155,11 @@ below are relative to that directory.
 - Fast availability is route-specific and revalidated in the backend. Codex
   uses live service tiers; API uses reviewed model metadata; result chips require
   provider confirmation rather than the frontend request bit.
+- A Codex App Server serves exactly one turn. The warm spare is pre-booted,
+  never reused after a turn; do not turn it into a shared long-lived server
+  without per-turn event isolation.
+- MCP write tools are gated by one `WRITE_TOOLS` list in `mcp_server.rs`, used
+  by both `tools/list` and dispatch. Every listed tool carries annotations.
 - App Server protocol changes stay normalized in `codex_app_server.rs`. Never
   key failure state on presence of nullable fields, collapse a multi-path
   `fileChange` into one opaque card, or drop live output/patch/progress events.
@@ -184,6 +189,7 @@ supports an explicit existing-tag dispatch when GitHub accepts a push but does
 not create its run; that recovery path checks out the requested signed tag and
 uses the same gates and publication order.
 
-Removed SFTP/sync/server/RCON, cost-cockpit, compaction, swarm, and old SDK
-abstractions stay removed. Git history is the archive; do not recreate them as
+Removed SFTP/sync/server/RCON, cost-cockpit, compaction, swarm, old SDK
+abstractions, the write-only `metric!` counter registry, and the never-called
+Job Object prototype stay removed. Git history is the archive; do not recreate them as
 parallel systems.
