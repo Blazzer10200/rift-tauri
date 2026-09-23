@@ -244,7 +244,8 @@
     const m = currentModel;
     if (!m) return "";
     if (!m.effort) return `${m.label} ${m.version} responds immediately — it doesn't use extended reasoning.`;
-    if (m.id === "claude-fable-5-1") return `Fable always reasons before replying — higher effort reasons more deeply. Currently ${currentEffort.label}.`;
+    // Fable + Opus 5.5 reject a thinking-disabled request, so their Low rung still reasons.
+    if (m.id === "claude-fable-5-1" || m.id === "opus") return `${m.label} always reasons before replying — higher effort reasons more deeply. Currently ${currentEffort.label}.`;
     return CAPTIONS[currentEffort.id] ?? "";
   });
   // Live per-model weekly limit (usage endpoint `limits[]`, model-scoped rows
@@ -448,8 +449,8 @@
       <span class="effort-head-cur">{currentEffort.label}</span>
       <span
         class="effort-help"
-        use:tooltip={currentModel?.id === "claude-fable-5-1"
-          ? "Fable always reasons before replying — effort sets how deeply."
+        use:tooltip={currentModel?.id === "claude-fable-5-1" || currentModel?.id === "opus"
+          ? `${currentModel.label} always reasons before replying — effort sets how deeply.`
           : "Higher effort reasons longer for better answers. Lower effort responds faster."}
         aria-label="About effort"
       ><HelpCircle size={12} /></span>

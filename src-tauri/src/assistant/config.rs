@@ -299,17 +299,30 @@ pub(super) fn haiku_unavailable() -> bool {
 /// `sonnet` needs pinning. Mirror of `SONNET_MODEL` in helpers.ts.
 pub(super) const SONNET_MODEL: &str = "claude-sonnet-5";
 
+/// Claude Opus 5.5 — released 2026-09-22; the picker's `opus` row. CLI 2.1.280
+/// already maps the bare `opus` alias here, but an older CLI would still run
+/// Opus 5, so `opus` is pinned explicitly like `sonnet`. Opus 5 stays reachable
+/// as the explicit `claude-opus-5` legacy row.
+pub(super) const OPUS_MODEL: &str = "claude-opus-5-5";
+
 /// Resolve a renderer model selection to the explicit id sent to the CLI. Maps
-/// the lagging `sonnet` alias → the pinned `claude-sonnet-5`; every other value
-/// (opus/haiku/fable aliases + already-explicit ids) passes through unchanged.
-/// Mirrors `canonicalModelAlias` in state/assistant/helpers.ts. Run AFTER the
+/// the `sonnet`/`opus` aliases → their pinned current ids; every other value
+/// (haiku/fable + already-explicit ids) passes through unchanged. Run AFTER the
 /// per-conversation pin + Fable/Haiku guards so a new chat pins the canonical id.
 pub(super) fn canonical_model_alias(model: &str) -> &str {
-    if model == "sonnet" {
-        SONNET_MODEL
-    } else {
-        model
+    match model {
+        "sonnet" => SONNET_MODEL,
+        "opus" => OPUS_MODEL,
+        _ => model,
     }
+}
+
+/// Models whose API rejects an explicit `thinking:{type:"disabled"}` block
+/// (CLI catalog capability `rejects_disabled_thinking`): Fable and Opus 5.5.
+/// Their thinking is always on, so a thinking-off turn must skip the no-think
+/// shim or every send 400s. Opus 5 / Sonnet 5 accept the disabled block.
+pub(super) fn rejects_disabled_thinking(model: &str) -> bool {
+    model.starts_with("claude-fable") || model == "opus" || model.starts_with(OPUS_MODEL)
 }
 
 /// Sonnet ids the CLI gates to a 200K context window unless the `[1m]` window-
@@ -339,8 +352,8 @@ pub(super) fn cli_model_arg(model: &str) -> String {
     }
 }
 
-/// Models the CLI's fast-output mode applies to — Opus 5 and Opus 4.8 only
-/// (the bare `opus` alias resolves to Opus 5). Older Opus snapshots, Sonnet,
+/// Models the CLI's fast-output mode applies to — Opus 5.5, Opus 5 and Opus 4.8
+/// only (the bare `opus` alias resolves to Opus 5.5). Older Opus snapshots, Sonnet,
 /// Haiku and Fable are NOT fast-eligible upstream. Gating here keeps an
 /// ineligible model from baking a no-op `fastMode` key into `--settings`
 /// (which would still churn the SpawnKey → pointless respawns). Mirrors
@@ -625,7 +638,7 @@ mod tests {
         canonical_model_alias, clamp_effort, cli_model_arg, effort_tier_to_flag, model_fast_eligible,
         is_valid_effort_tier, is_valid_local_base_url, is_valid_model_name, model_max_effort,
         normalize_effort_tier, send_effort_flag, DEFAULT_MODEL, FABLE_FALLBACK_MODEL, FABLE_MODEL,
-        SONNET_MODEL,
+        OPUS_MODEL, SONNET_MODEL,
     };
 
     #[test]
@@ -746,17 +759,19 @@ mod tests {
 
     // The shipped CLI alias `sonnet` resolves to claude-sonnet-4-6, so the bare
     // alias silently ran the previous generation — the "still detected as 4.6"
-    // bug. canonical_model_alias pins it to the explicit Sonnet 5 id; everything
-    // else (opus/haiku/fable aliases + already-explicit ids) passes through. The
-    // `sonnet`→claude-sonnet-5 mapping MUST mirror canonicalModelAlias in
-    // helpers.ts. (The 4.6 RESUME-pin path is asserted by turn.rs's own logic,
-    // not here — this helper only handles the forward `sonnet`→5 direction.)
+    // bug. canonical_model_alias pins it to the explicit Sonnet 5 id, and `opus`
+    // to Opus 5.5 (older CLIs map the alias to Opus 5); everything else
+    // (haiku/fable + already-explicit ids) passes through. (The 4.6 RESUME-pin
+    // path is asserted by turn.rs's own logic, not here — this helper only
+    // handles the forward direction.)
     #[test]
     fn canonical_alias_pins_sonnet_and_passes_others() {
         assert_eq!(canonical_model_alias("sonnet"), SONNET_MODEL);
         assert_eq!(SONNET_MODEL, "claude-sonnet-5");
-        // Other aliases resolve correctly in the CLI already — leave untouched.
-        assert_eq!(canonical_model_alias("opus"), "opus");
+        assert_eq!(canonical_model_alias("opus"), OPUS_MODEL);
+        assert_eq!(OPUS_MODEL, "claude-opus-5-5");
+        // The legacy Opus 5 row is an explicit id — never upgraded.
+        assert_eq!(canonical_model_alias("claude-opus-5"), "claude-opus-5");
         assert_eq!(canonical_model_alias("haiku"), "haiku");
         assert_eq!(canonical_model_alias("claude-fable-5-1"), "claude-fable-5-1");
         // Already-explicit ids (incl. an explicit Sonnet pin + legacy resume

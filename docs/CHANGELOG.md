@@ -6,8 +6,11 @@
 ## Unreleased — Current Claude, more control
 
 - The model picker and usage views now know the current Claude line-up: Fable
-  5.1, Opus 5, Sonnet 5, and Haiku 4.5, with the full effort ladder through
-  **Max** on capable models.
+  5.1, **Opus 5.5**, Sonnet 5, and Haiku 4.5, with the full effort ladder
+  through **Max** on capable models. Opus 5.5 is the main Opus: newer and
+  cheaper than Opus 5, which moves to **Other models** for chats that need to
+  stay on it. Opus 5.5 always reasons (like Fable), so Rift no longer tries to
+  switch its thinking off, a request its API rejects.
 - Projects can list up to eight **Extra folders**; Claude can read and edit
   those alongside the project root (Claude Code `--add-dir`).
 - Settings › Providers › Claude session gains an **Output style** field

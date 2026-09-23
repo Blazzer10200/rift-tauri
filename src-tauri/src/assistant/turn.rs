@@ -25,7 +25,8 @@ use super::config::{
     effective_output_style, effective_trust_level, effort_tier_to_flag, fable_unavailable,
     haiku_unavailable,
     is_valid_effort_tier, is_valid_model_name, is_valid_permission_mode, load_config,
-    model_fast_eligible, normalize_effort_tier, send_effort_flag, DEFAULT_MODEL,
+    model_fast_eligible, normalize_effort_tier, rejects_disabled_thinking, send_effort_flag,
+    DEFAULT_MODEL,
     FABLE_FALLBACK_MODEL, FABLE_MODEL, HAIKU_FALLBACK_MODEL, HAIKU_MODEL,
 };
 use super::convo_store::{
@@ -1214,6 +1215,14 @@ async fn resolve_spawn(
             log::info!("assistant_send: resolved model alias sonnet → {resolved} (first_turn={is_first_turn})");
             model = resolved.to_string();
         }
+        // `opus` → explicit Opus 5.5 on every turn. Unlike the sonnet legacy
+        // path, no resume carve-out: CLI 2.1.280 already maps the bare alias to
+        // 5.5, so a resumed `opus` session is running 5.5 today, and the CLI
+        // sanitizes cross-model thinking blocks on resume (see above). Also
+        // catches the Fable fallback, which lands on the bare alias.
+        if model == "opus" {
+            model = canonical_model_alias(&model).to_string(); // → claude-opus-5-5
+        }
     }
     // Effort tier: per-turn override wins, else stored default, else "smart"
     // (--effort medium, the responsive default — mirrors the frontend's
@@ -1663,10 +1672,11 @@ async fn resolve_spawn(
     if routes_through_nothink_shim(thinking_on, &model) {
         // Cloud "thinking off": point the CLI at the in-process shim, which
         // injects `thinking:{type:"disabled"}` into /v1/messages and forwards to
-        // Anthropic. Haiku + Fable are excluded (see routes_through_nothink_shim):
-        // Haiku has no extended thinking to disable, and Fable's thinking is
-        // always-on with the API 400ing on an explicit disabled block — a Fable
-        // turn through the shim would hard-error every send. If the shim failed
+        // Anthropic. Haiku, Fable + Opus 5.5 are excluded (see
+        // routes_through_nothink_shim): Haiku has no extended thinking to
+        // disable, and Fable / Opus 5.5 thinking is always-on with the API 400ing
+        // on an explicit disabled block — such a turn through the shim would
+        // hard-error every send. If the shim failed
         // to bind, leave ANTHROPIC_BASE_URL unset → falls back to normal thinking.
         // (By this point a Fable pref only survives when Fable is actually live —
         // an unavailable Fable session was already swapped to opus above.)
@@ -3121,13 +3131,14 @@ const STREAM_TOOL_CEILING_SECS: u64 = 900;
 /// (a) have extended thinking to disable and (b) accept an explicit disabled
 /// block. Excluded:
 ///   • Haiku — no extended thinking, so nothing to disable (needless hop).
-///   • Fable — thinking is ALWAYS ON and the API 400s on an explicit
-///     `thinking:{type:"disabled"}`; routing a Fable turn through the shim would
-///     hard-error every send for any user whose CLI honors ANTHROPIC_BASE_URL.
+///   • Fable + Opus 5.5 — thinking is ALWAYS ON and the API 400s on an explicit
+///     `thinking:{type:"disabled"}` (config.rs rejects_disabled_thinking);
+///     routing one through the shim would hard-error every send for any user
+///     whose CLI honors ANTHROPIC_BASE_URL.
 /// A thinking-ON turn never uses the shim (there's nothing to turn off).
 /// (Local-LLM mode has its own always-on shim branch and is handled separately.)
 fn routes_through_nothink_shim(thinking_on: bool, model: &str) -> bool {
-    !thinking_on && model != HAIKU_MODEL && !model.starts_with("claude-fable")
+    !thinking_on && model != HAIKU_MODEL && !rejects_disabled_thinking(model)
 }
 
 /// Pure watchdog decision: on a no-progress fire, do we re-arm or force-stall?
@@ -4357,12 +4368,18 @@ mod tests {
             !routes_through_nothink_shim(false, HAIKU_MODEL),
             "Haiku has no thinking to disable"
         );
-        // Opus / Sonnet thinking-off DO route through the shim (they accept the
-        // explicit disabled block); thinking-on never does.
-        assert!(routes_through_nothink_shim(false, "opus"));
-        assert!(routes_through_nothink_shim(false, "sonnet"));
+        // Opus 5.5 rejects the disabled block like Fable — alias or explicit id.
         assert!(
-            !routes_through_nothink_shim(true, "opus"),
+            !routes_through_nothink_shim(false, "claude-opus-5-5"),
+            "Opus 5.5 thinking-off must skip the shim (API 400s on disabled)"
+        );
+        assert!(!routes_through_nothink_shim(false, "opus"));
+        // Opus 5 / Sonnet thinking-off DO route through the shim (they accept
+        // the explicit disabled block); thinking-on never does.
+        assert!(routes_through_nothink_shim(false, "claude-opus-5"));
+        assert!(routes_through_nothink_shim(false, "claude-sonnet-5"));
+        assert!(
+            !routes_through_nothink_shim(true, "claude-opus-5"),
             "thinking-on never uses the shim"
         );
     }

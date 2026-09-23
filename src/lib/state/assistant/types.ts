@@ -490,14 +490,15 @@ export type ThinkingEffort =
 /** Model selection — stored value IS the string handed to the CLI's `--model`,
  *  so it flows through `assistant_send` untouched. `opus`/`sonnet`/`haiku` are
  *  the short aliases that always resolve to the newest snapshot of each family
- *  (Opus 5 / Sonnet 5 / Haiku 4.5, 1M ctx for the first two); `claude-fable-5-1`
- *  is the explicit Fable id. Retired pinned ids (claude-opus-4-x,
+ *  (Opus 5.5 / Sonnet 5 / Haiku 4.5, 1M ctx for the first two); `claude-fable-5-1`
+ *  is the explicit Fable id and `claude-opus-5` the previous-generation Opus
+ *  (the "More models" row). Retired pinned ids (claude-opus-4-x,
  *  claude-sonnet-4-x, claude-fable-5) fold into their alias via
  *  `normalizeLegacyModel` on load — the backend keeps a RESUMED session on its
  *  pinned id, so this only steers the picker + new chats.
  *  Must satisfy the Rust `is_valid_model_name` validator (no brackets). */
 export type ModelSel =
-  | "sonnet" | "opus" | "haiku" | "claude-fable-5-1"
+  | "sonnet" | "opus" | "haiku" | "claude-fable-5-1" | "claude-opus-5"
   | `gpt-${string}`;
 
 /** Visual family for the per-model aurora hue (sonnet=blue, opus=purple,

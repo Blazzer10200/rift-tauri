@@ -636,7 +636,7 @@
   };
   const MODEL_LABEL: Record<string, string> = {
     opus: "Opus", sonnet: "Sonnet", haiku: "Haiku", fable: "Fable",
-    "claude-opus-5": "Opus", "claude-sonnet-5": "Sonnet", "claude-haiku-4-5": "Haiku",
+    "claude-opus-5-5": "Opus", "claude-opus-5": "Opus", "claude-sonnet-5": "Sonnet", "claude-haiku-4-5": "Haiku",
     "claude-fable-5-1": "Fable", "claude-fable-5": "Fable",
     "claude-opus-4-8": "Opus", "claude-opus-4-7": "Opus", "claude-opus-4-6": "Opus", "claude-opus-4-5": "Opus",
     "claude-sonnet-4-6": "Sonnet", "claude-sonnet-4-5": "Sonnet",

@@ -240,7 +240,10 @@ describe("normalizeLegacyModel / asModelSel (retired pins fold into the alias)",
   it("folds retired + explicit Claude ids into the current alias", () => {
     expect(normalizeLegacyModel("claude-opus-4-7")).toBe("opus");
     expect(normalizeLegacyModel("claude-opus-4-8")).toBe("opus");
-    expect(normalizeLegacyModel("claude-opus-5")).toBe("opus");
+    expect(normalizeLegacyModel("claude-opus-5-5")).toBe("opus");
+    // Opus 5 is its own "More models" row now, not the alias.
+    expect(normalizeLegacyModel("claude-opus-5")).toBe("claude-opus-5");
+    expect(asModelSel("claude-opus-5")).toBe("claude-opus-5");
     expect(normalizeLegacyModel("claude-sonnet-4-6")).toBe("sonnet");
     expect(normalizeLegacyModel("claude-sonnet-5")).toBe("sonnet");
     expect(normalizeLegacyModel("claude-haiku-4-5")).toBe("haiku");
@@ -260,9 +263,10 @@ describe("normalizeLegacyModel / asModelSel (retired pins fold into the alias)",
 });
 
 describe("fastEligible (must mirror config.rs model_fast_eligible)", () => {
-  it("is Opus 5 / Opus 4.8 only — Fable shares the opus VISUAL family but is not fast-eligible", () => {
+  it("is Opus 5.5 / Opus 5 / Opus 4.8 only — Fable shares the opus VISUAL family but is not fast-eligible", () => {
     expect(fastEligible("opus")).toBe(true);
     expect(fastEligible("claude-opus-5")).toBe(true);
+    expect(fastEligible("claude-opus-5-5")).toBe(true);
     expect(fastEligible("claude-opus-4-8")).toBe(true);
     expect(fastEligible("claude-opus-4-7")).toBe(false);
     expect(fastEligible("claude-fable-5-1")).toBe(false);

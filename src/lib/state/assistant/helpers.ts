@@ -5,7 +5,7 @@
 import type { ChatGptRoute, CodexModel, ModelFamily, ModelSel, OpenAiModel, PermissionMode, RiftPlan, ThinkingEffort } from "./types";
 
 const MODEL_SELS: readonly ModelSel[] = [
-  "sonnet", "opus", "haiku", "claude-fable-5-1",
+  "sonnet", "opus", "haiku", "claude-fable-5-1", "claude-opus-5",
   "gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
   "gpt-5.3-codex",
 ] as const;
@@ -13,11 +13,13 @@ const MODEL_SELS: readonly ModelSel[] = [
 /** Fold a retired pinned Claude id (pre-2026-09 catalog: claude-opus-4-x,
  *  claude-sonnet-4-x, claude-fable-5, bare "fable") into its current alias so
  *  a stored pref / saved conversation still lands on a picker row. Explicit
- *  current ids (claude-opus-5 …) fold too — the alias IS that snapshot. The
- *  backend keeps a resumed session on its pinned id (turn.rs pin resolution
- *  runs before the alias), so this only steers the selector + new chats. */
+ *  current ids (claude-opus-5-5 …) fold too — the alias IS that snapshot.
+ *  `claude-opus-5` does NOT fold: it has its own "More models" row now that
+ *  `opus` means Opus 5.5. The backend keeps a resumed session on its pinned id
+ *  (turn.rs pin resolution runs before the alias), so this only steers the
+ *  selector + new chats. */
 export function normalizeLegacyModel(v: string): string {
-  if (/^claude-opus-(4-\d+|5)$/.test(v)) return "opus";
+  if (/^claude-opus-(4-\d+|5-5)$/.test(v)) return "opus";
   if (/^claude-sonnet-(4-\d+|5)$/.test(v)) return "sonnet";
   if (v.startsWith("claude-haiku-")) return "haiku";
   if (v === "claude-fable-5" || v === "fable") return "claude-fable-5-1";
@@ -319,10 +321,10 @@ export function planDecision(
   }
 }
 
-/** Models the CLI's fast-output mode applies to — Opus 5 and Opus 4.8 only (the
- *  bare `opus` alias resolves to Opus 5). Older Opus snapshots, Sonnet, Haiku
- *  and Fable are not fast-eligible upstream; Fable shares Opus's VISUAL family
- *  (modelFamily) so don't derive this from modelFamily. Mirrors
+/** Models the CLI's fast-output mode applies to — Opus 5.5, Opus 5 and Opus 4.8
+ *  only (the bare `opus` alias resolves to Opus 5.5). Older Opus snapshots,
+ *  Sonnet, Haiku and Fable are not fast-eligible upstream; Fable shares Opus's
+ *  VISUAL family (modelFamily) so don't derive this from modelFamily. Mirrors
  *  model_fast_eligible in config.rs. */
 export function fastEligible(model: string): boolean {
   return model === "opus" || model.startsWith("claude-opus-5") || model === "claude-opus-4-8";
@@ -566,13 +568,14 @@ export const EFFORT_ORDER: readonly ThinkingEffort[] = [
 /** Highest effort tier each model honors server-side — the single source of
  *  truth for the capability ceiling. `MODEL_OPTIONS.maxEffort` (the picker's
  *  slider) and `clampEffort` (the value actually sent) both derive from this so
- *  they can't disagree. Opus 5 / Fable 5.1 / Sonnet 5 honor the full CLI
+ *  they can't disagree. Opus 5.5 / Opus 5 / Fable 5.1 / Sonnet 5 honor the full CLI
  *  `--effort` ladder low→max, so they reach `max`; `agentic` is the Codex-only
  *  `ultra` level (the Claude CLI has no such flag) and clamps to `max` on
  *  Claude. Haiku rejects effort wholesale (`none`). Mirror in
  *  src-tauri/src/assistant/config.rs (model_max_effort). */
 export const MODEL_MAX_EFFORT: Record<string, ThinkingEffort> = {
   opus: "max",
+  "claude-opus-5": "max",
   "claude-fable-5-1": "max",
   sonnet: "max",
   haiku: "none",

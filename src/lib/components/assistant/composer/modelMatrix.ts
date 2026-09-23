@@ -67,7 +67,9 @@ export type ModelOpt = {
 };
 // Flat single-column list (Claude-Code-Desktop layout). Claude rows are the
 // current catalog only: `opus`/`sonnet`/`haiku` aliases → newest snapshot of
-// each family (Opus 5 / Sonnet 5 / Haiku 4.5); Fable 5.1 is an explicit id.
+// each family (Opus 5.5 / Sonnet 5 / Haiku 4.5); Fable 5.1 is an explicit id.
+// Opus 5 (explicit `claude-opus-5`) is the one legacy row — it moved to
+// "More models" when Opus 5.5 shipped 2026-09-22 (cheaper, newer).
 // Retired 4.x pins were dropped 2026-09-18 — helpers.ts normalizeLegacyModel
 // folds stored ones into the alias. The CLI takes the alias / id; name + suffix
 // are display-only.
@@ -85,9 +87,10 @@ export const MODEL_OPTIONS: ModelOpt[] = [
   { id: "gpt-5.3-codex-spark", label: "GPT Codex Spark", version: "5.3", tagline: "Separate ultra-fast, text-only coding model; not Fast mode", blurb: "Quick focused coding work", ctx: "400K ctx", suffix: "400K context", legacy: false, effort: true, maxEffort: "ultra", icon: Code2, provider: "openai" },
   { id: "gpt-5.3-codex", label: "GPT Codex", version: "5.3", tagline: "ChatGPT's agentic coding model", blurb: "Coding-focused reasoning & tools", ctx: "400K ctx", suffix: "400K context", legacy: false, effort: true, maxEffort: MODEL_MAX_EFFORT["gpt-5.3-codex"], icon: Code2, provider: "openai" },
   ...(fableAvailable() ? [{ id: "claude-fable-5-1" as ModelSel, label: "Fable", version: "5.1", tagline: "Anthropic's most capable model — limited run", blurb: "Most capable — limited run", ctx: "1M ctx", suffix: "1M context", legacy: false, limited: true, effort: true, maxEffort: MODEL_MAX_EFFORT["claude-fable-5-1"], icon: Sparkles, provider: "claude" as const }] : []),
-  { id: "opus",            label: "Opus",   version: "5",   tagline: "Newest + most capable — complex reasoning & agentic coding", blurb: "Deep reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.opus, icon: Gem, provider: "claude" },
+  { id: "opus",            label: "Opus",   version: "5.5", tagline: "Newest Opus — complex reasoning & agentic coding, for less than Opus 5", blurb: "Deep reasoning & agentic coding", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.opus, icon: Gem, provider: "claude" },
   { id: "sonnet",          label: "Sonnet", version: "5",   tagline: "Best speed + intelligence balance — the default",            blurb: "Everyday default — speed + smarts", ctx: "1M ctx",   suffix: "1M context",   legacy: false, effort: true,  maxEffort: MODEL_MAX_EFFORT.sonnet, icon: Feather, provider: "claude" },
   ...(haikuAvailable() ? [{ id: "haiku" as ModelSel, label: "Haiku", version: "4.5", tagline: "Fastest, near-frontier — quick edits & lookups", blurb: "Fastest — quick edits & lookups", ctx: "200K ctx", suffix: "200K context", legacy: false, effort: false, maxEffort: MODEL_MAX_EFFORT.haiku, icon: Rabbit, provider: "claude" as const }] : []),
+  { id: "claude-opus-5",   label: "Opus",   version: "5",   tagline: "Previous-generation Opus — for chats that need to stay on it", blurb: "Previous generation", ctx: "1M ctx",   suffix: "1M context",   legacy: true,  effort: true,  maxEffort: MODEL_MAX_EFFORT["claude-opus-5"], icon: Gem, provider: "claude" },
 ];
 
 const CODEX_TO_RIFT_EFFORT: Readonly<Record<string, ThinkingEffort>> = {

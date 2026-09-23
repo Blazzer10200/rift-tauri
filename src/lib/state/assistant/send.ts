@@ -261,8 +261,8 @@ export async function send(
     fableSunsetNoticed = true;
     notify.warn(
       Date.now() >= FABLE_SUNSET_MS
-        ? "Fable's limited run has ended — this turn falls back to Opus 5."
-        : "Heads up: Fable's limited run ends within a week — chats fall back to Opus 5 after that.",
+        ? "Fable's limited run has ended — this turn falls back to Opus 5.5."
+        : "Heads up: Fable's limited run ends within a week — chats fall back to Opus 5.5 after that.",
     );
   }
   // Telemetry: build the turn record + attach to tab. TabState fills it as
