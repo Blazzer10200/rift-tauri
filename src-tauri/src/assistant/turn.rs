@@ -270,6 +270,12 @@ fn tool_use_desc(block: &Value) -> String {
 /// re-running the interrupted tool. Splice it into the envelope's leading text
 /// block here. Peek-then-take: the stash is only consumed once a splice is
 /// guaranteed, so an unexpected envelope shape leaves the note for the next send.
+/// Take a shared user envelope back for a cold retry — free when this is the
+/// last handle (the normal case), a copy only if something still holds one.
+fn unshare(line: Arc<Vec<u8>>) -> Vec<u8> {
+    Arc::try_unwrap(line).unwrap_or_else(|shared| (*shared).clone())
+}
+
 fn inject_interrupted_note(line: Vec<u8>, session_id: &str) -> Vec<u8> {
     let mut v: Value = match serde_json::from_slice(&line) {
         Ok(v) => v,
@@ -2090,10 +2096,13 @@ async fn dispatch_turn(
             Some((turn_tx, in_progress, pre_controls)) => {
                 let (done_tx, done_rx) = oneshot::channel();
                 let bg_evict = Arc::new(std::sync::atomic::AtomicBool::new(false));
-                // Keep a copy: if the reused child turns out to be dead (killed
+                // Keep a handle: if the reused child turns out to be dead (killed
                 // while parked), the loop reports DeadOnReuse and we retry cold —
-                // which needs user_line again (the original was moved into the cmd).
-                let retry_line = user_line.clone();
+                // which needs user_line again. Shared, not copied: by the time a
+                // retry needs it the loop has dropped its handle, so `unshare`
+                // takes the buffer back without a copy.
+                let user_line = Arc::new(user_line);
+                let retry_line = Arc::clone(&user_line);
                 let cmd_msg = warm_pool::TurnCmd {
                     user_line,
                     pre_controls,
@@ -2123,7 +2132,7 @@ async fn dispatch_turn(
                                 // this retry must carry the reconciliation note —
                                 // it re-sends the same prompt the interrupted tool
                                 // came from, the exact double-execution shape.
-                                inject_interrupted_note(retry_line, &session_id)
+                                inject_interrupted_note(unshare(retry_line), &session_id)
                             }
                             Ok(r) => return r,
                             // Reader dropped done_tx without sending (loop exited /
@@ -2149,7 +2158,8 @@ async fn dispatch_turn(
                             "warm_pool: warm child for {session_id} dead on send — cold respawn"
                         );
                         emit_dispatch(&session_id, "dead_on_send", &model, &key, turn_epoch);
-                        send_err.0.user_line
+                        drop(send_err);
+                        unshare(retry_line)
                     }
                 }
             }
@@ -2381,7 +2391,7 @@ async fn cold_spawn_and_run(
     let (done_tx, done_rx) = oneshot::channel();
     let first_bg_evict = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let first_turn = warm_pool::TurnCmd {
-        user_line,
+        user_line: Arc::new(user_line),
         pre_controls: Vec::new(),
         app: app.clone(),
         window_label: window_label.clone(),
@@ -2748,7 +2758,7 @@ async fn run_turn_loop(mut ctx: RunCtx) {
                                     // CLI-initiated turn (send() is ignored).
                                     let (done_tx, _done_rx) = oneshot::channel();
                                     break 'park Some(warm_pool::TurnCmd {
-                                        user_line: Vec::new(),
+                                        user_line: Arc::default(),
                                         pre_controls: Vec::new(),
                                         app,
                                         window_label,

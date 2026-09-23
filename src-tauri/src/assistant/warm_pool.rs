@@ -88,7 +88,9 @@ pub(super) async fn kill_child_tree_async(pid: u32) {
 /// the awaiting `assistant_send` command.
 pub(super) struct TurnCmd {
     /// The pre-built stream-json `user` envelope (text + optional images).
-    pub user_line: Vec<u8>,
+    /// Shared with the dispatcher, which keeps a handle for the DeadOnReuse
+    /// cold retry instead of copying an envelope that can carry 20 MB of images.
+    pub user_line: Arc<Vec<u8>>,
     /// Serialized host→CLI `control_request` lines the reader loop writes to
     /// stdin BEFORE this turn's user envelope — the live-switch path
     /// (`set_permission_mode` / `set_model`, CLI ≥2.1.208) rides here so the

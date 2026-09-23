@@ -161,13 +161,6 @@ pub fn run() {
         return;
     }
 
-    // Prime the corporate-root PEM before the first claude spawn so the file
-    // exists on disk by the time any cli_install::claude_command() is called.
-    // Additive-only: the PEM carries the user's own Windows-store roots; Node
-    // still trusts its built-ins, reqwest still trusts webpki — on a non-proxied
-    // machine this changes nothing observable. Never disables verification.
-    let _ = certs::corp_pem_path();
-
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -259,6 +252,16 @@ pub fn run() {
             // the hot path so the first turn hits the cached value.
             tauri::async_runtime::spawn_blocking(|| {
                 let _ = assistant::cli_caps::CliCaps::active();
+            });
+            // Prime the corporate-root PEM (a Windows cert-store enumeration +
+            // file write) off the main thread, so it no longer delays the window.
+            // cli_install::claude_command() reads it through the same OnceLock,
+            // so a spawn that races this simply waits for the one extraction.
+            // Additive-only: the PEM carries the user's own Windows-store roots;
+            // Node still trusts its built-ins, reqwest still trusts webpki.
+            // Never disables verification.
+            tauri::async_runtime::spawn_blocking(|| {
+                let _ = certs::corp_pem_path();
             });
             Ok(())
         })

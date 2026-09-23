@@ -1,6 +1,6 @@
 //! Corporate TLS root extraction for Windows proxy environments.
-//! Reads the Windows Trusted Root + CA stores once at startup via
-//! `rustls-native-certs`, writes a concatenated PEM to
+//! Reads the Windows Trusted Root + CA stores once (off the main thread, from
+//! `setup()`) via `rustls-native-certs`, writes a concatenated PEM to
 //! `%LOCALAPPDATA%\Rift\certs\corporate-roots.pem`, and exposes
 //! two shared `reqwest::Client` singletons (usage + download timeouts)
 //! plus the PEM path for NODE_EXTRA_CA_CERTS injection.
@@ -20,13 +20,27 @@ pub fn corp_pem_path() -> Option<&'static PathBuf> {
     CORP_PEM.get_or_init(extract_corporate_roots).as_ref()
 }
 
+/// DER bytes of every usable Windows-store root, plus how many were skipped.
+/// The store read is the slow part (enumeration can take a while on
+/// domain-joined machines); the PEM and all three clients share one read
+/// instead of each enumerating the store again.
+static NATIVE_ROOTS: OnceLock<(Vec<Vec<u8>>, usize)> = OnceLock::new();
+
+fn native_roots() -> &'static (Vec<Vec<u8>>, usize) {
+    NATIVE_ROOTS.get_or_init(|| {
+        let result = rustls_native_certs::load_native_certs();
+        for err in &result.errors {
+            log::warn!("corp-certs: skipped one cert: {err}");
+        }
+        let ders = result.certs.iter().map(|c| c.as_ref().to_vec()).collect();
+        (ders, result.errors.len())
+    })
+}
+
 fn extract_corporate_roots() -> Option<PathBuf> {
-    let result = rustls_native_certs::load_native_certs();
-    let skipped = result.errors.len();
-    for err in &result.errors {
-        log::warn!("corp-certs: skipped one cert: {err}");
-    }
-    if result.certs.is_empty() {
+    let (certs, skipped) = native_roots();
+    let skipped = *skipped;
+    if certs.is_empty() {
         log::info!("corp-certs: no certs from Windows store — NODE_EXTRA_CA_CERTS will not be set");
         // Zero corporate roots silently breaks every HTTPS call behind a Zscaler/
         // proxy MITM. Surface it as a structured event (warn) so the console flags
@@ -44,10 +58,10 @@ fn extract_corporate_roots() -> Option<PathBuf> {
     }
     // Encode each DER cert as PEM.
     use base64::Engine as _;
-    let mut pem = String::with_capacity(result.certs.len() * 1024);
-    for cert in &result.certs {
+    let mut pem = String::with_capacity(certs.len() * 1024);
+    for cert in certs {
         pem.push_str("-----BEGIN CERTIFICATE-----\n");
-        pem.push_str(&base64::engine::general_purpose::STANDARD.encode(cert.as_ref()));
+        pem.push_str(&base64::engine::general_purpose::STANDARD.encode(cert));
         pem.push_str("\n-----END CERTIFICATE-----\n");
     }
     // Write to %LOCALAPPDATA%\Rift\certs\corporate-roots.pem.
@@ -60,7 +74,7 @@ fn extract_corporate_roots() -> Option<PathBuf> {
     std::fs::write(&path, pem.as_bytes()).ok()?;
     log::info!(
         "corp-certs: wrote {} root(s) to {}",
-        result.certs.len(),
+        certs.len(),
         path.display()
     );
     // Dual-write: the log:: above persists to rift.log; this event surfaces the
@@ -72,7 +86,7 @@ fn extract_corporate_roots() -> Option<PathBuf> {
         Some("certs"),
         Some(file!()),
         "corporate roots loaded",
-        serde_json::json!({ "certs_loaded": result.certs.len(), "skipped": skipped, "pem_written": true }),
+        serde_json::json!({ "certs_loaded": certs.len(), "skipped": skipped, "pem_written": true }),
     );
     Some(path)
 }
@@ -103,16 +117,13 @@ pub fn api_client() -> &'static reqwest::Client {
 }
 
 fn build_client(timeout: Duration, connect_timeout: Option<Duration>) -> reqwest::Client {
-    let result = rustls_native_certs::load_native_certs();
-    // Ignore partial errors — already logged by extract_corporate_roots if that
-    // ran first; this call is independent (reqwest DER path, no PEM needed).
     let mut b = reqwest::Client::builder().timeout(timeout);
     if let Some(ct) = connect_timeout {
         b = b.connect_timeout(ct);
     }
-    for cert in result.certs {
+    for cert in &native_roots().0 {
         // from_der accepts the raw DER bytes directly — no PEM round-trip.
-        if let Ok(c) = reqwest::tls::Certificate::from_der(cert.as_ref()) {
+        if let Ok(c) = reqwest::tls::Certificate::from_der(cert) {
             b = b.add_root_certificate(c);
         }
     }

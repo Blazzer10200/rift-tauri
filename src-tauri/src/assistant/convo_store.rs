@@ -433,108 +433,102 @@ pub async fn assistant_list_conversations() -> Result<Vec<ConversationMeta>, Str
         .map_err(|e| format!("list_conversations join error: {e}"))?
 }
 
-fn list_conversations_sync() -> Result<Vec<ConversationMeta>, String> {
+/// Everything list + stats derive from one transcript, parsed once.
+#[derive(Clone)]
+struct ConvoSummary {
+    meta: ConversationMeta,
+    /// None when `messages` isn't an array (stats skip those; the list keeps them).
+    stat: Option<ConvoStat>,
+    /// Sidecar key for the legacy workspace-root backfill (cli session id, else convo id).
+    sidecar_key: String,
+}
+
+/// File identity for the summary cache: saves go tmp → rename, so a changed
+/// transcript always changes mtime and usually length.
+type FileStamp = (std::time::SystemTime, u64);
+type SummaryCache = std::collections::HashMap<PathBuf, (FileStamp, Option<ConvoSummary>)>;
+
+/// Per-file summary cache shared by `assistant_list_conversations` and
+/// `assistant_stats`. The frontend re-lists after every save, and a full rescan
+/// re-parsed every transcript (630 files / 197 MB on the owner's machine, ~0.5s+)
+/// once per turn. Now a refresh stats every file and re-parses only the ones
+/// whose stamp moved. `None` caches an unparseable file so it's warned about once
+/// per change, not once per refresh. Entries for deleted files drop out on the
+/// next scan.
+static SUMMARY_CACHE: std::sync::LazyLock<Mutex<SummaryCache>> =
+    std::sync::LazyLock::new(|| Mutex::new(SummaryCache::new()));
+
+fn scan_summaries() -> Result<Vec<ConvoSummary>, String> {
     let dir = conversations_dir()?;
-    let mut out = Vec::new();
     let entries = match std::fs::read_dir(&dir) {
         Ok(e) => e,
-        Err(_) => return Ok(out),
+        Err(_) => return Ok(Vec::new()),
     };
+    // Held for the whole scan: a concurrent list/stats call waits and then hits
+    // a warm cache instead of re-parsing the same files in parallel.
+    let mut cache = SUMMARY_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
     for entry in entries.flatten() {
         let p = entry.path();
         if p.extension().and_then(|s| s.to_str()) != Some("json") {
             continue;
         }
-        let bytes = match std::fs::read(&p) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-        // Parse to a Value first so we can extract optional fields not modeled
-        // on the typed Conversation struct (compactionHistory[*].summary —
-        // shipped E5, ridden through serde_json::Value catch-all on save).
-        let raw: serde_json::Value = match serde_json::from_slice(&bytes) {
-            Ok(v) => v,
-            Err(e) => {
-                // Fail loud-ish: a convo silently vanishing from the list is
-                // indistinguishable from data loss — leave a trail.
-                log::warn!("convo list: skipping unparseable {} — {e}", p.display());
-                continue;
+        let Ok(md) = entry.metadata() else { continue };
+        let stamp = (md.modified().unwrap_or(std::time::UNIX_EPOCH), md.len());
+        seen.insert(p.clone());
+        let fresh = matches!(cache.get(&p), Some((s, _)) if *s == stamp);
+        if !fresh {
+            let Ok(bytes) = std::fs::read(&p) else { continue };
+            let summary = summarize_conversation(&bytes)
+                .map_err(|e| log::warn!("convo list: skipping {} — {e}", p.display()))
+                .ok();
+            cache.insert(p.clone(), (stamp, summary));
+        }
+        if let Some((_, Some(summary))) = cache.get_mut(&p) {
+            // Per-project scope: prefer the convo's own root; else backfill from
+            // the session-cwd sidecar so chats predating the field still land in
+            // their folder. A found pin is cached (session cwds never move); a
+            // miss is retried next scan since the sidecar can appear later.
+            if summary.meta.workspace_root.is_none() {
+                summary.meta.workspace_root = load_session_cwd(&summary.sidecar_key)
+                    .map(|p| p.to_string_lossy().into_owned());
             }
-        };
-        // Extract the Value-only fields BEFORE the typed parse consumes `raw`,
-        // so we deserialize once without cloning the whole Value per convo.
-        let last_activity_at = raw.get("lastActivityAt").and_then(|v| v.as_i64());
-        let compaction_summaries = raw
-            .get("compactionHistory")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|e| e.get("summary").and_then(|s| s.as_str()).map(String::from))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        let convo: Conversation = match serde_json::from_value(raw) {
-            Ok(c) => c,
-            Err(e) => {
-                log::warn!("convo list: skipping malformed {} — {e}", p.display());
-                continue;
-            }
-        };
-        let message_count = convo
-            .messages
-            .as_array()
-            .map(|a| a.len() as u32)
-            .unwrap_or(0);
-        let cost_usd = convo
-            .messages
-            .as_array()
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|m| m.get("costUsd").and_then(|v| v.as_f64()))
-                    .sum::<f64>()
-            })
-            .unwrap_or(0.0);
-        let last_snippet = convo.messages.as_array().and_then(|arr| {
-            arr.iter().rev().find_map(|m| {
-                if m.get("role").and_then(|r| r.as_str()) == Some("system") {
-                    return None;
-                }
-                m.get("blocks")?.as_array()?.iter().find_map(|b| {
-                    if b.get("type").and_then(|t| t.as_str()) != Some("text") {
-                        return None;
-                    }
-                    let t = b.get("text")?.as_str()?;
-                    // RR10: only the first ~120 chars are kept — bound the input
-                    // before the whitespace-collapse allocates (a multi-MB text
-                    // block would otherwise be flattened in full just to slice 120).
-                    let head = if t.len() > 2048 {
-                        match t.char_indices().nth(512) {
-                            Some((byte_idx, _)) => &t[..byte_idx],
-                            None => t,
-                        }
-                    } else {
-                        t
-                    };
-                    let flat = head.split_whitespace().collect::<Vec<_>>().join(" ");
-                    if flat.is_empty() {
-                        return None;
-                    }
-                    let mut s: String = flat.chars().take(120).collect();
-                    if flat.chars().count() > 120 {
-                        s.push('…');
-                    }
-                    Some(s)
-                })
-            })
-        });
-        // Per-project scope: prefer the convo's own root; else backfill from the
-        // session-cwd sidecar (keyed by the cli session id, falling back to the
-        // convo id) so chats predating the field still land in their folder.
-        let workspace_root = convo.workspace_root.clone().or_else(|| {
-            let sid = convo.cli_session_id.as_deref().unwrap_or(&convo.id);
-            load_session_cwd(sid).map(|p| p.to_string_lossy().into_owned())
-        });
-        out.push(ConversationMeta {
+            out.push(summary.clone());
+        }
+    }
+    cache.retain(|p, _| seen.contains(p));
+    Ok(out)
+}
+
+fn summarize_conversation(bytes: &[u8]) -> Result<ConvoSummary, String> {
+    // Parse to a Value first so we can extract optional fields not modeled on
+    // the typed Conversation struct (compactionHistory[*].summary — shipped E5,
+    // ridden through the serde_json::Value catch-all on save).
+    let raw: serde_json::Value = serde_json::from_slice(bytes).map_err(|e| format!("unparseable: {e}"))?;
+    // Extract the Value-only fields BEFORE the typed parse consumes `raw`, so we
+    // deserialize once without cloning the whole Value.
+    let last_activity_at = raw.get("lastActivityAt").and_then(|v| v.as_i64());
+    let compaction_summaries = raw
+        .get("compactionHistory")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|e| e.get("summary").and_then(|s| s.as_str()).map(String::from))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let convo: Conversation = serde_json::from_value(raw).map_err(|e| format!("malformed: {e}"))?;
+    let arr = convo.messages.as_array();
+    let message_count = arr.map(|a| a.len() as u32).unwrap_or(0);
+    let cost_usd = arr
+        .map(|a| a.iter().filter_map(|m| m.get("costUsd").and_then(|v| v.as_f64())).sum::<f64>())
+        .unwrap_or(0.0);
+    let last_snippet = arr.and_then(|a| a.iter().rev().find_map(message_snippet));
+    let stat = arr.map(|a| convo_stat(&convo, a));
+    let sidecar_key = convo.cli_session_id.clone().unwrap_or_else(|| convo.id.clone());
+    Ok(ConvoSummary {
+        meta: ConversationMeta {
             id: convo.id,
             title: convo.title,
             model: convo.model,
@@ -545,9 +539,48 @@ fn list_conversations_sync() -> Result<Vec<ConversationMeta>, String> {
             cost_usd,
             compaction_summaries,
             last_snippet,
-            workspace_root,
-        });
+            workspace_root: convo.workspace_root,
+        },
+        stat,
+        sidecar_key,
+    })
+}
+
+/// One-line preview of a non-system message's first text block.
+fn message_snippet(m: &serde_json::Value) -> Option<String> {
+    if m.get("role").and_then(|r| r.as_str()) == Some("system") {
+        return None;
     }
+    m.get("blocks")?.as_array()?.iter().find_map(|b| {
+        if b.get("type").and_then(|t| t.as_str()) != Some("text") {
+            return None;
+        }
+        let t = b.get("text")?.as_str()?;
+        // RR10: only the first ~120 chars are kept — bound the input before the
+        // whitespace-collapse allocates (a multi-MB text block would otherwise be
+        // flattened in full just to slice 120).
+        let head = if t.len() > 2048 {
+            match t.char_indices().nth(512) {
+                Some((byte_idx, _)) => &t[..byte_idx],
+                None => t,
+            }
+        } else {
+            t
+        };
+        let flat = head.split_whitespace().collect::<Vec<_>>().join(" ");
+        if flat.is_empty() {
+            return None;
+        }
+        let mut s: String = flat.chars().take(120).collect();
+        if flat.chars().count() > 120 {
+            s.push('…');
+        }
+        Some(s)
+    })
+}
+
+fn list_conversations_sync() -> Result<Vec<ConversationMeta>, String> {
+    let mut out: Vec<ConversationMeta> = scan_summaries()?.into_iter().map(|s| s.meta).collect();
     out.sort_by_key(|c| std::cmp::Reverse(c.updated_at));
     Ok(out)
 }
@@ -588,65 +621,45 @@ pub async fn assistant_stats() -> Result<Vec<ConvoStat>, String> {
 }
 
 fn assistant_stats_sync() -> Result<Vec<ConvoStat>, String> {
-    let dir = conversations_dir()?;
-    let mut out = Vec::new();
-    let entries = match std::fs::read_dir(&dir) {
-        Ok(e) => e,
-        Err(_) => return Ok(out),
+    Ok(scan_summaries()?.into_iter().filter_map(|s| s.stat).collect())
+}
+
+fn convo_stat(convo: &Conversation, arr: &[serde_json::Value]) -> ConvoStat {
+    let mut s = ConvoStat {
+        updated_at: convo.updated_at,
+        created_at: convo.created_at,
+        model: convo.model.clone(),
+        messages: 0,
+        user_messages: 0,
+        tool_calls: 0,
+        words: 0,
+        cost_usd: 0.0,
     };
-    for entry in entries.flatten() {
-        let p = entry.path();
-        if p.extension().and_then(|s| s.to_str()) != Some("json") {
-            continue;
+    for m in arr {
+        match m.get("role").and_then(|r| r.as_str()) {
+            Some("user") => s.user_messages += 1,
+            Some("assistant") => {}
+            _ => continue, // skip system / boundary rows
         }
-        let bytes = match std::fs::read(&p) {
-            Ok(b) => b,
-            Err(_) => continue,
-        };
-        let convo: Conversation = match serde_json::from_slice(&bytes) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-        let Some(arr) = convo.messages.as_array() else {
-            continue;
-        };
-        let mut s = ConvoStat {
-            updated_at: convo.updated_at,
-            created_at: convo.created_at,
-            model: convo.model,
-            messages: 0,
-            user_messages: 0,
-            tool_calls: 0,
-            words: 0,
-            cost_usd: 0.0,
-        };
-        for m in arr {
-            match m.get("role").and_then(|r| r.as_str()) {
-                Some("user") => s.user_messages += 1,
-                Some("assistant") => {}
-                _ => continue, // skip system / boundary rows
-            }
-            s.messages += 1;
-            if let Some(c) = m.get("costUsd").and_then(|v| v.as_f64()) {
-                s.cost_usd += c;
-            }
-            if let Some(blocks) = m.get("blocks").and_then(|b| b.as_array()) {
-                for b in blocks {
-                    match b.get("type").and_then(|t| t.as_str()) {
-                        Some("tool") => s.tool_calls += 1,
-                        Some("text") => {
-                            if let Some(t) = b.get("text").and_then(|t| t.as_str()) {
-                                s.words += t.split_whitespace().count() as u32;
-                            }
+        s.messages += 1;
+        if let Some(c) = m.get("costUsd").and_then(|v| v.as_f64()) {
+            s.cost_usd += c;
+        }
+        if let Some(blocks) = m.get("blocks").and_then(|b| b.as_array()) {
+            for b in blocks {
+                match b.get("type").and_then(|t| t.as_str()) {
+                    Some("tool") => s.tool_calls += 1,
+                    Some("text") => {
+                        if let Some(t) = b.get("text").and_then(|t| t.as_str()) {
+                            s.words += t.split_whitespace().count() as u32;
                         }
-                        _ => {}
                     }
+                    _ => {}
                 }
             }
         }
-        out.push(s);
     }
-    Ok(out)
+    s
 }
 
 #[tauri::command]
@@ -929,6 +942,47 @@ mod tests {
         }))
         .expect("legacy route-less record parses");
         assert_eq!(legacy.chat_gpt_route, None);
+    }
+
+    #[test]
+    fn one_parse_feeds_both_list_meta_and_stats() {
+        let raw = serde_json::json!({
+            "id": "550e8400-e29b-41d4-a716-446655440002",
+            "title": "Summary",
+            "model": "sonnet",
+            "createdAt": 1,
+            "updatedAt": 5,
+            "lastActivityAt": 4,
+            "cliSessionId": "660e8400-e29b-41d4-a716-446655440002",
+            "compactionHistory": [{ "summary": "earlier work" }],
+            "messages": [
+                { "role": "user", "blocks": [{ "type": "text", "text": "fix   the  bug" }] },
+                { "role": "assistant", "costUsd": 0.25, "blocks": [
+                    { "type": "tool" },
+                    { "type": "text", "text": "done now" }
+                ] },
+                { "role": "system", "blocks": [{ "type": "text", "text": "boundary" }] }
+            ]
+        });
+        let s = summarize_conversation(raw.to_string().as_bytes()).expect("summarizes");
+        assert_eq!(s.meta.message_count, 3);
+        assert_eq!(s.meta.cost_usd, 0.25);
+        assert_eq!(s.meta.last_activity_at, Some(4));
+        assert_eq!(s.meta.compaction_summaries, vec!["earlier work".to_string()]);
+        // Newest non-system text wins; whitespace is collapsed.
+        assert_eq!(s.meta.last_snippet.as_deref(), Some("done now"));
+        assert_eq!(s.sidecar_key, "660e8400-e29b-41d4-a716-446655440002");
+        let stat = s.stat.expect("array messages produce a stat");
+        assert_eq!((stat.messages, stat.user_messages, stat.tool_calls), (2, 1, 1));
+        assert_eq!(stat.words, 5);
+
+        let no_array = serde_json::json!({
+            "id": "550e8400-e29b-41d4-a716-446655440003", "title": "t", "model": "m",
+            "createdAt": 1, "updatedAt": 1, "messages": {}
+        });
+        let s = summarize_conversation(no_array.to_string().as_bytes()).expect("summarizes");
+        assert!(s.stat.is_none(), "stats skip non-array transcripts; the list keeps them");
+        assert!(summarize_conversation(b"{not json").is_err());
     }
 
     #[test]
