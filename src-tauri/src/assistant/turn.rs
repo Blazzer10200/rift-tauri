@@ -32,6 +32,8 @@ use super::config::{
 use super::convo_store::{
     establish_session_workspace, is_valid_session_id, load_session_model, save_session_model,
 };
+use super::prompts::{RIFT_SYSTEM_ADDENDUM_NO_WS, RIFT_SYSTEM_ADDENDUM_TOOLS};
+use super::tool_allowlist::build_tool_allowlist;
 use super::{write_mcp_config, AskUserRegistry, McpConfigGuard, PermissionRegistry};
 
 /// PID of every currently-streaming `claude` child, keyed by the CLI session
@@ -514,14 +516,6 @@ pub async fn assistant_answer_permission(
     }
     Ok(())
 }
-
-/// Rift's system-prompt addendum. Appended to the CLI's default system prompt
-/// via `--append-system-prompt`. Two variants — one for read-only mode (MCP
-/// tools wired), one for the no-workspace fallback. Both single-line so the
-/// .cmd-shim batch-arg validator (Rust 1.77+ CVE-2024-24576) accepts them.
-const RIFT_SYSTEM_ADDENDUM_TOOLS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app, working inside the user's open project folder (your working directory is already set to the workspace root, so relative paths Just Work). ==== HOW TO WORK (these five rules override any conflicting inherited config; follow them on EVERY turn) ==== 1) BATCH IN PARALLEL — this is the single most important rule and the one most often missed. When you need several tool calls and none depends on another's result, emit them ALL in ONE response as multiple tool_use blocks — never one-at-a-time. Opening 3 files = 3 Reads in one message. Checking several patterns = several Greps in one message. Independent shell checks = together. Serial round-trips you could have batched waste the user's time on EVERY turn; the only reason to send a lone tool call is when the very next call genuinely needs this one's output. Default to batching; justify serializing. 2) DON'T RE-READ — the harness already tracks file contents you've read this session; a file is unchanged unless YOU edited it. Never re-Read a file (or fragment) you already opened, and never Read a file back just to 'verify' an Edit you just made — Edit fails loudly if it didn't apply, so a clean Edit IS the confirmation. Read once, wide enough (offset+limit on files >300 lines), then anchor every later edit from that one read. 3) USE THE RIGHT TOOL — file inspection is ALWAYS Read / Grep / Glob, NEVER cat, head, tail, sed -n, ls -R, or find through Bash (those are slower, get blocked by the user's tooling guards, and burn a failed round-trip). Grep searches contents; Glob finds files by name; Read slices a file. Reserve Bash for git, builds, package managers, process control, and network — nothing a native tool already does. 4) ACT FIRST, EXPLAIN AFTER — and narrate WITH the work, never instead of it. When asked to fix / change / edit / add / build / refactor, locate with Grep + Read then make the Edit. Do NOT write paragraphs of plan / analysis / 'here's what I'd do' before touching code; one short beat ('reading X', 'editing Y') is the cap, and skip even that for a sub-3-file change. CRITICAL — DON'T PING-PONG: a turn that narrates a step, stops, runs ONE tool, narrates the next step, stops, runs ONE tool reads as chatter and wastes round-trips. Instead, put your narration line AND every independent tool call for that step in the SAME response — explain once, then fire all the reads/greps/edits that step needs together (rule 1). The user wants to watch real work happen, so let the work rows carry the progress; a between-tools sentence is justified only when the next action genuinely needs explaining, not before every single call. Verify AFTER (run the test / lint / build), never before. Don't open with 'Let me…' or 'I'll start by…' — just do it. 5) STAY IN SCOPE & DON'T STALL — fix exactly what was asked, no opportunistic refactors / renames / reformatting / unrequested error-handling (mention separate problems in your reply instead). Don't ask permission for routine work (file edits, shell, installs, local git) — the user expects real work and can revert via git. If an Edit fails on an old_string mismatch, re-Read ONLY that region and re-anchor — never retry it verbatim, and after two failures on one file switch tactic (smaller anchor, replace_all, or Write). Surface tool errors verbatim and try another approach instead of bouncing the problem back. ==== YOUR TOOLS ==== Full Claude Code toolset: Read / Write / Edit / MultiEdit for files, Bash for shell (runs in the workspace dir, output streamed back), Glob for filename patterns, Grep for content search, WebFetch / WebSearch for the open web, TaskCreate / TaskUpdate for multi-step plans (TodoWrite on older CLI builds), and Agent for delegating heavy lookups. Task output surfaces in a dedicated Tasks panel in the user's UI — create tasks proactively when a request has three or more distinct steps, and keep statuses LIVE while you work — TaskUpdate a task to in_progress the moment you start it and to completed the moment it's done, never saving the updates for one batch at the end (the user watches a live plan widget driven by these statuses; a plan that sits at 0/N all turn and jumps to N/N at the finish reads as broken) — but don't churn the list with a fresh batch for every sub-step or every new user message. Rift's MCP server also exposes read_file / list_dir / grep as scoped, workspace-rooted helpers, plus git_status / git_diff / git_log (and git_pull / git_commit / git_push when trust permits); prefer the Claude Code built-ins for normal work and use the MCP variants only when a guaranteed-workspace-rooted path matters. Three MCP tools drive the Rift app itself: mcp__rift__ask_user presents an interactive multiple-choice card in the chat — use it when the user must pick between approaches or confirm something risky, and PREFER it over a trailing prose question: whenever your reply would END by asking the user to choose or confirm something short (A-or-B, yes/no, which-option), send an ask_user card with those options instead of making the user type an answer (the standard Anthropic `AskUserQuestion` tool is NOT available here; ask_user is its Rift-native replacement, and if it errors fall back to asking in plain text). mcp__rift__open_browser shows any http/https page in Rift's in-app browser dock beside the chat — ALWAYS call it instead of only printing a URL when you start a dev server or want the user to see a local preview (e.g. http://localhost:3000), a deployed page, or docs worth reading together. mcp__rift__notify pops a brief toast in the corner — fire it when long-running work finishes or something needs attention (they may be on another page of the app); don't spam it. ==== DELEGATION ==== A sub-agent you spawn with Agent does NOT inherit these instructions — it starts from the CLI's default agent prompt and can't see this guidance. So when a delegated lookup matters, bake the essentials into the Agent prompt yourself: tell it to inspect with Read / Grep / Glob (never cat / head / find through Bash), to batch independent tool calls in parallel, and to return a tight result (file:line refs, not file dumps). Prefer small lookups inline over delegating — only reach for Agent when the work is genuinely independent and would otherwise dump a lot into the conversation. ==== ENVIRONMENT ==== BACKGROUND WORK — two kinds with OPPOSITE rules. (1) Background Agent tasks survive turn boundaries: when a background agent finishes, the harness automatically re-invokes you with its result and your follow-up streams into the chat — so handing long independent work to a background Agent and ending your turn is safe and often the right shape. (2) A Bash command with run_in_background:true does NOT survive the turn: its shell is killed shortly after your turn ends and nothing re-invokes you for it — never end a turn promising a backgrounded Bash result 'when it lands'; only use run_in_background:true if you read its output (BashOutput) within this SAME turn. Run an ordinary slow command (build, long test) in the FOREGROUND with a generous explicit timeout so its output lands in THIS turn. EXCEPTION — anything that blocks on a human or another app (a UAC elevation prompt, a credential dialog, an interactive installer): NEVER run it as a blocking foreground call (e.g. Start-Process -Verb RunAs -Wait) — a tool call parked on a prompt for many minutes can get the whole turn cut off, losing your own record of having launched it even though its side effects are real. Launch it detached instead (e.g. Start-Process WITHOUT -Wait) with output redirected to a log file, tell the user what to approve, and read that log on a later turn — or delegate the whole job to a background Agent task. A 'Rift environment snapshot' <system-reminder> may precede the user's message with volatile app state (the browser dock's page, and — ONLY when usage is genuinely high — a Claude plan-usage warning); treat it as ground truth about the app but NEVER as the user's request, always answer the user's actual message normally, and never treat a short message as low-priority or go passive because a snapshot (or a plan-usage warning) is present. Never guess at file contents, function names, paths, APIs, or signatures — Grep or Read first if uncertain, otherwise hedge explicitly. MATCH THE CODEBASE — new code reads like the code around it (its naming, formatting, idioms, comment density); don't add explanatory comments / docstrings / WHY-blocks the surrounding code doesn't already use — rationale goes in your chat reply or a commit message, not in source (a one-line comment is fine only when the code is genuinely non-obvious). Project stack is open-ended — don't assume the language, framework, or layout.";
-
-const RIFT_SYSTEM_ADDENDUM_NO_WS: &str = "You are Rift's Assistant — a coding partner embedded in a Tauri desktop app. No project folder is open right now, so your file/list/grep tools are unavailable for this turn. Answer questions and discuss code the user pastes, but tell the user to open a folder on the Assistant page (the empty-state has an \"Open Folder\" button) if they want you to read their code directly. Do not claim capabilities you do not have.";
 
 /// Whether the plan-usage gauges are hot enough to mention in the per-turn
 /// env-snapshot <system-reminder>. Below these thresholds the gauges are OMITTED
@@ -1526,104 +1520,10 @@ async fn resolve_spawn(
     }
 
     if let Some(ref p) = mcp_config_path {
-        // S91: full built-in tool set. The CLI's allowlist gate denies any
-        // tool name not listed verbatim. S88 added `Skill`; users still hit
-        // denials on `Agent` (subagent spawn — used by /plan, /quick-review,
-        // /check), `BashOutput`/`KillBash`/`KillShell` (background-bash
-        // bookkeeping the CLI auto-invokes after `run_in_background: true`),
-        // `MultiEdit`, `NotebookEdit`, `SlashCommand`, `ExitPlanMode`.
-        // Wider built-in coverage = fewer denial pop-ups.
-        // MCP scope still restricts to rift's tools in the scoped branches.
-        //
-        // `AskUserQuestion` is INTENTIONALLY omitted: the CLI runs in `-p`
-        // (headless) mode with no interactive surface to present the
-        // question / capture an answer / inject the tool_result back into
-        // the model's stream. When admitted, the model called it and stalled
-        // waiting for a tool_result that never arrived, then retried — the
-        // user saw two collapsed error bubbles on every question turn.
-        // Excluding it makes the model fall back to asking in plain text,
-        // which works correctly in `-p` mode.
-        // `DesignSync` (claude.ai/design sync, driven by /design-sync) is the
-        // built-in for the Claude Design integration; kept out of SAFE_BUILTINS
-        // so its cloud writes ride the can_use_tool prompt. OAuth-path only —
-        // it has no auth under --bare.
-        // Task* are the CLI 2.1.18x+ rename of TodoWrite (the Tasks-dock driver):
-        // TaskCreate/TaskUpdate/TaskList/TaskGet/TaskStop. Keep BOTH names — old
-        // CLIs emit TodoWrite, new ones emit Task*; the FE (streaming.ts
-        // applyTaskCreate/applyTaskUpdate) already renders both into the same Plan
-        // card. Omitting Task* silently killed the Tasks panel on current CLI: the
-        // model has the tools but the allowlist gated them out, so it fell back to
-        // describing the plan in plain text. (Found in the 2026-06-25 stress test.)
-        //
-        // S107 (2026-07-06, verified vs CLI 2.1.201 sdk-tools.d.ts + exe strings):
-        // the 2.1.19x/2.1.20x tool set added EnterPlanMode, ToolSearch (deferred-
-        // tool schema fetch), ReportFindings (code-review output), Workflow
-        // (multi-agent orchestration), Monitor (background watch), Artifact
-        // (claude.ai page publish), REPL (JS scratchpad), SendMessage (agent-to-
-        // agent), ScheduleWakeup, Cron*, RemoteTrigger, PushNotification,
-        // EnterWorktree/ExitWorktree, and the MCP-resource readers. All listed so
-        // a current CLI's tools aren't denial-popped; unknown names are harmless
-        // on older CLIs (allowlist entries that never match). SlashCommand/
-        // Refreshed 2026-09-18 against CLI 2.1.277 (Rift's hard floor is 2.1.161,
-        // past the 2.1.201 removal of MultiEdit/KillBash/KillShell/BashOutput/
-        // SlashCommand, so those are dropped). AskUserQuestion stays excluded
-        // (see above). S128 (2026-07-08): + PowerShell (the CLI's dedicated
-        // Windows shell tool — omitting it denial-gated every PowerShell call on
-        // Windows) and LSP (deferred symbol-query tool, loaded via ToolSearch).
-        // Skill/plugin discovery (ListSkills/SearchSkills/SuggestSkills/
-        // ListPlugins/SearchPlugins/SuggestPluginInstall), ListAgents and the
-        // Artifact side tools (ArtifactComments/ArtifactData) are the 2.1.2xx
-        // additions.
-        const BUILTINS: &str = "Agent,Artifact,ArtifactComments,ArtifactData,Bash,CronCreate,CronDelete,CronList,DesignSync,Edit,EnterPlanMode,EnterWorktree,ExitPlanMode,ExitWorktree,Glob,Grep,ListAgents,ListMcpResources,ListPlugins,ListSkills,LSP,Monitor,NotebookEdit,PowerShell,PushNotification,Read,ReadMcpResource,ReadMcpResourceDir,REPL,RemoteTrigger,ReportFindings,ScheduleWakeup,SearchPlugins,SearchSkills,SendMessage,Skill,SuggestPluginInstall,SuggestSkills,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,TodoWrite,ToolSearch,WebFetch,WebSearch,Workflow,Write";
-        // Read-only / non-mutating subset always auto-approved even in a
-        // prompting mode — these shouldn't interrupt the user. Everything
-        // omitted (Bash, Edit, Write, Agent, Skill, Workflow, Monitor/REPL
-        // (both execute code), Artifact (cloud publish), worktree/Cron/Remote
-        // mutations, and the mutating mcp__rift__* tools) falls through to the
-        // `can_use_tool` prompt. New no-op additions: ToolSearch (schema fetch),
-        // EnterPlanMode (mode flip), ScheduleWakeup (self-timer), ReportFindings
-        // (display-only), CronList (read), PushNotification (user-directed toast,
-        // parallel to mcp__rift__notify below), LSP (read-only symbol queries).
-        // PowerShell executes commands → BUILTINS only, prompts like Bash here.
-        // ListAgents + the skill/plugin List/Search/Suggest tools are catalog
-        // reads (SuggestPluginInstall only renders a card — the install itself
-        // is a separate user click), so they sit here too.
-        const SAFE_BUILTINS: &str = "CronList,EnterPlanMode,Glob,Grep,ListAgents,ListPlugins,ListSkills,LSP,PushNotification,Read,ReportFindings,ScheduleWakeup,SearchPlugins,SearchSkills,SuggestPluginInstall,SuggestSkills,TaskCreate,TaskGet,TaskList,TaskOutput,TaskStop,TaskUpdate,TodoWrite,ToolSearch,WebFetch,WebSearch";
-        // UI-presentation tools (ask_user / open_browser / notify) are safe to
-        // auto-approve: scheme-allowlisted, length-capped, no workspace writes.
-        // The browser-dock readers (page text / console) are read-only eyes on
-        // the pane the user is already looking at — same no-prompt tier.
-        const SAFE_MCP: &str = "mcp__rift__read_file,mcp__rift__list_dir,mcp__rift__grep,mcp__rift__ask_user,mcp__rift__open_browser,mcp__rift__notify,mcp__rift__read_browser_page,mcp__rift__read_browser_console";
-        // Local git tools (git_local.rs). Read set is non-mutating → safe to
-        // auto-approve even in prompting modes. Write set is admitted in
-        // non-prompting variants but deliberately OMITTED from the prompting
-        // allowlist so it rides the can_use_tool prompt. RIFT_TRUST_LEVEL is the
-        // real authority server-side; these just keep the CLI from rejecting
-        // the call before it reaches the server.
-        const GIT_READ_MCP: &str = "mcp__rift__git_status,mcp__rift__git_diff,mcp__rift__git_log";
-        const GIT_WRITE_MCP: &str = "mcp__rift__git_pull,mcp__rift__git_commit,mcp__rift__git_push";
-        // Mirror the server-side gate (mcp_server::trust_at_least("standard")) in
-        // the CLI allowlist: only list the git-write tools when trust actually
-        // permits them, so the outer allowlist is never wider than the server
-        // gate (defense-in-depth — a patched CLI can't call what isn't listed).
-        let git_write = if trust_level == "standard" {
-            format!(",{GIT_WRITE_MCP}")
-        } else {
-            String::new()
-        };
-        let allowed: String = if prompting_mode {
-            // Narrow allowlist: only the safe set auto-approves; the CLI prompts
-            // for the rest via the control channel. Applies across config
-            // variants — mutating MCP tools (git write) intentionally prompt here.
-            format!("{SAFE_BUILTINS},{SAFE_MCP},{GIT_READ_MCP}")
-        } else if use_full_config {
-            // `mcp__*` admits any tool from user MCP servers that the CLI
-            // merged in (no `--strict-mcp-config`). Rift's tools stay scoped
-            // via the explicit-name entries.
-            format!("{BUILTINS},mcp__*")
-        } else {
-            format!("{BUILTINS},{SAFE_MCP},{GIT_READ_MCP}{git_write}")
-        };
+        // Construction (BUILTINS/SAFE_BUILTINS/SAFE_MCP/git-write gating — S91,
+        // S107, S128, refreshed 2026-09-18 against CLI 2.1.277) lives in
+        // `tool_allowlist::build_tool_allowlist`; see its doc comment.
+        let allowed = build_tool_allowlist(&trust_level, prompting_mode, use_full_config);
         stash_session_allowlist(session_id, &allowed);
         cmd.arg("--mcp-config")
             .arg(p)
@@ -2242,6 +2142,69 @@ fn emit_dispatch(
     );
 }
 
+/// #39 stop-on-spawn guard, shared by `cold_spawn_and_run` and `prewarm_spawn`:
+/// a stop/teardown arriving in the spawn window would otherwise find no PID
+/// and silently drop. Re-checks now that the PID is registered — kills the
+/// child, clears its PID, and returns `true` when a stop did land, so the
+/// caller can bail before doing anything else with it. `caller`/`noun` carry
+/// the per-site log text ("cold_spawn"/"child" vs "prewarm_spawn"/"spare");
+/// the differing post-bail behavior (cold emits `DONE_EVENT`, prewarm does
+/// not) stays with each caller.
+fn stop_landed_during_spawn(
+    session_id: &str,
+    child: &mut tokio::process::Child,
+    turn_pid: Option<u32>,
+    caller: &str,
+    noun: &str,
+) -> bool {
+    if !take_session_stopped(session_id) {
+        return false;
+    }
+    log::info!("{caller}: stop arrived during spawn for {session_id} — killing {noun}");
+    if let Err(e) = child.start_kill() {
+        log::warn!("{caller}: start_kill failed for {session_id} during stop-on-spawn: {e}");
+    }
+    if let Some(p) = turn_pid {
+        clear_session_pid_if(session_id, p);
+    }
+    true
+}
+
+/// A1: `stdin`/`stdout`/`stderr` take()+guard, shared by `cold_spawn_and_run`
+/// and `prewarm_spawn` — `None` means the child died between spawn and now.
+/// Kills the (already-dead) child, clears its PID, and returns an `Err` naming
+/// which pipe was missing. `err_prefix` carries the per-site error text ("" for
+/// the cold path, "prewarm: " for the spare path).
+fn take_child_pipes(
+    child: &mut tokio::process::Child,
+    session_id: &str,
+    err_prefix: &str,
+) -> Result<
+    (
+        tokio::process::ChildStdin,
+        tokio::process::ChildStdout,
+        tokio::process::ChildStderr,
+    ),
+    String,
+> {
+    let Some(stdin) = child.stdin.take() else {
+        let _ = child.start_kill();
+        clear_session_pid(session_id);
+        return Err(format!("{err_prefix}claude stdin unavailable — process killed"));
+    };
+    let Some(stdout) = child.stdout.take() else {
+        let _ = child.start_kill();
+        clear_session_pid(session_id);
+        return Err(format!("{err_prefix}claude stdout unavailable — process killed"));
+    };
+    let Some(stderr) = child.stderr.take() else {
+        let _ = child.start_kill();
+        clear_session_pid(session_id);
+        return Err(format!("{err_prefix}claude stderr unavailable — process killed"));
+    };
+    Ok((stdin, stdout, stderr))
+}
+
 /// Cold-spawn a fresh `claude` child, register it in the warm pool, start its
 /// long-lived reader loop, hand it the first turn, and await that turn's
 /// result. The reader loop OWNS stdin/stdout/stderr for the child's whole life
@@ -2286,14 +2249,7 @@ async fn cold_spawn_and_run(
 
     // #39: a concurrent stop arriving in the spawn window would find no PID and
     // silently drop. Re-check now that the PID is registered.
-    if take_session_stopped(&session_id) {
-        log::info!("cold_spawn: stop arrived during spawn for {session_id} — killing child");
-        if let Err(e) = child.start_kill() {
-            log::warn!("cold_spawn: start_kill failed for {session_id} during stop-on-spawn: {e}");
-        }
-        if let Some(p) = turn_pid {
-            clear_session_pid_if(&session_id, p);
-        }
+    if stop_landed_during_spawn(&session_id, &mut child, turn_pid, "cold_spawn", "child") {
         let _ = app.emit_to(
             &window_label,
             DONE_EVENT,
@@ -2305,21 +2261,7 @@ async fn cold_spawn_and_run(
     }
 
     // A1: take() + guard — None means the child died between spawn and now.
-    let Some(stdin) = child.stdin.take() else {
-        let _ = child.start_kill();
-        clear_session_pid(&session_id);
-        return Err("claude stdin unavailable — process killed".into());
-    };
-    let Some(stdout) = child.stdout.take() else {
-        let _ = child.start_kill();
-        clear_session_pid(&session_id);
-        return Err("claude stdout unavailable — process killed".into());
-    };
-    let Some(stderr) = child.stderr.take() else {
-        let _ = child.start_kill();
-        clear_session_pid(&session_id);
-        return Err("claude stderr unavailable — process killed".into());
-    };
+    let (stdin, stdout, stderr) = take_child_pipes(&mut child, &session_id, "")?;
 
     // Per-child turn channel: dispatch_turn sends a TurnCmd; the loop runs it.
     let (turn_tx, turn_rx) = mpsc::unbounded_channel::<warm_pool::TurnCmd>();
@@ -2475,36 +2417,13 @@ fn prewarm_spawn(
     // then the spare gets inserted into the pool and parks — an orphaned child
     // the Stop button can't reach until idle-evict ages it out. Re-check now
     // that the PID is registered: if stopped, kill + clear + bail before insert.
-    if take_session_stopped(&session_id) {
-        log::info!("prewarm_spawn: stop arrived during spawn for {session_id} — killing spare");
-        if let Err(e) = child.start_kill() {
-            log::warn!(
-                "prewarm_spawn: start_kill failed for {session_id} during stop-on-spawn: {e}"
-            );
-        }
-        if let Some(p) = turn_pid {
-            clear_session_pid_if(&session_id, p);
-        }
+    if stop_landed_during_spawn(&session_id, &mut child, turn_pid, "prewarm_spawn", "spare") {
         return Ok(());
     }
 
     // A1: same take()+guard as the cold path — None means the child died between
     // spawn and now.
-    let Some(stdin) = child.stdin.take() else {
-        let _ = child.start_kill();
-        clear_session_pid(&session_id);
-        return Err("prewarm: claude stdin unavailable — process killed".into());
-    };
-    let Some(stdout) = child.stdout.take() else {
-        let _ = child.start_kill();
-        clear_session_pid(&session_id);
-        return Err("prewarm: claude stdout unavailable — process killed".into());
-    };
-    let Some(stderr) = child.stderr.take() else {
-        let _ = child.start_kill();
-        clear_session_pid(&session_id);
-        return Err("prewarm: claude stderr unavailable — process killed".into());
-    };
+    let (stdin, stdout, stderr) = take_child_pipes(&mut child, &session_id, "prewarm: ")?;
 
     let (turn_tx, turn_rx) = mpsc::unbounded_channel::<warm_pool::TurnCmd>();
     let (steer_tx, steer_rx) = mpsc::unbounded_channel::<warm_pool::SteerCmd>();
