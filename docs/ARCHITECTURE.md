@@ -83,9 +83,12 @@ the thin binary entrypoint. Table paths are relative to `src-tauri/src/`.
 | Area | Responsibility |
 |---|---|
 | `assistant/turn.rs` | Claude live turns, process/session registry, stream and permission events |
+| `assistant/prompts.rs`, `tool_allowlist.rs` | Claude system-prompt text and the trust-level `--allowedTools` list that `turn.rs` spawns with |
+| `assistant/pending.rs` | Shared `PendingRegistry<T>` behind the permission and `ask_user` waits |
 | `assistant/warm_pool.rs` | Persistent per-session Claude child and idle/death recovery |
+| `assistant/cli_install.rs` | Claude CLI discovery: install ranking, bounded version probes, `claude_command` |
 | `assistant/codex.rs` | Standalone Codex discovery, status, and interactive login |
-| `assistant/codex_app_server.rs` | ChatGPT account overview, model/skill/usage discovery, thread turns, approvals, tools, and cancellation |
+| `assistant/codex_app_server.rs` | ChatGPT account overview, model/skill/usage discovery, thread turns, approvals, tools, cancellation, and the warm spare server |
 | `assistant/openai.rs` | Native Responses API transport, SSE, local continuation, images, tools, and usage |
 | `assistant/mcp_server.rs` | Shared workspace file/search/git/GitHub tool catalog for Claude |
 | `assistant/mcp_bridge.rs`, `bridge.rs` | Token-gated loopback round trips for `ask_user`, `open_browser`, and `notify` |
