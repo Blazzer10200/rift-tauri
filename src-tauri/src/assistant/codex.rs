@@ -176,6 +176,8 @@ pub fn assistant_codex_open_login() -> Result<(), String> {
     let exe = resolve_codex_cli().ok_or_else(|| {
         "No runnable Codex CLI was found. Install the standalone Codex CLI first; the Windows Desktop bundle cannot host Rift turns.".to_string()
     })?;
+    // A parked App Server booted under the old account must not serve the next turn.
+    super::codex_app_server::drop_codex_spare();
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;

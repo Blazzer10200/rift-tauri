@@ -197,9 +197,168 @@ impl AppServer {
         }
     }
 
+    /// Pipelined `request`: writes every call before reading any reply, so the
+    /// App Server works on them together instead of one round trip at a time
+    /// (3 account reads: ~900 ms sequential → ~400 ms pipelined, measured
+    /// 2026-09-22). Results come back in call order; one failure doesn't sink
+    /// the others. Interleaved notifications land in `pending` as usual.
+    async fn request_all(&mut self, calls: Vec<(&str, Value)>) -> Vec<Result<Value, String>> {
+        let first_id = self.next_id;
+        let mut results: Vec<Option<Result<Value, String>>> = Vec::with_capacity(calls.len());
+        for (method, params) in &calls {
+            let id = self.next_id;
+            self.next_id += 1;
+            let sent = self
+                .write(&json!({ "id": id, "method": method, "params": params }))
+                .await;
+            results.push(sent.err().map(Err));
+        }
+        let mut stopped = "gave no reply";
+        while results.iter().any(Option::is_none) {
+            let line = match tokio::time::timeout(Duration::from_secs(20), self.lines.next_line()).await {
+                Ok(Ok(Some(line))) => line,
+                Ok(Ok(None)) => {
+                    stopped = "exited before replying";
+                    break;
+                }
+                Ok(Err(_)) => {
+                    stopped = "stream failed before replying";
+                    break;
+                }
+                Err(_) => {
+                    stopped = "timed out waiting";
+                    break;
+                }
+            };
+            let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
+            let slot = msg
+                .get("id")
+                .and_then(Value::as_u64)
+                .filter(|_| msg.get("method").is_none())
+                .and_then(|id| id.checked_sub(first_id))
+                .and_then(|i| results.get_mut(i as usize));
+            match slot {
+                Some(slot @ None) => {
+                    *slot = Some(match msg.get("error") {
+                        Some(error) => Err(app_server_error(error)),
+                        None => Ok(msg.get("result").cloned().unwrap_or(Value::Null)),
+                    });
+                }
+                Some(Some(_)) => {}
+                None if msg.get("method").is_some() => self.pending.push(msg),
+                None => {}
+            }
+        }
+        results
+            .into_iter()
+            .zip(&calls)
+            .map(|(result, (method, _))| {
+                result.unwrap_or_else(|| Err(format!("Codex App Server {stopped} ({method})")))
+            })
+            .collect()
+    }
+
     async fn shutdown(&mut self) {
         let _ = self.child.kill().await;
     }
+}
+
+// ─── Warm spare ──────────────────────────────────────────────────────────────
+//
+// `codex app-server` spends ~3.4 s starting up and answering `initialize`
+// before it can take a turn (measured 2026-09-22; the native exe and the npm
+// wrapper cost the same, so it is Codex's own boot). Every ChatGPT turn used to
+// pay that up front. One pre-initialized server is now parked here and handed
+// to the next turn.
+//
+// Single-use by design: whoever takes it kills it afterwards, exactly like a
+// fresh spawn, so no turn ever inherits another turn's late events. A
+// replacement warms in the background on every take. The spare expires after
+// `SPARE_TTL`, so an idle user doesn't keep Codex (and any MCP servers it starts)
+// running, and auth/config edits get picked up by the next boot. Warming is
+// driven by intent (`assistant_codex_prewarm` from the composer, or a real
+// turn), never by app start.
+
+const SPARE_TTL: Duration = Duration::from_secs(5 * 60);
+
+struct Spare {
+    server: AppServer,
+    born: std::time::Instant,
+    generation: u64,
+}
+
+static SPARE: Mutex<Option<Spare>> = Mutex::new(None);
+static SPARE_WARMING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static SPARE_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn spare_slot() -> std::sync::MutexGuard<'static, Option<Spare>> {
+    SPARE.lock().unwrap_or_else(|p| p.into_inner())
+}
+
+/// Start warming a spare unless one is parked or already warming. Cheap and
+/// idempotent — safe to call on every composer tick.
+fn warm_spare() {
+    use std::sync::atomic::Ordering;
+    if spare_slot().is_some() || SPARE_WARMING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    tauri::async_runtime::spawn(async {
+        let started = std::time::Instant::now();
+        let result = AppServer::spawn().await;
+        SPARE_WARMING.store(false, Ordering::Release);
+        let server = match result {
+            Ok(server) => server,
+            Err(error) => {
+                log::warn!("codex: warm spare failed to start: {error}");
+                return;
+            }
+        };
+        log::info!("codex: warm spare ready in {} ms", started.elapsed().as_millis());
+        let generation = SPARE_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
+        let displaced = spare_slot().replace(Spare {
+            server,
+            born: std::time::Instant::now(),
+            generation,
+        });
+        drop(displaced); // kill_on_drop reaps it
+        tokio::time::sleep(SPARE_TTL).await;
+        let expired = {
+            let mut slot = spare_slot();
+            if slot.as_ref().is_some_and(|spare| spare.generation == generation) {
+                slot.take()
+            } else {
+                None
+            }
+        };
+        if expired.is_some() {
+            log::info!("codex: warm spare expired unused");
+        }
+    });
+}
+
+/// A ready App Server for one turn: the parked spare when it's live and fresh,
+/// else a cold spawn. Either way a replacement starts warming for the next turn.
+async fn take_server() -> Result<AppServer, String> {
+    let spare = spare_slot().take();
+    warm_spare();
+    if let Some(mut spare) = spare {
+        if spare.born.elapsed() < SPARE_TTL && matches!(spare.server.child.try_wait(), Ok(None)) {
+            return Ok(spare.server);
+        }
+        spare.server.shutdown().await;
+    }
+    AppServer::spawn().await
+}
+
+/// Drop the parked spare (app exit, sign-in change).
+pub fn drop_codex_spare() {
+    let spare = spare_slot().take();
+    drop(spare);
+}
+
+#[tauri::command]
+pub fn assistant_codex_prewarm() {
+    warm_spare();
 }
 
 fn app_server_error(error: &Value) -> String {
@@ -281,32 +440,27 @@ pub fn cancel_all_codex_turns() {
 pub async fn assistant_codex_account_overview(
     root: Option<String>,
 ) -> Result<CodexAccountOverview, String> {
-    let mut server = AppServer::spawn().await?;
-    let models = server
-        .request(
-            "model/list",
-            json!({ "includeHidden": false, "limit": 100 }),
-        )
-        .await;
     // Skills are pane/workspace scoped. An omitted root means user-level only;
     // never borrow whichever project happens to be globally selected.
     let root = resolve_root(root.as_deref())?;
-    let skills = if let Some(root) = root.as_deref() {
-        server
-            .request(
-                "skills/list",
-                json!({ "cwds": [root], "forceReload": false }),
-            )
-            .await
-    } else {
-        Ok(json!({ "data": [] }))
-    };
-    let account = server
-        .request("account/read", json!({ "refreshToken": false }))
-        .await;
-    let rate_limits = server.request("account/rateLimits/read", json!({})).await;
-    let usage = server.request("account/usage/read", json!({})).await;
+    // A fresh boot, never the warm spare: this runs right after a sign-in, and
+    // a spare booted before it would report the old account. Nor does it warm
+    // one: status refreshes run for every Codex-ready install, ChatGPT user or not.
+    let mut server = AppServer::spawn().await?;
+    let mut calls = vec![
+        ("model/list", json!({ "includeHidden": false, "limit": 100 })),
+        ("account/read", json!({ "refreshToken": false })),
+        ("account/rateLimits/read", json!({})),
+        ("account/usage/read", json!({})),
+    ];
+    if let Some(root) = root.as_deref() {
+        calls.push(("skills/list", json!({ "cwds": [root], "forceReload": false })));
+    }
+    let mut replies = server.request_all(calls).await.into_iter();
     server.shutdown().await;
+    let mut next = || replies.next().unwrap_or_else(|| Err("missing reply".into()));
+    let (models, account, rate_limits, usage) = (next(), next(), next(), next());
+    let skills = if root.is_some() { next() } else { Ok(json!({ "data": [] })) };
 
     let mut overview = parse_account_overview(&account?, rate_limits, usage);
     let models = models?;
@@ -620,7 +774,7 @@ pub async fn assistant_codex_send(
     let epoch = turn_epoch.unwrap_or(0);
     let window_label = window.label().to_string();
     let (cancel, _guard) = register_turn(&session_id);
-    let mut server = AppServer::spawn().await?;
+    let mut server = take_server().await?;
     let result = run_turn(
         &app,
         &window_label,

@@ -81,9 +81,18 @@ function signatureOf(
 export function requestPrewarm(store: AssistantStore): void {
   const tab = store.activeTab;
   if (!tab) return;
-  if (isOpenAIModel(store.modelFor(tab))) return;
   // Never pre-warm a tab mid-turn — its warm child is busy.
   if (tab.streaming) return;
+  const model = store.modelFor(tab);
+  if (isOpenAIModel(model)) {
+    if (store.chatGptRouteFor(model, tab.chatGptRoute) === "codex") {
+      // Reading the draft subscribes the caller's $effect to typing, so a spare
+      // that expired while the user was idle re-warms on their first keystroke.
+      void tab.draft;
+      requestCodexPrewarm();
+    }
+    return;
+  }
   // Pre-warm BOTH a fresh tab (no convo yet → `--session-id` spare) AND a STARTED
   // conversation that currently has no live child (→ `--resume` spare). With the
   // persistent-process model the warm child survives any active-use pause, so the
@@ -144,6 +153,22 @@ export function requestPrewarm(store: AssistantStore): void {
       console.debug("assistant_prewarm failed (first turn will be cold):", e);
     });
   }, delay);
+}
+
+// ChatGPT subscription route: the backend parks one pre-booted Codex App Server
+// (~3.4s boot) for the next turn. It is session-agnostic and idempotent, so a
+// plain throttle is enough — no signature, no debounce.
+const CODEX_PREWARM_THROTTLE_MS = 30_000;
+let lastCodexPrewarmAt = 0;
+
+function requestCodexPrewarm(): void {
+  const now = Date.now();
+  if (now - lastCodexPrewarmAt < CODEX_PREWARM_THROTTLE_MS) return;
+  lastCodexPrewarmAt = now;
+  void invoke("assistant_codex_prewarm").catch((e) => {
+    lastCodexPrewarmAt = 0;
+    console.debug("assistant_codex_prewarm failed (next ChatGPT turn boots cold):", e);
+  });
 }
 
 /** Drop the dedup latch — call when the active tab/session changes so the next
