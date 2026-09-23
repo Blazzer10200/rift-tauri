@@ -19,7 +19,6 @@ pub mod certs;
 pub mod commands;
 pub mod diagnostics;
 pub mod elevation;
-pub mod job_object;
 pub mod secrets;
 pub mod shutdown;
 pub mod state;
@@ -141,9 +140,11 @@ pub fn run() {
     // so it would inherit the kill-on-close job and be terminated the instant the
     // old Rift exits — bricking the swap+relaunch. Simple job flags can't keep
     // WebView2/claude children IN the job while letting Update.exe OUT. See
-    // src/job_object.rs (kept, not called) + docs for the safe designs
+    // the docs for the safe designs
     // (JobObjectAssociateCompletionPort watcher process, or CREATE_BREAKAWAY on
     // our own Update.exe wrapper). Flagged for owner — do NOT wire in blindly.
+    // The never-called prototype (src/job_object.rs) was removed 2026-09-22;
+    // git history keeps it for whichever safe design gets built.
 
     // Velopack: install/update/uninstall hooks run FIRST on normal launches
     // (the installer passes `--veloapp-*` args). In all other cases this is a

@@ -96,7 +96,7 @@ fn load_roots() -> Vec<PathBuf> {
         // same plain form: PathFilter::allows_path/allows_dir strip_prefix a
         // PLAIN resolved path against these roots — a verbatim `\\?\C:\` root
         // never matches, which silently fail-opened the include/exclude scoping.
-        .filter_map(|s| dunce::canonicalize(s).ok())
+        .filter_map(|s| std::fs::canonicalize(s).ok())
         .map(|p| super::strip_unc(&p))
         .collect()
 }
@@ -234,18 +234,22 @@ fn resolve_under_roots(path: &str, roots: &[PathBuf]) -> Result<PathBuf, String>
         );
     }
     let raw = PathBuf::from(path);
-    // For relative paths, anchor to the first root.
-    let candidate = if raw.is_absolute() {
-        raw
-    } else {
-        roots[0].join(&raw)
-    };
     // Canonicalize so `..` segments are resolved before the root check. Don't
     // echo the raw OS error (it discloses internal filesystem layout / existence
     // of sibling paths); a path that won't canonicalize is reported as not-found
     // relative to the workspace, which is all the caller needs.
-    let canon = std::fs::canonicalize(&candidate)
-        .map_err(|_| format!("path not found or unreadable: {}", path))?;
+    let not_found = || format!("path not found or unreadable: {}", path);
+    let canon = if raw.is_absolute() {
+        std::fs::canonicalize(&raw).map_err(|_| not_found())?
+    } else {
+        // Relative paths anchor to the first root that has them, in root order:
+        // the cwd wins a name both roots share, and a file that only exists in
+        // an `--add-dir` extra folder still resolves instead of "not found".
+        roots
+            .iter()
+            .find_map(|root| std::fs::canonicalize(root.join(&raw)).ok())
+            .ok_or_else(not_found)?
+    };
     // Windows-friendly canonical (strip UNC prefix).
     let canon = super::strip_unc(&canon);
     for root in roots {
@@ -258,18 +262,6 @@ fn resolve_under_roots(path: &str, roots: &[PathBuf]) -> Result<PathBuf, String>
         "{} is outside the workspace root(s)",
         canon.display()
     ))
-}
-
-// Tiny path canonicalize wrapper that works through symlinks the same way
-// std does. Kept as a module-level fn so tests / future-deferred logic can
-// override; for now it's `std::fs::canonicalize`. The `dunce` crate would
-// be nicer (strips UNC) but we already handle that in `strip_unc`.
-mod dunce {
-    use std::io;
-    use std::path::{Path, PathBuf};
-    pub fn canonicalize<P: AsRef<Path>>(p: P) -> io::Result<PathBuf> {
-        std::fs::canonicalize(p)
-    }
 }
 
 // ─── tool implementations ──────────────────────────────────────────────────
@@ -669,14 +661,7 @@ fn tool_read_diagnostics(args: &Value) -> Result<String, String> {
         .get("filter")
         .and_then(|v| v.as_str())
         .map(|s| s.to_lowercase());
-    let rank = |l: &str| match l {
-        "trace" => 0u8,
-        "debug" => 1,
-        "info" => 2,
-        "warn" => 3,
-        "error" => 4,
-        _ => 2,
-    };
+    let rank = log_level_rank;
     let path = crate::diagnostics::app_log_path().ok_or("app log path unavailable")?;
     let content =
         std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
@@ -709,6 +694,19 @@ fn tool_read_diagnostics(args: &Value) -> Result<String, String> {
     ))
 }
 
+/// Severity order shared by `read_diagnostics` and `read_events`; an unknown
+/// level ranks as info so it passes an info gate rather than vanishing.
+fn log_level_rank(level: &str) -> u8 {
+    match level {
+        "trace" => 0,
+        "debug" => 1,
+        "info" => 2,
+        "warn" => 3,
+        "error" => 4,
+        _ => 2,
+    }
+}
+
 /// Pure line filter for `read_events` — separate for unit tests. Returns
 /// (total matched, last `limit` lines). Non-JSON lines are dropped (the sink
 /// only ever writes JSON; a torn tail line must not pollute output).
@@ -719,14 +717,7 @@ fn filter_event_lines<'a>(
     filter: Option<&str>,
     limit: usize,
 ) -> (usize, Vec<&'a str>) {
-    let rank = |l: &str| match l {
-        "trace" => 0u8,
-        "debug" => 1,
-        "info" => 2,
-        "warn" => 3,
-        "error" => 4,
-        _ => 2,
-    };
+    let rank = log_level_rank;
     let matched: Vec<&str> = content
         .lines()
         .filter(|line| {
@@ -1072,58 +1063,58 @@ fn tools_list_payload_for(level: &str, include_bridge: bool) -> Value {
             "required": ["number"]
         }
     }));
-    if trust_rank(level) >= trust_rank("standard") {
-        tools.push(json!({
-            "name": "gh_pr_create",
-            "description": "Open a pull request on this workspace's GitHub repo from the CURRENT branch (it must already be pushed). Uses the user's `gh` CLI auth. Provide a clear `title` and a `body` that summarizes the changes; `base` defaults to the repo's default branch. Set `draft: true` for a draft PR.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "title": { "type": "string", "description": "PR title (single line, ≤250 chars)." },
-                    "body": { "type": "string", "description": "PR description (markdown, ≤8 KB)." },
-                    "base": { "type": "string", "description": "Base branch. Default = repo default branch." },
-                    "draft": { "type": "boolean", "description": "Create as a draft PR." }
-                },
-                "required": ["title"]
-            }
-        }));
-        tools.push(json!({
-            "name": "git_pull",
-            "description": "Pull the current branch from upstream in the user's Rift workspace. Fast-forward only by default; `rebase: true` rebases. Refuses on a dirty working tree (stash/commit first). Surfaces merge errors verbatim — never silently merges.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "rebase": { "type": "boolean", "description": "Use --rebase instead of --ff-only." }
-                },
-                "required": []
-            }
-        }));
-        tools.push(json!({
-            "name": "git_commit",
-            "description": "Stage and commit changes in the user's Rift workspace. `message` is required. Provide `paths` (workspace-relative) to stage specific files, or `all: true` to stage everything; omit both to commit only what's already staged. Refuses an empty message or an empty index.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "message": { "type": "string", "description": "Commit message (1-4096 bytes)." },
-                    "paths": { "type": "array", "items": { "type": "string" }, "description": "Workspace-relative paths to stage before committing." },
-                    "all": { "type": "boolean", "description": "Stage all tracked+untracked changes (git add -A) before committing." }
-                },
-                "required": ["message"]
-            }
-        }));
-        tools.push(json!({
-            "name": "git_push",
-            "description": "Push the current branch to its remote in the user's Rift workspace. Defaults to `origin` + current branch. Force push is NOT permitted. Auth uses the user's system git/SSH config.",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "remote": { "type": "string", "description": "Remote name. Default `origin`." },
-                    "branch": { "type": "string", "description": "Branch to push. Default = current branch." }
-                },
-                "required": []
-            }
-        }));
-    }
+    // Write set (WRITE_TOOLS) — listed here unconditionally, then dropped below
+    // by `tool_allowed`, the same gate dispatch uses.
+    tools.push(json!({
+        "name": "gh_pr_create",
+        "description": "Open a pull request on this workspace's GitHub repo from the CURRENT branch (it must already be pushed). Uses the user's `gh` CLI auth. Provide a clear `title` and a `body` that summarizes the changes; `base` defaults to the repo's default branch. Set `draft: true` for a draft PR.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "title": { "type": "string", "description": "PR title (single line, ≤250 chars)." },
+                "body": { "type": "string", "description": "PR description (markdown, ≤8 KB)." },
+                "base": { "type": "string", "description": "Base branch. Default = repo default branch." },
+                "draft": { "type": "boolean", "description": "Create as a draft PR." }
+            },
+            "required": ["title"]
+        }
+    }));
+    tools.push(json!({
+        "name": "git_pull",
+        "description": "Pull the current branch from upstream in the user's Rift workspace. Fast-forward only by default; `rebase: true` rebases. Refuses on a dirty working tree (stash/commit first). Surfaces merge errors verbatim — never silently merges.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "rebase": { "type": "boolean", "description": "Use --rebase instead of --ff-only." }
+            },
+            "required": []
+        }
+    }));
+    tools.push(json!({
+        "name": "git_commit",
+        "description": "Stage and commit changes in the user's Rift workspace. `message` is required. Provide `paths` (workspace-relative) to stage specific files, or `all: true` to stage everything; omit both to commit only what's already staged. Refuses an empty message or an empty index.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "message": { "type": "string", "description": "Commit message (1-4096 bytes)." },
+                "paths": { "type": "array", "items": { "type": "string" }, "description": "Workspace-relative paths to stage before committing." },
+                "all": { "type": "boolean", "description": "Stage all tracked+untracked changes (git add -A) before committing." }
+            },
+            "required": ["message"]
+        }
+    }));
+    tools.push(json!({
+        "name": "git_push",
+        "description": "Push the current branch to its remote in the user's Rift workspace. Defaults to `origin` + current branch. Force push is NOT permitted. Auth uses the user's system git/SSH config.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "remote": { "type": "string", "description": "Remote name. Default `origin`." },
+                "branch": { "type": "string", "description": "Branch to push. Default = current branch." }
+            },
+            "required": []
+        }
+    }));
     // UI-bridge tools: only listed when the parent's loopback bridge env is
     // present (env-stripped MCP launchers degrade to the file/git set).
     if include_bridge {
@@ -1209,7 +1200,45 @@ fn tools_list_payload_for(level: &str, include_bridge: bool) -> Value {
             }
         }));
     }
+    tools.retain(|t| tool_allowed(t["name"].as_str().unwrap_or(""), level));
+    for t in &mut tools {
+        let name = t["name"].as_str().unwrap_or("").to_string();
+        t["annotations"] = tool_annotations(&name);
+    }
     json!({ "tools": tools })
+}
+
+/// The Standard-trust write set. Listing (`tools_list_payload_for`) and
+/// dispatch (`invoke_workspace_tool`) both gate on `tool_allowed`, so a tool
+/// can't be listed-but-refused or refused-but-listed.
+const WRITE_TOOLS: &[&str] = &["gh_pr_create", "git_pull", "git_commit", "git_push"];
+
+fn tool_allowed(name: &str, level: &str) -> bool {
+    !WRITE_TOOLS.contains(&name) || trust_rank(level) >= trust_rank("standard")
+}
+
+/// MCP tool annotations (spec 2025-03-26, the version this server declares).
+/// Hosts use `readOnlyHint` to treat a call as side-effect free — Claude Code
+/// can run such calls concurrently instead of one at a time. Writers state
+/// that they are additive (no force push, ff-only pull by default) and which
+/// ones reach the network.
+fn tool_annotations(name: &str) -> Value {
+    match name {
+        "git_commit" => {
+            json!({ "readOnlyHint": false, "destructiveHint": false, "openWorldHint": false })
+        }
+        "git_pull" | "git_push" | "gh_pr_create" => {
+            json!({ "readOnlyHint": false, "destructiveHint": false, "openWorldHint": true })
+        }
+        // Visible UI side effects (dock navigation, toast), nothing destroyed.
+        "open_browser" | "notify" => {
+            json!({ "readOnlyHint": false, "destructiveHint": false, "openWorldHint": false })
+        }
+        "gh_checks" | "gh_run_view" | "gh_pr_list" | "gh_pr_view" | "gh_pr_diff" => {
+            json!({ "readOnlyHint": true, "openWorldHint": true })
+        }
+        _ => json!({ "readOnlyHint": true, "openWorldHint": false }),
+    }
 }
 
 fn tools_list_payload() -> Value {
@@ -1249,6 +1278,9 @@ pub(super) fn invoke_workspace_tool(
     roots: &[PathBuf],
     level: &str,
 ) -> Result<String, String> {
+    if !tool_allowed(name, level) {
+        return Err(format!("unknown tool: {name}"));
+    }
     match name {
         "read_file" => tool_read_file(args, roots),
         "list_dir" => tool_list_dir(args, roots),
@@ -1260,23 +1292,15 @@ pub(super) fn invoke_workspace_tool(
         "git_status" => git_local::tool_git_status(args, roots),
         "git_diff" => git_local::tool_git_diff(args, roots),
         "git_log" => git_local::tool_git_log(args, roots),
-        "git_pull" if trust_rank(level) >= trust_rank("standard") => {
-            git_local::tool_git_pull(args, roots)
-        }
-        "git_commit" if trust_rank(level) >= trust_rank("standard") => {
-            git_local::tool_git_commit(args, roots)
-        }
-        "git_push" if trust_rank(level) >= trust_rank("standard") => {
-            git_local::tool_git_push(args, roots)
-        }
+        "git_pull" => git_local::tool_git_pull(args, roots),
+        "git_commit" => git_local::tool_git_commit(args, roots),
+        "git_push" => git_local::tool_git_push(args, roots),
         "gh_checks" => gh_remote::tool_gh_checks(args, roots),
         "gh_run_view" => gh_remote::tool_gh_run_view(args, roots),
         "gh_pr_list" => gh_remote::tool_gh_pr_list(args, roots),
         "gh_pr_view" => gh_remote::tool_gh_pr_view(args, roots),
         "gh_pr_diff" => gh_remote::tool_gh_pr_diff(args, roots),
-        "gh_pr_create" if trust_rank(level) >= trust_rank("standard") => {
-            gh_remote::tool_gh_pr_create(args, roots)
-        }
+        "gh_pr_create" => gh_remote::tool_gh_pr_create(args, roots),
         other => Err(format!("unknown tool: {other}")),
     }
 }
@@ -1337,15 +1361,6 @@ fn handle_request(req: RpcRequest, roots: &[PathBuf]) -> Option<RpcResponse> {
                         "session": session, "proc": "mcp_subprocess",
                     }),
                 );
-                // Phase 5: feed the same sample into the metrics registry — a
-                // tool-call counter + a latency histogram the health panel reads
-                // without re-scanning events. The rich event above stays the
-                // queryable record; this is the cheap running aggregate.
-                crate::diagnostics::metrics::incr("mcp.tool_calls", 1);
-                crate::diagnostics::metrics::record_ms("mcp.tool_ms", tool_dur_ms);
-                if !tool_ok {
-                    crate::metric!("mcp.tool_errors");
-                }
             }
             match res {
                 Ok(text) => Ok(json!({
@@ -1546,6 +1561,60 @@ mod tests {
         assert!(resolve_under_roots("a.txt", &[]).is_err());
         // Non-existent path can't be canonicalized → error (never silently OK).
         assert!(resolve_under_roots("nope.txt", &[root]).is_err());
+    }
+
+    #[test]
+    fn resolve_relative_tries_every_root() {
+        // A relative path that only exists under the SECOND root must resolve
+        // there, not fail because root one was tried first.
+        let (_td1, first) = workspace();
+        let (_td2, second) = workspace();
+        std::fs::write(second.join("only_in_second.txt"), "x").unwrap();
+        let roots = vec![first, second.clone()];
+        let got = resolve_under_roots("only_in_second.txt", &roots).expect("second root");
+        assert!(crate::assistant::strip_unc(&got).starts_with(crate::assistant::strip_unc(&second)));
+    }
+
+    // ─── tools/list gating + annotations ──────────────────────────────────────
+
+    fn listed(level: &str) -> Vec<Value> {
+        tools_list_payload_for(level, true)["tools"]
+            .as_array()
+            .unwrap()
+            .clone()
+    }
+
+    #[test]
+    fn write_tools_listed_and_dispatched_only_at_standard() {
+        let names = |level| {
+            listed(level)
+                .iter()
+                .map(|t| t["name"].as_str().unwrap().to_string())
+                .collect::<Vec<_>>()
+        };
+        let std_names = names("standard");
+        let ro_names = names("readonly");
+        for w in WRITE_TOOLS {
+            assert!(std_names.iter().any(|n| n == w), "{w} missing at standard");
+            assert!(!ro_names.iter().any(|n| n == w), "{w} listed at readonly");
+        }
+        let (_td, root) = workspace();
+        let err = invoke_workspace_tool("git_push", &json!({}), &[root], "readonly").unwrap_err();
+        assert!(err.contains("unknown tool"), "{err}");
+    }
+
+    #[test]
+    fn every_listed_tool_carries_annotations() {
+        for t in listed("standard") {
+            let name = t["name"].as_str().unwrap();
+            let ro = t["annotations"]["readOnlyHint"].as_bool();
+            assert!(ro.is_some(), "{name} has no readOnlyHint");
+            assert_eq!(
+                ro == Some(false),
+                WRITE_TOOLS.contains(&name) || name == "open_browser" || name == "notify",
+                "{name}"
+            );
+        }
     }
 
     // ─── read_file ────────────────────────────────────────────────────────────

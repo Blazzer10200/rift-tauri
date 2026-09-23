@@ -23,7 +23,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
-pub mod metrics;
+// The `metric!`/`timed!` counter registry (metrics.rs) was removed 2026-09-22:
+// write-only, since nothing ever read `snapshot()`. Warm-pool outcomes already
+// ride the `dispatch` event, turn latency rides perf.rs, and MCP tool calls ride
+// the "mcp tool call" event.
 pub mod perf;
 
 const BUS_CAPACITY: usize = 4096;

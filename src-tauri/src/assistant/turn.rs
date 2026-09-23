@@ -1107,9 +1107,8 @@ async fn run_or_prewarm(
             if let Some(p) = old_pid {
                 kill_child_tree_async(p).await;
             }
-            // metric-only (no emit_dispatch): dispatch outcomes feed the FE
+            // Log-only (no emit_dispatch): dispatch outcomes feed the FE
             // warm-hit rate, whose denominator must stay real turn dispatches.
-            crate::metric!("warm_pool.prewarm_drain");
             log::info!("prewarm: drained stale-key spare for {session_id} (picker changed before send) — respawning warm");
         }
         return prewarm_spawn(app, window_label, session_id, key, cmd, mcp_guard, model);
@@ -2225,16 +2224,6 @@ fn emit_dispatch(
     key: &warm_pool::SpawnKey,
     turn_epoch: u64,
 ) {
-    // Phase 5: also bump a per-outcome counter via the metric! primitive — gives
-    // the health panel a running warm-hit total without re-scanning the ring.
-    match outcome {
-        "hit" => crate::metric!("warm_pool.hit"),
-        "cold" => crate::metric!("warm_pool.cold"),
-        "signature_drain" => crate::metric!("warm_pool.drain"),
-        "dead_on_send" => crate::metric!("warm_pool.dead_on_send"),
-        "live_switch" => crate::metric!("warm_pool.live_switch"),
-        _ => {}
-    }
     let turn_id = format!("{session_id}#{turn_epoch}");
     crate::diagnostics::emit_scoped(
         crate::diagnostics::DiagStage::Log,
