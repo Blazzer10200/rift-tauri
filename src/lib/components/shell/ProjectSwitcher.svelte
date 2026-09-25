@@ -2,7 +2,7 @@
   // Sidebar workspace identity and the single owner of conversation scope. The
   // trigger shows the active project (or All), while its menu preserves focused
   // open, split-open, drag-to-pane, and new-project actions.
-  import { ChevronsUpDown, Plus, SplitSquareHorizontal, FolderOpen, ArrowRight, MessageSquare, GitBranch, Check } from "@lucide/svelte";
+  import { ChevronsUpDown, Plus, SplitSquareHorizontal, FolderOpen, ArrowRight, MessageSquare, GitBranch, Check, Trash2 } from "@lucide/svelte";
   import { projects, projectRootKey } from "$lib/state/projects.svelte";
   import type { Project } from "$lib/state/assistant/types";
   import { assistant } from "$lib/state/assistant.svelte";
@@ -15,6 +15,7 @@
 
   import { projectHue } from "$lib/utils/projectHue";
   import Skeleton from "./Skeleton.svelte";
+  import DeleteProjectDialog from "./DeleteProjectDialog.svelte";
   import { bootLoad } from "$lib/state/bootLoad.svelte";
 
   const list = $derived(projects.sorted);
@@ -112,6 +113,9 @@
   }
   function onItemDragEnd() { assistant.draggingProjectRoot = null; }
 
+  // Project awaiting delete confirmation (DeleteProjectDialog is open while set).
+  let deleting = $state<Project | null>(null);
+
   function onItemContext(e: MouseEvent, p: Project) {
     e.preventDefault();
     e.stopPropagation();
@@ -125,6 +129,16 @@
       },
       { kind: "divider" },
       { label: "Go to Workspace", icon: ArrowRight, action: () => workspace.setActive("home") },
+      { kind: "divider" },
+      {
+        label: "Delete project…",
+        icon: Trash2,
+        danger: true,
+        action: () => {
+          closeMenu();
+          deleting = p;
+        },
+      },
     ]);
   }
 </script>
@@ -208,6 +222,8 @@
     </button>
   </div>
 {/if}
+
+<DeleteProjectDialog bind:project={deleting} />
 
 <style>
   /* The project is context, not a second card inside the sidebar card. A flat
