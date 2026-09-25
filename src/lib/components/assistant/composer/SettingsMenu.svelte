@@ -502,12 +502,10 @@
 <style>
   /* Unified settings panel — flat single-column list (Claude-Code-Desktop
      layout) on the shared .rift-menu chrome: model rows, a fast-mode toggle,
-     and a Faster↔Smarter effort slider. Right-anchored, content-width. */
-  /* Panel — spec `.pop` glass popover (docs/design/rift-redesign.html). The
-     compound selector overrides the shared .rift-menu base chrome. */
-  /* Panel — flat professional surface (Claude-Desktop grade): near-solid fill,
-     mild blur, quick pop-in. No radial glow, no per-row stagger theater.
-     LOCKSTEP w/ PermMenu — keep the two recipes identical. */
+     and a Faster↔Smarter effort slider. Right-anchored, content-width.
+     Near-solid fill, mild blur, quick pop-in; the compound selector overrides
+     the .rift-menu base. Still hand-rolled — PermMenu now takes its panel from
+     components/ui/ (recipes.ts), so this is the next swap candidate. */
   :global(.rift-menu.settings-menu) {
     position: fixed;
     width: 276px; min-width: 260px;
