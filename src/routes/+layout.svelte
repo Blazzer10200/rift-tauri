@@ -15,13 +15,18 @@
   import { goto } from "$app/navigation";
   import { page } from "$app/state";
 
-  // Dev-only: Ctrl+Alt+G toggles the stream gallery (/dev/gallery) — a
-  // showroom of every renderable block for design work. No-op in prod builds.
+  // Dev-only: Ctrl+Alt+G toggles the stream gallery (/dev/gallery), Ctrl+Alt+U
+  // toggles the primitives catalog (/dev/ui) — showrooms for design work. No-op
+  // in prod builds.
   function onDevKey(e: KeyboardEvent) {
     if (!import.meta.env.DEV) return;
     if (e.ctrlKey && e.altKey && (e.key === "g" || e.key === "G")) {
       e.preventDefault();
       void goto(page.url.pathname.startsWith("/dev/gallery") ? "/" : "/dev/gallery");
+    }
+    if (e.ctrlKey && e.altKey && (e.key === "u" || e.key === "U")) {
+      e.preventDefault();
+      void goto(page.url.pathname.startsWith("/dev/ui") ? "/" : "/dev/ui");
     }
   }
 

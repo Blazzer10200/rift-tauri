@@ -42,6 +42,12 @@ Never kill `rift-tauri.exe` by image name. Cleanup must stay PID/path-scoped so
 an installed Rift instance cannot be touched. Do not recursively delete CDP
 scratch data; remove only confirmed generated files.
 
+Build new UI from the primitives in `src/lib/components/ui/` (shadcn-svelte over
+bits-ui, restyled to Rift tokens), not hand-rolled portals, menus, or dialogs.
+`design-system/DESIGN.md` §10 has the rules; `/dev/ui` (dev build, Ctrl+Alt+U)
+shows every primitive and state. `npm run check` enforces it via
+`design-system/check-ui.mjs`.
+
 ## Provider Work
 
 Rift has three production assistant routes. Keep them distinct and

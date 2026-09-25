@@ -23,6 +23,8 @@ export type CtxMenuItem =
       label: string;
       icon?: CtxIcon;
       disabled?: boolean;
+      /** Destructive action — rendered in the danger color. */
+      danger?: boolean;
       action: () => void | Promise<void>;
     }
   | { kind: "divider" };

@@ -254,9 +254,54 @@ seed rules below.
 
 1. **Intent first:** before pixels, state in ≤2 sentences what the element's job is and
    how it should feel ("quiet furniture" vs "the protagonist").
-2. **Build from tokens;** verify token names against `styles.css` before using them.
-3. **Look, then judge:** after any visual change, `bash scripts/cdp/c.sh look "<selector>"`
+2. **Compose from `components/ui/` first** (§10). A menu, select, confirm dialog, or
+   button is a primitive, never a hand-rolled `use:portal` + `role="menu"` + key handler.
+   Check `/dev/ui` (dev build, Ctrl+Alt+U) for the variant you need before writing one.
+3. **Build from tokens;** verify token names against `styles.css` before using them.
+4. **Look, then judge:** after any visual change, `bash scripts/cdp/c.sh look "<selector>"`
    and critique before claiming done — spacing rhythm, competing weights, accent overuse.
-4. **Named-lens critique:** ask "what would a Linear designer flag?" (ladder discipline,
+5. **Named-lens critique:** ask "what would a Linear designer flag?" (ladder discipline,
    accent scarcity) or "a Raycast designer?" (chrome polish, keyboard-first affordances).
-5. **Rejection → §8, same session.** That's how this file gets smarter.
+6. **Rejection → §8, same session.** That's how this file gets smarter.
+
+## 10. Primitives — `src/lib/components/ui/`
+
+Why they exist (2026-09-25): the look above was always well specified; the drift came
+from BEHAVIOR and STRUCTURE being re-rolled per surface — 14 hand-portaled overlays,
+28 hand-written position calcs, keyboard support ranging from none to full. The
+primitives are shadcn-svelte components (copied in, owned by Rift) over bits-ui
+(headless: focus, keyboard, dismiss, positioning, ARIA), restyled to Rift tokens.
+
+- **One vocabulary.** Tailwind utilities ARE Rift token names — `app.css` wipes
+  Tailwind's default palette/shadows/radii/fonts/eases and maps utilities onto the
+  tokens (`bg-surface`, `text-fg-2`, `rounded-xl`, `shadow-lg`, `h-row`,
+  `z-(--z-popover)`). Off-system classes (`bg-blue-500`, `shadow-xl`, `bg-black`)
+  generate no CSS at all. shadcn's own color names are never defined.
+- **One recipe file.** `ui/recipes.ts` spells the floating panel, menu row, label,
+  separator, field trigger, and dialog layers ONCE; dropdown-menu, context-menu,
+  select, and alert-dialog compose them. Change a look there, never per component.
+- **Floating tier, as built:** `--surface` + `--border-strong` + `--shadow-lg`, 12px
+  panel radius over 4px padding with 8px rows (concentric). Resolves §5's "elev-3":
+  a panel on elev-3 leaves no step above it for the row highlight, so the highlight
+  is `--surface-hover` on a `--surface` panel — the same pairing the canonical
+  `.rift-menu` recipe already used.
+- **Rows** are density-aware (`min-h-row`, `text-base` = `--fs-md`). Highlight =
+  `--surface-hover` + `--fg`; selected = `--accent-soft` wash + trailing ✓ in accent
+  (tone-soft + tone ✓ where the choice carries status meaning, e.g. permission modes);
+  disabled = `--fg-faint`.
+- **Buttons** mirror `.btn`: `secondary` (default: surface + border), `ghost`, `soft`
+  (§2's accent ghost: accent-soft + ghost-border), `primary` (solid accent — Send +
+  ≤1 CTA/screen), `danger`/`warn`/`info`, `link`. Sizes 26/22/20px + `lg` 32px.
+- **Layers:** `--z-dialog` 4000 (above toasts + notification center) < `--z-popover`
+  9000 (a menu inside a dialog still works) < tooltips/splash 9999. Dialog dim is
+  `--scrim` — opaque, never backdrop-filter (WebView2).
+- **Motion:** fade + 95% zoom + 8px slide from the trigger side, `--dur-fast`,
+  `--ease-page`. `prefers-reduced-motion` drops every `[data-slot]` animation.
+- **Guardrail:** `npm run check` runs `design-system/check-ui.mjs` — every `ui/` class
+  must generate CSS, and hand-rolled overlays / raw colors / arbitrary `-[…]` values
+  outside `ui/` may only go DOWN (baseline `ui-baseline.json`, `--update` to lock in a
+  drop). CSS-var shorthand `-(--token)` is allowed for Rift tokens and bits-ui vars.
+- **Adding a primitive:** `npx shadcn-svelte@latest add <name>` (never `init` — it
+  rewrites `app.css`), then restyle to `recipes.ts` + tokens until check-ui passes,
+  add it to `/dev/ui`. Upstream docs for agents: https://shadcn-svelte.com/llms.txt
+  and https://bits-ui.com/llms.txt.

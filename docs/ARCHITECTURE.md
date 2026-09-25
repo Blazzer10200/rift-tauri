@@ -122,6 +122,11 @@ below are relative to that directory.
   `onboarding/`, and `shell/` own the remaining screens and chrome.
 - `components/shell/workspaceRegistry.ts` is the lazy screen registry. The
   legacy `projects` ID remains only as a persisted-state migration alias.
+- `components/ui/` holds the primitive layer: shadcn-svelte components over
+  bits-ui, restyled to Rift tokens, with shared class recipes in `recipes.ts`.
+  New menus, popovers, selects, and dialogs compose from it
+  (`design-system/DESIGN.md` §10); the dev-only `/dev/ui` route
+  (Ctrl+Alt+U) is its catalog.
 - `components/shared/` holds generic building blocks (`Select`, `LimitBar`);
   `utils/` holds pure helpers, including the canonical path helpers in
   `utils/path.ts`.
@@ -130,7 +135,8 @@ below are relative to that directory.
 
 - `web/` is the Cloudflare Pages download site (see `web/README.md`), not part
   of the app bundle.
-- `design-system/` holds the token source and `check-tokens.mjs`, run by
+- `design-system/` holds the token source, `check-tokens.mjs`, and
+  `check-ui.mjs` (the primitives ratchet over `ui-baseline.json`), both run by
   `npm run check`.
 - `scripts/` holds dev, verify, release, and CDP tooling; `scripts/cdp/` is
   the live-UI bridge used by the `rift-ui` skill.

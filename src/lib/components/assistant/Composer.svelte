@@ -20,6 +20,7 @@
   import SettingsMenu from "./composer/SettingsMenu.svelte";
   import CtxRing from "./composer/CtxRing.svelte";
   import PermMenu from "./composer/PermMenu.svelte";
+  import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import {
     MODEL_OPTIONS, MODE_OPTIONS,
     chatGptModelsFor,
@@ -375,11 +376,11 @@
   // textarea has focus. Filters by the text after the slash.
   // Two toolbar pills (mock split): `settingsOpen` drives the model+effort
   // popover (settings-pill), `permOpen` drives the permission-mode popover
-  // (perm-pill). `settingsIdx`/`permIdx` are the keyboard cursors for each.
+  // (perm-pill, now a DropdownMenu.Root — bits owns its own keyboard nav).
+  // `settingsIdx` is the keyboard cursor for the settings panel.
   let settingsOpen = $state(false);
   let settingsIdx = $state(0);
   let permOpen = $state(false);
-  let permIdx = $state(0);
   const slashOpen = $derived(
     !settingsOpen &&
       draft.startsWith("/") &&
@@ -564,8 +565,7 @@
   const permTone = $derived(permToneFor(currentMode.id));
   function pickMode(m: ModeOpt) {
     assistant.setPermissionMode(m.id, tab);
-    permOpen = false;
-    void tick().then(() => ta?.focus());
+    // Menu close + textarea refocus are bits' (onCloseAutoFocus in PermMenu).
   }
   // Shift+Tab cycles the permission mode (mock affordance) without opening the menu.
   function cyclePerm() {
@@ -584,13 +584,6 @@
     if (settingsOpen) {
       const i = settingsRows.findIndex((r) => r.kind === "model" && r.model.id === paneEffectiveModel);
       settingsIdx = i >= 0 ? i : 0;
-    }
-  });
-  // Re-seed the perm cursor to the current mode whenever the perm menu opens.
-  $effect(() => {
-    if (permOpen) {
-      const i = MODE_OPTIONS.findIndex((m) => m.id === effectivePermissionMode);
-      permIdx = i >= 0 ? i : 0;
     }
   });
   function pickRow(row: SettingsRow) {
@@ -1118,8 +1111,9 @@
   // next send. Mixed paste (image + text) keeps the text in the textarea
   // and stages the image separately. Caps mirror backend's 20 MiB guard so
   // we reject early rather than round-trip a doomed payload.
-  // Permission-mode menu portals to <body> — positioning + outside-mousedown
-  // close live in composer/PermMenu.svelte (C7); permWrap anchors it.
+  // Permission-mode menu trigger (DropdownMenu.Root, C7) — permWrap is the
+  // pill's own DOM node, kept so PermMenu's onCloseAutoFocus can tell "focus
+  // landed back on the pill" apart from "focus moved elsewhere entirely".
   let permWrap = $state<HTMLButtonElement | null>(null);
   // Model/effort menu portals to <body> too — same anchor pattern; modelWrap
   // is the trigger pill it positions against.
@@ -1192,15 +1186,10 @@
     // Ctrl/Cmd+D — tap-toggle or hold-to-talk dictation (see dictKeydown).
     if (dictKeydown(e)) return;
     if (pttKeydown(e)) return;
-    // Permission-mode menu nav (mirrors the settings-menu nav below).
-    if (permOpen) {
-      const n = MODE_OPTIONS.length;
-      if (e.key === "ArrowDown") { e.preventDefault(); permIdx = (permIdx + 1) % n; return; }
-      if (e.key === "ArrowUp") { e.preventDefault(); permIdx = (permIdx - 1 + n) % n; return; }
-      if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); pickMode(MODE_OPTIONS[permIdx]); return; }
-      if (e.key === "Escape") { e.preventDefault(); permOpen = false; return; }
-      if (e.key.length === 1) permOpen = false;
-    }
+    // Permission-mode menu nav is bits' own (DropdownMenu.Content) now — the
+    // Shift+Tab cycling above only fires while the menu is closed (bits traps
+    // focus inside DropdownMenu.Content once it's open); PermMenu.svelte's own
+    // onContentKeydown covers the while-open case via this same cyclePerm().
     // Mention picker keys take precedence — runs before history recall so
     // arrow keys navigate the list, not the prompt history.
     if (mentionState && mentionResults.length > 0) {
@@ -1672,34 +1661,34 @@
            idles; it materializes as the composer descends on engagement. -->
       <div class="composer-bar">
         <div class="cbar-l">
-          <button
-            type="button"
-            class="cbtn cperm"
-            class:open={permOpen}
-            class:tone-ok={permTone === "ok"}
-            class:tone-warn={permTone === "warn"}
-            class:tone-info={permTone === "info"}
-            bind:this={permWrap}
-            onclick={() => { permOpen = !permOpen; settingsOpen = false; void tick().then(() => ta?.focus()); }}
-            aria-haspopup="listbox"
-            aria-expanded={permOpen}
-            aria-label="Permission mode"
-            use:tooltip={{ text: `Permission mode — ${currentMode.label}`, kbd: "⇧Tab" }}
-          >
-            <PermIcon size={13} />
-            <span class="perm-label">{currentMode.short}</span>
-            <ChevronUp size={12} class="cbtn-chev" />
-          </button>
-
-          {#if permOpen}
+          <DropdownMenu.Root bind:open={permOpen} onOpenChange={(v) => { if (v) settingsOpen = false; }}>
+            <DropdownMenu.Trigger>
+              {#snippet child({ props })}
+                <button
+                  {...props}
+                  class="cbtn cperm"
+                  class:open={permOpen}
+                  class:tone-ok={permTone === "ok"}
+                  class:tone-warn={permTone === "warn"}
+                  class:tone-info={permTone === "info"}
+                  bind:this={permWrap}
+                  aria-label="Permission mode"
+                  use:tooltip={{ text: `Permission mode — ${currentMode.label}`, kbd: "⇧Tab" }}
+                >
+                  <PermIcon size={13} />
+                  <span class="perm-label">{currentMode.short}</span>
+                  <ChevronUp size={12} class="cbtn-chev" />
+                </button>
+              {/snippet}
+            </DropdownMenu.Trigger>
             <PermMenu
-              {permIdx}
               selectedMode={effectivePermissionMode}
-              anchor={permWrap}
+              pillEl={permWrap}
               onPick={pickMode}
-              onRequestClose={() => (permOpen = false)}
+              onCloseFocus={() => void tick().then(() => ta?.focus())}
+              onCyclePerm={cyclePerm}
             />
-          {/if}
+          </DropdownMenu.Root>
 
           <span class="cbar-sep" aria-hidden="true"></span>
 
@@ -2633,7 +2622,9 @@
   }
   .ps-dismiss:hover { color: var(--fg); background: color-mix(in oklch, var(--bg-elev-2) 80%, transparent); }
 
-  /* Perm-menu popover styles moved to composer/PermMenu.svelte (C7).
+  /* Perm-menu popover chrome now comes from ui/recipes.ts (menuItem,
+     menuItemChecked, menuCheck) plus PermMenu.svelte's tone-radio overrides —
+     no popover styles live in this file anymore (C7 swap onto DropdownMenu).
      The flat perm button itself = .cbtn.cperm (see flat control bar above). */
 
   /* Settings panel (model rows + effort slider) styles moved to composer/SettingsMenu.svelte (C7). */

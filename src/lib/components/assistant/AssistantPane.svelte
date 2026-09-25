@@ -306,6 +306,16 @@
     requestAnimationFrame(() => {
       const ae = document.activeElement;
       if (composerSlotEl?.contains(ae)) return;
+      // The permission menu (DropdownMenu.Content) portals to <body>, outside
+      // composerSlotEl — bits moves focus into it on open, which would read as
+      // "focus left the composer" and disengage (hiding the composer-bar mid-
+      // interaction, unmounting the pill AND the open menu under it). Re-arm
+      // this same check for when focus actually leaves the popover instead.
+      const popover = ae?.closest("[data-composer-popover]");
+      if (popover) {
+        popover.addEventListener("focusout", onHostFocusOut, { once: true });
+        return;
+      }
       if ((tab?.draft ?? "").trim().length > 0 || sttHere) return;
       setEngaged(false);
     });
