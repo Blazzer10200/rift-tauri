@@ -236,6 +236,16 @@ def copyright_lines(pkg_dir: str, cap: int = 3) -> list[str]:
     return lines
 
 
+def sniff_license(pkg_dir: str) -> str | None:
+    """SPDX id from a LICENSE file's title line, for packages whose metadata
+    omits the license field (svelte-toolbelt ships only a LICENSE file)."""
+    for lf in license_files(pkg_dir):
+        head = next((ln.strip() for ln in read_text(lf).splitlines() if ln.strip()), "")
+        if re.fullmatch(r"(The )?MIT License( \(MIT\))?", head, re.I):
+            return "MIT"
+    return None
+
+
 def collect_rust() -> tuple[list[dict], dict[str, str]]:
     meta = json.loads(
         subprocess.check_output(
@@ -333,7 +343,7 @@ def collect_npm() -> tuple[list[dict], dict[str, str]]:
         if (name, version) in seen:
             continue
         seen.add((name, version))
-        lic = d.get("license") or "SEE-LICENSE-FILE"
+        lic = d.get("license") or sniff_license(p) or "SEE-LICENSE-FILE"
         if isinstance(lic, dict):
             lic = lic.get("type", "SEE-LICENSE-FILE")
         lic = str(lic).strip("()")
