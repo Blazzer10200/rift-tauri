@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { cn, type WithElementRef } from "$lib/utils.js";
+	import { menuLabel } from "../recipes.js";
 	import type { HTMLAttributes } from "svelte/elements";
 
 	let {
@@ -17,7 +18,7 @@
 	bind:this={ref}
 	data-slot="context-menu-label"
 	data-inset={inset}
-	class={cn("text-muted-foreground px-1.5 py-1 text-xs font-medium data-inset:pl-7", className)}
+	class={cn(menuLabel, className)}
 	{...restProps}
 >
 	{@render children?.()}

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { cn, type WithElementRef } from "$lib/utils.js";
 	import type { HTMLAttributes } from "svelte/elements";
+	import { menuLabel } from "../recipes.js";
 
 	let {
 		ref = $bindable(null),
@@ -13,7 +14,7 @@
 <div
 	bind:this={ref}
 	data-slot="select-label"
-	class={cn("text-muted-foreground px-1.5 py-1 text-xs", className)}
+	class={cn(menuLabel, className)}
 	{...restProps}
 >
 	{@render children?.()}

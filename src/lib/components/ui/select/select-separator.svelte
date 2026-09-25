@@ -2,6 +2,7 @@
 	import { Separator } from "$lib/components/ui/separator/index.js";
 	import { cn } from "$lib/utils.js";
 	import type { Separator as SeparatorPrimitive } from "bits-ui";
+	import { menuSeparator } from "../recipes.js";
 
 	let {
 		ref = $bindable(null),
@@ -13,6 +14,6 @@
 <Separator
 	bind:ref
 	data-slot="select-separator"
-	class={cn("bg-border -mx-1 my-1 h-px pointer-events-none", className)}
+	class={cn(menuSeparator, className)}
 	{...restProps}
 />

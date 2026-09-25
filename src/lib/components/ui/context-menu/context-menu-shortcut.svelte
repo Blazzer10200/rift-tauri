@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { cn, type WithElementRef } from "$lib/utils.js";
+	import { menuShortcut } from "../recipes.js";
 	import type { HTMLAttributes } from "svelte/elements";
 
 	let {
@@ -13,7 +14,7 @@
 <span
 	bind:this={ref}
 	data-slot="context-menu-shortcut"
-	class={cn("text-muted-foreground group-focus/context-menu-item:text-accent-foreground ml-auto text-xs tracking-widest", className)}
+	class={cn(menuShortcut, className)}
 	{...restProps}
 >
 	{@render children?.()}

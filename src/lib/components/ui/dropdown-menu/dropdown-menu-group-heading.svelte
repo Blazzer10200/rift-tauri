@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { DropdownMenu as DropdownMenuPrimitive } from "bits-ui";
 	import { cn } from "$lib/utils.js";
+	import { menuLabel } from "../recipes.js";
 	import type { ComponentProps } from "svelte";
 
 	let {
@@ -17,6 +18,6 @@
 	bind:ref
 	data-slot="dropdown-menu-group-heading"
 	data-inset={inset}
-	class={cn("text-muted-foreground px-1.5 py-1 text-xs font-medium data-inset:pl-7", className)}
+	class={cn(menuLabel, className)}
 	{...restProps}
 />

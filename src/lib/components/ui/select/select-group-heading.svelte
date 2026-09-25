@@ -2,6 +2,7 @@
 	import { Select as SelectPrimitive } from "bits-ui";
 	import { cn } from "$lib/utils.js";
 	import type { ComponentProps } from "svelte";
+	import { menuLabel } from "../recipes.js";
 
 	let {
 		ref = $bindable(null),
@@ -14,7 +15,7 @@
 <SelectPrimitive.GroupHeading
 	bind:ref
 	data-slot="select-group-heading"
-	class={cn("text-muted-foreground px-1.5 py-1 text-xs", className)}
+	class={cn(menuLabel, className)}
 	{...restProps}
 >
 	{@render children?.()}
