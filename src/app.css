@@ -1,4 +1,124 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+
+/* ─── Tailwind ↔ Rift token bridge ───
+   Tailwind utilities speak Rift's vocabulary and nothing else: the default
+   palette, shadows, radii, type scale, and eases are wiped, then re-registered
+   as the Rift tokens below (same names as DESIGN.md — `bg-surface`,
+   `text-fg-muted`, `border-border`, `bg-accent-soft`, `ring-ring`). An
+   off-system utility like `bg-blue-500` generates no CSS at all.
+   `inline` makes each utility emit `var(--token)` directly, so runtime theming
+   (accent hue/vividness, density) restyles utilities for free. Where a Rift name
+   coincides with Tailwind's (`--radius-sm`, `--shadow-lg`, `--ease-page`), the
+   self-reference is intentional: Rift's unlayered :root declaration below
+   out-ranks Tailwind's @layer theme copy. shadcn's own vars (`--background`,
+   `--primary`, and an `--accent` that means hover-gray) are never defined —
+   "accent" means Rift's brand accent, everywhere. Any non-T-shirt name added
+   here must also be registered in `cn` ($lib/utils.ts). */
+@theme {
+  --color-*: initial;
+  --shadow-*: initial;
+  --inset-shadow-*: initial;
+  --drop-shadow-*: initial;
+  --text-shadow-*: initial;
+  --radius-*: initial;
+  --text-*: initial;
+  --font-*: initial;
+  --ease-*: initial;
+}
+@theme inline {
+  --color-bg: var(--bg);
+  --color-bg-inset: var(--bg-inset);
+  --color-bg-elev-1: var(--bg-elev-1);
+  --color-bg-elev-2: var(--bg-elev-2);
+  --color-bg-elev-3: var(--bg-elev-3);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-active: var(--surface-active);
+  --color-field: var(--field);
+  --color-field-border: var(--field-border);
+  --color-track: var(--track);
+  --color-code-bg: var(--code-bg);
+  --color-code-border: var(--code-border);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-border-focus: var(--border-focus);
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-fg-faint: var(--fg-faint);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-active: var(--accent-active);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-ghost-border: var(--ghost-border);
+  --color-ring: var(--ring);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger: var(--danger);
+  --color-danger-fg: var(--danger-fg);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-status-busy: var(--status-busy);
+  --color-status-pending: var(--status-pending);
+  --color-status-warn: var(--status-warn);
+  --color-island-fill: var(--island-fill);
+  --color-island-border: var(--island-border);
+  --color-tile-fill: var(--tile-fill);
+  --color-tile-fill-hover: var(--tile-fill-hover);
+  --color-tile-border: var(--tile-border);
+  --color-tile-border-hover: var(--tile-border-hover);
+  --color-tile-border-live: var(--tile-border-live);
+  --color-tile-border-bad: var(--tile-border-bad);
+  --color-tile-border-ask: var(--tile-border-ask);
+  --color-tile-well: var(--tile-well);
+
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+  --radius-card: var(--r-card);
+  --radius-island: var(--island-radius);
+  --radius-tile: var(--tile-radius);
+  --radius-tile-inner: var(--tile-radius-inner);
+
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-float: var(--shadow-float);
+
+  --text-2xs: var(--tile-meta-fs);
+  --text-xs: var(--fs-xs);
+  --text-sm: var(--fs-sm);
+  --text-base: var(--fs-md);
+  --text-lg: var(--fs-lg);
+  --text-xl: var(--fs-xl);
+  --text-2xl: var(--fs-2xl);
+
+  --font-sans: var(--font-ui);
+  --font-mono: var(--font-mono);
+
+  --ease-page: var(--ease-page);
+  --ease-soft: var(--ease-soft);
+  --ease-spring: var(--ease-spring);
+
+  --spacing-row: var(--row-h);
+  --spacing-density: var(--gap);
+}
+
+/* tw-animate-css enter/exit motion honors the OS reduced-motion setting on
+   every primitive (they all carry data-slot). Bits UI unmounts immediately
+   when no animation is running, so exits stay correct. */
+@media (prefers-reduced-motion: reduce) {
+  [data-slot] { animation: none !important; }
+}
 
 /* ─────────────────────────────────────────────────────────────
    Rift — design tokens (OKLCH) · Linear-precise · dark

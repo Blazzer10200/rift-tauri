@@ -40,7 +40,10 @@ const verbose = process.argv.includes("--verbose");
 // Pull the FIRST :root{…} block's body. Both files put the canonical tokens there;
 // the app's block also carries the [data-direction][data-mode] alias on the same
 // selector, which is fine — we only want the declarations inside the braces.
-function rootBlock(css) {
+// Comments are stripped first: a prose mention of ":root" (app.css's @theme
+// bridge notes have one) must not anchor the search.
+function rootBlock(rawCss) {
+  const css = rawCss.replace(/\/\*[\s\S]*?\*\//g, " ");
   const i = css.indexOf(":root");
   if (i === -1) return "";
   const open = css.indexOf("{", i);
@@ -89,6 +92,10 @@ function resolve(value, map) {
 function main() {
   const appTok = parseTokens(rootBlock(readFileSync(APP_CSS, "utf8")));
   const dsTok = parseTokens(rootBlock(readFileSync(DS_CSS, "utf8")));
+  if (!appTok.size || !dsTok.size) {
+    console.log(`\nToken drift check — FAIL: parsed ${appTok.size} app / ${dsTok.size} ds tokens; the :root block was not found.\n`);
+    process.exit(1);
+  }
 
   const mismatches = [];
   const appOnly = [];
