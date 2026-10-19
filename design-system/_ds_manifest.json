@@ -41,7 +41,7 @@
     { "name": "--fg", "value": "oklch(0.925 0.004 250)", "kind": "color", "definedIn": "styles.css" },
     { "name": "--fg-2", "value": "oklch(0.825 0.008 255)", "kind": "color", "definedIn": "styles.css" },
     { "name": "--fg-muted", "value": "oklch(0.700 0.013 258)", "kind": "color", "definedIn": "styles.css" },
-    { "name": "--fg-subtle", "value": "oklch(0.545 0.016 262)", "kind": "color", "definedIn": "styles.css" },
+    { "name": "--fg-subtle", "value": "oklch(0.600 0.016 262)", "kind": "color", "definedIn": "styles.css" },
     { "name": "--fg-faint", "value": "oklch(0.430 0.010 260)", "kind": "color", "definedIn": "styles.css" },
     { "name": "--accent-h", "value": "163", "kind": "other", "definedIn": "styles.css" },
     { "name": "--accent-c", "value": "0.15", "kind": "other", "definedIn": "styles.css" },

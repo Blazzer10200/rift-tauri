@@ -161,7 +161,7 @@
   --fg:            oklch(0.925 0.004 250);   /* #E5E7EB */
   --fg-2:          oklch(0.825 0.008 255);   /* #C3C8CF */
   --fg-muted:      oklch(0.700 0.013 258);   /* #9CA3AF */
-  --fg-subtle:     oklch(0.545 0.016 262);   /* #6B7280 */
+  --fg-subtle:     oklch(0.600 0.016 262);   /* #7B808A — ≥4.5:1 on bg, bg-inset; 4.4 on elev-1 */
   --fg-faint:      oklch(0.430 0.010 260);   /* #4B5056 */
 
   /* brand / accent — themeable: hue (--accent-h) + vividness (--accent-c, chroma)

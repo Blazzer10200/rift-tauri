@@ -36,7 +36,7 @@
   --fg:        oklch(0.925 0.004 250);
   --fg-2:      oklch(0.825 0.008 255);
   --fg-muted:  oklch(0.700 0.013 258);
-  --fg-subtle: oklch(0.545 0.016 262);
+  --fg-subtle: oklch(0.600 0.016 262);
   --fg-faint:  oklch(0.430 0.010 260);
 
   /* ── accent — themeable: hue (--accent-h) + vividness (--accent-c, chroma)
