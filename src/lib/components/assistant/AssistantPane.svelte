@@ -1226,10 +1226,12 @@
   @media (prefers-reduced-motion: reduce) {
     .scroll-fade-top { transition: none; }
   }
+  /* One column: messages share the composer's edges (composer-wrap caps at
+     880px with 18px side padding → an 844px box). */
   .messages {
     display: flex; flex-direction: column;
     gap: 18px;
-    max-width: var(--chat-col-max);
+    max-width: calc(min(var(--chat-col-max), 880px) - 36px);
     width: 100%;
     margin: 0 auto;
   }

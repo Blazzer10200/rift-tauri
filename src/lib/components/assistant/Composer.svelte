@@ -1,9 +1,8 @@
 <script lang="ts">
   import { Send, Square, X, Mic, Loader2, Wand2, Paperclip,
-    Sparkles, ChevronUp, Folder, GitBranch } from "@lucide/svelte";
+    Sparkles, ChevronUp } from "@lucide/svelte";
   import { assistant } from "../../state/assistant.svelte";
   import { github } from "../../state/github.svelte";
-  import GhPopover from "./GhPopover.svelte";
   import { notify } from "../../state/toast.svelte";
   import { clampEffort, isOpenAIModel, modelFamily } from "../../state/assistant/helpers";
   import { cliCommands } from "../../state/assistant/cliCommands.svelte";
@@ -91,12 +90,12 @@
   const textAttachments = $derived(tab?.textAttachments ?? []);
   const queue = $derived(tab?.queue ?? []);
   const streaming = $derived(tab?.streaming ?? false);
-  // Context chips (in-chat only) — passive workspace · branch readout above
-  // the well. Hero suppresses them: the welcome card already shows both.
-  // Reads THIS tab's explicit root — the global current alone showed a stale
-  // folder after a per-tab folder switch.
+  // THIS tab's explicit root — the global current alone showed a stale folder
+  // after a per-tab folder switch. The workspace · branch crumb that used to
+  // sit above the well is gone (2026-10-19, Ledger): the status bar footer is
+  // the one home for project + branch + GitHub status; split panes name their
+  // folder in the pane header. Branch + GitHub status still load here.
   const wsRoot = $derived(tab ? assistant.effectiveRoot(tab) : (assistant.workspace.current ?? null));
-  const wsFolderName = $derived(wsRoot?.split(/[\\/]/).filter(Boolean).pop() ?? "");
   $effect(() => {
     if (!hero && wsRoot && focusedRoot && assistant.workspaceBranch == null) void assistant.loadWorkspaceBranch();
   });
@@ -104,15 +103,7 @@
   $effect(() => {
     if (!hero && wsRoot && focusedRoot) github.maybeRefresh(wsRoot);
   });
-  let ghOpen = $state(false);
-  let ghAnchor = $state<HTMLElement | null>(null);
   const focusedRoot = $derived(assistant.activeRoot === wsRoot);
-  const paneBranch = $derived(focusedRoot ? assistant.workspaceBranch : null);
-  const ghStatus = $derived(github.loadedFor === wsRoot ? github.status : null);
-  const ghDot = $derived(github.loadedFor === wsRoot ? github.dot : "none");
-  const ghActive = $derived(
-    !!ghStatus && ["ok", "no_auth", "no_gh", "error"].includes(ghStatus.state),
-  );
   // Per-pane context readout — the bare assistant.ctx* getters delegate to the
   // focused activeTab, so in split-pane both composers showed the focused
   // pane's ctx%. Read this pane's own tab instead.
@@ -1494,31 +1485,6 @@
     {/if}
 
     <div class="composer" class:hero={hero} class:streaming={streaming} class:enchanting={enhancing} data-mode={mode}>
-      {#if !hero && wsRoot}
-        <div class="ctx-chips" aria-label="Workspace context">
-          {#if ghActive && paneBranch}
-            <button class="ctx-crumb" type="button" bind:this={ghAnchor}
-              onclick={() => (ghOpen = !ghOpen)} use:tooltip={`Workspace · ${wsRoot}\nGitHub branch status`}
-              aria-haspopup="dialog" aria-expanded={ghOpen}>
-              <Folder size={11} /><span class="cc-label">{wsFolderName}</span>
-              <span class="ctx-slash" aria-hidden="true">/</span>
-              <GitBranch size={11} /><span class="cc-label">{paneBranch}</span>
-              {#if ghDot !== "none"}<span class="gh-dot {ghDot}"></span>{/if}
-            </button>
-          {:else}
-            <span class="ctx-crumb" use:tooltip={wsRoot}>
-              <Folder size={11} /><span class="cc-label">{wsFolderName}</span>
-              {#if paneBranch}
-                <span class="ctx-slash" aria-hidden="true">/</span>
-                <GitBranch size={11} /><span class="cc-label">{paneBranch}</span>
-              {/if}
-            </span>
-          {/if}
-        </div>
-        {#if ghOpen && ghAnchor}
-          <GhPopover anchor={ghAnchor} root={wsRoot} {tab} onClose={() => (ghOpen = false)} />
-        {/if}
-      {/if}
       <!-- WELL: attachments + input only. All chrome (border/glass/focus-ring/
            streaming edge) lives here; controls sit on the flat bar BELOW. -->
       <div class="composer-box" class:multiline={multiline}>
@@ -2573,20 +2539,6 @@
   }
   .model-pill:hover :global(.pill-chev), .model-pill.open :global(.pill-chev) { opacity: 1; }
   .model-pill.open :global(.pill-chev) { transform: rotate(180deg); color: var(--fg-muted); }
-
-  /* One quiet workspace breadcrumb instead of two competing pills. */
-  .ctx-chips {
-    display: flex; align-items: center; margin: 0 2px 6px; min-width: 0;
-  }
-  .ctx-crumb { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 100%;
-    height: 22px; padding: 0 7px; border: 0; border-radius: 6px; background: transparent;
-    color: var(--fg-faint); font: inherit; font-size: 10.5px; cursor: default; }
-  button.ctx-crumb { cursor: pointer; }
-  button.ctx-crumb:hover { background: var(--surface-hover); color: var(--fg-muted); }
-  button.ctx-crumb:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--ring); }
-  .ctx-crumb :global(svg) { flex: none; }
-  .ctx-crumb .cc-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .ctx-slash { color: var(--border-strong); }
 
   /* #87: ghost prompt-suggestion chip (CLI --prompt-suggestions). Quiet by
      default — faint text + dashed hairline on the well fill; accent on hover. */

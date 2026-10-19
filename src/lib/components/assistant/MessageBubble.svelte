@@ -547,12 +547,12 @@
 
       {#if isUser}
         <div class="user-actions">
-          {#if msgTime}<span class="user-time" aria-hidden="true">{msgTime}</span>{/if}
           {#if plainText.length > 0}
             <button class="user-copy" type="button" onclick={copy} aria-label="Copy message">
               {#if copied}<Check size={12} /><span>Copied</span>{:else}<Copy size={12} /><span>Copy</span>{/if}
             </button>
           {/if}
+          {#if msgTime}<span class="user-time" aria-hidden="true">{msgTime}</span>{/if}
         </div>
       {/if}
 
@@ -1232,16 +1232,17 @@
     transition: opacity var(--dur-fast) ease-out;
   }
   .bubble:hover .head-time { opacity: 0.9; }
-  .user-actions { min-height: 28px; display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 2px; opacity: 0.38; transition: opacity var(--dur-fast); }
-  .bubble[data-role="user"]:hover .user-actions, .bubble[data-role="user"]:focus-within .user-actions { opacity: 1; }
+  /* The exchange's ONE timestamp lives here (the turn receipt no longer repeats
+     it), so it stays readable at rest: Inter tabular at fg-subtle. Copy waits
+     for hover/focus. */
+  .user-actions { min-height: 28px; display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 2px; }
   .bubble[data-role="user"] .user-time {
-    font-family: var(--font-mono, monospace);
-    font-size: 10px;
-    color: var(--fg-faint);
-    letter-spacing: 0.02em;
-    opacity: 1;
+    font-size: var(--fs-xs);
+    font-variant-numeric: tabular-nums;
+    color: var(--fg-subtle);
   }
-  .user-copy { min-height: 28px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border-radius: 6px; color: var(--fg-subtle); font: inherit; font-size: 11px; background: transparent; border: 0; }
+  .user-copy { min-height: 28px; display: inline-flex; align-items: center; gap: 5px; padding: 0 8px; border-radius: 6px; color: var(--fg-subtle); font: inherit; font-size: 11px; background: transparent; border: 0; opacity: 0; transition: opacity var(--dur-fast); }
+  .bubble[data-role="user"]:hover .user-copy, .bubble[data-role="user"]:focus-within .user-copy { opacity: 1; }
   .user-copy:hover { color: var(--fg); background: var(--surface-hover); }
 
   /* User image thumbnails — pasted/dropped into the composer get persisted

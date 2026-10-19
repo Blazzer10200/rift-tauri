@@ -251,17 +251,15 @@
         ? (autoCompacting ? "Auto-compacting conversation…" : "Compacting conversation…")
         : "Working…"
   );
-  // Completed-turn hover timestamp — `message.ts` stamped at send (2026-07-02+);
-  // absent on older convos, hidden while live (the head already ticks then).
-  const turnTime = $derived.by(() => {
-    const t = message.ts;
-    if (!t || streaming) return null;
-    const d = new Date(t);
-    const time = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-    return d.toDateString() === new Date().toDateString()
-      ? time
-      : `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${time}`;
-  });
+  // Receipt facts that stay visible at rest. The turn's clock time is gone: the
+  // user message above already carries it (one fact, one home).
+  const hasFacts = $derived(hasActivity || turn.totalSecs >= 1 || !!completionCost || !!message.fast);
+  // A finished turn with no answer, no receipt and no actions renders nothing,
+  // but its margins + the list gap still stacked into ~64px of dead air per
+  // turn (C7 in docs/design/redesign-plan.md). Drop it from layout entirely.
+  const isEmpty = $derived(
+    !streaming && answerGroups.length === 0 && !hasFacts && !completionTokens && plainText.length === 0 && !isLast,
+  );
 
   // Live footer verb: a pending tool drives the real action word ("Reading X").
   // With NO tool in flight (model reasoning before/between tool calls) we no
@@ -358,7 +356,7 @@
   );
 </script>
 
-<div class="sturn">
+<div class="sturn" class:is-empty={isEmpty}>
   {#snippet renderGroup(g: Group, gi: number, historicalReceipt: boolean)}
     {#if g.type === "say"}
       {@const sm = sayMode(g.text, streaming && gi === groups.length - 1, gi)}
@@ -453,37 +451,60 @@
       {#each groups as g, gi (gi)}{@render renderGroup(g, gi, false)}{/each}
     </div>
   {:else}
-    {#if hasActivity}
-      <section class="sactivity tile" class:is-bad={turn.outcome === "failed"} data-outcome={turn.outcome} class:open={activityOpen}>
-        <button
-          class="sactivity-head tile-head"
-          type="button"
-          aria-expanded={activityOpen}
-          onclick={() => (activityOpen = !activityOpen)}
-        >
-          <!-- Outcome first (what happened + how much), provenance second:
-               duration and cost stay readable, tokens and clock time recede
-               until the turn is hovered. -->
-          <span class="tile-glyph" class:is-bad={turn.outcome === "failed"} class:is-ok={turn.outcome !== "failed"} aria-hidden="true">
-            {#if turn.outcome === "failed"}<AlertTriangle size={11} />{:else}<Check size={11} strokeWidth={2.5} />{/if}
-          </span>
-          <span class="sactivity-title">{activityTitle}</span>
-          {#if turn.outcome === "applied" && turn.files > 0}
-            <span class="tile-pill is-edit">{turn.files} file{turn.files === 1 ? "" : "s"}</span>
-          {:else if actionCount > 0}
-            <span class="tile-pill">{actionCount} action{actionCount === 1 ? "" : "s"}</span>
+    <!-- Ledger (owner pick 2026-10-19): the answer reads first; the turn's
+         receipt is ONE ruled line under it — outcome · count · duration · cost,
+         tokens on hover — with Copy/Retry on the same line. Expanding it unfolds
+         the work below the rule, on a plain well (no frame around tiles). -->
+    {#if answerGroups.length > 0}
+      <div class="sanswer">
+        {#each answerGroups as g, gi (gi)}
+          {#if g.type === "say"}<div class="snarr"><Markdown text={g.text} {workspaceRoot} /></div>{/if}
+        {/each}
+      </div>
+    {/if}
+
+    {#if hasFacts || completionTokens || plainText.length > 0 || isLast}
+      <div class="sledger" class:ruled={hasFacts} data-outcome={turn.outcome}>
+        <div class="sledger-row">
+          {#if hasActivity}
+            <button class="sledger-toggle" type="button" aria-expanded={activityOpen}
+              onclick={() => (activityOpen = !activityOpen)}>
+              <span class="sledger-glyph" class:is-bad={turn.outcome === "failed"} aria-hidden="true">
+                {#if turn.outcome === "failed"}<AlertTriangle size={12} />{:else}<Check size={12} strokeWidth={2.5} />{/if}
+              </span>
+              <span class="sledger-title">{activityTitle}</span>
+              <span class="sledger-facts">
+                {#if turn.outcome === "applied" && turn.files > 0}<span>{turn.files} file{turn.files === 1 ? "" : "s"}</span>
+                {:else if actionCount > 0}<span>{actionCount} action{actionCount === 1 ? "" : "s"}</span>{/if}
+                {#if turn.totalSecs >= 1}<span>{fmtDur(turn.totalSecs)}</span>{/if}
+                {#if completionCost}<span>{completionCost}</span>{/if}
+                {#if message.fast}<span class="sledger-fast"><Zap size={10} />fast</span>{/if}
+              </span>
+              <span class="tile-chev" class:open={activityOpen}><ChevronRight size={12} /></span>
+            </button>
+          {:else if hasFacts}
+            <span class="sledger-facts">
+              {#if turn.totalSecs >= 1}<span>{fmtDur(turn.totalSecs)}</span>{/if}
+              {#if completionCost}<span>{completionCost}</span>{/if}
+              {#if message.fast}<span class="sledger-fast"><Zap size={10} />fast</span>{/if}
+            </span>
           {/if}
-          <span class="sactivity-meta">
-            {#if turn.totalSecs >= 1}<span class="tile-dur">{fmtDur(turn.totalSecs)}</span>{/if}
-            {#if completionCost}<span class="sactivity-cost">{completionCost}</span>{/if}
-            {#if message.fast}<span class="sactivity-fast"><Zap size={10} />fast</span>{/if}
-            {#if completionTokens}<span class="sactivity-quiet">↑ {fmtTokens(completionTokens)}</span>{/if}
-            {#if turnTime}<span class="sactivity-quiet sactivity-time" use:tooltip={"When this turn ran"}>{turnTime}</span>{/if}
+          {#if completionTokens}<span class="sledger-facts sledger-hover">↑ {fmtTokens(completionTokens)} tokens</span>{/if}
+          <span class="sledger-acts">
+            {#if plainText.length > 0}
+              <button class="msg-act" class:copied type="button" onclick={copy}>
+                {#if copied}<Check size={12} strokeWidth={2.5} />Copied{:else}<Copy size={12} />Copy{/if}
+              </button>
+            {/if}
+            {#if isLast}
+              <button class="msg-act" type="button" onclick={() => assistant.retryLast(tabId)}>
+                <RotateCcw size={12} />Retry
+              </button>
+            {/if}
           </span>
-          <span class="tile-chev" class:open={activityOpen}><ChevronRight size={13} /></span>
-        </button>
+        </div>
         {#if activityOpen}
-          <div class="sactivity-body tile-body" transition:slide={{ duration: 180 }}>
+          <div class="sactivity-body" transition:slide={{ duration: 180 }}>
             {#if activityShellCount > 0}
               <div class="sactivity-tools">
                 <span>{activityShellCount} terminal {activityShellCount === 1 ? "result" : "results"}</span>
@@ -500,24 +521,6 @@
             </div>
           </div>
         {/if}
-      </section>
-    {/if}
-
-    {#if answerGroups.length > 0}
-      <div class="sanswer">
-        {#each answerGroups as g, gi (gi)}
-          {#if g.type === "say"}<div class="snarr"><Markdown text={g.text} {workspaceRoot} /></div>{/if}
-        {/each}
-      </div>
-    {/if}
-
-    {#if !hasActivity && (turn.totalSecs >= 1 || completionTokens || completionCost || message.fast)}
-      <div class="sreceipt">
-        {#if turn.totalSecs >= 1}<span>{fmtDur(turn.totalSecs)}</span>{/if}
-        {#if completionTokens}<span>↑ {fmtTokens(completionTokens)} tokens</span>{/if}
-        {#if completionCost}<span class="sreceipt-cost">{completionCost}</span>{/if}
-        {#if message.fast}<span class="sreceipt-fast"><Zap size={10} />fast</span>{/if}
-        {#if turnTime}<span class="sreceipt-time" use:tooltip={"When this turn ran"}>{turnTime}</span>{/if}
       </div>
     {/if}
   {/if}
@@ -581,18 +584,4 @@
     {/if}
   {/if}
 
-  {#if !streaming && (plainText.length > 0 || isLast)}
-    <div class="msg-acts">
-      {#if plainText.length > 0}
-        <button class="msg-act" class:copied type="button" onclick={copy}>
-          {#if copied}<Check size={13} strokeWidth={2.5} />Copied{:else}<Copy size={13} />Copy{/if}
-        </button>
-      {/if}
-      {#if isLast}
-        <button class="msg-act" type="button" onclick={() => assistant.retryLast(tabId)}>
-          <RotateCcw size={13} />Retry
-        </button>
-      {/if}
-    </div>
-  {/if}
 </div>

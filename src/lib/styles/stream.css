@@ -401,29 +401,38 @@
   .sturn-body.railed.live::after { animation: none; background: none; }
 }
 
-/* Completed-turn hierarchy: process evidence becomes one compact disclosure,
-   while trailing prose remains in the open as the answer. The receipt is the
-   only framed element at rest; expanding it unfolds the detailed ledger below. */
-.sactivity { width: fit-content; max-width: 100%; margin: 2px 0 var(--stream-gap-turn); }
-.sactivity.open { width: 100%; }
-/* Chrome comes from .tile / .tile-head (app.css). Local rules only set the
-   receipt's hierarchy: outcome + count lead, provenance trails. */
-.sactivity-head { min-height: 30px; }
-.sactivity-title { min-width: 0; font-weight: 600; color: var(--fg-2); white-space: nowrap; }
-.sactivity-meta { display: inline-flex; align-items: center; gap: 7px; flex: none; margin-left: auto; padding-left: 6px;
-  font-family: var(--font-mono); font-size: var(--tile-meta-fs); font-variant-numeric: tabular-nums; color: var(--fg-faint); }
-.sactivity-meta > span + span::before { content: "·"; margin-right: 7px; opacity: 0.45; }
-/* Cost is provenance, not a call to action — neutral, one step above faint. */
-.sactivity-cost { color: var(--fg-muted); }
-.sactivity-fast { display: inline-flex; align-items: center; gap: 3px; color: var(--fg-muted); }
-/* Keep tokens + timestamp in layout at low emphasis. The receipt is
-   fit-content, so animating max-width here made the whole chip resize
-   whenever its turn was hovered. Opacity-only emphasis preserves stable
-   geometry without a blank reserved tail at rest. */
-.sactivity-quiet { opacity: 0.45; transition: opacity var(--dur-fast); }
-.sturn:hover .sactivity-quiet, .sactivity-head:focus-visible .sactivity-quiet { opacity: 0.9; }
-.sactivity-body { padding: 2px 12px 7px; background: var(--tile-well);
-  border-radius: 0 0 calc(var(--tile-radius) - 1px) calc(var(--tile-radius) - 1px); }
+/* Completed turn = Ledger (owner pick 2026-10-19): answer first, then ONE
+   ruled receipt line — outcome · count · duration · cost, tokens on hover,
+   Copy/Retry trailing on the same line. Meta is Inter tabular at fg-subtle
+   (≥4.5:1 on the island) — the old fg-faint × 0.45 mono read at 1.57:1. */
+.sturn.is-empty { display: none; }
+/* margin-left matches Markdown's .md 10px text inset, so rule + glyph start
+   on the answer's text edge. */
+.sledger { margin: 8px 0 0 10px; }
+.sledger.ruled { padding-top: 6px; border-top: 1px solid color-mix(in oklab, var(--border) 60%, transparent); }
+.sledger-row { display: flex; align-items: center; gap: 8px; min-height: 28px; }
+.sledger-toggle { display: inline-flex; align-items: center; gap: 8px; min-width: 0; min-height: 28px;
+  padding: 0 8px 0 4px; margin-left: -4px; border: 0; border-radius: var(--radius-sm); background: transparent;
+  font: inherit; font-size: var(--fs-xs); color: var(--fg-subtle); cursor: pointer;
+  transition: background var(--dur-fast); }
+.sledger-toggle:hover { background: var(--surface-hover); }
+.sledger-toggle:hover .tile-chev { color: var(--fg-muted); }
+.sledger-toggle:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--ring); }
+.sledger-glyph { flex: none; display: inline-flex; color: var(--ok); }
+.sledger-glyph.is-bad { color: var(--danger); }
+.sledger-title { flex: none; font-weight: 500; color: var(--fg-muted); white-space: nowrap; }
+.sledger-facts { display: inline-flex; align-items: center; gap: 7px; min-width: 0; white-space: nowrap;
+  font-size: var(--fs-xs); font-variant-numeric: tabular-nums; color: var(--fg-subtle); }
+.sledger-facts > span + span::before { content: "·"; margin-right: 7px; }
+.sledger-fast { display: inline-flex; align-items: center; gap: 3px; }
+/* Tokens are provenance: present on hover/focus, readable when shown. Opacity
+   only, so the line's geometry never shifts. */
+.sledger-hover { opacity: 0; transition: opacity var(--dur-fast); }
+.sturn:hover .sledger-hover, .sturn:focus-within .sledger-hover { opacity: 1; }
+.sledger-acts { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; flex: none;
+  opacity: 0; transition: opacity var(--dur-fast); }
+.sturn:hover .sledger-acts, .sturn:focus-within .sledger-acts { opacity: 1; }
+.sactivity-body { margin-top: 6px; padding: 2px 12px 7px; background: var(--tile-well); border-radius: var(--tile-radius); }
 .sactivity-tools {
   min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 4px 2px 5px 18px; color: var(--fg-faint); font-size: var(--tile-meta-fs);
@@ -440,33 +449,18 @@
 .sanswer { min-width: 0; }
 .sanswer > .snarr:first-child { margin-top: 0; }
 
-/* Text-only answers do not need a generic "Done" badge. Their receipt is just
-   quiet provenance: elapsed time, tokens, cost, and fast confirmation. */
-.sreceipt { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 5px 0 0;
-  font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-faint); font-variant-numeric: tabular-nums; }
-.sreceipt > span + span::before { content: "·"; margin-right: 8px; opacity: 0.45; }
-.sreceipt-cost, .sreceipt-fast { color: var(--fg-muted); }
-.sreceipt-fast { display: inline-flex; align-items: center; gap: 3px; }
-.sreceipt-time { opacity: 0; transition: opacity var(--dur-fast); }
-.sturn:hover .sreceipt-time, .sturn:focus-within .sreceipt-time { opacity: 0.85; }
-
 @media (max-width: 720px) {
-  .sactivity-head { flex-wrap: wrap; }
-  .sactivity-meta { width: 100%; margin-left: 26px; padding-left: 0; }
-  .sactivity-time { display: none; }
+  .sledger-hover { display: none; }
 }
 
-/* per-turn hover actions (copy / retry) */
-.msg-acts { display: flex; align-items: center; gap: 3px; margin-top: 13px; min-height: 32px;
-  opacity: 0.62; transform: none; transition: opacity var(--dur-fast), transform var(--dur-fast); }
-.sturn:hover .msg-acts, .sturn:focus-within .msg-acts { opacity: 1; transform: none; }
-.msg-act { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 10px; border-radius: 7px;
+/* per-turn hover actions (copy / retry) — ride the ledger line */
+.msg-act { display: inline-flex; align-items: center; gap: 5px; min-height: 26px; padding: 0 8px; border-radius: var(--radius-sm);
   font-size: var(--fs-xs); font-weight: 500; color: var(--fg-subtle); transition: background var(--dur-fast), color var(--dur-fast); }
 .msg-act:hover { background: var(--surface-hover); color: var(--fg-2); }
 .msg-act:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--ring); }
 .msg-act.copied { color: var(--ok); }
 .msg-act svg { flex: none; }
-@media (prefers-reduced-motion: reduce) { .msg-acts { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .sledger-acts, .sledger-hover, .sledger-toggle { transition: none; } }
 
 /* ── plan / todo checklist ── Tile card like every other machinery block
    (DESIGN §8) — was a left rail, then a hand-rolled border; now the shared
