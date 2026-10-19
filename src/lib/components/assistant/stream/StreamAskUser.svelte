@@ -39,14 +39,18 @@
   // could no longer be answered (and, when the turn died mid-input, over NO
   // question at all). Render inert instead: question kept readable, no chrome
   // that promises an action the backend can't honor anymore.
-  const askExpired = $derived(!askAnswered && (!live || tool.status === "error"));
+  // Failed call (bad input shape → the MCP rejected it and the model asks
+  // again): not a question the user could ever answer, so it must not render
+  // as a second full card carrying the same text as the retry below it.
+  const askFailed = $derived(tool.status === "error");
+  const askExpired = $derived(!askAnswered && !askFailed && !live);
   // Live turn, but the tool input is still streaming in (questions [] until the
   // input JSON finishes forming) — hold the buttons until there's a question.
-  const askForming = $derived(!askAnswered && !askExpired && askQuestions.length === 0);
+  const askForming = $derived(!askAnswered && !askExpired && !askFailed && askQuestions.length === 0);
   // Still genuinely awaiting the user — the moment the tile's is-ask (accent,
   // stationary status edge) treatment applies. Settled (answered/expired)
   // drops back to a plain tile so a resolved question stops reading as live.
-  const awaiting = $derived(!askAnswered && !askExpired);
+  const awaiting = $derived(!askAnswered && !askExpired && !askFailed);
 
   // The backend tool_result is plain text Claude reads ("Q: …\nA: …" pairs, or
   // a dismissal sentence). Rendering it raw in a <pre> read as an unstyled
@@ -141,6 +145,15 @@
   });
 </script>
 
+{#if askFailed}
+  <div class="tile is-compact sask sask-failed" title={tool.result ?? undefined}>
+    <div class="tile-head">
+      <span class="tile-glyph is-bad" aria-hidden="true"><MessageCircleQuestion size={11} /></span>
+      <span class="tile-title">Question couldn't be shown</span>
+      <span class="tile-meta"><span class="tile-pill is-bad">failed</span></span>
+    </div>
+  </div>
+{:else}
 <div class="tile sask" class:is-ask={awaiting} class:answered={askAnswered} class:expired={askExpired} class:dismissed={askDismissed}>
   <div class="tile-head sask-head">
     <span class="sask-head-ic" aria-hidden="true">
@@ -298,6 +311,7 @@
     {/if}
   </div>
 </div>
+{/if}
 
 <style>
   /* The one card the turn is blocked on — global `tile` shell (border/radius/
@@ -339,7 +353,12 @@
   .sask-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 1px; }
   .sask-chips :global(svg) { color: var(--ok); flex: none; }
 
+  .sask-failed { width: fit-content; max-width: 100%; }
+  .sask-failed .tile-title { color: var(--fg-subtle); }
   .sask-question { display: flex; flex-direction: column; gap: 6px; }
+  /* The header pill is a flex child of a column — without this it stretches
+     to a full-width bar instead of hugging its text. */
+  .sask-question > .tile-pill, .sask-answered > .tile-pill { align-self: flex-start; }
   .sask-q-text { font-size: var(--fs-md); font-weight: 500; color: var(--fg, inherit); }
   .sask-options { display: flex; flex-direction: column; gap: 6px; }
   /* Options are tint tiles inside the island (one level deep, per DESIGN §8) —

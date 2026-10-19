@@ -41,8 +41,10 @@
     return () => clearInterval(t);
   });
   const shownMd = $derived(revealing ? plan.slice(0, reveal) : plan);
-  // Still being written — forming upstream, or the reveal catching up.
-  const drafting = $derived(pending && (!!tool.forming || revealing));
+  // Still being written — forming upstream, the reveal catching up, or no plan
+  // text yet (the title alone says "Drafting plan…"; the body stays empty
+  // instead of repeating it).
+  const drafting = $derived(pending && (!!tool.forming || revealing || !plan));
   // Send transport: settled card on the last turn whose plan was never
   // approved — Approve flips the mode + auto-sends the execute prompt.
   const settledActionable = $derived(
@@ -115,11 +117,13 @@
 <div class="tile sxplan" class:pending class:is-ask={showActions}>
   <button class="sxplan-head" type="button" onclick={toggle} aria-expanded={open}>
     <span class="tile-glyph" class:is-live={live}><ScrollText size={12} strokeWidth={2} class={drafting ? "sxplan-write" : ""} /></span>
-    <span class="sxplan-title">{drafting ? "Drafting plan…" : live ? "Plan proposed — approve to build" : pending ? "Plan proposed — review to continue" : "Proposed plan"}</span>
+    <!-- Live: the action bar's "Approve & build" already says what to do, so
+         the title just names the card. -->
+    <span class="sxplan-title">{drafting ? "Drafting plan…" : pending && !live ? "Plan proposed — review to continue" : "Proposed plan"}</span>
     <span class="sxplan-chev tile-chev" class:open><ChevronRight size={13} strokeWidth={2.25} /></span>
   </button>
   {#if !plan}
-    <div class="sxplan-empty">Drafting plan…</div>
+    {#if !pending}<div class="sxplan-empty">No plan text</div>{/if}
   {:else if open}
     <div class="sxplan-body">
       {#if editing && showActions}

@@ -26,8 +26,14 @@ export function buildReplaySteps(): ReplayStep[] {
     t += delay;
     steps.push({ at: t, apply });
   };
-  const findTool = (m: ChatMessage, id: string): ToolBlock | undefined =>
-    m.blocks.find((b): b is ToolBlock => b.type === "tool" && b.id === id);
+  // Replace, never mutate: the real store swaps in a new block object on every
+  // change, and streamModel memoizes tool adaptation by block identity
+  // (adaptCache, #100). An in-place Object.assign left every start()/finish()
+  // tool stuck "pending" in the replay.
+  const patchTool = (m: ChatMessage, id: string, fields: Partial<ToolBlock>) => {
+    const i = m.blocks.findIndex((b) => b.type === "tool" && b.id === id);
+    if (i >= 0) m.blocks[i] = { ...(m.blocks[i] as ToolBlock), ...fields };
+  };
 
   // Push a settled tool in one beat (the quick, boring case).
   const done = (delay: number, name: string, input: Record<string, unknown>, result: string | null, over: Partial<ToolBlock> = {}) =>
@@ -43,10 +49,7 @@ export function buildReplaySteps(): ReplayStep[] {
       status: "pending", startedAt: Date.now(), ...(forming ? { inputPartial: true } : {}),
     }));
   const finish = (delay: number, id: string, result: string | null, over: Partial<ToolBlock> = {}) =>
-    add(delay, (m) => {
-      const tb = findTool(m, id);
-      if (tb) Object.assign(tb, { result, status: "error" in over && over.isError ? "error" : "done", durationMs: 900, ...over });
-    });
+    add(delay, (m) => patchTool(m, id, { result, status: "error" in over && over.isError ? "error" : "done", durationMs: 900, ...over }));
 
   const say = (delay: number, text: string) => add(delay, (m) => m.blocks.push({ type: "text", text }));
 
@@ -85,7 +88,7 @@ export function buildReplaySteps(): ReplayStep[] {
   say(900, "A forming block — the input is still streaming, so it reads running…");
   const shF = "gal-sh-forming";
   start(700, shF, "Bash", {}, true);
-  add(2200, (m) => { const tb = findTool(m, shF); if (tb) { tb.input = { command: "cargo build --release" }; tb.inputPartial = undefined; } });
+  add(2200, (m) => patchTool(m, shF, { input: { command: "cargo build --release" }, inputPartial: undefined }));
   finish(1500, shF, `${E}31merror[E0308]${E}0m: mismatched types\n  --> src/assistant/turn.rs:812:9\n   = note: expected \`String\`, found \`&str\``, { isError: true, status: "error" });
 
   // ── 6 · long output: reveal tiers + head/tail fold ────────────────────────
@@ -153,16 +156,16 @@ export function buildReplaySteps(): ReplayStep[] {
     ] },
     result: "ok", isError: false, status: "done", durationMs: 50,
   }));
-  add(1600, (m) => { const tb = findTool(m, plan); if (tb) tb.input = { todos: [
+  add(1600, (m) => patchTool(m, plan, { input: { todos: [
     { content: "Walk every block kind", status: "completed" },
     { content: "Show the footer variants", status: "in_progress" },
     { content: "Hand back to Blazzer", status: "pending" },
-  ] }; });
-  add(1600, (m) => { const tb = findTool(m, plan); if (tb) tb.input = { todos: [
+  ] } }));
+  add(1600, (m) => patchTool(m, plan, { input: { todos: [
     { content: "Walk every block kind", status: "completed" },
     { content: "Show the footer variants", status: "completed" },
     { content: "Hand back to Blazzer", status: "in_progress" },
-  ] }; });
+  ] } }));
 
   // ── 13 · ask user: pending → answered chips ──────────────────────────────
   say(900, "An ask — options render as chips, then the answered state:");

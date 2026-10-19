@@ -367,12 +367,15 @@ function caption(tb: ToolBlock): string {
   if (n === "Glob") {
     // "searching…" not "?": the pattern field lands late in the streamed
     // input JSON, so the placeholder is what users see while it forms.
-    const pat = typeof inp.pattern === "string" ? inp.pattern : "searching…";
+    const pat = typeof inp.pattern === "string" ? trim(inp.pattern, 40) : "searching…";
     const scope = typeof inp.path === "string" ? ` in ${shortScope(inp.path)}` : "";
     return `${pat}${scope}`;
   }
   if (n === "Grep" || n === "grep") {
-    const pat = typeof inp.pattern === "string" ? `"${inp.pattern}"` : "searching…";
+    // A long alternation regex dumped whole into the one-line summary swamped
+    // every other name on the row; the full pattern stays in the row title +
+    // GrepResult body.
+    const pat = typeof inp.pattern === "string" ? `"${trim(inp.pattern, 32)}"` : "searching…";
     const scope = typeof inp.path === "string" ? ` in ${shortScope(inp.path)}` : "";
     return `${pat}${scope}`;
   }

@@ -30,7 +30,12 @@
   const lead = $derived(leadTool?.kind ?? "mcp");
   const Icon = $derived(NAME_ICONS[leadTool?.name ?? ""] ?? ICONS[lead] ?? Wrench);
   const anyActive = $derived(tools.some((t) => t.status === "pending"));
-  const anyFailed = $derived(tools.some((t) => t.status === "error"));
+  // One failed search in a 12-row group used to frame the WHOLE tile danger-red
+  // — a glance read "everything failed". The frame only goes red when every
+  // tool in the group failed; a partial failure is a count pill on the head
+  // (the failed row itself is already marked inside the ledger).
+  const failedCount = $derived(tools.filter((t) => t.status === "error").length);
+  const allFailed = $derived(failedCount > 0 && failedCount === tools.length);
   const summary = $derived(groupNames(tools));
   const totalSecs = $derived(tools.reduce((a, t) => a + t.durSecs, 0));
 
@@ -54,11 +59,12 @@
     <span class="wa-cap">{#if tools[0].dir}<span class="wa-dir">{tools[0].dir}</span>{/if}<b>{tools[0].cap}</b></span>
   </div>
 {:else}
-  <div class="tile wline" class:open class:is-compact={!open} class:is-bad={anyFailed}>
+  <div class="tile wline" class:open class:is-compact={!open} class:is-bad={allFailed}>
     <button class="tile-head" onclick={() => (userOpen = !userOpen)} type="button" title={summary}>
-      <span class="tile-glyph" class:is-live={anyActive}><Icon size={12} strokeWidth={2} /></span>
+      <span class="tile-glyph" class:is-live={anyActive} class:is-bad={allFailed}><Icon size={12} strokeWidth={2} /></span>
       <span class="tile-title wline-label">{summary}</span>
       <span class="tile-meta">
+        {#if failedCount > 0 && !allFailed}<span class="tile-pill is-bad">{failedCount} failed</span>{/if}
         {#if tools.length > 1}<span class="tile-pill">{tools.length}</span>{/if}
         {#if totalSecs >= 1}<span class="tile-dur">{fmtDur(totalSecs)}</span>{/if}
         <ChevronRight class="tile-chev {open ? 'open' : ''}" size={12} strokeWidth={2} />

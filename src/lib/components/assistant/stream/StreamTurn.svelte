@@ -247,11 +247,9 @@
   const headLabel = $derived(
     !streaming
       ? `Worked for ${fmtDur(turn.totalSecs)}`
-      : awaitingInput
-        ? "Waiting for you"
-        : compacting
-          ? (autoCompacting ? "Auto-compacting conversation…" : "Compacting conversation…")
-          : "Working…"
+      : compacting
+        ? (autoCompacting ? "Auto-compacting conversation…" : "Compacting conversation…")
+        : "Working…"
   );
   // Completed-turn hover timestamp — `message.ts` stamped at send (2026-07-02+);
   // absent on older convos, hidden while live (the head already ticks then).
@@ -316,16 +314,11 @@
             ? "Waiting on the model"
             : `${idleVerb}…`,
   );
-  // The head already owns the turn-level state word ("Working…"/"Thinking…"), so
-  // repeating idleVerb in the footer just stacked the SAME word top-and-bottom
-  // (owner: "it feels duplicated"). The footer earns its row only when it can say
-  // something the head can't: a real tool action, a compaction, a stall warning,
-  // or an awaiting-input prompt. In the plain idle/reasoning gap the verb is
-  // suppressed and the footer becomes a clean detail line — last-action trail +
-  // the elapsed·tokens meter — with no echoed word.
-  const footerVerbShown = $derived(
-    liveTool || compacting || stallLevel > 0 || awaitingInput ? footerVerb : null,
-  );
+  // The footer is now the ONE live status line (the head only renders for
+  // compaction), so it always leads with the honest state word. Suppressing
+  // the verb in the idle gap left a bare past-tense trail — "Read X  46s" —
+  // that read as a read stuck for 46 seconds.
+  const footerVerbShown = $derived(footerVerb);
   // The caption of the live tool ("composer.svelte", "git status …") rides next
   // to the verb so the footer reads as one honest phrase — "Reading composer.svelte"
   // — instead of a bare verb with the target stranded in a work row above. Dir
@@ -439,10 +432,13 @@
     {/if}
   {/snippet}
 
-  <!-- The head earns its row only for awaiting-input or compaction states.
-       StreamThinking owns reasoning from first signal through completion. -->
-  {#if streaming && (awaitingInput || compacting)}
-  <div class="sturn-head live" class:awaiting-head={awaitingInput}>
+  <!-- The head earns its row only for compaction (the progress card below has
+       no title of its own). Awaiting-input is already announced by the ask
+       card's eyebrow and the footer — a third "waiting" line on top read as
+       duplicated. StreamThinking owns reasoning from first signal through
+       completion. -->
+  {#if streaming && compacting}
+  <div class="sturn-head live">
     <span class="sh-dot"></span>
     <span class="sh-label">{headLabel}</span>
   </div>

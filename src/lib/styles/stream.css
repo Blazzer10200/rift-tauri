@@ -71,8 +71,8 @@
   from { background-position: 0 -90px; }
   to { background-position: 0 calc(100% + 90px); }
 }
-/* Quiet state line, not a bar (comp: no top rule) — renders only for states the
-   footer can't carry: thinking pause · awaiting input · compacting. */
+/* Quiet state line, not a bar (comp: no top rule) — renders only for the one
+   state the footer can't carry alone: compacting. */
 .sturn-head { display: flex; align-items: center; gap: 9px; padding-bottom: 6px; margin-bottom: 2px;
   font-size: var(--fs-sm); color: var(--fg-subtle); letter-spacing: 0.003em;
   animation: blockIn var(--dur-base) var(--ease-page) both; }
@@ -267,8 +267,6 @@
   animation: none; -webkit-text-fill-color: currentColor;
   background: none; color: var(--accent); font-weight: 600; }
 .sfooter.awaiting .sf-await-hint { color: var(--fg-faint); }
-/* head dot: solid accent, no pulse — calm "parked" not "live grinding" */
-.sturn-head.live.awaiting-head .sh-dot { animation: none; background: var(--accent); }
 
 /* tool run — an ISLAND that hugs its content (2026-07-22 reshape: full-width
    bars were 90% empty chrome — owner: "tacky"). Collapsed it's a compact
@@ -370,7 +368,6 @@
 .wbatch:hover { border-color: var(--tile-border-hover); }
 .wbrow { display: flex; align-items: center; gap: 9px; padding: 3px 0; font-size: var(--fs-sm);
   animation: blockIn var(--dur-base) var(--ease-page) both; }
-.wb-verb { color: var(--fg-muted); }
 .wb-name { color: var(--fg); font-weight: 600; letter-spacing: -0.004em; }
 .wb-diff { display: inline-flex; gap: 6px; font-family: var(--font-mono); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 .wb-add { color: var(--ok); }

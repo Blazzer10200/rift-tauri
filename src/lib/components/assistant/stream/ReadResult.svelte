@@ -6,6 +6,10 @@
   import { parseReadOutput, OUTPUT_CHAR_CAP } from "./streamModel";
   import { highlightSync, normalizeLang, whenReady } from "$lib/state/highlighter.svelte";
   import { leafName } from "$lib/utils/path";
+  // The host row already names the file and its line count (WorkLine's
+  // "Read X → N lines", ToolChip's input rows) — repeating both here stacked
+  // the same facts three deep. The head keeps only what the row can't say:
+  // the language and the truncation notice.
 
   let {
     text,
@@ -20,7 +24,6 @@
   const parsed = $derived(parseReadOutput(raw));
   const code = $derived(parsed ? parsed.code : raw);
   const start = $derived(parsed ? parsed.start : (offset ?? 1));
-  const lineCount = $derived(code.length === 0 ? 0 : code.split("\n").length);
 
   const ext = $derived.by(() => {
     if (!path) return null;
@@ -39,12 +42,12 @@
 </script>
 
 <div class="rres">
-  <div class="rres-head">
-    {#if path}<span class="rres-name" title={path}>{leafName(path)}</span><span class="rres-sep">·</span>{/if}
-    <span class="tile-label rres-lines">{lineCount} line{lineCount === 1 ? "" : "s"}</span>
-    {#if lang}<span class="rres-sep">·</span><span class="tile-label">{lang}</span>{/if}
-    {#if capped}<span class="rres-cap">truncated</span>{/if}
-  </div>
+  {#if lang || capped}
+    <div class="rres-head">
+      {#if lang}<span class="tile-label">{lang}</span>{/if}
+      {#if capped}<span class="rres-cap">truncated</span>{/if}
+    </div>
+  {/if}
   <div class="rres-code" style="counter-reset: rrline {start - 1}">
     {#if html}
       {@html html}
@@ -57,13 +60,10 @@
 
 <style>
   .rres { display: flex; flex-direction: column; min-width: 0; }
-  /* Section label ("N lines" / lang) is the shared `.tile-label` (app.css) —
-     this row is just its flex layout + the filename/truncated-note siblings,
-     which keep their own (non-label) weight so the row doesn't read as ALL caps. */
+  /* Lang label is the shared `.tile-label` (app.css); the truncated note keeps
+     its own (non-label) weight so the row doesn't read as ALL caps. */
   .rres-head { display: flex; align-items: center; gap: 6px; padding: 5px 11px 2px;
     font-family: var(--font-mono); color: var(--fg-faint); }
-  .rres-name { color: var(--fg-subtle); font-weight: 700; letter-spacing: 0.02em; font-size: var(--tile-meta-fs); }
-  .rres-sep { opacity: 0.5; font-size: var(--tile-meta-fs); }
   .rres-cap { margin-left: auto; font-weight: 700; font-style: italic; letter-spacing: 0.02em; font-size: var(--tile-meta-fs); }
 
   /* Shiki emits <pre class="shiki"><code><span class="line">…</span></code></pre>.
@@ -77,11 +77,17 @@
   .rres-code :global(pre) { margin: 0; padding: 7px 0 8px;
     background: transparent !important;
     font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.55; }
-  .rres-code :global(code) { display: block; min-width: 0; }
+  /* white-space: normal on <code> collapses the "\n" text nodes Shiki leaves
+     BETWEEN its block-level .line spans — under the inherited `pre` they
+     rendered as a blank row after every line (double-spaced code). Each
+     .line keeps pre-wrap for its own content. */
+  .rres-code :global(code) { display: block; min-width: 0; white-space: normal; }
   .rres-code :global(.line) { display: block; padding-right: 11px; white-space: pre-wrap; word-break: break-word; }
   .rres-code :global(.line)::before {
     counter-increment: rrline; content: counter(rrline);
-    display: inline-block; width: 4ch; margin-right: 11px; padding-left: 8px;
+    /* content-box: the global border-box rule ate the 8px padding out of the
+       4ch, so a 3-digit line number wrapped onto two lines ("31" / "1"). */
+    display: inline-block; box-sizing: content-box; width: 4ch; margin-right: 11px; padding-left: 8px;
     text-align: right; color: var(--fg-faint); opacity: 0.7;
     user-select: none; flex: none;
   }

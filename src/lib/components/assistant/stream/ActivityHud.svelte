@@ -247,12 +247,14 @@
           {/if}
         </span>
         <span class="ahud-text">
+          <!-- The done/total count beside this text carries the agent tally, so
+               the text names what is happening instead of re-counting it. -->
           {#if running.length > 0}
-            {running.length} agent{running.length === 1 ? "" : "s"}{headline ? ` · ${headline}` : ""}{shells.length > 0 ? ` · ${shells.length} shell${shells.length === 1 ? "" : "s"}` : ""}
+            {headline ?? "Agents running"}{shells.length > 0 ? ` · ${shells.length} shell${shells.length === 1 ? "" : "s"}` : ""}
           {:else if shells.length > 0}
             {shells.length} shell{shells.length === 1 ? "" : "s"} running · {trimCmd(shellLabel(shells[shells.length - 1].cmd), 48)}
           {:else}
-            {total} agent{total === 1 ? "" : "s"} finished
+            {total === 1 ? "Agent finished" : "All agents finished"}
           {/if}
         </span>
         {#if total > 0}<span class="ahud-count">{done}/{total}</span>{/if}
@@ -280,7 +282,7 @@
                 {:else if s.isError}<AlertCircle size={12} />
                 {:else}<Check size={12} strokeWidth={2.5} />{/if}
               </span>
-              <span class="tile-pill is-live">{s.subagentType}</span>
+              <span class="tile-pill">{s.subagentType}</span>
               <span class="ahud-desc" class:settled={!live}>{s.description}</span>
               {#if nowL}
                 <span class="ahud-now">

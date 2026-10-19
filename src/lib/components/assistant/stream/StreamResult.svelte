@@ -21,8 +21,11 @@
   });
   function toggle() { touched = true; open = !open; }
 
+  // No pill while running: the live border, live glyph and the turn footer
+  // already say so — a "running…" pill was the fourth copy. The pill appears
+  // when there is an outcome to report.
   const pill = $derived.by(() => {
-    if (running) return { text: "running…", tone: "running" as const };
+    if (running) return null;
     if (failed) return { text: tool.fail != null ? `${tool.fail} failed` : "failed", tone: "bad" as const };
     return { text: tool.pass != null ? `${tool.pass} passed` : "passed", tone: "ok" as const };
   });

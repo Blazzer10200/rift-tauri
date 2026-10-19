@@ -1,7 +1,7 @@
 <script lang="ts">
   import { slide } from "svelte/transition";
   import { ChevronRight } from "@lucide/svelte";
-  import { VERB_PAST, VERB_ING, isPlanArtifact, type StreamTool } from "./streamModel";
+  import { isPlanArtifact, type StreamTool } from "./streamModel";
   import EditDiff from "../EditDiff.svelte";
   import AnimatedCount from "./AnimatedCount.svelte";
   import { prefersReducedMotion } from "$lib/state/accessibility.svelte";
@@ -34,13 +34,23 @@
   function isOpen(t: StreamTool): boolean {
     return openMap[t.id] ?? autoOpen(t);
   }
+  // EditDiff renders ONE old/new pair; a MultiEdit carries `edits[]`, which
+  // opened to an empty well. Split it into one diff per edit, the way
+  // MessageBubble's history path already does.
+  function diffInputs(t: StreamTool): Record<string, unknown>[] {
+    const inp = t.input ?? {};
+    const edits = inp.edits;
+    if (!Array.isArray(edits)) return [inp];
+    return edits.map((e) => ({ ...(e as Record<string, unknown>), file_path: inp.file_path }));
+  }
   function toggle(t: StreamTool) {
     openMap = { ...openMap, [t.id]: !isOpen(t) };
   }
 
-  // Created/Edited/Deleted badge — the verb text already says it, but a
-  // color-coded mono pill lets you scan a batch of rows without reading each
-  // one (2026-09-22 tile migration; matches EditDiff's header badge).
+  // Created/Edited/Deleted badge — the row's only kind signal. A verb word
+  // ("Edited") used to sit in front of it saying the same thing; the
+  // color-coded pill scans faster, so the verb went (matches EditDiff's
+  // header badge). Live state = the row's `.active` label + the live dot.
   function kindPill(k: StreamTool["kind"]): { cls: string; label: string } {
     if (k === "create") return { cls: "is-new", label: "new" };
     if (k === "delete") return { cls: "is-del", label: "deleted" };
@@ -59,7 +69,6 @@
           <ChevronRight size={12} strokeWidth={2.2} />
         </button>
       {/if}
-      <span class="wb-verb">{live ? VERB_ING[t.kind] : VERB_PAST[t.kind]}</span>
       <span class="tile-pill {kp.cls}">{kp.label}</span>
       <span class="wb-label" title={t.path ?? t.cap}>
         {#if t.dir && t.dir.trim()}<span class="wb-dir">{t.dir}</span>{/if}<span class="wb-name">{t.cap}</span>
@@ -78,7 +87,9 @@
     </div>
     {#if open && t.input}
       <div class="wb-diffwrap" transition:slide={{ duration: reduced ? 0 : 200 }}>
-        <EditDiff input={t.input} compact defaultExpanded hideHead {workspaceRoot} />
+        {#each diffInputs(t) as input, i (i)}
+          <EditDiff {input} compact defaultExpanded hideHead {workspaceRoot} />
+        {/each}
       </div>
     {/if}
   {/each}

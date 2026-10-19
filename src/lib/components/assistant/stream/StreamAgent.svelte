@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Bot, Loader2, CheckCircle2, AlertCircle, ChevronRight, ArrowRight, Brain,
+  import { Bot, Loader2, CheckCircle2, AlertCircle, ChevronRight, ArrowRight, Brain, CornerDownRight,
     FileSearch, FilePen, FilePlus, Search, FolderTree, Terminal, Globe, AppWindow, GitBranch, ListChecks, Wrench } from "@lucide/svelte";
   import { fmtDur, type StreamTool } from "./streamModel";
   import { captionForTool, agentNowLine } from "../toolCaption";
@@ -39,14 +39,9 @@
       ? spawn.completedAt == null ? "running" : spawn.isError ? "error" : "done"
       : tool.status === "pending" ? "running" : tool.status,
   );
-  // Pill tone tracks the card's own status — mirrors BlockHeader's PILL_TONE map
-  // (app.css .tile-pill status classes): accent while live, danger once failed,
-  // neutral once settled ok. Keeps the identity pill in the same status
-  // vocabulary as the tile's own border (is-live / is-bad).
-  const pillTone = $derived(status === "running" ? "is-live" : status === "error" ? "is-bad" : "");
-  function kidTone(kid: Spawn): string {
-    return kid.completedAt == null ? "is-live" : kid.isError ? "is-bad" : "";
-  }
+  // The agent-type pill is identity, not status: it stays neutral. Status
+  // already has a home in the tile border (is-live / is-bad) and the stat
+  // glyph — tinting the pill too made one fact three signals.
   const agentType = $derived(spawn?.subagentType ?? (tool.task ?? tool.cap ?? "task").split(" · ")[0]);
   const desc = $derived(
     spawn?.description ??
@@ -108,7 +103,7 @@
   <button class="tile-head sa-head" class:sa-clickable={expandable} type="button"
     onclick={() => expandable && (open = !open)} aria-expanded={open}>
     <span class="sa-bot" aria-hidden="true"><Bot size={14} strokeWidth={2} /></span>
-    <span class="tile-pill {pillTone}">{agentType}</span>
+    <span class="tile-pill">{agentType}</span>
     {#if desc}<span class="sa-desc">{desc}</span>{/if}
     {#if toolSteps.length > 0 && !open}<span class="tile-dur">{toolSteps.length} step{toolSteps.length === 1 ? "" : "s"}</span>{/if}
     {#if spawn?.tokens}<span class="tile-dur">{fmtTokens(spawn.tokens)} tok</span>{/if}
@@ -124,7 +119,9 @@
   {#if nowLine}
     <div class="sa-now">
       <span class="sa-now-ic" aria-hidden="true">
-        {#if nowLine.thinking}<Brain size={12} />{:else}<Loader2 size={12} class="sa-spin" />{/if}
+        <!-- The header's stat glyph is the one spinner; this line just points
+             at the current action. -->
+        {#if nowLine.thinking}<Brain size={12} />{:else}<CornerDownRight size={12} />{/if}
       </span>
       <span class="sa-now-label" class:has-snip={!!nowLine.snip}>{nowLine.label}{#if nowLine.thinking && !nowLine.snip}<span class="sa-dots"><span></span><span></span><span></span></span>{/if}</span>
       {#if nowLine.snip}<span class="sa-now-snip">{nowLine.snip}</span>{/if}
@@ -167,7 +164,7 @@
                 {:else if kid.isError}<AlertCircle size={10} />
                 {:else}<CheckCircle2 size={10} />{/if}
               </span>
-              <span class="tile-pill {kidTone(kid)}">{kid.subagentType}</span>
+              <span class="tile-pill">{kid.subagentType}</span>
               {#if kid.description}<span class="sa-kid-desc">{kid.description}</span>{/if}
               {#if kid.tokens}<span class="tile-dur">{fmtTokens(kid.tokens)} tok</span>{/if}
             </div>
@@ -228,7 +225,7 @@
     border-top: 1px solid color-mix(in oklch, var(--tile-border) 80%, transparent);
     font-size: var(--fs-sm);
   }
-  .sa-now-ic { display: inline-flex; flex: none; color: var(--status-busy); }
+  .sa-now-ic { display: inline-flex; flex: none; color: var(--fg-faint); }
   .sa-now-label { color: var(--fg-muted); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sa-now-label.has-snip { flex: none; }
   /* The agent's own newest words — the live feed the forwarded frames carry. */
