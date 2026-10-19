@@ -77,6 +77,28 @@ is stopped.
 For task-specific entrypoints, use the fast-navigation table in
 [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
+### Scripts
+
+Each script's header comment has the full usage; this is the index.
+
+| Script | What it does |
+|---|---|
+| `verify.ps1` | The complete local gate (`npm run verify`; `-FrontendOnly` / `-RustOnly`) |
+| `verify-openai.ps1` | Focused OpenAI-route checks: `npm run check`, the playback + model-matrix tests, `cargo test openai` |
+| `project-doctor.ps1` | Read-only dev-environment diagnostic (`npm run doctor`) |
+| `cargo-test.ps1` | Rust tests with a retry for the runner's LNK1103 cache corruption (used by CI) |
+| `run-dev-deelevated.ps1` | Launches `tauri dev` de-elevated so WebView2 CDP binds (`npm run cdp:dev`) |
+| `run-dev2-deelevated.ps1` | A second dev window on CDP :9224 that reuses instance 1's vite |
+| `smoke-turn.ps1` | Manual pre-ship check: one real Claude CLI turn with Rift's flags (costs a little quota) |
+| `fable-watch.ps1` | Manual probe for Fable model availability behind its kill-switch |
+| `bump.ps1` | Writes the version into every manifest in one shot |
+| `release.ps1` | Velopack build + feed-first publish; normally run by CI from a tag (see Releases) |
+| `ship-watch.ps1` | Waits on the tag's release workflow run and reports green/red |
+| `test-update.ps1` | Local end-to-end auto-update test against a local feed |
+| `gen-third-party-notices.py` | Regenerates `THIRD-PARTY-NOTICES.md` |
+| `gen-typo-dict.mjs`, `gen-word-freq.mjs` | Regenerate the autocorrect data in `src/lib/utils/` |
+| `cdp/` | WebView inspection bridge (`c.sh`, `serve.cjs`); see `scripts/cdp/README.md` |
+
 ### Verification
 
 ```powershell
