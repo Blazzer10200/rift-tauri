@@ -8,8 +8,8 @@
     <style>
       html, body { margin: 0; background: oklch(0.142 0.003 250); }
       /* Pre-JS first paint: a dim static mark where the splash lockup lands,
-         so the window is branded from frame one. The opaque splash (then the
-         app surface) paints over it — no cleanup needed. */
+         so the window is branded from frame one. Removed by the root
+         +layout onMount once the splash is up. */
       #first-paint { position: fixed; left: 50%; top: 50%; transform: translate(-50%, calc(-50% - 30px)); opacity: 0.45; }
       #first-paint img { display: block; width: 64px; height: 64px; }
     </style>

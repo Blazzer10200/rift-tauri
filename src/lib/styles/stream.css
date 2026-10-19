@@ -22,7 +22,9 @@
 :root[data-density="compact"] { --stream-gap: 10px; --stream-gap-turn: 13px; --stream-gap-between-turns: 18px; }
 :root[data-density="comfy"]   { --stream-gap: 15px; --stream-gap-turn: 19px; --stream-gap-between-turns: 27px; }
 
-@keyframes blockIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+/* 3px (was 8px): with every block rising 8px while the follow-scroll chased the
+   growth, a streaming turn read as content lurching downward (owner 2026-10-19). */
+@keyframes blockIn { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 /* dropdown polish — an opened body's content fades in a beat after the slide
    starts, so the reveal reads as surface-then-content instead of a hard pop */
 @keyframes bodyFadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -60,17 +62,10 @@
     color-mix(in oklch, var(--border-strong) 85%, transparent) 12%,
     color-mix(in oklab, var(--accent) 35%, transparent) 92%,
     transparent); }
-/* Live glint — one soft accent spark drifting down the spine while the turn
-   works. Quieter than pulsing any text; reads as "current position". */
-.sturn-body.railed.live::after { content: ""; position: absolute; left: 1px; top: 2px; bottom: 2px;
-  width: 1.5px; border-radius: 999px;
-  background: linear-gradient(to bottom, transparent, color-mix(in oklab, var(--accent) 55%, transparent) 50%, transparent);
-  background-size: 100% 90px; background-repeat: no-repeat;
-  animation: railGlint 3.2s ease-in-out infinite; }
-@keyframes railGlint {
-  from { background-position: 0 -90px; }
-  to { background-position: 0 calc(100% + 90px); }
-}
+/* (The live "glint" — an accent spark travelling down this rail for the whole
+   turn — was removed 2026-10-19: traveling light along a fixed chrome line is
+   the DESIGN.md §8 orbit/sweep ban. The accent-tinted tail above is the live
+   signal; it is stationary.) */
 /* Quiet state line, not a bar (comp: no top rule) — renders only for the one
    state the footer can't carry alone: compacting. */
 .sturn-head { display: flex; align-items: center; gap: 9px; padding-bottom: 6px; margin-bottom: 2px;
@@ -187,39 +182,25 @@
    {#key} remounts .sf-verb per word swap → verbIn gives each new word a soft
    rise instead of a hard cut. */
 .sfooter { display: flex; align-items: center; gap: 7px; margin: var(--stream-gap-turn) 0 2px; font-size: var(--fs-sm);
-  color: var(--fg-faint); font-variant-numeric: tabular-nums; animation: blockIn var(--dur-base) var(--ease-page) both; }
-/* Liveness anchor — the turn's only status dot now lives here (comp cstat). */
+  color: var(--fg-subtle); font-variant-numeric: tabular-nums; animation: blockIn var(--dur-base) var(--ease-page) both; }
+/* Liveness anchor — the turn's only status dot now lives here (comp cstat).
+   Breathes only; the spring pop-in was dropped with the other footer springs. */
 .sfooter .sf-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none;
-  animation: dotPop 420ms var(--ease-spring) both, streamLivePulse var(--pulse-live) ease-out 420ms infinite; }
+  animation: streamLivePulse var(--pulse-live) ease-out infinite; }
 .sfooter.stalled .sf-dot { background: var(--warn); animation: none; }
 .sfooter.awaiting .sf-dot { background: var(--accent); animation: none; }
 .sfooter .sf-verb { color: var(--fg-muted); }
-/* The live target ("composer.svelte", "git status …") right after the verb, so
-   the footer reads as one honest phrase. Quiet mono, truncates before it can
-   shove the meter off the row. */
-.sfooter .sf-cap { margin-left: 7px; min-width: 0; font-family: var(--font-mono, monospace);
-  font-size: var(--fs-xs); color: var(--fg-faint); white-space: nowrap; overflow: hidden;
-  text-overflow: ellipsis; }
-/* dead-air trail — the last FINISHED action, quieter than a live cap */
-.sfooter .sf-last { opacity: 0.72; }
-/* leading detail — the footer has no verb this beat (head owns the state word),
-   so the caption/trail IS the left anchor: no left margin, lifted a touch so it
-   doesn't read as an orphaned fragment. */
-.sfooter .sf-cap.sf-lead { margin-left: 0; opacity: 0.9; }
+/* Verb swaps crossfade in place (was a 320ms spring rise per word — on a busy
+   turn the footer never stopped bouncing). */
 .sfooter .sf-verb-wrap { display: inline-flex; align-items: baseline; min-width: 0; max-width: 60%;
-  animation: verbIn 320ms var(--ease-spring) both; }
-@keyframes verbIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
-/* the meta cluster trails the verb by a beat — the footer assembles as a small
-   wave (verb+caption ride the wrap's spring, the cluster follows on a delay).
-   Left-clustered with the verb (comp cstat) — no right-edge float. */
+  animation: verbIn var(--dur-fast) var(--ease-soft) both; }
+@keyframes verbIn { from { opacity: 0; } to { opacity: 1; } }
+/* elapsed · tokens — one quiet line in the UI face (was mono fg-faint at 85%
+   riding a delayed spring). Readable at fg-subtle, stationary. */
 .sfooter .sf-cluster { display: inline-flex; align-items: baseline; gap: 7px; flex: none;
-  margin-left: 2px;
-  font-family: var(--font-mono, monospace); font-size: var(--fs-xs); letter-spacing: 0.02em;
-  color: var(--fg-faint); opacity: 0.85;
-  animation: clusterIn 380ms var(--ease-spring) 150ms both; }
-@keyframes clusterIn { from { opacity: 0; transform: translateX(6px); } to { opacity: 0.85; transform: none; } }
+  font-size: var(--fs-xs); color: var(--fg-subtle); }
+.sfooter .sf-cluster::before { content: "·"; }
 .sfooter .sf-meta { color: var(--fg-subtle); }
-.sfooter .sf-pip { opacity: 0.5; }
 @media (prefers-reduced-motion: reduce) { .sfooter .sf-verb-wrap { animation: none; } }
 
 /* Stall watchdog — a live turn with no token back past the threshold. The wait
@@ -316,7 +297,9 @@
 /* Result body — a proper inset well (family two-tone), not a translucent
    left-rail float; opens per-row via the chevron. Tokens, not raw literals —
    same well recipe as every other nested tool-output body. */
-.wr-out { margin: 3px 0 8px; border: 1px solid color-mix(in oklab, var(--tile-border) 70%, transparent);
+/* Well, not a bordered card — it already sits inside the work tile (§7: inside
+   a tile use tile-well, never a second bordered box). */
+.wr-out { margin: 3px 0 8px;
   border-radius: var(--tile-radius-inner); background: var(--tile-well); overflow: hidden;
   animation: workOpen 0.24s var(--ease-page) both; }
 .wr-out .oblock-out { padding: 5px 10px; color: var(--fg-muted); font-size: var(--fs-xs); }
@@ -398,7 +381,6 @@
   .wline, .wline-list, .wline-active, .wbrow, .splan, .sxplan, .sweb, .sresult { animation: none; }
   .scompact-fill { transition: none; }
   .sturn-head.live .sh-dot, .wline-active .wa-dot, .wb-dot.live { animation: none; }
-  .sturn-body.railed.live::after { animation: none; background: none; }
 }
 
 /* Completed turn = Ledger (owner pick 2026-10-19): answer first, then ONE

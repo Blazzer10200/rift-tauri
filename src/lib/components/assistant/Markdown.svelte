@@ -166,10 +166,10 @@
   // totalWords/everStreamed are plain lets (NOT $state) → mutating them inside
   // the derived can't trigger a reactivity loop; idempotent under double-invoke
   // (same as the legacy revealFrom pattern).
-  const WORD_MS = 42;      // mock stagger: i * 0.042s
+  const WORD_MS = 30;      // was 42 (mock stagger) — owner found streaming laggy 2026-10-19
   const REVEAL_MS = 500;   // per-word blur duration (matches md-word keyframe)
   const REVEAL_WINDOW = Math.ceil(REVEAL_MS / WORD_MS) + 1; // words still mid-blur behind the cursor (+1 so the oldest finishes before snapping solid)
-  const CATCHUP_LAG = Math.ceil(520 / WORD_MS); // trail beyond ~520ms of words drains proportionally so a fast burst stays close to live (tightened from 800ms — lower felt latency on bursts)
+  const CATCHUP_LAG = Math.ceil(320 / WORD_MS); // trail beyond ~320ms of words drains proportionally so a fast burst stays close to live (800 → 520 → 320ms; lower felt latency)
   let shownCount = $state(0);
   let totalWords = 0;
   let everStreamed = false;
@@ -684,10 +684,10 @@
     animation: md-word 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
   }
   /* Received-but-not-yet-revealed words: present (reserve layout, no reflow)
-     but invisible + blurred until the cursor reaches them. */
+     but invisible until the cursor reaches them. No filter here — on an
+     opacity:0 span a blur paints nothing and only costs a filter per word. */
   .md :global(.md-w-hold) {
     opacity: 0;
-    filter: blur(3px);
   }
   @keyframes md-word {
     from { opacity: 0; filter: blur(3px); }

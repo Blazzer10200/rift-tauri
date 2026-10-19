@@ -43,6 +43,11 @@
   if (!seenSplash) intro.arm();
 
   onMount(() => {
+    // app.html's pre-JS #first-paint mark is position:fixed, so it painted OVER
+    // any page without an opaque positioned surface (/dev/gallery showed a dim
+    // "R" across the stream). Children (incl. the opaque splash) are mounted
+    // before this runs, so removing it here never flashes.
+    document.getElementById("first-paint")?.remove();
     uiPrefs.init();
     workspace.init();
     void projects.refresh();

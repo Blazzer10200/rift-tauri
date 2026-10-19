@@ -14,7 +14,7 @@
   import StreamShell from "./StreamShell.svelte";
   import StreamExitPlan from "./StreamExitPlan.svelte";
   import PermissionBar from "../PermissionBar.svelte";
-  import { messageToTurn, groupBlocks, answerStartIndex, fmtDur, classifySay, VERB_ING, VERB_PAST, tasksToPlanItems, type Group, type StreamTool } from "./streamModel";
+  import { messageToTurn, groupBlocks, answerStartIndex, fmtDur, classifySay, VERB_ING, tasksToPlanItems, type Group, type StreamTool } from "./streamModel";
   import { assistant, type ChatMessage, type TabState } from "$lib/state/assistant.svelte";
   import { uiPrefs } from "$lib/state/ui-prefs.svelte";
   import { fmtTokens, isOpenAIModel } from "$lib/state/assistant/helpers";
@@ -316,44 +316,11 @@
   // compaction), so it always leads with the honest state word. Suppressing
   // the verb in the idle gap left a bare past-tense trail — "Read X  46s" —
   // that read as a read stuck for 46 seconds.
-  const footerVerbShown = $derived(footerVerb);
-  // The caption of the live tool ("composer.svelte", "git status …") rides next
-  // to the verb so the footer reads as one honest phrase — "Reading composer.svelte"
-  // — instead of a bare verb with the target stranded in a work row above. Dir
-  // prefix dropped here (the row above carries the full path); footer stays tight.
-  // Suppressed in the 'focused' (calm) narration density: that mode's whole point
-  // is a clean, minimal stream, so the footer stays a bare verb + meter there.
-  // Some caps ARE verb phrases (ExitPlanMode → "Proposed a plan") — pairing
-  // those with a footer verb reads doubled ("Proposed a plan Proposed a plan").
-  const capIsVerbPhrase = (t: StreamTool) => t.cap === VERB_PAST[t.kind];
-  const footerCap = $derived(
-    liveTool && !awaitingInput && uiPrefs.narration !== "focused" && !capIsVerbPhrase(liveTool)
-      ? (liveTool.cap ?? null)
-      : null,
-  );
-  // Dead-air trail — with no tool in flight the footer used to collapse to a
-  // bare "Working…" for the whole between-tools gap (the #1 "is it stuck?"
-  // read on long turns). Keep the verb honest, but carry the LAST finished
-  // action as a dim past-tense trail ("· Read Composer.svelte") so the quiet
-  // stretch still says where the turn is. Same focused-mode gate as footerCap.
-  const lastDone = $derived.by((): StreamTool | null => {
-    let last: StreamTool | null = null;
-    for (const g of groups) {
-      if (g.type !== "work") continue;
-      for (const seg of g.segs) {
-        const tools = seg.seg === "rich" ? [seg.tool] : seg.tools;
-        for (const t of tools) if (t.status !== "pending") last = t;
-      }
-    }
-    return last;
-  });
-  const idleTrail = $derived(
-    !liveTool && !awaitingInput && stallLevel === 0 && lastDone && uiPrefs.narration !== "focused"
-      ? capIsVerbPhrase(lastDone)
-        ? VERB_PAST[lastDone.kind]
-        : `${VERB_PAST[lastDone.kind]} ${lastDone.cap}`
-      : null,
-  );
+  // The footer is verb + elapsed + tokens only. It used to append the live
+  // tool's caption ("Reading composer.svelte") or, between tools, the last
+  // finished one ("· Read streamModel.ts") — but the live/just-finished block
+  // sits directly above the footer and already names it (one fact, one home;
+  // owner flagged the repeat 2026-10-19).
 </script>
 
 <div class="sturn" class:is-empty={isEmpty}>
@@ -530,7 +497,7 @@
          status, so the footer stays suppressed until a tool or token lands. -->
     <div class="sfooter" class:stalled={stallLevel > 0} class:awaiting={awaitingInput}>
       <span class="sf-dot" aria-hidden="true"></span>
-      {#key footerVerbShown ?? idleTrail}<span class="sf-verb-wrap">{#if footerVerbShown}<span class="sf-verb">{footerVerbShown}</span>{/if}{#if footerCap}<span class="sf-cap" class:sf-lead={!footerVerbShown}>{footerCap}</span>{:else if idleTrail}<span class="sf-cap sf-last" class:sf-lead={!footerVerbShown}>{footerVerbShown ? "· " : ""}{idleTrail}</span>{/if}</span>{/key}
+      {#key footerVerb}<span class="sf-verb-wrap"><span class="sf-verb">{footerVerb}</span></span>{/key}
       {#if awaitingInput}
         <!-- Parked on the user: no climbing clock (it's human time, not the
              model's), no token meter. Just the calm verb + a nudge. -->
@@ -543,7 +510,7 @@
           {/if}
           {#if liveSecs != null && liveTokens != null}<span class="sf-pip">·</span>{/if}
           {#if liveTokens != null}
-            <span class="sf-meta">↑ <AnimatedCount value={liveTokens} format={fmtTokens} /> tokens</span>
+            <span class="sf-meta"><AnimatedCount value={liveTokens} format={fmtTokens} /> tokens</span>
           {/if}
         </span>
       {/if}

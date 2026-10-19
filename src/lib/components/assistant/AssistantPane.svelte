@@ -180,7 +180,9 @@
       if (!scrollEl || !stickToBottom) return;
       const delta = scrollEl.scrollHeight - scrollEl.clientHeight - scrollEl.scrollTop;
       if (Math.abs(delta) < 0.5) { pinEcho = scrollEl.scrollTop; return; }
-      scrollEl.scrollTop = delta > 900 ? scrollEl.scrollHeight : scrollEl.scrollTop + delta * 0.2;
+      // 0.35/frame (was 0.2): the view trailed new text by ~170ms, which read
+      // as lag on top of the word reveal (owner 2026-10-19).
+      scrollEl.scrollTop = delta > 900 ? scrollEl.scrollHeight : scrollEl.scrollTop + delta * 0.35;
       pinEcho = scrollEl.scrollTop;
       smoothRaf = requestAnimationFrame(step);
     };
@@ -1381,8 +1383,6 @@
     display: inline-flex; align-items: center; gap: 6px;
     height: 26px; padding: 0 12px 0 10px;
     border-radius: 999px;
-    backdrop-filter: blur(16px) saturate(140%);
-    -webkit-backdrop-filter: blur(16px) saturate(140%);
     color: var(--fg-2);
     font-size: var(--fs-sm); font-weight: 550;
     cursor: pointer;
