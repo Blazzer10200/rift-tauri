@@ -471,7 +471,7 @@
     .ge-dot { animation: ge-breathe 3.4s ease-in-out infinite; }
   }
   @keyframes ge-breathe { 50% { opacity: 0.45; } }
-  .greet-title { font-family: "Lexend", var(--font-ui); font-size: 27px; font-weight: 600; letter-spacing: -0.025em;
+  .greet-title { font-family: "Lexend Variable", var(--font-ui); font-size: 27px; font-weight: 600; letter-spacing: -0.025em;
     line-height: 1.3; margin: 0; color: var(--fg-subtle); text-wrap: pretty; }
   .greet-title b { color: var(--fg); font-weight: 650; }
 
