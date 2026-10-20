@@ -1,0 +1,2 @@
+Rift stress fixture.
+The magic word is PELICAN-42.

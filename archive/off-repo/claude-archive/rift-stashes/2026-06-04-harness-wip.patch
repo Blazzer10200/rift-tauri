@@ -1,0 +1,658 @@
+diff --git a/src/lib/components/dialogs/CommandPalette.svelte b/src/lib/components/dialogs/CommandPalette.svelte
+index af43e1f2..bb12276e 100644
+--- a/src/lib/components/dialogs/CommandPalette.svelte
++++ b/src/lib/components/dialogs/CommandPalette.svelte
+@@ -3,7 +3,7 @@
+   import { fly, fade } from "svelte/transition";
+   import { quintOut } from "svelte/easing";
+   import {
+-    Search, MessageSquare,
++    Search, MessageSquare, Activity,
+     Settings as SettingsIcon, Plus, Palette, Accessibility as A11yIcon,
+     Sparkles, Mic, Info, History,
+   } from "lucide-svelte";
+@@ -38,7 +38,8 @@
+     // Workspace navigation
+     const navs: { id: WorkspaceId; label: string; icon: Icon; sub: string }[] = [
+       { id: "chat",     label: "Chat",     icon: MessageSquare, sub: "Ctrl+2" },
+-      { id: "settings", label: "Settings", icon: SettingsIcon,  sub: "Ctrl+3" },
++      { id: "harness",  label: "Harness",  icon: Activity,      sub: "Ctrl+3" },
++      { id: "settings", label: "Settings", icon: SettingsIcon,  sub: "Ctrl+4" },
+     ];
+     for (const n of navs) {
+       out.push({
+diff --git a/src/lib/components/workspaces/HarnessPage.svelte b/src/lib/components/workspaces/HarnessPage.svelte
+new file mode 100644
+index 00000000..17279044
+--- /dev/null
++++ b/src/lib/components/workspaces/HarnessPage.svelte
+@@ -0,0 +1,570 @@
++<script lang="ts">
++  import { onMount } from "svelte";
++  import { listen, type UnlistenFn } from "@tauri-apps/api/event";
++  import {
++    Gauge, SlidersHorizontal, BarChart3, Terminal,
++    Copy, Check, Trash2, ShieldCheck, Ban,
++  } from "lucide-svelte";
++  import { assistant } from "../../state/assistant.svelte";
++  import { effortToFlag } from "../../state/assistant/helpers";
++  import { tooltip } from "$lib/actions/tooltip";
++
++  // ── Diagnostics event shape (mirrors src-tauri/src/diagnostics/mod.rs::DiagEvent) ──
++  type DiagEvent = {
++    at: string; seq: number; stage: string; level: string;
++    resource: string | null; file: string | null; message: string;
++    fields?: unknown;
++  };
++
++  type Sec = "session" | "config" | "telemetry" | "diagnostics";
++  const SECTIONS: { id: Sec; label: string; icon: typeof Gauge; sub: string }[] = [
++    { id: "session",     label: "Session",     icon: Gauge,            sub: "Live token, cache, and cost telemetry for the conversation you're in." },
++    { id: "config",      label: "Harness",     icon: SlidersHorizontal, sub: "How Rift wires the Claude CLI — auth, model, workspace, and the tools the model can reach." },
++    { id: "telemetry",   label: "Telemetry",   icon: BarChart3,        sub: "Per-session rollup — turns, timing, and tool activity across every model used." },
++    { id: "diagnostics", label: "Diagnostics", icon: Terminal,         sub: "Live backend event stream. Quiet by default; flip filters to see everything." },
++  ];
++
++  let activeSec = $state<Sec>("session");
++  let scrollEl = $state<HTMLDivElement>();
++  let secEls = $state<Partial<Record<Sec, HTMLElement>>>({});
++
++  function onScroll() {
++    const sc = scrollEl;
++    if (!sc) return;
++    const scTop = sc.getBoundingClientRect().top;
++    let cur: Sec = SECTIONS[0].id;
++    for (const s of SECTIONS) {
++      const el = secEls[s.id];
++      if (el && el.getBoundingClientRect().top - scTop <= 140) cur = s.id;
++    }
++    activeSec = cur;
++  }
++  function jump(id: Sec) {
++    const el = secEls[id];
++    const sc = scrollEl;
++    if (!el || !sc) return;
++    const delta = el.getBoundingClientRect().top - sc.getBoundingClientRect().top;
++    sc.scrollTo({ top: sc.scrollTop + delta - 24, behavior: "smooth" });
++  }
++
++  // ── formatters ──
++  function fmtTok(n: number | null | undefined): string {
++    if (n == null) return "—";
++    if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + "M";
++    if (n >= 1_000) return (n / 1_000).toFixed(1) + "K";
++    return String(n);
++  }
++  function fmtUsd(n: number | null | undefined): string {
++    if (n == null) return "—";
++    return "$" + (n < 1 ? n.toFixed(3) : n.toFixed(2));
++  }
++  function fmtMs(n: number | null | undefined): string {
++    if (n == null) return "—";
++    return n >= 1000 ? (n / 1000).toFixed(1) + "s" : Math.round(n) + "ms";
++  }
++  function fmtTime(iso: string): string {
++    const d = new Date(iso);
++    return isNaN(d.getTime()) ? "--:--:--" : d.toTimeString().slice(0, 8);
++  }
++
++  // ── Session telemetry (reactive: re-folds when a turn settles) ──
++  const su = $derived(assistant.sessionUsage);
++  const lt = $derived(assistant.lastTurnUsage);
++  const ctxPct = $derived(assistant.ctxPct);
++  const ctxBand = $derived(ctxPct < 60 ? "ok" : ctxPct < 80 ? "warn" : "hot");
++  const cacheEff = $derived.by(() => {
++    const seen = su.totalInput + su.totalCacheRead;
++    return seen > 0 ? (su.totalCacheRead / seen) * 100 : 0;
++  });
++
++  const snap = $derived.by(() => {
++    void su.turns; // recompute when a turn lands
++    return assistant.telemetry.snapshot();
++  });
++  const sum = $derived(snap.summary);
++  const byModel = $derived(Object.entries(sum.byModel));
++  const toolRows = $derived(
++    Object.entries(sum.toolNameCounts).sort((a, b) => b[1] - a[1]),
++  );
++
++  // ── Harness config (read-only mirror of the live store) ──
++  const effortFlag = $derived(effortToFlag(assistant.thinkingEffort, assistant.model));
++  const writeOK = $derived(assistant.trustLevel !== "readonly");
++  const RIFT_TOOLS = [
++    { name: "read_file",  write: false, desc: "Read a workspace file" },
++    { name: "list_dir",   write: false, desc: "List a directory" },
++    { name: "grep",       write: false, desc: "Search file contents" },
++    { name: "git_status", write: false, desc: "Working-tree status" },
++    { name: "git_diff",   write: false, desc: "Staged / unstaged diff" },
++    { name: "git_log",    write: false, desc: "Commit history" },
++    { name: "git_pull",   write: true,  desc: "Pull from remote" },
++    { name: "git_commit", write: true,  desc: "Stage and commit" },
++    { name: "git_push",   write: true,  desc: "Push to remote" },
++  ] as const;
++
++  // ── Diagnostics live log ──
++  const LOG_CAP = 200;
++  let log = $state<DiagEvent[]>([]);
++  let levelFilter = $state<"all" | "warn" | "error">("all");
++  let textFilter = $state("");
++  let showDead = $state(false);
++  let logCopied = $state(false);
++  let logCopiedTimer: ReturnType<typeof setTimeout> | null = null;
++
++  function levelTone(l: string): string {
++    if (l === "error") return "danger";
++    if (l === "warn") return "warn";
++    if (l === "info") return "info";
++    return "subtle";
++  }
++  const shownLog = $derived(
++    log.filter((ev) => {
++      if (levelFilter === "error" && ev.level !== "error") return false;
++      if (levelFilter === "warn" && !(ev.level === "warn" || ev.level === "error")) return false;
++      if (!showDead && ev.stage !== "log" && ev.stage !== "system") return false;
++      if (textFilter) {
++        const q = textFilter.toLowerCase();
++        if (!`${ev.message} ${ev.stage} ${ev.resource ?? ""}`.toLowerCase().includes(q)) return false;
++      }
++      return true;
++    }),
++  );
++
++  async function copyLog() {
++    try {
++      await navigator.clipboard.writeText(JSON.stringify(shownLog, null, 2));
++      logCopied = true;
++      if (logCopiedTimer) clearTimeout(logCopiedTimer);
++      logCopiedTimer = setTimeout(() => { logCopied = false; logCopiedTimer = null; }, 1400);
++    } catch (e) { console.error("copy log failed", e); }
++  }
++
++  onMount(() => {
++    let alive = true;
++    let un: UnlistenFn | null = null;
++    void listen<DiagEvent>("diag://event", (e) => {
++      log = [...log, e.payload].slice(-LOG_CAP);
++    }).then((u) => { if (alive) un = u; else u(); })
++      .catch((err) => console.warn("diag listen failed", err));
++    void assistant.refreshAuth().catch(() => {}); // freshen the auth pill on open
++    return () => {
++      alive = false;
++      un?.();
++      if (logCopiedTimer) { clearTimeout(logCopiedTimer); logCopiedTimer = null; }
++    };
++  });
++</script>
++
++<div class="hz-main">
++  <div class="hz-inner">
++    <!-- ── Sticky section index ── -->
++    <nav class="hz-index">
++      <div class="hz-index-head">
++        <div class="hz-index-title">Harness</div>
++        <div class="hz-index-sub">Claude Code · <span class="mono">local</span></div>
++      </div>
++      <div class="hz-index-list">
++        {#each SECTIONS as s (s.id)}
++          {@const Icon = s.icon}
++          <button class="hz-index-row" class:on={activeSec === s.id} onclick={() => jump(s.id)} type="button">
++            <span class="hz-index-ic"><Icon size={16} strokeWidth={1.75} /></span>
++            <span class="lbl">{s.label}</span>
++            {#if s.id === "diagnostics" && shownLog.length > 0}<span class="hz-index-count mono">{shownLog.length}</span>{/if}
++          </button>
++        {/each}
++      </div>
++      <div class="hz-index-foot">
++        Read-only view. Numbers are measured from this Rift session — nothing here is editable.
++      </div>
++    </nav>
++
++    <!-- ── Scroll document ── -->
++    <div class="hz-scroll" bind:this={scrollEl} onscroll={onScroll}>
++      <div class="hz-doc">
++
++        <!-- ════ SESSION ════ -->
++        <section class="hz-sec" bind:this={secEls.session}>
++          <div class="hz-sec-head">
++            <div class="hz-sec-ic"><Gauge size={19} strokeWidth={1.75} /></div>
++            <div><div class="hz-sec-tt">Session</div><div class="hz-sec-sub">{SECTIONS[0].sub}</div></div>
++          </div>
++
++          <div class="hz-block">
++            <div class="hz-block-label">Context window</div>
++            <div class="hz-card hz-pad">
++              {#if lt}
++                <div class="hz-meter">
++                  <div class="hz-meter-track"><div class="hz-meter-fill" data-band={ctxBand} style="width:{Math.max(1.5, ctxPct)}%"></div></div>
++                  <div class="hz-meter-labels">
++                    <span><span class="mono hz-strong">{fmtTok(assistant.ctxTokens)}</span> of {fmtTok(assistant.ctxWindow)} tokens</span>
++                    <span class="mono" data-band={ctxBand}>{ctxPct.toFixed(1)}%</span>
++                  </div>
++                </div>
++                <div class="hz-hint">Estimated from the last turn's usage against this model's window. Lower is roomier — caching keeps cost flat as it fills.</div>
++              {:else}
++                <div class="hz-empty">No turns yet — the context bar fills after your first message.</div>
++              {/if}
++            </div>
++          </div>
++
++          <div class="hz-block">
++            <div class="hz-block-label">Tokens this session</div>
++            <div class="hz-card">
++              {#each [
++                { k: "Input",       v: su.totalInput,       d: lt?.input },
++                { k: "Output",      v: su.totalOutput,      d: lt?.output },
++                { k: "Cache read",  v: su.totalCacheRead,   d: lt?.cacheRead },
++                { k: "Cache write", v: su.totalCacheCreate, d: lt?.cacheCreate },
++              ] as r (r.k)}
++                <div class="hz-kv">
++                  <span class="hz-kv-k">{r.k}</span>
++                  <span class="hz-kv-v mono hz-strong">{fmtTok(r.v)}</span>
++                  {#if r.d != null && r.d > 0}<span class="hz-kv-delta mono">+{fmtTok(r.d)} last turn</span>{/if}
++                </div>
++              {/each}
++              <div class="hz-kv">
++                <span class="hz-kv-k">Cache hit</span>
++                <span class="hz-kv-v mono hz-strong" data-band={cacheEff >= 70 ? "ok" : cacheEff >= 40 ? "warn" : "hot"}>{cacheEff.toFixed(1)}%</span>
++                <span class="hz-kv-delta">of read+input tokens served from cache</span>
++              </div>
++            </div>
++          </div>
++
++          <div class="hz-block">
++            <div class="hz-block-label">Cost &amp; turns</div>
++            <div class="hz-card">
++              <div class="hz-stat-grid">
++                <div class="hz-stat"><div class="hz-stat-v mono">{fmtUsd(assistant.totalCostUsd)}</div><div class="hz-stat-k">Session cost</div></div>
++                <div class="hz-stat"><div class="hz-stat-v mono">{su.turns}</div><div class="hz-stat-k">Turns</div></div>
++                <div class="hz-stat"><div class="hz-stat-v mono">{assistant.lastModelId ?? assistant.model}</div><div class="hz-stat-k">Last model</div></div>
++                <div class="hz-stat"><div class="hz-stat-v mono">{assistant.streaming ? "Streaming" : "Idle"}</div><div class="hz-stat-k">State</div></div>
++              </div>
++            </div>
++          </div>
++        </section>
++
++        <!-- ════ HARNESS / CONFIG ════ -->
++        <section class="hz-sec" bind:this={secEls.config}>
++          <div class="hz-sec-head">
++            <div class="hz-sec-ic"><SlidersHorizontal size={19} strokeWidth={1.75} /></div>
++            <div><div class="hz-sec-tt">Harness</div><div class="hz-sec-sub">{SECTIONS[1].sub}</div></div>
++          </div>
++
++          <div class="hz-block">
++            <div class="hz-block-label">Claude session</div>
++            <div class="hz-card">
++              <div class="hz-kv hz-kv-wide">
++                <span class="hz-kv-k">Status</span>
++                <span class="hz-kv-v">
++                  {#if assistant.auth}
++                    <span class="hz-pill" class:ok={assistant.auth.pill === "green"} class:warn={assistant.auth.pill === "yellow" || assistant.auth.pill === "red"}><span class="dot"></span>{assistant.auth.summary}</span>
++                  {:else}
++                    <span class="hz-pill"><span class="dot"></span>{assistant.authChecking ? "Checking…" : "Unknown"}</span>
++                  {/if}
++                </span>
++              </div>
++              {#each [
++                { k: "Email",        v: assistant.auth?.email },
++                { k: "Plan",         v: assistant.auth?.subscriptionType },
++                { k: "Provider",     v: assistant.auth?.apiProvider },
++                { k: "Auth method",  v: assistant.auth?.authMethod },
++                { k: "Install",      v: assistant.auth?.installMethod },
++                { k: "CLI version",  v: assistant.auth?.cliVersion },
++              ] as r (r.k)}
++                {#if r.v}
++                  <div class="hz-kv"><span class="hz-kv-k">{r.k}</span><span class="hz-kv-v mono">{r.v}</span></div>
++                {/if}
++              {/each}
++            </div>
++          </div>
++
++          <div class="hz-block">
++            <div class="hz-block-label">Model &amp; workspace</div>
++            <div class="hz-card">
++              <div class="hz-kv"><span class="hz-kv-k">Model</span><span class="hz-kv-v mono hz-strong">{assistant.model}</span></div>
++              <div class="hz-kv"><span class="hz-kv-k">Effort</span><span class="hz-kv-v mono">{effortFlag ?? assistant.thinkingEffort}</span></div>
++              <div class="hz-kv"><span class="hz-kv-k">Root</span><span class="hz-kv-v mono">{assistant.workspace.current ?? "—"}</span></div>
++              <div class="hz-kv"><span class="hz-kv-k">Branch</span><span class="hz-kv-v mono">{assistant.workspaceBranch ?? "—"}</span></div>
++              <div class="hz-kv"><span class="hz-kv-k">Full config</span><span class="hz-kv-v mono">{assistant.useFullConfig && !assistant.hasApiKey ? "on" : "off (sandboxed)"}</span></div>
++              <div class="hz-kv"><span class="hz-kv-k">Budget cap</span><span class="hz-kv-v mono">{assistant.maxBudgetUsd != null ? fmtUsd(assistant.maxBudgetUsd) + " / turn" : "none"}</span></div>
++              <div class="hz-kv"><span class="hz-kv-k">Auto-compact</span><span class="hz-kv-v mono">{assistant.autoCompactThreshold != null ? fmtTok(assistant.autoCompactThreshold) + " tok · " + assistant.compactModel : "manual"}</span></div>
++            </div>
++          </div>
++
++          <div class="hz-block">
++            <div class="hz-block-label">Tools granted to the model</div>
++            <div class="hz-card">
++              {#each RIFT_TOOLS as t (t.name)}
++                {@const granted = !t.write || writeOK}
++                <div class="hz-tool" data-off={!granted}>
++                  <span class="hz-tool-ic">{#if granted}<ShieldCheck size={15} />{:else}<Ban size={15} />{/if}</span>
++                  <span class="hz-tool-name mono">{t.name}</span>
++                  <span class="hz-tool-desc">{t.desc}</span>
++                  <span class="hz-tool-tag" class:write={t.write}>{t.write ? "write" : "read"}</span>
++                </div>
++              {/each}
++              <div class="hz-note">
++                Trust level is <span class="mono">{assistant.trustLevel}</span>. {writeOK ? "Write git tools are enabled." : "Write git tools are blocked — set Standard in Settings to enable commit/pull/push."}
++              </div>
++            </div>
++          </div>
++
++          {#if assistant.useFullConfig && !assistant.hasApiKey}
++            <div class="hz-block">
++              <div class="hz-block-label">Resolved by the Claude CLI</div>
++              <div class="hz-card hz-pad">
++                <div class="hz-hint">
++                  With full config on, the CLI also layers your <span class="mono">~/.claude/CLAUDE.md</span>, rules, slash commands, skills, hooks, and any of your own MCP servers into each turn. Those are resolved inside the CLI process — Rift can't enumerate them here, so they're intentionally not faked.
++                </div>
++              </div>
++            </div>
++          {/if}
++        </section>
++
++        <!-- ════ TELEMETRY ════ -->
++        <section class="hz-sec" bind:this={secEls.telemetry}>
++          <div class="hz-sec-head">
++            <div class="hz-sec-ic"><BarChart3 size={19} strokeWidth={1.75} /></div>
++            <div><div class="hz-sec-tt">Telemetry</div><div class="hz-sec-sub">{SECTIONS[2].sub}</div></div>
++          </div>
++
++          {#if sum.totalTurns === 0}
++            <div class="hz-card hz-pad"><div class="hz-empty">No turns recorded yet — start a chat to populate the rollup.</div></div>
++          {:else}
++            <div class="hz-block">
++              <div class="hz-block-label">Session rollup</div>
++              <div class="hz-card">
++                <div class="hz-stat-grid hz-stat-grid-3">
++                  <div class="hz-stat"><div class="hz-stat-v mono">{sum.totalTurns}</div><div class="hz-stat-k">Turns</div></div>
++                  <div class="hz-stat"><div class="hz-stat-v mono">{fmtUsd(sum.totalCostUsd)}</div><div class="hz-stat-k">Total cost</div></div>
++                  <div class="hz-stat"><div class="hz-stat-v mono">{fmtMs(sum.avgTtfpMs)}</div><div class="hz-stat-k">Avg first paint</div></div>
++                  <div class="hz-stat"><div class="hz-stat-v mono">{fmtMs(sum.avgDoneMs)}</div><div class="hz-stat-k">Avg turn</div></div>
++                  <div class="hz-stat"><div class="hz-stat-v mono">{sum.outputTokensPerSec ?? "—"}{#if sum.outputTokensPerSec}<span class="hz-stat-unit"> t/s</span>{/if}</div><div class="hz-stat-k">Output speed</div></div>
++                  <div class="hz-stat"><div class="hz-stat-v mono">{fmtTok(sum.coldStartCacheCreate)}</div><div class="hz-stat-k">Cold-start cache</div></div>
++                  <div class="hz-stat"><div class="hz-stat-v mono">{sum.toolCallTotal}</div><div class="hz-stat-k">Tool calls</div></div>
++                  <div class="hz-stat"><div class="hz-stat-v mono" data-band={sum.toolErrorTotal > 0 ? "hot" : undefined}>{sum.toolErrorTotal}</div><div class="hz-stat-k">Tool errors</div></div>
++                  <div class="hz-stat"><div class="hz-stat-v mono" data-band={sum.staleCacheTurns > 0 ? "warn" : undefined}>{sum.staleCacheTurns}</div><div class="hz-stat-k">Stale-cache turns</div></div>
++                </div>
++              </div>
++            </div>
++
++            <div class="hz-block">
++              <div class="hz-block-label">By model</div>
++              <div class="hz-card hz-tbl-wrap">
++                <table class="hz-tbl">
++                  <thead><tr><th>Model</th><th>Turns</th><th>Cost</th><th>Avg paint</th><th>Cache read</th></tr></thead>
++                  <tbody>
++                    {#each byModel as [name, m] (name)}
++                      <tr>
++                        <td class="mono">{name}</td>
++                        <td class="mono">{m.turns}</td>
++                        <td class="mono">{fmtUsd(m.costUsd)}</td>
++                        <td class="mono">{fmtMs(m.avgTtfpMs)}</td>
++                        <td class="mono">{fmtTok(m.cacheReadTokens)}</td>
++                      </tr>
++                    {/each}
++                  </tbody>
++                </table>
++              </div>
++            </div>
++
++            {#if toolRows.length > 0}
++              <div class="hz-block">
++                <div class="hz-block-label">Tool activity</div>
++                <div class="hz-card">
++                  {#if sum.slowestTool}
++                    <div class="hz-kv"><span class="hz-kv-k">Slowest</span><span class="hz-kv-v mono">{sum.slowestTool.name}</span><span class="hz-kv-delta mono">{fmtMs(sum.slowestTool.durationMs)}</span></div>
++                  {/if}
++                  {#each toolRows as [name, count] (name)}
++                    <div class="hz-tool">
++                      <span class="hz-tool-name mono">{name}</span>
++                      <span class="hz-toolbar"><span class="hz-toolbar-fill" style="width:{(count / toolRows[0][1]) * 100}%"></span></span>
++                      <span class="hz-tool-tag mono">{count}</span>
++                    </div>
++                  {/each}
++                </div>
++              </div>
++            {/if}
++          {/if}
++        </section>
++
++        <!-- ════ DIAGNOSTICS ════ -->
++        <section class="hz-sec" bind:this={secEls.diagnostics}>
++          <div class="hz-sec-head">
++            <div class="hz-sec-ic"><Terminal size={19} strokeWidth={1.75} /></div>
++            <div><div class="hz-sec-tt">Diagnostics</div><div class="hz-sec-sub">{SECTIONS[3].sub}</div></div>
++          </div>
++
++          <div class="hz-block">
++            <div class="hz-logbar">
++              <div class="hz-seg">
++                {#each [{ id: "all", l: "All" }, { id: "warn", l: "Warn+" }, { id: "error", l: "Errors" }] as o (o.id)}
++                  <button class="hz-seg-btn" class:on={levelFilter === o.id} type="button" onclick={() => (levelFilter = o.id as typeof levelFilter)}>{o.l}</button>
++                {/each}
++              </div>
++              <input class="hz-input mono" type="text" placeholder="Filter messages…" bind:value={textFilter} spellcheck="false" />
++              <label class="hz-check"><input type="checkbox" bind:checked={showDead} /> legacy stages</label>
++              <div class="hz-logbar-sp"></div>
++              <button class="hz-btn" type="button" onclick={copyLog} use:tooltip={"Copy filtered events as JSON"}>{#if logCopied}<Check size={14} />{:else}<Copy size={14} />{/if} Copy</button>
++              <button class="hz-btn" type="button" onclick={() => (log = [])} use:tooltip={"Clear the local buffer"}><Trash2 size={14} /> Clear</button>
++            </div>
++            <div class="hz-card hz-log">
++              {#if shownLog.length === 0}
++                <div class="hz-empty">No events yet. Backend log lines stream in as the assistant runs.</div>
++              {:else}
++                {#each shownLog as ev (ev.seq)}
++                  <div class="hz-log-row">
++                    <span class="hz-log-t mono">{fmtTime(ev.at)}</span>
++                    <span class="hz-log-lvl mono" data-tone={levelTone(ev.level)}>{ev.level}</span>
++                    <span class="hz-log-stage mono">{ev.stage}</span>
++                    <span class="hz-log-msg">{ev.message}</span>
++                  </div>
++                {/each}
++              {/if}
++            </div>
++            <div class="hz-hint">Showing the last {LOG_CAP} backend events, rate-limited at the source. Legacy sync/SFTP stages are hidden until toggled — they no longer fire in the pure-assistant build.</div>
++          </div>
++        </section>
++
++      </div>
++    </div>
++  </div>
++</div>
++
++<style>
++  .hz-main { position: relative; overflow: hidden; display: flex; flex: 1; min-height: 0; min-width: 0; background: var(--bg); color: var(--fg); }
++  .hz-inner { flex: 1; min-width: 0; min-height: 0; display: flex; }
++
++  /* ── Sticky section index ── */
++  .hz-index { width: 232px; flex: none; min-height: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; background: var(--bg); padding: 20px 14px 14px; }
++  .hz-index-head { padding: 0 8px 16px; }
++  .hz-index-title { font-size: 19px; font-weight: 700; letter-spacing: -0.02em; }
++  .hz-index-sub { font-size: var(--fs-xs); color: var(--fg-subtle); margin-top: 3px; display: flex; align-items: center; gap: 6px; }
++  .hz-index-sub .mono { font-family: var(--font-mono); color: var(--fg-muted); }
++  .hz-index-list { display: flex; flex-direction: column; gap: 1px; }
++  .hz-index-row { display: flex; align-items: center; gap: 11px; position: relative; height: 36px; padding: 0 11px; border: 0; border-radius: var(--radius); background: none; color: var(--fg-muted); font: inherit; font-size: var(--fs-md); font-weight: 550; cursor: pointer; text-align: left; width: 100%; transition: background 120ms var(--ease-soft), color 120ms var(--ease-soft); }
++  .hz-index-row:hover { background: var(--surface); color: var(--fg-2); }
++  .hz-index-row.on { background: var(--accent-soft); color: var(--fg); font-weight: 600; }
++  .hz-index-row.on::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 2px; background: var(--accent); box-shadow: 0 0 8px color-mix(in oklab, var(--accent) 45%, transparent); }
++  .hz-index-row.on .hz-index-ic :global(svg) { color: var(--accent); }
++  .hz-index-ic { color: var(--fg-subtle); display: inline-flex; flex: none; }
++  .hz-index-ic :global(svg) { transition: color 120ms; }
++  .hz-index-row .lbl { flex: 1; }
++  .hz-index-count { font-size: 10px; color: var(--fg-subtle); background: var(--bg-elev-2); border: 1px solid var(--border); padding: 0 6px; height: 17px; line-height: 15px; border-radius: 999px; }
++  .hz-index-foot { margin-top: auto; padding: 14px 8px 0; font-size: 10.5px; line-height: 1.5; color: var(--fg-faint); border-top: 1px solid var(--border); }
++
++  /* ── Scroll document ── */
++  .hz-scroll { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; scroll-behavior: smooth; }
++  .hz-doc { max-width: 760px; margin: 0; padding: 32px 56px 96px; display: flex; flex-direction: column; gap: 40px; }
++  .hz-sec { display: flex; flex-direction: column; gap: 16px; scroll-margin-top: 24px; }
++  .hz-sec-head { display: flex; align-items: center; gap: 13px; }
++  .hz-sec-ic { width: 36px; height: 36px; border-radius: 10px; flex: none; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px var(--ghost-border); }
++  .hz-sec-ic :global(svg) { color: var(--accent); }
++  .hz-sec-tt { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
++  .hz-sec-sub { font-size: var(--fs-sm); color: var(--fg-muted); margin-top: 3px; line-height: 1.45; }
++
++  .hz-block { display: flex; flex-direction: column; gap: 9px; }
++  .hz-block-label { font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--fg-subtle); padding: 0 2px; }
++  .hz-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); }
++  .hz-pad { padding: 16px 17px; }
++  .hz-strong { color: var(--fg); }
++  .hz-hint { font-size: var(--fs-xs); color: var(--fg-muted); line-height: 1.55; }
++  .hz-hint .mono, .hz-note .mono { font-family: var(--font-mono); color: var(--code-fg); background: var(--code-bg); border: 1px solid var(--code-border); padding: 1px 5px; border-radius: 4px; font-size: 0.92em; }
++  .hz-empty { font-size: var(--fs-sm); color: var(--fg-subtle); padding: 6px 0; }
++  .hz-note { padding: 11px 17px; font-size: var(--fs-xs); color: var(--fg-muted); border-top: 1px solid var(--border); line-height: 1.5; }
++
++  /* ── Context meter ── */
++  .hz-meter { display: flex; flex-direction: column; gap: 9px; }
++  .hz-meter-track { height: 9px; border-radius: 999px; background: var(--bg-inset); border: 1px solid var(--border); overflow: hidden; }
++  .hz-meter-fill { height: 100%; border-radius: 999px; transition: width 320ms var(--ease-page); background: var(--accent); }
++  .hz-meter-fill[data-band="warn"] { background: var(--warn); }
++  .hz-meter-fill[data-band="hot"] { background: var(--danger); }
++  .hz-meter-labels { display: flex; justify-content: space-between; align-items: baseline; font-size: var(--fs-xs); color: var(--fg-muted); }
++  .hz-meter-labels [data-band="warn"] { color: var(--warn); }
++  .hz-meter-labels [data-band="hot"] { color: var(--danger); }
++
++  /* ── Key-value rows ── */
++  .hz-kv { display: flex; align-items: center; gap: 14px; padding: 11px 17px; }
++  .hz-kv + .hz-kv { border-top: 1px solid var(--border); }
++  .hz-kv-k { font-size: var(--fs-md); font-weight: 600; color: var(--fg); flex: none; width: 116px; }
++  .hz-kv-v { font-size: var(--fs-sm); color: var(--fg-2); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++  .hz-kv-v.mono { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--fg-muted); }
++  .hz-kv-v.mono.hz-strong { color: var(--fg); }
++  .hz-kv-v[data-band="ok"] { color: var(--ok); }
++  .hz-kv-v[data-band="warn"] { color: var(--warn); }
++  .hz-kv-v[data-band="hot"] { color: var(--danger); }
++  .hz-kv-delta { font-size: 10.5px; color: var(--fg-faint); flex: none; white-space: nowrap; }
++  .hz-kv-wide .hz-kv-v { flex: 0 1 auto; }
++
++  /* ── Stat tiles ── */
++  .hz-stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); }
++  .hz-stat-grid-3 { grid-template-columns: repeat(3, 1fr); }
++  .hz-stat { padding: 14px 17px; border-top: 1px solid var(--border); border-left: 1px solid var(--border); }
++  .hz-stat-grid > .hz-stat:nth-child(-n+2) { border-top: 0; }
++  .hz-stat-grid-3 > .hz-stat:nth-child(-n+3) { border-top: 0; }
++  .hz-stat-grid > .hz-stat:nth-child(2n+1) { border-left: 0; }
++  .hz-stat-grid-3 > .hz-stat:nth-child(3n+1) { border-left: 0; }
++  .hz-stat-v { font-size: 17px; font-weight: 650; color: var(--fg); letter-spacing: -0.01em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++  .hz-stat-v[data-band="warn"] { color: var(--warn); }
++  .hz-stat-v[data-band="hot"] { color: var(--danger); }
++  .hz-stat-unit { font-size: 11px; color: var(--fg-subtle); font-weight: 500; }
++  .hz-stat-k { font-size: var(--fs-xs); color: var(--fg-muted); margin-top: 3px; }
++
++  /* ── Status pill (mirrors Settings) ── */
++  .hz-pill { display: inline-flex; align-items: center; gap: 7px; height: 24px; padding: 0 10px; border-radius: 999px; font-size: var(--fs-xs); font-weight: 650; border: 1px solid var(--border); background: var(--surface); color: var(--fg-muted); }
++  .hz-pill .dot { width: 7px; height: 7px; border-radius: 999px; background: var(--fg-faint); }
++  .hz-pill.ok { background: var(--ok-soft); border-color: color-mix(in oklch, var(--ok) 28%, transparent); color: var(--ok); }
++  .hz-pill.ok .dot { background: var(--ok); }
++  .hz-pill.warn { background: var(--warn-soft); border-color: color-mix(in oklab, var(--warn) 28%, transparent); color: var(--warn); }
++  .hz-pill.warn .dot { background: var(--warn); }
++
++  /* ── Tool rows ── */
++  .hz-tool { display: flex; align-items: center; gap: 11px; padding: 11px 17px; }
++  .hz-tool + .hz-tool { border-top: 1px solid var(--border); }
++  .hz-tool[data-off="true"] { opacity: 0.5; }
++  .hz-tool-ic { display: inline-flex; flex: none; color: var(--ok); }
++  .hz-tool[data-off="true"] .hz-tool-ic { color: var(--fg-faint); }
++  .hz-tool-name { font-size: var(--fs-sm); color: var(--fg); flex: none; min-width: 96px; }
++  .hz-tool-desc { font-size: var(--fs-xs); color: var(--fg-muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++  .hz-tool-tag { font-size: 10px; font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-subtle); background: var(--bg-elev-2); border: 1px solid var(--border); padding: 1px 7px; border-radius: 999px; flex: none; }
++  .hz-tool-tag.write { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 30%, var(--border)); background: var(--warn-soft); }
++  .hz-toolbar { flex: 1; height: 6px; border-radius: 999px; background: var(--bg-inset); overflow: hidden; }
++  .hz-toolbar-fill { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
++
++  /* ── Table ── */
++  .hz-tbl-wrap { overflow-x: auto; }
++  .hz-tbl { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
++  .hz-tbl th { text-align: left; font-size: var(--fs-xs); font-weight: 650; color: var(--fg-subtle); text-transform: uppercase; letter-spacing: 0.04em; padding: 11px 14px; border-bottom: 1px solid var(--border); }
++  .hz-tbl th:not(:first-child), .hz-tbl td:not(:first-child) { text-align: right; }
++  .hz-tbl td { padding: 10px 14px; color: var(--fg-2); border-bottom: 1px solid var(--border); font-size: var(--fs-xs); }
++  .hz-tbl tbody tr:last-child td { border-bottom: 0; }
++  .hz-tbl td.mono, .hz-tbl th { font-family: var(--font-mono); }
++  .hz-tbl td:first-child { color: var(--fg); }
++
++  /* ── Diagnostics log ── */
++  .hz-logbar { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
++  .hz-logbar-sp { flex: 1; }
++  .hz-seg { display: inline-flex; background: var(--track); border: 1px solid var(--border); border-radius: var(--radius); padding: 3px; gap: 2px; }
++  .hz-seg-btn { height: 26px; padding: 0 12px; border: 0; border-radius: 6px; background: none; color: var(--fg-muted); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer; white-space: nowrap; transition: color 120ms, background 120ms; }
++  .hz-seg-btn:hover { color: var(--fg); }
++  .hz-seg-btn.on { background: var(--surface-hover); color: var(--fg); box-shadow: var(--shadow-sm); }
++  .hz-input { height: 30px; padding: 0 11px; border-radius: var(--radius); background: var(--field); border: 1px solid var(--field-border); color: var(--fg); font: inherit; font-size: var(--fs-xs); min-width: 150px; flex: 0 1 200px; }
++  .hz-input:focus { outline: 0; border-color: var(--border-focus); box-shadow: 0 0 0 3px var(--ring); }
++  .hz-check { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-xs); color: var(--fg-muted); cursor: pointer; white-space: nowrap; }
++  .hz-check input { accent-color: var(--accent); }
++  .hz-btn { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: var(--radius); font: inherit; font-size: var(--fs-xs); font-weight: 600; cursor: pointer; border: 1px solid var(--border); background: var(--surface); color: var(--fg-2); transition: background 120ms, border-color 120ms, color 120ms; }
++  .hz-btn:hover { background: var(--surface-hover); border-color: var(--border-strong); color: var(--fg); }
++
++  .hz-log { max-height: 380px; overflow-y: auto; padding: 6px 0; font-family: var(--font-mono); }
++  .hz-log .hz-empty { padding: 14px 17px; }
++  .hz-log-row { display: flex; align-items: baseline; gap: 10px; padding: 4px 17px; font-size: 11.5px; line-height: 1.5; }
++  .hz-log-row:hover { background: var(--surface-hover); }
++  .hz-log-t { color: var(--fg-faint); flex: none; }
++  .hz-log-lvl { flex: none; width: 42px; text-transform: uppercase; font-size: 9.5px; font-weight: 700; letter-spacing: 0.03em; }
++  .hz-log-lvl[data-tone="danger"] { color: var(--danger); }
++  .hz-log-lvl[data-tone="warn"] { color: var(--warn); }
++  .hz-log-lvl[data-tone="info"] { color: var(--info); }
++  .hz-log-lvl[data-tone="subtle"] { color: var(--fg-subtle); }
++  .hz-log-stage { flex: none; color: var(--fg-subtle); }
++  .hz-log-msg { flex: 1; min-width: 0; color: var(--fg-2); word-break: break-word; white-space: pre-wrap; }
++</style>
+diff --git a/src/lib/components/workspaces/index.ts b/src/lib/components/workspaces/index.ts
+index e97a4184..c6d0ed54 100644
+--- a/src/lib/components/workspaces/index.ts
++++ b/src/lib/components/workspaces/index.ts
+@@ -6,6 +6,7 @@ import {
+ } from "lucide-svelte";
+ import HomePage from "../home/HomePage.svelte";
+ import AssistantPage from "../assistant/AssistantPage.svelte";
++import HarnessPage from "./HarnessPage.svelte";
+ import SettingsPage from "../settings/SettingsPage.svelte";
+ 
+ // lucide-svelte 1.x ships icons typed as legacy components; `typeof Activity`
+@@ -32,5 +33,6 @@ export type WorkspaceDef = {
+ export const WORKSPACES: Record<WorkspaceId, WorkspaceDef> = {
+   home:        { component: HomePage,          title: "Home",        icon: HomeIcon,      kbd: "1" },
+   chat:        { component: AssistantPage,     title: "Chat",        icon: MessageSquare, kbd: "2" },
+-  settings:    { component: SettingsPage,      title: "Settings",    icon: SettingsIcon,  kbd: "3" },
++  harness:     { component: HarnessPage,       title: "Harness",     icon: Activity,      kbd: "3" },
++  settings:    { component: SettingsPage,      title: "Settings",    icon: SettingsIcon,  kbd: "4" },
+ };
+diff --git a/src/lib/state/workspace.svelte.ts b/src/lib/state/workspace.svelte.ts
+index f8c6f744..a28cb87f 100644
+--- a/src/lib/state/workspace.svelte.ts
++++ b/src/lib/state/workspace.svelte.ts
+@@ -4,11 +4,11 @@
+ 
+ export type WorkspaceId =
+   | "home" | "chat"
+-  | "settings";
++  | "harness" | "settings";
+ 
+ export const WORKSPACE_IDS: readonly WorkspaceId[] = [
+   "home", "chat",
+-  "settings",
++  "harness", "settings",
+ ] as const;
+ 
+ const ACTIVE_KEY = "rift.ui.workspace.v1";
+@@ -86,7 +86,19 @@ class WorkspaceState {
+           const seen = new Set(valid);
+           // Backfill any ids missing from stored order — covers new workspace
+           // additions in later releases for users w/ persisted older order.
+-          for (const id of DEFAULT_ORDER) if (!seen.has(id)) valid.push(id);
++          // Insert at the new id's DEFAULT_ORDER-relative slot (not the end) so
++          // a mid-list addition like "harness" lands before "settings", keeping
++          // positional Ctrl+N switching aligned with the kbd hints.
++          for (const id of DEFAULT_ORDER) {
++            if (seen.has(id)) continue;
++            const di = DEFAULT_ORDER.indexOf(id);
++            let at = valid.length;
++            for (let i = 0; i < valid.length; i++) {
++              if (DEFAULT_ORDER.indexOf(valid[i]) > di) { at = i; break; }
++            }
++            valid.splice(at, 0, id);
++            seen.add(id);
++          }
+           this.order = valid;
+         }
+       }

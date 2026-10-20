@@ -1,0 +1,1206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Rift — Launch</title>
+<style>
+  /* ─── Rift's REAL design tokens — resolved OKLCH straight from the running
+         app (src/app.css). Chrome renders oklch() natively, so these are the
+         exact same colors the app paints, not hex approximations. ─────────── */
+  :root{
+    --bg:            oklch(0.142 0.003 250);
+    --bg-inset:      oklch(0.178 0.004 250);
+    --bg-elev-1:     oklch(0.215 0.004 250);   /* cards */
+    --bg-elev-2:     oklch(0.262 0.005 250);
+    --bg-elev-3:     oklch(0.300 0.006 255);
+    --surface:       oklch(0.215 0.004 250);
+    --surface-hover: oklch(0.262 0.005 250);
+    --surface-active:oklch(0.300 0.006 255);
+    --border:        oklch(0.300 0.006 255);
+    --border-strong: oklch(0.365 0.007 255);
+    --fg:            oklch(0.925 0.004 250);
+    --fg-2:          oklch(0.825 0.008 255);
+    --fg-muted:      oklch(0.700 0.013 258);
+    --fg-subtle:     oklch(0.545 0.016 262);
+    --fg-faint:      oklch(0.430 0.010 260);
+
+    --accent-h:      163;
+    --accent-c:      0.15;
+    --accent-a:      0.12;
+    --accent:        oklch(0.78 0.15 var(--accent-h));
+    --accent-soft:   oklch(0.78 0.15 var(--accent-h) / 0.12);
+    --accent-fg:     oklch(0.25 0.05 var(--accent-h));
+    --ok:            oklch(0.73 0.18 150);
+    --ok-soft:       oklch(0.73 0.18 150 / 0.14);
+    --status-busy:   #22c55e;
+    --warn:          oklch(0.78 0.16 70);
+
+    --code-bg:       color-mix(in oklch, var(--fg) 8%, transparent);
+    --code-border:   color-mix(in oklch, var(--fg) 13%, transparent);
+
+    --font-ui:  "Inter Variable","Inter","Segoe UI",system-ui,-apple-system,sans-serif;
+    --font-mono:"JetBrains Mono Variable","JetBrains Mono","Cascadia Code","SFMono-Regular",Consolas,monospace;
+    --titlebar-h: 34px;
+    --ease-page: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:100%;height:100%;background:#000;overflow:hidden}
+  body{
+    font-family:var(--font-ui);
+    font-feature-settings:"cv02","cv03","cv04","cv11","ss01";
+    font-variant-ligatures:none;
+    letter-spacing:-0.005em;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+    color:var(--fg);
+  }
+
+  /* ─── Stage: fixed 1920x1080, scaled to fit viewport ─────────────────── */
+  #stage{
+    position:absolute; top:50%; left:50%;
+    width:1920px; height:1080px;
+    transform:translate(-50%,-50%);
+    background:
+      radial-gradient(140% 100% at 50% 38%, oklch(0.19 0.02 var(--accent-h)) 0%, oklch(0.145 0.006 250) 44%, oklch(0.11 0.004 250) 100%);
+    overflow:hidden;
+  }
+  /* emerald atmosphere bloom behind the window */
+  #bloom{
+    position:absolute; left:50%; top:47%;
+    width:1600px; height:940px; transform:translate(-50%,-50%) scale(.6);
+    background:radial-gradient(closest-side, oklch(0.78 0.15 var(--accent-h) / 0.20), oklch(0.78 0.15 var(--accent-h) / 0.05) 42%, transparent 72%);
+    filter:blur(24px);
+    opacity:0;
+  }
+  #vignette{
+    position:absolute; inset:0;
+    background:radial-gradient(135% 105% at 50% 50%, transparent 52%, oklch(0 0 0 / 0.58) 100%);
+    pointer-events:none;
+  }
+
+  /* ─── Intro glyph — the REAL Rift logo PNG (dark squircle) ────────────── */
+  #mark{
+    position:absolute; left:50%; top:50%;
+    transform:translate(-50%,-50%) scale(.7);
+    opacity:0; text-align:center;
+  }
+  #mark img{width:172px;height:172px;display:block;margin:0 auto;
+    border-radius:38px;
+    filter:drop-shadow(0 0 34px oklch(0.78 0.15 var(--accent-h) / 0.55));}
+  #mark .wordmark{
+    margin-top:26px;font-size:40px;font-weight:680;letter-spacing:-0.02em;color:var(--fg);
+    opacity:0;
+  }
+
+  /* ─── App window (the hero object) — real 1600×973 shell proportions ──── */
+  #app{
+    position:absolute; left:50%; top:50%;
+    width:1580px; height:940px;
+    transform:translate(-50%,-50%) scale(.93);
+    opacity:0;
+    background:
+      radial-gradient(1200px 700px at 50% -10%, oklch(0.205 0.004 250) 0%, transparent 60%),
+      var(--bg);
+    border:1px solid var(--border-strong);
+    border-radius:14px;
+    box-shadow:
+      0 44px 130px -22px oklch(0 0 0 / 0.82),
+      0 0 0 1px oklch(0.78 0.15 var(--accent-h) / 0.05),
+      0 0 70px -12px oklch(0.78 0.15 var(--accent-h) / 0.09);
+    overflow:hidden;
+    display:grid;
+    grid-template-columns:270px 1fr;
+    grid-template-rows:40px 1fr 27px;
+  }
+  #app::before{
+    content:""; position:absolute; inset:0; border-radius:14px; pointer-events:none; z-index:20;
+    box-shadow:inset 0 1px 0 oklch(1 0 0 / 0.04), inset 0 0 44px -22px oklch(0.78 0.15 var(--accent-h) / 0.22);
+  }
+
+  /* ── SIDEBAR (real gradient + brand + accent New-chat + segment + list) ──
+     grid-row 1/3 (NOT 1/4): the sidebar spans the titlebar + main rows only, so
+     the full-width status bar on row 3 sits BELOW it — no overlap. This mirrors
+     the live app, where .app is a flex column of [.app-body(sidebar+main)] then
+     [StatusBar], the status bar full-width beneath the sidebar. */
+  .sidebar{
+    grid-column:1; grid-row:1/3;
+    display:flex; flex-direction:column; gap:4px; min-height:0;
+    padding:8px 10px 10px;
+    border-right:1px solid var(--border);
+    background:linear-gradient(180deg,
+      color-mix(in oklab, var(--fg) 3.6%, var(--bg)),
+      color-mix(in oklab, var(--fg) 1.6%, var(--bg)) 260px);
+    box-shadow:inset 0 1px 0 color-mix(in oklab, var(--fg) 4%, transparent);
+  }
+  .side-head{display:flex;align-items:center;justify-content:space-between;height:40px;padding:0 6px 0 8px;flex:none}
+  .side-head .brand{display:inline-flex;align-items:center;gap:9px}
+  .side-head .brand img{width:22px;height:22px;border-radius:7px;display:block}
+  .side-head .brand-name{font-size:14px;font-weight:650;letter-spacing:-0.012em;color:var(--fg)}
+  .side-head .collapse{width:28px;height:28px;display:grid;place-items:center;border-radius:7px;color:var(--fg-faint)}
+  .proj-switch{
+    display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:10px;margin:2px 0;
+    background:var(--bg-elev-1);border:1px solid var(--border);
+  }
+  .proj-switch .ps-ic{width:26px;height:26px;border-radius:7px;background:var(--bg-elev-2);display:grid;place-items:center;color:var(--fg-muted)}
+  .proj-switch .ps-t{font-size:12.5px;font-weight:600;color:var(--fg);line-height:1.25}
+  .proj-switch .ps-s{font-size:10.5px;color:var(--fg-faint)}
+  .proj-switch .ps-chev{margin-left:auto;color:var(--fg-faint);font-size:12px}
+  .action-row{display:flex;align-items:center;gap:6px;margin:2px 0}
+  .new-chat{
+    display:flex;align-items:center;gap:10px;height:38px;flex:1;padding:0 10px 0 11px;
+    border-radius:10px;font-size:13px;font-weight:580;color:var(--fg);
+    border:1px solid color-mix(in oklab, var(--accent) 28%, var(--border));
+    background:linear-gradient(180deg, color-mix(in oklab, var(--accent) 12%, transparent), color-mix(in oklab, var(--accent) 5%, transparent));
+  }
+  .new-chat .nc-ic{color:var(--accent);font-size:17px;font-weight:400;line-height:1;display:inline-flex}
+  .ic-btn{width:38px;height:38px;flex:none;display:grid;place-items:center;border-radius:10px;color:var(--fg-muted);border:1px solid var(--border);background:var(--bg-inset)}
+  .tool-row{display:flex;align-items:center;justify-content:space-between;padding:4px 2px 2px}
+  .seg{position:relative;display:inline-flex;padding:2px;gap:2px;border-radius:8px;border:1px solid var(--border);background:var(--bg-inset)}
+  .seg .seg-thumb{position:absolute;top:2px;left:2px;height:22px;width:78px;border-radius:6px;background:var(--surface-active)}
+  .seg .seg-btn{position:relative;z-index:1;height:22px;padding:0 10px;border-radius:6px;font-size:11px;font-weight:600;color:var(--fg-subtle);display:inline-flex;align-items:center}
+  .seg .seg-btn.on{color:var(--fg)}
+  .count-note{font-size:10.5px;font-weight:500;color:var(--fg-faint);font-variant-numeric:tabular-nums}
+  .conv-list{display:flex;flex-direction:column;gap:1px;flex:1;margin-top:4px;overflow:hidden}
+  .crow{display:flex;align-items:center;gap:8px;height:32px;padding:0 8px 0 11px;border-radius:8px}
+  .crow.active{background:var(--surface-hover)}
+  .crow.active::before{content:"";position:absolute}
+  .crow .cr-t{font-size:12.5px;color:var(--fg-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
+  .crow.active .cr-t{color:var(--fg)}
+  .crow .cr-tag{font-size:9.5px;color:var(--fg-faint);background:var(--bg-elev-1);border:1px solid var(--border);border-radius:5px;padding:1px 5px;white-space:nowrap;flex:none}
+  .crow .cr-time{font-size:10px;color:var(--fg-faint);flex:none;font-variant-numeric:tabular-nums}
+  .foot-nav{display:flex;align-items:center;gap:2px;flex:none;padding-top:8px;margin-top:4px;border-top:1px solid color-mix(in oklab, var(--border) 60%, transparent)}
+  .fnav{width:40px;height:34px;display:grid;place-items:center;border-radius:8px;color:var(--fg-muted);font-size:16px}
+  .fnav.on{color:var(--accent);background:color-mix(in oklab, var(--fg) 8%, transparent)}
+  .fnav-spacer{flex:1}
+
+  /* ── TOPBAR (title left, window/pane controls right) ── */
+  .topbar{
+    grid-column:2;grid-row:1;display:flex;align-items:center;
+    padding:0 16px;border-bottom:1px solid var(--border);
+    background:color-mix(in oklab, var(--bg) 82%, transparent);
+  }
+  .topbar .tb-title{font-size:13px;font-weight:600;color:var(--fg-2);letter-spacing:-0.01em}
+  .topbar .tb-right{margin-left:auto;display:flex;align-items:center;gap:12px;color:var(--fg-muted)}
+  .topbar .tb-ic{color:var(--fg-muted)}
+  .topbar .tb-bell{position:relative;color:var(--fg-muted)}
+  .topbar .tb-badge{position:absolute;top:-6px;right:-9px;background:var(--accent);color:var(--accent-fg);font-size:9px;font-weight:700;border-radius:999px;padding:0 5px;line-height:1.5;min-width:16px;text-align:center}
+  .topbar .wc{display:flex;gap:1px;margin-left:8px;color:var(--fg-muted)}
+  .topbar .wc span{width:28px;height:24px;border-radius:5px}
+
+  /* ── MAIN chat column ── */
+  .main{grid-column:2;grid-row:2;position:relative;display:flex;flex-direction:column;overflow:hidden}
+  .thread{flex:1;overflow:hidden;padding:30px 0 0}
+  .col{max-width:1100px;margin:0 auto;padding:0 48px}
+
+  /* HERO / welcome state */
+  .hero{position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;padding:0 0 40px;opacity:0}
+  .hero .hcol{max-width:1100px;margin:0 auto;width:100%;padding:0 48px}
+  .hero .eyebrow{display:flex;align-items:center;gap:7px;font-size:11px;font-weight:700;letter-spacing:0.09em;text-transform:uppercase;color:var(--accent);margin-bottom:12px}
+  .hero .eyebrow .e-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
+  .hero h1{font-size:27px;font-weight:600;letter-spacing:-0.675px;color:var(--fg-subtle);line-height:1.15}
+  .hero h1 b{color:var(--fg);font-weight:600}
+  .hero .meta{display:flex;align-items:center;gap:13px;margin-top:18px;color:var(--fg-muted);font-size:13px}
+  .hero .branch{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-weight:500;font-size:12.5px}
+  .hero .files b{color:var(--fg);font-weight:650}
+  .hero .path{color:var(--fg-faint);font-family:var(--font-mono);font-size:12px}
+  .hero .meta-right{margin-left:auto;display:flex;gap:10px}
+  .hero .hbtn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 13px;border-radius:9px;border:1px solid var(--border);background:var(--bg-elev-1);color:var(--fg-2);font-size:13px;font-weight:500}
+  .hero .jump-lbl{margin-top:30px;font-size:11px;font-weight:700;letter-spacing:0.09em;text-transform:uppercase;color:var(--fg-faint)}
+  .hero .jump-row{display:flex;gap:12px;margin-top:11px}
+  .hero .jcard{flex:1;display:flex;align-items:center;gap:11px;padding:13px 15px;border-radius:11px;border:1px solid var(--border);background:var(--bg-elev-1)}
+  .hero .jcard .j-ic{width:30px;height:30px;border-radius:8px;background:var(--bg-elev-2);display:grid;place-items:center;color:var(--fg-muted);font-size:14px}
+  .hero .jcard .j-t{font-size:13px;font-weight:600;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .hero .jcard .j-s{font-size:11px;color:var(--fg-faint);margin-top:2px}
+
+  /* ── ANSWERED-TURN (current app: NO spine, NO avatar) ──
+     The old build drew a green vertical .rail + a Claude-sparkle .avatar circle
+     to the left of every turn. The LIVE app removed that entirely — a turn now
+     leads with a ● dot + "Working…/Worked for Ns" status head (.worked), then
+     naked content, no connector line, no logo. Single-column, full-width. */
+  .turn{display:block;position:relative;opacity:0}
+  .turn .body{min-width:0;display:flex;flex-direction:column}
+
+  /* user bubble — right-aligned tinted with tail */
+  .user{display:flex;justify-content:flex-end;margin-bottom:22px;opacity:0;transform:translateY(8px)}
+  .user .ubub{max-width:62ch;padding:10px 15px;line-height:1.6;font-size:13px;color:var(--fg);
+    background:linear-gradient(180deg, color-mix(in oklab, var(--accent) 11%, var(--bg-inset)), color-mix(in oklab, var(--accent) 6%, var(--bg-inset)));
+    border:1px solid color-mix(in oklab, var(--accent) 16%, var(--border));
+    border-radius:16px 16px 5px 16px;box-shadow:inset 0 1px 0 oklch(1 0 0 / 0.05), 0 4px 14px -10px oklch(0 0 0 / 0.55);}
+
+  /* answer content */
+  .ans{display:flex;flex-direction:column}
+  .node{position:relative;opacity:0;transform:translateY(6px)}
+  .node + .node{margin-top:12px}
+  .p{font-size:13px;line-height:1.62;color:var(--fg)}
+  .p b{font-weight:650;color:var(--fg)}
+  .h{font-size:16px;font-weight:600;color:var(--fg);display:flex;align-items:center;gap:9px;margin:6px 0 2px}
+  .h::before{content:"";width:3px;height:14px;border-radius:2px;background:var(--accent)}
+  .bul{padding-left:20px;position:relative;font-size:13px;line-height:1.6;color:var(--fg)}
+  .bul::before{content:"";position:absolute;left:5px;top:10px;width:5px;height:5px;border-radius:50%;background:var(--fg-subtle)}
+  code{font-family:var(--font-mono);font-size:0.86em;color:var(--fg-2);
+    background:var(--code-bg);border:1px solid var(--code-border);padding:0.06em 0.34em;border-radius:5px;letter-spacing:0}
+
+  /* Real streaming tool row (.wline) — naked: icon + past-tense phrase +
+     chevron-down. NO border, NO box, NO green check. Muted subtle text. */
+  .wline{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--fg-subtle)}
+  .wline .wl-ic{color:var(--fg-muted);display:inline-flex}
+  .wline .wl-label{font-size:12.5px;font-weight:400;color:var(--fg-subtle)}
+  .wline .wl-chev{color:var(--fg-faint);display:inline-flex;margin-left:-2px}
+  /* the 'Worked for Ns' status row above the answer */
+  .worked{display:flex;align-items:center;gap:8px;color:var(--fg-muted);font-size:13px;margin-bottom:14px}
+  .worked .wk-dot{width:7px;height:7px;border-radius:50%;background:var(--status-busy,#22c55e);box-shadow:0 0 8px color-mix(in oklch,var(--ok) 60%,transparent)}
+  /* result well — the code/tree output block under a tool */
+  .out-well{border:1px solid var(--border);border-radius:10px;background:var(--bg-inset);padding:12px 15px;font-family:var(--font-mono);font-size:12px;line-height:1.6;color:var(--fg-2);white-space:pre;overflow:hidden}
+  .out-well .ow-dim{color:var(--fg-faint)}
+
+  /* done footer + actions */
+  .foot{display:flex;align-items:center;gap:11px;margin-top:16px;opacity:0}
+  .foot .done{display:flex;align-items:center;gap:6px;color:var(--fg);font-weight:600;font-size:13px}
+  .foot .done .ck{color:var(--ok);display:inline-flex}
+  .foot .sec{color:var(--fg-faint);font-size:12.5px}
+  .foot .cost{font-family:var(--font-mono);font-size:11px;color:var(--fg-muted);
+    background:color-mix(in oklch, var(--bg-elev-2) 70%, transparent);border:1px solid color-mix(in oklch, var(--border) 60%, transparent);
+    padding:2px 8px;border-radius:999px;font-variant-numeric:tabular-nums}
+  .actions{display:flex;gap:14px;margin-top:12px;opacity:0}
+  .actions .abtn{display:inline-flex;align-items:center;gap:6px;color:var(--fg-faint);font-size:12px}
+  .actions .abtn .ai{font-size:12px}
+
+  /* ── COMPOSER (real well + bar) ── */
+  .composer-wrap{width:100%;flex:none;position:relative;z-index:5;padding:0 0 22px}
+  .composer{max-width:1100px;margin:0 auto;padding:0 48px}
+  .cwell{background:var(--bg-inset);border:1px solid var(--border-strong);border-radius:16px;padding:14px 16px 10px;transition:border-color .4s, box-shadow .4s}
+  .cwell.live{border-color:color-mix(in oklab, var(--accent) 42%, var(--border));box-shadow:0 0 0 3px oklch(0.78 0.15 var(--accent-h) / 0.08)}
+  .ctext{font-size:14px;color:var(--fg);min-height:24px;line-height:1.5;padding:2px 2px 0}
+  .ctext .caret{display:inline-block;width:2px;height:18px;background:var(--accent);margin-left:1px;vertical-align:-3px;animation:blink 1.05s step-end infinite}
+  .cph{color:var(--fg-subtle)}
+  .cph .k{color:var(--fg-faint);font-family:var(--font-mono);font-size:12px}
+  @keyframes blink{50%{opacity:0}}
+  .cbar{display:flex;align-items:center;margin-top:10px;gap:10px}
+  .cbar .cl{display:flex;align-items:center;gap:10px}
+  .perm{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border-radius:8px;color:var(--warn);font-weight:600;font-size:12.5px}
+  .perm .pchev{color:var(--fg-faint);font-size:11px}
+  .cicon{width:30px;height:30px;display:grid;place-items:center;border-radius:8px;color:var(--fg-muted);font-size:15px}
+  .cbar .cr{margin-left:auto;display:flex;align-items:center;gap:12px}
+  .model-pill{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 10px;border-radius:9px;border:1px solid var(--border);background:var(--bg-elev-1);font-size:13px;color:var(--fg-2);font-weight:600}
+  .model-pill .mdot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+  .model-pill .meff{color:var(--fg-muted);font-weight:500}
+  .model-pill .mchev{color:var(--fg-faint);font-size:11px}
+  .send{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;background:var(--accent);color:var(--accent-fg);transition:transform .2s}
+  .send svg{width:15px;height:15px}
+
+  /* ── STATUSBAR (real 27px) ── */
+  .statusbar{grid-column:1/3;grid-row:3;display:flex;align-items:center;gap:13px;padding:0 16px;
+    border-top:1px solid var(--border);background:color-mix(in oklab, var(--bg) 82%, transparent);font-size:11px;color:var(--fg-subtle)}
+  .statusbar .si{display:inline-flex;align-items:center;gap:6px;font-variant-numeric:tabular-nums}
+  .statusbar .sdot{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px color-mix(in oklch, var(--ok) 18%, transparent)}
+  .statusbar .ssep{width:1px;height:11px;background:var(--border)}
+  .statusbar .sright{margin-left:auto;display:flex;align-items:center;gap:16px}
+  .statusbar .rl{display:inline-flex;align-items:center;gap:7px;color:var(--fg-subtle)}
+  .statusbar .rl-t{color:var(--fg-faint)}
+  .statusbar .rl-bar{width:46px;height:4px;border-radius:999px;background:color-mix(in oklab, var(--fg) 8%, transparent);overflow:hidden}
+  .statusbar .rl-bar i{display:block;height:100%;background:var(--accent);border-radius:999px}
+
+  /* ─── Outro — logo lockup: the window folds INTO the mark, wordmark unfolds out ─ */
+  #outro{position:absolute;inset:0;display:grid;place-items:center;text-align:center;opacity:0;pointer-events:none}
+  .o-lock{display:flex;align-items:center;gap:28px;will-change:transform}
+  .o-logo{width:124px;height:124px;border-radius:28px;display:block;opacity:0;
+    filter:drop-shadow(0 0 34px oklch(0.78 0.15 var(--accent-h) / 0.55))}
+  .o-wordwrap{overflow:hidden;padding-right:8px}
+  .o-word{font-size:98px;font-weight:720;letter-spacing:-2.5px;line-height:1.1;color:var(--fg);transform:translateX(-105%)}
+  .o-tag{margin-top:26px;font-size:19px;color:var(--fg-muted);font-weight:450;opacity:0}
+
+  /* ─── Tour page layers — each page is an absolute layer in .main ─────── */
+  .page{position:absolute;inset:0;opacity:0;overflow:hidden;display:flex;flex-direction:column}
+  .tour-chip{
+    position:absolute;top:16px;left:50%;transform:translateX(-50%);z-index:40;
+    display:flex;align-items:center;gap:8px;height:34px;padding:0 15px;border-radius:999px;
+    background:color-mix(in oklab, var(--bg-elev-1) 90%, transparent);
+    border:1px solid color-mix(in oklab, var(--accent) 30%, var(--border));
+    backdrop-filter:blur(10px);
+    box-shadow:0 10px 30px -14px oklch(0 0 0 / 0.7), 0 0 24px -10px oklch(0.78 0.15 var(--accent-h) / 0.25);
+    font-size:12.5px;font-weight:550;color:var(--fg-2);white-space:nowrap;opacity:0}
+  .tour-chip .tc-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
+
+  /* ─── WORKSPACE page ─── */
+  .ws-col{max-width:1200px;width:100%;margin:0 auto;padding:22px 40px;display:flex;flex-direction:column;gap:12px}
+  .ws-head{display:flex;align-items:flex-start;gap:14px}
+  .ws-greet{font-size:23px;font-weight:600;letter-spacing:-0.02em;color:var(--fg-subtle)}
+  .ws-greet b{color:var(--fg);font-weight:600}
+  .ws-actions{margin-left:auto;display:flex;gap:8px}
+  .ws-btn{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;border-radius:9px;font-size:12.5px;font-weight:560;color:var(--fg-2);border:1px solid var(--border);background:var(--bg-elev-1)}
+  .ws-btn.primary{color:var(--fg);border-color:color-mix(in oklab, var(--accent) 28%, var(--border));
+    background:linear-gradient(180deg, color-mix(in oklab, var(--accent) 12%, transparent), color-mix(in oklab, var(--accent) 5%, transparent))}
+  .ws-btn .ic{color:var(--accent)}
+  .ws-btn.ghost .ic{color:var(--fg-muted)}
+  .ws-band{display:flex;align-items:center;gap:12px;color:var(--fg-muted);font-size:12.5px;margin-top:-2px}
+  .ws-band .branch{display:inline-flex;align-items:center;gap:5px;height:21px;padding:0 9px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-weight:500;font-size:12px}
+  .ws-band .files b{color:var(--fg);font-weight:650}
+  .ws-band .swf{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:8px;border:1px solid var(--border);background:var(--bg-elev-1);color:var(--fg-2);font-size:11.5px}
+  .ws-sech{display:flex;align-items:center;gap:8px;font-size:10px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:var(--fg-faint);margin-top:6px}
+  .ws-sech .ic{color:var(--fg-faint)}
+  .ws-sech .cnt{background:var(--bg-elev-1);border:1px solid var(--border);border-radius:5px;padding:0 5px;font-size:9.5px}
+  .ws-sech .sec-r{margin-left:auto;display:flex;gap:4px}
+  .ws-mini{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:7px;border:1px solid var(--border);background:var(--bg-inset);color:var(--fg-muted);font-size:10.5px;font-weight:600}
+  .ws-mini.on{color:var(--fg);background:var(--surface-active);border-color:var(--border-strong)}
+  .ws-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  .pcard{position:relative;border-radius:14px;border:1px solid var(--border);background:var(--bg-elev-1);padding:13px 15px;display:flex;flex-direction:column;gap:9px}
+  .pcard.active{border-color:color-mix(in oklab, var(--accent) 34%, var(--border));
+    background:linear-gradient(160deg, color-mix(in oklab, var(--accent) 9%, var(--bg-elev-1)), color-mix(in oklab, var(--accent) 3%, var(--bg-elev-1)))}
+  .pcard-top{display:flex;align-items:center;gap:10px}
+  .pcard-mono{width:32px;height:32px;border-radius:9px;display:grid;place-items:center;font-size:14px;font-weight:700;color:var(--accent);background:var(--accent-soft)}
+  .pcard.active .pcard-mono{color:var(--accent-fg);background:linear-gradient(160deg, var(--accent), color-mix(in oklab, var(--accent) 70%, #fff))}
+  .pcard-name{font-size:13.5px;font-weight:640;color:var(--fg)}
+  .pcard-path{font-size:10.5px;color:var(--fg-subtle);font-family:var(--font-mono)}
+  .pcard-live{margin-left:auto;display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 8px;border-radius:999px;font-size:10px;font-weight:650;color:var(--accent);background:var(--accent-soft)}
+  .pcard-live .ld{width:5px;height:5px;border-radius:50%;background:var(--accent)}
+  .pcard-meta{display:flex;align-items:center;gap:11px;font-size:11px;color:var(--fg-muted)}
+  .pcard-meta .pm{display:inline-flex;align-items:center;gap:5px}
+  .pcard-meta .pm .ic{color:var(--fg-faint)}
+  .pcard-go{margin-left:auto;display:inline-flex;align-items:center;gap:5px;color:var(--accent);font-size:11.5px;font-weight:600}
+  .ws-act{border-radius:16px;border:1px solid var(--border);background:var(--bg-elev-1);padding:16px 20px;display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:20px}
+  .ws-act .act-l{display:flex;flex-direction:column;gap:8px}
+  .ws-hero-n{font-size:38px;font-weight:760;letter-spacing:-0.02em;line-height:1;
+    background:linear-gradient(90deg, var(--fg), color-mix(in oklab, var(--accent) 55%, var(--fg)));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .ws-hero-s{font-size:12px;color:var(--fg-muted)}
+  .ws-chart{display:flex;align-items:flex-end;gap:8px;height:92px;margin-top:8px}
+  .ws-bar{flex:1;border-radius:4px 4px 2px 2px;background:linear-gradient(180deg, oklch(0.82 0.15 var(--accent-h)), oklch(0.66 0.13 var(--accent-h)));min-height:2px}
+  .ws-chart-cap{font-size:10px;color:var(--fg-faint);display:flex;justify-content:space-between}
+  .ws-act .act-r{border-left:1px solid var(--border);padding-left:20px;display:flex;flex-direction:column;gap:10px}
+  .ws-tiles{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .ws-tile{border-radius:10px;background:var(--bg-inset);box-shadow:inset 0 0 0 1px color-mix(in oklab, var(--fg) 7%, transparent);padding:9px 11px}
+  .ws-tile .tv{font-size:17px;font-weight:720;color:var(--fg);font-variant-numeric:tabular-nums;display:flex;align-items:baseline;gap:6px}
+  .ws-tile .tv .delta{font-size:9.5px;font-weight:700;color:var(--ok);background:var(--ok-soft);border-radius:999px;padding:1px 6px}
+  .ws-tile .tl{font-size:9.5px;font-weight:600;letter-spacing:0.05em;text-transform:uppercase;color:var(--fg-faint);margin-top:2px}
+  .ws-mix-l{font-size:10px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:var(--fg-faint)}
+  .ws-mix{display:flex;height:8px;border-radius:999px;overflow:hidden;gap:2px}
+  .ws-mix i{display:block;height:100%}
+  .ws-legend{display:flex;gap:12px;font-size:10.5px;color:var(--fg-muted)}
+  .ws-legend .lg{display:inline-flex;align-items:center;gap:5px}
+  .ws-legend .lg i{width:7px;height:7px;border-radius:3px;display:inline-block}
+
+  /* ─── AI HEALTH page ─── */
+  .ah-col{max-width:820px;width:100%;margin:0 auto;padding:20px 40px;display:flex;flex-direction:column;gap:11px}
+  .ah-eyebrow{display:flex;align-items:center;gap:7px;font-size:10px;font-weight:700;letter-spacing:0.09em;text-transform:uppercase;color:var(--accent)}
+  .ah-eyebrow::before{content:"";width:12px;height:2px;border-radius:2px;background:var(--accent)}
+  .ah-title{font-size:24px;font-weight:760;letter-spacing:-0.02em;color:var(--fg);margin-top:2px}
+  .ah-desc{font-size:12px;color:var(--fg-muted);line-height:1.5;max-width:62ch}
+  .ah-banner{display:flex;align-items:center;gap:13px;padding:13px 16px;border-radius:14px;
+    background:linear-gradient(135deg, color-mix(in oklab, var(--accent) 13%, transparent), color-mix(in oklab, var(--accent) 4%, transparent));
+    box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, var(--border))}
+  .ah-banner .ab-ic{width:36px;height:36px;flex:none;border-radius:10px;background:var(--accent-soft);display:grid;place-items:center;color:var(--accent)}
+  .ah-banner .ab-t{font-size:13.5px;font-weight:650;color:var(--fg)}
+  .ah-banner .ab-s{font-size:11px;color:var(--fg-muted);margin-top:2px}
+  .ah-banner .ab-btn{margin-left:auto;flex:none;display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 13px;border-radius:9px;background:var(--accent);color:var(--accent-fg);font-size:12px;font-weight:650}
+  .ah-verdict{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:12px;background:var(--surface);
+    box-shadow:inset 0 0 0 1px var(--border);border-left:3px solid var(--accent)}
+  .ah-verdict .vd{width:8px;height:8px;border-radius:50%;background:var(--accent)}
+  .ah-verdict .vt{font-size:12.5px;font-weight:650;color:var(--fg)}
+  .ah-verdict .vn{font-size:11.5px;color:var(--fg-muted)}
+  .ah-verdict .vr{margin-left:auto;display:flex;gap:5px}
+  .ah-verdict .vr i{width:6px;height:6px;border-radius:50%;background:var(--ok);opacity:.75}
+  .ah-card{border-radius:14px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--border);padding:13px 17px;display:flex;flex-direction:column;gap:9px}
+  .ah-ch{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:660;color:var(--fg)}
+  .ah-ch .ic{color:var(--fg-muted)}
+  .ah-ch .when{margin-left:auto;font-size:10.5px;color:var(--fg-faint)}
+  .ah-sum{font-size:12px;color:var(--fg-2);line-height:1.55}
+  .ah-rec{border-radius:11px;background:var(--bg-inset);box-shadow:inset 0 0 0 1px color-mix(in oklab, var(--fg) 8%, transparent);padding:11px 13px;display:flex;flex-direction:column;gap:7px}
+  .ah-rec .rh{display:flex;align-items:center;gap:9px}
+  .ah-chip{font-size:9.5px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;border-radius:999px;padding:2px 8px;color:var(--warn);background:color-mix(in oklab, var(--warn) 14%, transparent)}
+  .ah-rec .rt{font-size:12.5px;font-weight:640;color:var(--fg)}
+  .ah-rec .rd{font-size:11.5px;color:var(--fg-muted);line-height:1.5}
+  .ah-apply{display:flex;align-items:center;gap:9px;font-size:11.5px;color:var(--fg-2)}
+  .ah-apply .from-to{font-family:var(--font-mono);font-size:11px;color:var(--fg-2)}
+  .ah-apply .from-to .arr{color:var(--accent);margin:0 4px}
+  .ah-apply .ap-btn{margin-left:auto;display:inline-flex;align-items:center;height:24px;padding:0 12px;border-radius:999px;background:var(--accent);color:var(--accent-fg);font-size:11px;font-weight:650}
+  .ah-applied{display:none;align-items:center;gap:8px;font-size:11.5px}
+  .ah-applied .ok-t{display:inline-flex;align-items:center;gap:5px;color:var(--ok);font-weight:650}
+  .ah-applied .undo{color:var(--fg-faint);font-weight:550;margin-left:auto;display:inline-flex;align-items:center;gap:4px}
+  .ah-row{display:flex;flex-direction:column;gap:5px}
+  .ah-row .rl{display:flex;align-items:baseline;gap:8px;font-size:11.5px;color:var(--fg-2)}
+  .ah-row .rl b{font-weight:650;color:var(--fg)}
+  .ah-row .rl .pct{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--fg-muted)}
+  .ah-track{height:7px;border-radius:999px;background:color-mix(in oklab, var(--fg) 8%, transparent);overflow:hidden}
+  .ah-track i{display:block;height:100%;border-radius:999px;background:var(--accent)}
+  .ah-tiles{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+  .ah-tile{border-radius:10px;background:var(--bg-inset);box-shadow:inset 0 0 0 1px color-mix(in oklab, var(--fg) 7%, transparent);padding:9px 11px}
+  .ah-tile .tv{font-size:16px;font-weight:720;color:var(--fg);font-variant-numeric:tabular-nums}
+  .ah-tile .tl{font-size:9px;font-weight:600;letter-spacing:0.04em;text-transform:uppercase;color:var(--fg-faint);margin-top:2px}
+
+  /* ─── SETTINGS page ─── */
+  .st-col{max-width:820px;width:100%;margin:0 auto;padding:20px 40px;display:flex;flex-direction:column;gap:11px}
+  .st-hero-top{display:flex;align-items:center}
+  .st-chips{margin-left:auto;display:flex;gap:7px}
+  .st-chip{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 11px;border-radius:999px;border:1px solid var(--border);background:var(--bg-elev-1);font-size:11px;color:var(--fg-muted);font-family:var(--font-mono)}
+  .st-tabs{display:flex;gap:18px;border-bottom:1px solid var(--border);margin-top:6px}
+  .st-tab{display:inline-flex;align-items:center;gap:7px;padding:7px 2px 9px;font-size:12.5px;font-weight:560;color:var(--fg-muted);position:relative}
+  .st-tab.on{color:var(--fg)}
+  .st-tab.on::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;border-radius:2px;background:var(--accent)}
+  .st-tab .dotb{width:5px;height:5px;border-radius:50%;background:var(--accent)}
+  .st-card{border-radius:12px;border:1px solid var(--border);background:var(--surface);padding:14px 17px;display:flex;flex-direction:column;gap:10px}
+  .st-ct{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:650;color:var(--fg)}
+  .st-ct .cdot{width:13px;height:13px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 1px var(--border-strong), 0 0 12px -2px var(--accent)}
+  .st-cd{font-size:11.5px;color:var(--fg-subtle);line-height:1.5;margin-top:-4px}
+  .st-swatches{display:grid;grid-template-columns:repeat(8,1fr);gap:8px;max-width:460px}
+  .sw{position:relative;aspect-ratio:1;border-radius:9px;display:grid;place-items:center}
+  .sw .sw-ck{opacity:0;color:#fff;filter:drop-shadow(0 1px 2px rgb(0 0 0/.5))}
+  .sw.ring{box-shadow:0 0 0 2px var(--bg), 0 0 0 4px var(--border-strong)}
+  .st-hue{display:flex;align-items:center;gap:12px}
+  .st-hue .hue-bar{flex:1;height:10px;border-radius:999px;position:relative;
+    background:linear-gradient(90deg, oklch(.72 .17 20), oklch(.72 .17 80), oklch(.72 .17 140), oklch(.72 .17 200), oklch(.72 .17 260), oklch(.72 .17 320), oklch(.72 .17 20))}
+  .st-hue .hue-knob{position:absolute;top:50%;width:16px;height:16px;border-radius:50%;background:var(--accent);border:2px solid #fff;transform:translate(-50%,-50%);box-shadow:0 1px 4px rgb(0 0 0/.5)}
+  .st-hue .hue-v{font-family:var(--font-mono);font-size:11.5px;color:var(--fg-muted);font-variant-numeric:tabular-nums;width:36px;text-align:right}
+  .st-row{display:flex;align-items:center;gap:12px;padding-top:9px;border-top:1px solid color-mix(in oklab, var(--border) 60%, transparent)}
+  .st-row .rt{font-size:12px;font-weight:600;color:var(--fg)}
+  .st-row .rs{font-size:11px;color:var(--fg-subtle)}
+  .st-row .rr{margin-left:auto;display:flex;align-items:center;gap:10px}
+  .st-range{width:150px;height:5px;border-radius:999px;background:color-mix(in oklab, var(--fg) 9%, transparent);position:relative}
+  .st-range i{display:block;height:100%;border-radius:999px;background:var(--accent);width:55%}
+  .st-range .kn{position:absolute;top:50%;left:55%;width:13px;height:13px;border-radius:50%;background:var(--fg);transform:translate(-50%,-50%)}
+  .st-range-v{font-size:11px;color:var(--fg-muted);font-variant-numeric:tabular-nums}
+  .st-tiles{display:grid;grid-template-columns:repeat(6,1fr);gap:9px}
+  .st-tile{display:flex;flex-direction:column;gap:5px}
+  .st-tile .tp{aspect-ratio:1.5;border-radius:9px;border:1px solid var(--border);background:var(--bg-inset);position:relative;overflow:hidden}
+  .st-tile.on .tp{box-shadow:0 0 0 2px color-mix(in oklab, var(--accent) 60%, transparent)}
+  .st-tile .tn{font-size:10px;color:var(--fg-muted);text-align:center}
+  .st-tile.on .tn{color:var(--fg)}
+  .tp.dots{background-image:radial-gradient(color-mix(in oklab, var(--fg) 26%, transparent) 1.2px, transparent 1.2px);background-size:11px 11px}
+  .tp.dense{background-image:radial-gradient(color-mix(in oklab, var(--fg) 22%, transparent) 1px, transparent 1px);background-size:6px 6px}
+  .tp.margins{background-image:linear-gradient(90deg, transparent 14%, color-mix(in oklab, var(--fg) 14%, transparent) 14%, color-mix(in oklab, var(--fg) 14%, transparent) calc(14% + 1px), transparent calc(14% + 1px), transparent 86%, color-mix(in oklab, var(--fg) 14%, transparent) 86%, color-mix(in oklab, var(--fg) 14%, transparent) calc(86% + 1px), transparent calc(86% + 1px))}
+  .tp.grid-t{background-image:linear-gradient(color-mix(in oklab, var(--fg) 16%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in oklab, var(--fg) 16%, transparent) 1px, transparent 1px);background-size:14px 14px}
+  .tp.blueprint{background-image:linear-gradient(color-mix(in oklab, var(--accent) 22%, transparent) 1px, transparent 1px), linear-gradient(90deg, color-mix(in oklab, var(--accent) 22%, transparent) 1px, transparent 1px);background-size:14px 14px;background-color:color-mix(in oklab, var(--accent) 5%, var(--bg-inset))}
+  .tp.lines{background-image:linear-gradient(color-mix(in oklab, var(--fg) 17%, transparent) 1px, transparent 1px);background-size:100% 9px}
+
+  /* ─── SPLIT-PANE page ─── */
+  .sp-wrap{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 6px minmax(0,1fr);padding:6px;min-height:0}
+  .sp-divider{position:relative}
+  .sp-divider::after{content:"";position:absolute;left:50%;top:50%;width:2px;height:24px;border-radius:2px;background:var(--fg-faint);transform:translate(-50%,-50%);opacity:.5}
+  .sp-pane{border-radius:14px;overflow:hidden;display:flex;flex-direction:column;min-height:0;
+    background:color-mix(in oklab, var(--bg-inset) 26%, transparent);box-shadow:inset 0 0 0 1px var(--border)}
+  .sp-pane.focused{box-shadow:inset 0 0 0 1px var(--ghost-border, var(--border-strong)), inset 0 2px 0 0 var(--accent)}
+  .sp-pane.dim{opacity:.84}
+  .sp-head{height:28px;flex:none;display:flex;align-items:center;gap:7px;padding:0 8px;
+    background:color-mix(in oklch, var(--bg-elev-1) 55%, transparent);border-bottom:1px solid var(--border)}
+  .sp-pane.focused .sp-head{background:color-mix(in oklab, var(--accent) 9%, var(--bg-elev-1));border-bottom-color:color-mix(in oklab, var(--accent) 40%, var(--border))}
+  .sp-head .idx{width:16px;height:16px;border-radius:5px;display:grid;place-items:center;font-size:9.5px;font-weight:700;color:var(--fg-muted);background:var(--bg-elev-2);border:1px solid var(--border)}
+  .sp-pane.focused .sp-head .idx{color:var(--accent)}
+  .sp-head .pt{font-size:11px;font-weight:600;color:var(--fg-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sp-pane.focused .sp-head .pt{color:var(--fg)}
+  .sp-head .chipp{display:inline-flex;align-items:center;gap:4px;height:17px;padding:0 7px;border-radius:999px;background:var(--bg-elev-2);border:1px solid var(--border);font-size:9.5px;color:var(--fg-muted);white-space:nowrap}
+  .sp-head .ctxb{width:28px;height:3px;border-radius:999px;background:color-mix(in oklab, var(--fg) 9%, transparent);overflow:hidden}
+  .sp-head .ctxb i{display:block;height:100%;background:var(--accent)}
+  .sp-head .wk{display:inline-flex;align-items:center;gap:4px;font-size:9.5px;color:var(--accent);font-weight:600}
+  .sp-head .wk .wd{width:5px;height:5px;border-radius:50%;background:var(--accent)}
+  .sp-head .px{margin-left:auto;color:var(--fg-faint);display:inline-flex}
+  .sp-body{flex:1;min-height:0;padding:16px 20px 10px;display:flex;flex-direction:column;gap:11px;overflow:hidden}
+  .sp-user{display:flex;justify-content:flex-end}
+  .sp-user .ub{max-width:52ch;padding:8px 12px;line-height:1.55;font-size:11.5px;color:var(--fg);
+    background:linear-gradient(180deg, color-mix(in oklab, var(--accent) 11%, var(--bg-inset)), color-mix(in oklab, var(--accent) 6%, var(--bg-inset)));
+    border:1px solid color-mix(in oklab, var(--accent) 16%, var(--border));border-radius:13px 13px 4px 13px}
+  .sp-worked{display:flex;align-items:center;gap:7px;color:var(--fg-muted);font-size:11.5px}
+  .sp-worked .wk-dot{width:6px;height:6px;border-radius:50%;background:var(--status-busy)}
+  .sp-p{font-size:11.5px;line-height:1.6;color:var(--fg)}
+  .sp-p b{font-weight:650}
+  .sp-wline{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--fg-subtle)}
+  .sp-wline .ic{color:var(--fg-muted)}
+  .sp-out{border:1px solid var(--border);border-radius:9px;background:var(--bg-inset);padding:9px 12px;font-family:var(--font-mono);font-size:10.5px;line-height:1.6;color:var(--fg-2);white-space:pre;overflow:hidden}
+  .sp-out .ow-dim{color:var(--fg-faint)}
+  .sp-comp{flex:none;padding:0 12px 12px}
+  .sp-cwell{background:var(--bg-inset);border:1px solid var(--border-strong);border-radius:13px;padding:10px 12px 8px}
+  .sp-cwell .sph{font-size:11.5px;color:var(--fg-subtle);min-height:17px}
+  .sp-cbar{display:flex;align-items:center;margin-top:7px}
+  .sp-cbar .mp{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:8px;border:1px solid var(--border);background:var(--bg-elev-1);font-size:10.5px;color:var(--fg-2);font-weight:600}
+  .sp-cbar .mp .mdot{width:6px;height:6px;border-radius:50%;background:var(--accent)}
+  .sp-cbar .snd{margin-left:auto;width:24px;height:24px;border-radius:7px;display:grid;place-items:center;background:var(--accent);color:var(--accent-fg)}
+  .sp-cbar .snd svg{width:12px;height:12px}
+
+  /* ─── Real lucide icons — 24×24 stroke, inherit currentColor ─────────── */
+  .ic{display:inline-flex;align-items:center;justify-content:center;flex:none}
+  .ic svg{display:block;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+  /* icon color/placement fixups per context */
+  .statusbar .si .ic{color:var(--fg-faint)}
+  .hero .branch .ic{color:var(--accent)}
+  .hero .hbtn .ic{color:var(--fg-muted)}
+  .hero .jcard .j-ic .ic, .proj-switch .ps-ic .ic{color:inherit}
+  .cbar .perm .ic{color:var(--warn)}
+  .cbar .cicon .ic, .cbar .pchev .ic, .cbar .mchev .ic{color:inherit}
+  .topbar .wc .ic{color:var(--fg-muted)}
+  .actions .abtn .ic{color:var(--fg-faint)}
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="bloom"></div>
+
+  <!-- intro glyph: the real Rift logo -->
+  <div id="mark">
+    <img src="rift-logo.png" alt="Rift" />
+    <div class="wordmark">Rift</div>
+  </div>
+
+  <!-- app window -->
+  <div id="app">
+    <!-- SIDEBAR -->
+    <div class="sidebar">
+      <div class="side-head">
+        <span class="brand"><img src="rift-logo.png" alt=""><span class="brand-name">Rift</span></span>
+        <span class="collapse ic"><svg width="16" height="16" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg></span>
+      </div>
+      <div class="proj-switch">
+        <span class="ps-ic ic"><svg width="15" height="15" viewBox="0 0 24 24"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></svg></span>
+        <span><div class="ps-t">All projects</div><div class="ps-s">Every project's chats</div></span>
+        <span class="ps-chev ic"><svg width="14" height="14" viewBox="0 0 24 24"><path d="m7 15 5 5 5-5"/><path d="m7 9 5-5 5 5"/></svg></span>
+      </div>
+      <div class="action-row">
+        <span class="new-chat"><span class="nc-ic ic"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2.4"><path d="M5 12h14"/><path d="M12 5v14"/></svg></span>New chat</span>
+        <span class="ic-btn ic"><svg width="16" height="16" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg></span>
+      </div>
+      <div class="tool-row">
+        <span class="seg"><span class="seg-thumb"></span>
+          <span class="seg-btn on">This project</span><span class="seg-btn">All</span></span>
+        <span class="count-note">18 chats</span>
+      </div>
+      <div class="conv-list" id="convList"></div>
+      <div class="foot-nav">
+        <span class="fnav ic" id="fn0"><svg width="17" height="17" viewBox="0 0 24 24"><path d="M20 10a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2.5a1 1 0 0 1-.8-.4l-.9-1.2A1 1 0 0 0 15 3h-2a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z"/><path d="M20 21a1 1 0 0 0 1-1v-3a1 1 0 0 0-1-1h-2.9a1 1 0 0 1-.88-.55l-.42-.85a1 1 0 0 0-.92-.6H13a1 1 0 0 0-1 1v5a1 1 0 0 0 1 1Z"/><path d="M3 5a2 2 0 0 0 2 2h3"/><path d="M3 3v13a2 2 0 0 0 2 2h3"/></svg></span>
+        <span class="fnav ic" id="fn1"><svg width="17" height="17" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/></svg></span>
+        <span class="fnav ic" id="fn2"><svg width="17" height="17" viewBox="0 0 24 24"><path d="M2 9.5a5.5 5.5 0 0 1 9.591-3.676.56.56 0 0 0 .818 0A5.49 5.49 0 0 1 22 9.5c0 2.29-1.5 4-3 5.5l-5.492 5.313a2 2 0 0 1-3 .019L5 15c-1.5-1.5-3-3.2-3-5.5"/><path d="M3.22 13H9.5l.5-1 2 4.5 2-7 1.5 3.5h5.27"/></svg></span>
+        <span class="fnav-spacer"></span>
+        <span class="fnav ic" id="fn3"><svg width="17" height="17" viewBox="0 0 24 24"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg></span>
+      </div>
+    </div>
+
+    <!-- TOPBAR -->
+    <div class="topbar">
+      <span class="tb-title" id="tbTitle">New chat</span>
+      <span class="tb-right">
+        <span class="tb-ic ic"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M8 19H5c-1 0-2-1-2-2V7c0-1 1-2 2-2h3"/><path d="M16 5h3c1 0 2 1 2 2v10c0 1-1 2-2 2h-3"/><line x1="12" x2="12" y1="4" y2="20"/></svg></span>
+        <span class="tb-ic ic"><svg width="15" height="15" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 4v4"/><path d="M2 8h20"/><path d="M6 4v4"/></svg></span>
+        <span class="tb-bell ic"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></svg><span class="tb-badge">9+</span></span>
+        <span class="wc">
+          <span class="ic"><svg width="12" height="12" viewBox="0 0 24 24"><path d="M5 12h14"/></svg></span>
+          <span class="ic"><svg width="10" height="10" viewBox="0 0 24 24"><rect width="16" height="16" x="4" y="4" rx="1"/></svg></span>
+          <span class="ic"><svg width="12" height="12" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span>
+        </span>
+      </span>
+    </div>
+
+    <!-- MAIN thread -->
+    <div class="main">
+      <!-- tour caption chip -->
+      <div class="tour-chip" id="tourChip"><span class="tc-dot"></span><span id="tcText"></span></div>
+
+      <!-- WORKSPACE page -->
+      <div class="page" id="pgWorkspace">
+        <div class="ws-col">
+          <div class="ws-head" data-ws>
+            <div>
+              <div class="ws-greet">Evening. What's next for <b>your-project</b>?</div>
+              <div class="ws-band" style="margin-top:10px">
+                <span class="branch"><span class="ic"><svg width="12" height="12" viewBox="0 0 24 24"><path d="M15 6a9 9 0 0 0-9 9V3"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/></svg></span>main</span>
+                <span class="files"><b>128</b> files</span>
+                <span class="swf"><span class="ic"><svg width="12" height="12" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg></span>Switch folder</span>
+              </div>
+            </div>
+            <div class="ws-actions">
+              <span class="ws-btn primary"><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/></svg></span>New chat</span>
+              <span class="ws-btn ghost"><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></svg></span>New project</span>
+            </div>
+          </div>
+
+          <div class="ws-sech" data-ws>
+            <span class="ic"><svg width="12" height="12" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg></span>
+            Projects <span class="cnt">3</span>
+            <span class="sec-r"><span class="ws-mini">+ New</span></span>
+          </div>
+          <div class="ws-grid" data-ws>
+            <div class="pcard active" id="wsCardActive">
+              <div class="pcard-top">
+                <span class="pcard-mono">Y</span>
+                <span><div class="pcard-name">your-project</div><div class="pcard-path">~/dev/your-project</div></span>
+                <span class="pcard-live" id="wsLive"><span class="ld"></span>Active</span>
+              </div>
+              <div class="pcard-meta">
+                <span class="pm"><span class="ic"><svg width="11" height="11" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/></svg></span>18 chats</span>
+                <span class="pm"><span class="ic"><svg width="11" height="11" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>24m ago</span>
+                <span class="pm"><span class="ic"><svg width="11" height="11" viewBox="0 0 24 24"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span>$4.12</span>
+                <span class="pcard-go">Continue <span class="ic"><svg width="11" height="11" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></span></span>
+              </div>
+            </div>
+            <div class="pcard">
+              <div class="pcard-top">
+                <span class="pcard-mono">D</span>
+                <span><div class="pcard-name">docs-site</div><div class="pcard-path">~/dev/docs-site</div></span>
+              </div>
+              <div class="pcard-meta">
+                <span class="pm"><span class="ic"><svg width="11" height="11" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/></svg></span>7 chats</span>
+                <span class="pm"><span class="ic"><svg width="11" height="11" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>2d ago</span>
+                <span class="pm"><span class="ic"><svg width="11" height="11" viewBox="0 0 24 24"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span>$1.08</span>
+              </div>
+            </div>
+            <div class="pcard">
+              <div class="pcard-top">
+                <span class="pcard-mono">A</span>
+                <span><div class="pcard-name">api-server</div><div class="pcard-path">~/dev/api-server</div></span>
+              </div>
+              <div class="pcard-meta">
+                <span class="pm"><span class="ic"><svg width="11" height="11" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/></svg></span>12 chats</span>
+                <span class="pm"><span class="ic"><svg width="11" height="11" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>5h ago</span>
+                <span class="pm"><span class="ic"><svg width="11" height="11" viewBox="0 0 24 24"><line x1="12" x2="12" y1="2" y2="22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></span>$2.87</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="ws-sech" data-ws>
+            <span class="ic"><svg width="12" height="12" viewBox="0 0 24 24"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/></svg></span>
+            Activity
+            <span class="sec-r"><span class="ws-mini on">7d</span><span class="ws-mini">30d</span><span class="ws-mini">All</span></span>
+          </div>
+          <div class="ws-act" data-ws>
+            <div class="act-l">
+              <div class="ws-hero-n">1,284</div>
+              <div class="ws-hero-s">messages exchanged</div>
+              <div class="ws-chart" id="wsChart">
+                <span class="ws-bar" data-h="34"></span><span class="ws-bar" data-h="58"></span><span class="ws-bar" data-h="42"></span><span class="ws-bar" data-h="76"></span><span class="ws-bar" data-h="64"></span><span class="ws-bar" data-h="88"></span><span class="ws-bar" data-h="52"></span>
+              </div>
+              <div class="ws-chart-cap"><span>Per day · last 7</span><span>peak 312</span></div>
+            </div>
+            <div class="act-r">
+              <div class="ws-tiles">
+                <div class="ws-tile"><div class="tv">96 <span class="delta">▲ 12%</span></div><div class="tl">sessions</div></div>
+                <div class="ws-tile"><div class="tv">3,412</div><div class="tl">tool calls</div></div>
+                <div class="ws-tile"><div class="tv">$41.20</div><div class="tl">spent</div></div>
+                <div class="ws-tile"><div class="tv">12d</div><div class="tl">streak · best 15</div></div>
+              </div>
+              <div class="ws-mix-l">Model mix · mostly Opus</div>
+              <div class="ws-mix">
+                <i style="width:58%;background:oklch(0.78 0.15 163)"></i><i style="width:34%;background:oklch(0.78 0.15 220)"></i><i style="width:8%;background:oklch(0.6 0.02 250)"></i>
+              </div>
+              <div class="ws-legend">
+                <span class="lg"><i style="background:oklch(0.78 0.15 163)"></i>Opus 58%</span>
+                <span class="lg"><i style="background:oklch(0.78 0.15 220)"></i>Sonnet 34%</span>
+                <span class="lg"><i style="background:oklch(0.6 0.02 250)"></i>Other 8%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CHAT page (hero + thread + composer) -->
+      <div class="page" id="pgChat">
+      <!-- HERO welcome -->
+      <div class="hero" id="hero">
+        <div class="hcol">
+          <div class="eyebrow"><span class="e-dot"></span>Still up</div>
+          <h1>What's next for <b>your&nbsp;project</b>?</h1>
+          <div class="meta">
+            <span class="branch"><span class="ic"><svg width="12" height="12" viewBox="0 0 24 24"><path d="M15 6a9 9 0 0 0-9 9V3"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/></svg></span>main</span>
+            <span class="files"><b>128</b> files</span>
+            <span class="path">…/workspace/your-project</span>
+            <span class="meta-right">
+              <span class="hbtn"><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg></span>Switch folder</span>
+              <span class="hbtn"><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg></span>Activity</span>
+            </span>
+          </div>
+          <div class="jump-lbl">Jump back in</div>
+          <div class="jump-row">
+            <div class="jcard"><span class="j-ic ic"><svg width="14" height="14" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/></svg></span><span><div class="j-t">Warm pool lifecycle</div><div class="j-s">24m ago</div></span></div>
+            <div class="jcard"><span class="j-ic ic"><svg width="14" height="14" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/></svg></span><span><div class="j-t">Streaming pipeline</div><div class="j-s">2h ago</div></span></div>
+            <div class="jcard"><span class="j-ic ic"><svg width="14" height="14" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/></svg></span><span><div class="j-t">MCP tool surface</div><div class="j-s">3h ago</div></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CONVERSATION (fades in over hero) -->
+      <div class="thread" id="thread" style="opacity:0">
+        <div class="col">
+          <div class="user" id="user"><div class="ubub">How does Rift keep the CLI process alive between turns?</div></div>
+
+          <div class="turn" id="turn">
+            <div class="body">
+              <!-- Live app: NO "Claude · Opus 4.8" head line. The turn leads
+                   straight with the ● status row. -->
+              <div class="ans">
+                <div class="node worked" data-n><span class="wk-dot"></span>Worked for 4s</div>
+                <div class="node p" data-n>Rift keeps <b>one persistent CLI child alive per chat session</b>. Let me trace how the pool hands a warm child back.</div>
+                <div class="node wline" data-n>
+                  <span class="wl-ic ic"><svg width="12" height="12" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><circle cx="12" cy="13" r="3"/></svg></span>
+                  <span class="wl-label">Searched warm_pool.rs</span>
+                  <span class="wl-chev ic"><svg width="13" height="13" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>
+                </div>
+                <div class="node p" data-n>The pool keeps a spare child parked so turn two skips the cold Node boot entirely.</div>
+                <div class="node wline" data-n>
+                  <span class="wl-ic ic"><svg width="12" height="12" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg></span>
+                  <span class="wl-label">Read warm_pool.rs</span>
+                  <span class="wl-chev ic"><svg width="13" height="13" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span>
+                </div>
+                <div class="node p" data-n>Here's the shape of it:</div>
+                <div class="node out-well" data-n>pub struct WarmPool {
+    <span class="ow-dim">// keyed by session — a matching SpawnKey reuses the child</span>
+    idle: HashMap&lt;SpawnKey, Child&gt;,
+    reader: JoinHandle&lt;()&gt;,   <span class="ow-dim">// parks on a channel</span>
+}</div>
+                <div class="node p" data-n>A long-lived <b>reader task</b> owns the child's stdout and <b>parks on a channel</b> between turns instead of dropping the pipe. The pool is keyed by <code>session_id</code>; a matching <code>SpawnKey</code> reuses the warm child, a changed one respawns with <code>--resume</code>. Measured: turn two runs <b>~1.4s warm vs ~3s cold</b>.</div>
+                <div class="foot" id="foot">
+                  <span class="done"><span class="ck ic"><svg width="13" height="13" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span> Done</span>
+                  <span class="sec">· 4s</span>
+                  <span class="cost">$0.41</span>
+                </div>
+                <div class="actions" id="actions">
+                  <span class="abtn"><span class="ai ic"><svg width="12" height="12" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg></span> Copy</span>
+                  <span class="abtn"><span class="ai ic"><svg width="12" height="12" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg></span> Retry</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- COMPOSER -->
+      <div class="composer-wrap">
+        <div class="composer">
+          <div class="cwell" id="cwell">
+            <div class="ctext" id="ctext"><span class="cph" id="cph">Ask Claude · <span class="k">/</span> for commands · <span class="k">@</span> to mention a file</span><span class="caret" id="caret" style="display:none"></span></div>
+            <div class="cbar">
+              <div class="cl">
+                <span class="perm"><span class="ic"><svg width="14" height="14" viewBox="0 0 24 24"><path d="M6 16c5 0 7-8 12-8a4 4 0 0 1 0 8c-5 0-7-8-12-8a4 4 0 1 0 0 8"/></svg></span>Bypass <span class="pchev ic"><svg width="11" height="11" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></svg></span></span>
+                <span class="cicon ic"><svg width="15" height="15" viewBox="0 0 24 24"><path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551"/></svg></span>
+                <span class="cicon ic"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><rect x="9" y="2" width="6" height="13" rx="3"/></svg></span>
+              </div>
+              <div class="cr">
+                <span class="model-pill"><span class="mdot"></span>Opus 4.8 <span class="meff">· Low</span> <span class="mchev ic"><svg width="11" height="11" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></svg></span></span>
+                <span class="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22 11 13 2 9 22 2z"/></svg></span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      </div><!-- /pgChat -->
+
+      <!-- AI HEALTH page -->
+      <div class="page" id="pgHealth">
+        <div class="ah-col">
+          <div data-ah>
+            <div class="ah-eyebrow">Experimental</div>
+            <div class="ah-title">AI Health</div>
+            <div class="ah-desc">See how you're using Claude through Rift — your plan limits, where your usage goes, and one-tap advice on how to stretch your plan further.</div>
+          </div>
+          <div class="ah-banner" data-ah>
+            <span class="ab-ic ic"><svg width="17" height="17" viewBox="0 0 24 24"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/></svg></span>
+            <span><div class="ab-t">Let Rift tune itself to how you work</div><div class="ab-s">Advice from your own Claude — nothing changes until you say so.</div></span>
+            <span class="ab-btn">Re-analyze <span class="ic"><svg width="12" height="12" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg></span></span>
+          </div>
+          <div class="ah-verdict" data-ah>
+            <span class="vd"></span><span class="vt">Healthy</span><span class="vn">Your setup looks well-tuned.</span>
+            <span class="vr"><i></i><i></i><i></i></span>
+          </div>
+          <div class="ah-card" data-ah>
+            <div class="ah-sum">One small tweak would stretch your plan further this week.</div>
+            <div class="ah-rec">
+              <div class="rh"><span class="ah-chip">Medium</span><span class="rt">Drop default effort to Medium</span></div>
+              <div class="rd">Most of your recent turns are short edits — High effort adds wait without better answers.</div>
+              <div class="ah-apply" id="ahApplyRow">
+                <span class="from-to">High <span class="arr">→</span> Medium</span>
+                <span class="ap-btn" id="ahApplyBtn">Apply</span>
+              </div>
+              <div class="ah-applied" id="ahAppliedRow">
+                <span class="ok-t"><span class="ic"><svg width="12" height="12" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span>Applied</span>
+                <span class="undo"><span class="ic"><svg width="11" height="11" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></svg></span>Undo</span>
+              </div>
+            </div>
+          </div>
+          <div class="ah-card" data-ah>
+            <div class="ah-ch"><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></svg></span>Plan limits<span class="when">updated 2m ago</span></div>
+            <div class="ah-row">
+              <div class="rl"><b>5-hour window</b><span>resets in 2h 14m</span><span class="pct">34%</span></div>
+              <div class="ah-track"><i data-bar="34"></i></div>
+            </div>
+            <div class="ah-row">
+              <div class="rl"><b>Weekly · all models</b><span>resets Thu, Jul 9</span><span class="pct">52%</span></div>
+              <div class="ah-track"><i data-bar="52"></i></div>
+            </div>
+          </div>
+          <div class="ah-card" data-ah>
+            <div class="ah-ch"><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span>Where your usage goes</div>
+            <div class="ah-tiles">
+              <div class="ah-tile"><div class="tv">42</div><div class="tl">conversations</div></div>
+              <div class="ah-tile"><div class="tv">1,284</div><div class="tl">messages</div></div>
+              <div class="ah-tile"><div class="tv">3,412</div><div class="tl">tool calls</div></div>
+              <div class="ah-tile"><div class="tv">$41.20</div><div class="tl">est. spend</div></div>
+              <div class="ah-tile"><div class="tv">Opus</div><div class="tl">most used</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SETTINGS page -->
+      <div class="page" id="pgSettings">
+        <div class="st-col">
+          <div data-st>
+            <div class="st-hero-top">
+              <div class="ah-eyebrow">Settings</div>
+              <div class="st-chips">
+                <span class="st-chip">local workspace</span>
+                <span class="st-chip"><span class="ic"><svg width="11" height="11" viewBox="0 0 24 24"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg></span>0.94.0 · dev</span>
+              </div>
+            </div>
+            <div class="ah-title">Appearance</div>
+            <div class="ah-desc">Accent color, texture, and density — every change applies instantly.</div>
+            <div class="st-tabs">
+              <span class="st-tab on"><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></svg></span>Appearance</span>
+              <span class="st-tab"><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/></svg></span>Claude <span class="dotb"></span></span>
+              <span class="st-tab"><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24"><path d="M12 19v3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><rect x="9" y="2" width="6" height="13" rx="3"/></svg></span>Speech</span>
+              <span class="st-tab"><span class="ic"><svg width="13" height="13" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></span>About</span>
+            </div>
+          </div>
+          <div class="st-card" data-st>
+            <div class="st-ct"><span class="cdot"></span>Accent color</div>
+            <div class="st-cd">The highlight color used across Rift — buttons, toggles, and selection. Pick a swatch or dial in your own hue.</div>
+            <div class="st-swatches">
+              <span class="sw" style="background:oklch(.72 .17 25)"></span>
+              <span class="sw" style="background:oklch(.72 .17 55)"></span>
+              <span class="sw" style="background:oklch(.72 .17 95)"></span>
+              <span class="sw ring" id="swEm" style="background:oklch(.72 .17 163)"><span class="sw-ck" id="ckEm" style="opacity:1"><svg width="13" height="13" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span></span>
+              <span class="sw" style="background:oklch(.72 .17 195)"></span>
+              <span class="sw" style="background:oklch(.72 .17 230)"></span>
+              <span class="sw" id="swVi" style="background:oklch(.72 .17 300)"><span class="sw-ck" id="ckVi"><svg width="13" height="13" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span></span>
+              <span class="sw" style="background:oklch(.72 .17 345)"></span>
+            </div>
+            <div class="st-hue">
+              <div class="hue-bar"><span class="hue-knob" id="hueKnob" style="left:39.7%"></span></div>
+              <span class="hue-v" id="hueV">163°</span>
+            </div>
+            <div class="st-row">
+              <div><div class="rt">Vividness</div><div class="rs">How saturated the accent reads across the app.</div></div>
+              <div class="rr"><span class="st-range"><i></i><span class="kn"></span></span><span class="st-range-v">55%</span></div>
+            </div>
+          </div>
+          <div class="st-card" data-st>
+            <div class="st-ct">Background texture</div>
+            <div class="st-cd">A faint pattern behind the workspace — hover a tile to preview it live. Blueprint and Glow follow your accent color.</div>
+            <div class="st-tiles">
+              <div class="st-tile on"><div class="tp dots"></div><div class="tn">Dots</div></div>
+              <div class="st-tile"><div class="tp dense"></div><div class="tn">Dense</div></div>
+              <div class="st-tile"><div class="tp margins"></div><div class="tn">Margins</div></div>
+              <div class="st-tile"><div class="tp grid-t"></div><div class="tn">Grid</div></div>
+              <div class="st-tile"><div class="tp blueprint"></div><div class="tn">Blueprint</div></div>
+              <div class="st-tile"><div class="tp lines"></div><div class="tn">Lines</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SPLIT-PANE page -->
+      <div class="page" id="pgSplit">
+        <div class="sp-wrap">
+          <div class="sp-pane focused">
+            <div class="sp-head">
+              <span class="idx">1</span><span class="pt">Warm pool lifecycle</span>
+              <span class="chipp"><span class="ic"><svg width="9" height="9" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg></span>your-project</span>
+              <span class="chipp"><span class="ctxb"><i style="width:42%"></i></span>42%</span>
+              <span class="px ic"><svg width="12" height="12" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span>
+            </div>
+            <div class="sp-body">
+              <div class="sp-user"><div class="ub">How does Rift keep the CLI process alive between turns?</div></div>
+              <div class="sp-worked"><span class="wk-dot"></span>Worked for 4s</div>
+              <div class="sp-p">One persistent CLI child per chat session — the pool parks a <b>warm child</b> between turns, so turn two skips the cold boot.</div>
+              <div class="sp-wline"><span class="ic"><svg width="11" height="11" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg></span>Read warm_pool.rs<span class="ic" style="color:var(--fg-faint)"><svg width="11" height="11" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></div>
+              <div class="sp-out">pub struct WarmPool {
+    <span class="ow-dim">// keyed by session — reuse the child</span>
+    idle: HashMap&lt;SpawnKey, Child&gt;,
+}</div>
+              <div class="sp-p">A matching <code>SpawnKey</code> reuses the warm child; a changed one respawns with <code>--resume</code>.</div>
+            </div>
+            <div class="sp-comp"><div class="sp-cwell"><div class="sph">Ask Claude…</div>
+              <div class="sp-cbar"><span class="mp"><span class="mdot"></span>Opus 4.8 · Low</span><span class="snd"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22 11 13 2 9 22 2z"/></svg></span></div>
+            </div></div>
+          </div>
+          <div class="sp-divider"></div>
+          <div class="sp-pane dim" id="spPane2">
+            <div class="sp-head">
+              <span class="idx">2</span><span class="pt">Streaming pipeline</span>
+              <span class="chipp"><span class="ic"><svg width="9" height="9" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg></span>docs-site</span>
+              <span class="wk" id="spWk"><span class="wd"></span>working</span>
+              <span class="px ic"><svg width="12" height="12" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></span>
+            </div>
+            <div class="sp-body">
+              <div class="sp-user"><div class="ub">Add retry logic to the stream reader — same backoff we use in the pool.</div></div>
+              <div class="sp-worked" id="spWorking"><span class="wk-dot" id="spWkDot"></span><span id="spWkTxt">Working… 6s</span></div>
+              <div class="sp-wline" id="spWl1"><span class="ic"><svg width="11" height="11" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg></span>Searched stream.rs<span class="ic" style="color:var(--fg-faint)"><svg width="11" height="11" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></div>
+              <div class="sp-wline" id="spWl2"><span class="ic"><svg width="11" height="11" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></svg></span>Read retry.rs<span class="ic" style="color:var(--fg-faint)"><svg width="11" height="11" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></span></div>
+              <div class="sp-p" id="spP2">Adding exponential backoff with jitter to <code>StreamReader::read_line</code> — mirroring the pool's retry ladder…</div>
+            </div>
+            <div class="sp-comp"><div class="sp-cwell"><div class="sph">Ask Claude…</div>
+              <div class="sp-cbar"><span class="mp"><span class="mdot"></span>Sonnet 5 · Medium</span><span class="snd"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2 11 13"/><path d="M22 2 15 22 11 13 2 9 22 2z"/></svg></span></div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STATUSBAR -->
+    <div class="statusbar">
+      <span class="si"><span class="sdot"></span>Claude</span>
+      <span class="ssep"></span>
+      <span class="si">your-project</span>
+      <span class="si"><span class="ic"><svg width="11" height="11" viewBox="0 0 24 24"><path d="M15 6a9 9 0 0 0-9 9V3"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/></svg></span>main</span>
+      <span class="ssep"></span>
+      <span class="si">Wed, Jul 8</span>
+      <span class="sright">
+        <span class="rl"><span class="rl-t">5h</span><span class="rl-bar"><i style="width:34%"></i></span></span>
+        <span class="rl"><span class="rl-t">7d</span><span class="rl-bar"><i style="width:52%"></i></span></span>
+      </span>
+    </div>
+  </div>
+
+  <!-- outro: logo lockup -->
+  <div id="outro">
+    <div>
+      <div class="o-lock" id="oLock">
+        <img class="o-logo" id="oLogo" src="rift-logo.png" alt="Rift" />
+        <div class="o-wordwrap"><div class="o-word" id="oWord">Rift</div></div>
+      </div>
+      <div class="o-tag" id="oTag">Claude Code as a native Windows desktop app</div>
+    </div>
+  </div>
+
+  <div id="vignette"></div>
+</div>
+
+<script>
+/* ─── Deterministic timeline driven by seek(t). No CSS keyframes for the
+   choreography (only the caret blink). t in seconds. ──────────────────── */
+const $=(s)=>document.querySelector(s);
+const stage=$('#stage'),bloom=$('#bloom'),mark=$('#mark'),app=$('#app'),outro=$('#outro');
+const hero=$('#hero'),thread=$('#thread'),user=$('#user'),turn=$('#turn'),
+      foot=$('#foot'),actions=$('#actions'),cwell=$('#cwell'),ctext=$('#ctext'),cph=$('#cph'),
+      caret=$('#caret'),tbTitle=$('#tbTitle');
+const nodes=[...document.querySelectorAll('.node[data-n]')];
+const wordmark=document.querySelector('#mark .wordmark');
+
+const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
+const lerp=(a,b,t)=>a+(b-a)*t;
+const easeOut=(x)=>1-Math.pow(1-x,3);
+const easeInOut=(x)=>x<.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;
+const easeOutBack=(x)=>{const c1=1.70158,c3=c1+1;return 1+c3*Math.pow(x-1,3)+c1*Math.pow(x-1,2)};
+const P=(t,t0,t1,ease=easeOut)=>ease(clamp((t-t0)/(t1-t0)));
+
+const PROMPT="How does Rift keep the CLI process alive between turns?";
+
+// sidebar conversation rows (placeholder titles — zero PII)
+const CONV=[
+  ["Warm pool lifecycle","core","24m",true],
+  ["Streaming pipeline","core","31m",false],
+  ["MCP tool surface","core","34m",false],
+  ["Turn reconciliation","core","37m",false],
+  ["Composer state model","ui","42m",false],
+  ["Permission modes","ui","49m",false],
+  ["Local git runner","core","1h",false],
+  ["Self-update flow","core","2h",false],
+  ["Diagnostics bus","core","2h",false],
+  ["Effort dial mapping","ui","3h",false],
+];
+const convHtml=CONV.map(([t,tag,time,on])=>
+  `<div class="crow${on?' active':''}"><span class="cr-t">${t}</span><span class="cr-tag">${tag}</span><span class="cr-time">${time}</span></div>`
+).join('');
+document.getElementById('convList').innerHTML=convHtml;
+
+function setTyped(str){
+  while(ctext.firstChild && ctext.firstChild!==caret){ ctext.removeChild(ctext.firstChild); }
+  ctext.insertBefore(document.createTextNode(str), caret);
+}
+
+/* ═══ TOUR TIMELINE v3 — 8 scenes, 48.5s (owner reorder: split follows chat) ═══
+   0.0–2.4  intro logo          3.0–9.25  Workspace page
+   9.25–14  project setup/hero  14–24.9   work turn (tools stream)
+   24.9–30.4 split-pane         30.4–36.4 AI Health
+   36.4–42.4 Settings (hue)     42.4–48.5 outro: fold into logo → lockup */
+window.__probeErrs=[];window.addEventListener('error',e=>window.__probeErrs.push(String(e.message)));
+
+const pages={ws:$('#pgWorkspace'),chat:$('#pgChat'),ah:$('#pgHealth'),st:$('#pgSettings'),sp:$('#pgSplit')};
+const tourChip=$('#tourChip'),tcText=$('#tcText');
+const fns=[$('#fn0'),$('#fn1'),$('#fn2'),$('#fn3')];
+const wsItems=[...document.querySelectorAll('#pgWorkspace [data-ws]')];
+const ahItems=[...document.querySelectorAll('#pgHealth [data-ah]')];
+const stItems=[...document.querySelectorAll('#pgSettings [data-st]')];
+const wsBars=[...document.querySelectorAll('#wsChart .ws-bar')];
+const ahBars=[...document.querySelectorAll('#pgHealth [data-bar]')];
+const hueKnob=$('#hueKnob'),hueV=$('#hueV'),ckEm=$('#ckEm'),ckVi=$('#ckVi'),swEm=$('#swEm'),swVi=$('#swVi');
+const ahApplyRow=$('#ahApplyRow'),ahAppliedRow=$('#ahAppliedRow'),ahApplyBtn=$('#ahApplyBtn');
+const spPane2=$('#spPane2'),spWkDot=$('#spWkDot'),spWkTxt=$('#spWkTxt'),spWl1=$('#spWl1'),spWl2=$('#spWl2'),spWk=$('#spWk');
+const wsLive=$('#wsLive'),wsCardActive=$('#wsCardActive');
+const rootEl=document.documentElement;
+const oLock=$('#oLock'),oLogo=$('#oLogo'),oWord=$('#oWord'),oTag=$('#oTag');
+const pulse=(t,at,w=0.35)=>{const x=clamp((t-at)/w);return Math.sin(x*Math.PI);};
+
+const CAPTIONS=[
+  {a:3.7,  b:8.3,  txt:"Every project, one workspace."},
+  {a:9.9,  b:13.1, txt:"Point it at a folder — that’s the whole setup."},
+  {a:16.3, b:19.9, txt:"Every tool call, visible as it happens."},
+  {a:25.9, b:29.4, txt:"Run a second session right beside it."},
+  {a:31.0, b:35.3, txt:"Built-in advice that stretches your plan."},
+  {a:37.0, b:41.3, txt:"Make it yours — changes apply instantly."},
+];
+
+function seek(t){
+  // ── intro logo (0 → 2.4) ──
+  {
+    const s=lerp(.7,1,P(t,0,1.1,easeOutBack));
+    const mo=P(t,0,.55)*(1-P(t,1.5,1.9));
+    mark.style.opacity=mo;
+    mark.style.transform=`translate(-50%,-50%) scale(${s})`;
+    wordmark.style.opacity=P(t,.5,1.0)*(1-P(t,1.5,1.9));
+    bloom.style.opacity=(lerp(0,1,P(t,.3,1.9))+.35*pulse(t,43.2,.9))*(1-P(t,46.9,48.1));
+    bloom.style.transform=`translate(-50%,-50%) scale(${lerp(.6,1,P(t,.3,2.7))})`;
+  }
+
+  // ── app window: assemble (1.6→2.7) · push-in (20.6→24.8) · exit (42.55→) ──
+  {
+    const ap=P(t,1.6,2.7,easeOut);
+    const zoom=P(t,20.6,22.5,easeInOut)*(1-P(t,23.5,24.6));
+    const out=P(t,42.45,43.2,easeInOut);
+    let sc=lerp(.93,1,ap)*(1+0.045*zoom);
+    if(out>0){ sc=lerp(sc,.10,out); app.style.transformOrigin='50% 50%'; }
+    else app.style.transformOrigin='50% 60%';
+    app.style.opacity=ap*(1-P(t,42.7,43.15));
+    app.style.transform=`translate(-50%,-50%) scale(${sc})`;
+  }
+
+  // page layer helper: fade/slide in + fade out
+  const page=(el,i0,i1,o0,o1)=>{
+    const v=P(t,i0,i1)*(1-P(t,o0,o1));
+    el.style.opacity=v;
+    el.style.transform=`translateY(${lerp(10,0,P(t,i0,i1))}px)`;
+    return v;
+  };
+
+  // ── WORKSPACE (3.0 → 9.25) ──
+  {
+    page(pages.ws,3.0,3.5,8.8,9.25);
+    wsItems.forEach((el,i)=>{const p=P(t,3.15+i*.14,3.6+i*.14,easeOut);el.style.opacity=p;el.style.transform=`translateY(${lerp(8,0,p)}px)`;});
+    wsBars.forEach((el,i)=>{el.style.height=(Number(el.dataset.h)*P(t,3.9+i*.07,4.6+i*.07,easeOut))+'%';});
+    wsLive.style.opacity=String(.72+.28*Math.abs(Math.sin(t*2.6)));
+    wsCardActive.style.transform=`scale(${1-.02*pulse(t,8.1,.5)})`;
+  }
+
+  // ── CHAT: hero + typing (9.25 → 14.1) ──
+  {
+    page(pages.chat,9.25,9.7,24.9,25.35);
+    hero.style.opacity=P(t,9.35,9.8)*(1-P(t,13.95,14.35));
+    if(t>=11.25&&t<14.1){ cwell.classList.add('live'); caret.style.display='inline-block'; }
+    else { cwell.classList.remove('live'); caret.style.display='none'; }
+    const chars=Math.round(clamp((t-11.4)/2.1)*PROMPT.length);
+    if(t>=11.4&&t<14.1){ cph.style.display='none'; setTyped(PROMPT.slice(0,chars)); }
+    else { cph.style.display=''; setTyped(''); }
+    document.querySelector('.send').style.transform=(t>=13.8&&t<14.0)?'scale(.85)':'scale(1)';
+  }
+
+  // ── WORK TURN: answer streams (14.05 → 25) ──
+  {
+    thread.style.opacity=P(t,14.05,14.45);
+    const up=P(t,14.15,14.5,easeOut);
+    user.style.opacity=up; user.style.transform=`translateY(${lerp(8,0,up)}px)`;
+    turn.style.opacity=P(t,14.7,15.0);
+    const start=15.1, step=.58;
+    nodes.forEach((el,i)=>{
+      const np=P(t, start+i*step, start+i*step+.45, easeOut);
+      el.style.opacity=np;
+      el.style.transform=`translateY(${lerp(6,0,np)}px)`;
+    });
+    foot.style.opacity=P(t,20.3,20.7,easeOut);
+    actions.style.opacity=P(t,20.6,20.95,easeOut);
+  }
+
+  // ── AI HEALTH (30.4 → 36.4) ──
+  {
+    page(pages.ah,30.4,30.9,35.95,36.4);
+    ahItems.forEach((el,i)=>{const p=P(t,30.55+i*.16,31.0+i*.16,easeOut);el.style.opacity=p;el.style.transform=`translateY(${lerp(8,0,p)}px)`;});
+    ahBars.forEach((el)=>{el.style.width=(Number(el.dataset.bar)*P(t,31.4,32.5,easeOut))+'%';});
+    const applied=t>=34.25;
+    ahApplyRow.style.display=applied?'none':'flex';
+    ahAppliedRow.style.display=applied?'flex':'none';
+    ahAppliedRow.style.opacity=P(t,34.25,34.5);
+    ahApplyBtn.style.transform=`scale(${1-.14*pulse(t,34.0,.4)})`;
+  }
+
+  // ── SETTINGS (36.4 → 42.4) — the live accent-hue shift ──
+  {
+    page(pages.st,36.4,36.9,41.95,42.4);
+    stItems.forEach((el,i)=>{const p=P(t,36.55+i*.18,37.0+i*.18,easeOut);el.style.opacity=p;el.style.transform=`translateY(${lerp(8,0,p)}px)`;});
+    const pShift=P(t,38.0,38.75,easeInOut)*(1-P(t,40.3,41.0,easeInOut));
+    const hue=lerp(163,300,pShift);
+    rootEl.style.setProperty('--accent-h',String(hue));
+    hueV.textContent=Math.round(hue)+'°';
+    hueKnob.style.left=(((hue-20)/360)*100)+'%';
+    ckEm.style.opacity=String(1-pShift); ckVi.style.opacity=String(pShift);
+    swEm.classList.toggle('ring',pShift<.5); swVi.classList.toggle('ring',pShift>=.5);
+    swVi.style.transform=`scale(${1-.12*pulse(t,37.95,.35)})`;
+    swEm.style.transform=`scale(${1-.12*pulse(t,40.25,.35)})`;
+  }
+
+  // ── SPLIT-PANE (24.9 → 30.4) — the finished chat becomes pane 1 ──
+  {
+    page(pages.sp,24.9,25.35,29.95,30.4);
+    const p2=P(t,25.45,26.25,easeOut);
+    spPane2.style.transform=`translateX(${lerp(106,0,p2)}%)`;
+    spWkDot.style.opacity=String(.55+.45*Math.abs(Math.sin(t*3.4)));
+    spWk.style.opacity=String(.7+.3*Math.abs(Math.sin(t*3.4)));
+    spWkTxt.textContent='Working… '+Math.max(4,Math.round(t-21))+'s';
+    spWl1.style.opacity=P(t,26.7,27.1);
+    spWl2.style.opacity=P(t,27.7,28.1);
+    document.getElementById('spP2').style.opacity=P(t,28.4,28.9);
+  }
+
+  // ── captions (tour chip) ──
+  {
+    let cap=null;
+    for(const c of CAPTIONS){ if(t>=c.a-0.5&&t<=c.b+0.6){ cap=c; break; } }
+    if(cap){
+      tcText.textContent=cap.txt;
+      tourChip.style.top=(t>=24.9&&t<30.4)?'340px':'16px';
+      tourChip.style.opacity=P(t,cap.a,cap.a+.45)*(1-P(t,cap.b,cap.b+.45));
+      tourChip.style.transform=`translateX(-50%) translateY(${lerp(-6,0,P(t,cap.a,cap.a+.45))}px)`;
+    } else tourChip.style.opacity=0;
+  }
+
+  // ── topbar title + foot-nav active ──
+  tbTitle.textContent = t<9.25?'Workspace':(t<14.8?'New chat':(t<24.9?'Warm Pool · Process Lifecycle':(t<30.4?'Split editor':(t<36.4?'AI Health':'Settings'))));
+  const fi = t<9.25?0:(t<30.4?1:(t<36.4?2:3));
+  fns.forEach((el,i)=>el.classList.toggle('on',i===fi));
+
+  // ── OUTRO (42.7 → 48.5): window folds into the mark → wordmark unfolds out ──
+  {
+    outro.style.opacity=P(t,42.8,43.2);
+    const om=P(t,42.9,43.55,easeOutBack);
+    oLogo.style.opacity=P(t,42.9,43.3);
+    oLogo.style.transform=`scale(${lerp(.55,1,om)})`;
+    const uw=P(t,43.75,44.6,easeInOut);
+    oWord.style.transform=`translateX(${lerp(-105,0,uw)}%)`;
+    oLock.style.transform=`translateX(${lerp(98,0,uw)}px)`;
+    const tg=P(t,44.75,45.35,easeOut);
+    oTag.style.opacity=tg;
+    oTag.style.transform=`translateY(${lerp(10,0,tg)}px)`;
+  }
+}
+
+const DURATION=48.5;
+window.__rift={ seek, DURATION };
+
+if(!location.search.includes('paused')){
+  const t0=performance.now();
+  (function loop(now){
+    let t=((now-t0)/1000);
+    if(t>DURATION+1.2){ location.reload(); return; }
+    seek(Math.min(t,DURATION));
+    requestAnimationFrame(loop);
+  })(t0);
+}
+
+function fit(){
+  const s=Math.min(innerWidth/1920, innerHeight/1080);
+  stage.style.transform=`translate(-50%,-50%) scale(${s})`;
+}
+addEventListener('resize',fit); fit();
+seek(0);
+</script>
+</body>
+</html>

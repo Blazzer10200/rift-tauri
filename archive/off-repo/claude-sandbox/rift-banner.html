@@ -1,0 +1,31 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:1280px;height:640px;overflow:hidden}
+body{font-family:'Segoe UI',system-ui,sans-serif;
+  background:radial-gradient(1200px 700px at 78% -10%,#2b1b5e 0%,#0e1020 45%,#07080f 100%);
+  color:#fff;display:flex;flex-direction:column;justify-content:center;padding:0 96px;position:relative}
+.glow{position:absolute;border-radius:50%;filter:blur(80px);opacity:.55}
+.g1{width:520px;height:520px;background:#6d28d9;top:-160px;right:-120px}
+.g2{width:360px;height:360px;background:#2563eb;bottom:-160px;left:160px;opacity:.35}
+.wm{font-size:148px;font-weight:800;letter-spacing:-4px;line-height:1;
+  background:linear-gradient(92deg,#fff 0%,#c4b5fd 55%,#93c5fd 100%);
+  -webkit-background-clip:text;background-clip:text;color:transparent;position:relative}
+.tag{font-size:36px;font-weight:500;color:#cbd5e1;margin-top:22px;max-width:880px;line-height:1.32;position:relative}
+.b{color:#fff;font-weight:700}
+.chips{display:flex;gap:14px;margin-top:40px;position:relative}
+.chip{font-size:21px;font-weight:600;padding:11px 22px;border-radius:999px;
+  border:1px solid rgba(255,255,255,.16);background:rgba(255,255,255,.05);color:#e2e8f0}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:9px;vertical-align:middle}
+.foot{position:absolute;bottom:42px;right:96px;font-size:20px;color:#64748b;font-weight:500}
+</style></head><body>
+<div class="glow g1"></div><div class="glow g2"></div>
+<div class="wm">Rift</div>
+<div class="tag">A <span class="b">local-workspace coding assistant</span> for Windows.<br>Point it at a folder and chat with Claude — it reads, edits, and runs git in place.</div>
+<div class="chips">
+  <span class="chip"><span class="dot" style="background:#6d28d9"></span>Tauri 2</span>
+  <span class="chip"><span class="dot" style="background:#ff3e00"></span>SvelteKit</span>
+  <span class="chip"><span class="dot" style="background:#dea584"></span>Rust</span>
+  <span class="chip"><span class="dot" style="background:#2563eb"></span>Self-updating</span>
+</div>
+<div class="foot">github.com/Blazzer10200</div>
+</body></html>

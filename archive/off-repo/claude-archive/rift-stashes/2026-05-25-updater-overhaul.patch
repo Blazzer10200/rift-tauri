@@ -1,0 +1,238 @@
+diff --git a/src-tauri/src/assistant/mod.rs b/src-tauri/src/assistant/mod.rs
+index e4735551..368deff9 100644
+--- a/src-tauri/src/assistant/mod.rs
++++ b/src-tauri/src/assistant/mod.rs
+@@ -823,6 +823,27 @@ pub fn cleanup_mcp_config_on_exit() {
+     }
+ }
+ 
++/// Best-effort `taskkill /F /T` on every tracked claude CLI child PID. Used
++/// before `app.exit(0)` during an update apply so Velopack's Update.exe doesn't
++/// trip on a child process holding a file handle inside the install dir.
++/// Errors swallowed — we're about to exit anyway.
++#[cfg(target_os = "windows")]
++pub fn kill_child_processes_on_exit() {
++    use std::os::windows::process::CommandExt;
++    const CREATE_NO_WINDOW: u32 = 0x08000000;
++    let pids: Vec<u32> = with_session_pids(|m| m.values().copied().collect()).unwrap_or_default();
++    if pids.is_empty() { return; }
++    log::info!("update: taskkill /F /T on {} claude CLI children before exit", pids.len());
++    for pid in pids {
++        let _ = std::process::Command::new("taskkill")
++            .args(["/F", "/T", "/PID", &pid.to_string()])
++            .creation_flags(CREATE_NO_WINDOW)
++            .stdout(Stdio::null())
++            .stderr(Stdio::null())
++            .status();
++    }
++}
++
+ /// Phase E4: housekeeping sweep for CLI JSONLs that belong to sessions
+ /// retired by compaction. After a compact, the old `<uuid>.jsonl` under
+ /// `~/.claude/projects/<cwd-hash>/` is dead weight — Rift's own convo JSON
+diff --git a/src-tauri/src/commands/update.rs b/src-tauri/src/commands/update.rs
+index 9d4e3916..3c2edf1a 100644
+--- a/src-tauri/src/commands/update.rs
++++ b/src-tauri/src/commands/update.rs
+@@ -51,9 +51,14 @@ pub async fn download_update(
+ }
+ 
+ /// Stop autosync + tunnel, then apply previously-downloaded update + relaunch.
+-/// Velopack's `apply_updates_and_restart` exits on success.
++/// Velopack-rust's `apply_updates_and_restart` only *spawns* `Update.exe` with
++/// `--waitPid <our pid>` — it does NOT exit the current process. If we don't
++/// call `app.exit(0)` ourselves, Update.exe sits idle waiting for our PID to
++/// die and the user sees an indefinite "Applying..." until they manually quit.
++/// That was the multi-minute apply hang reported on the user side.
+ #[tauri::command]
+ pub async fn apply_pending_update(
++    app: tauri::AppHandle,
+     state: tauri::State<'_, AutoSyncState>,
+     tunnel_state: tauri::State<'_, TunnelState>,
+     svc: tauri::State<'_, std::sync::Arc<update_service::UpdateService>>,
+@@ -73,5 +78,22 @@ pub async fn apply_pending_update(
+     let svc = svc.inner().clone();
+     tokio::task::spawn_blocking(move || svc.apply())
+         .await
+-        .map_err(|e| format!("apply task: {e}"))?
++        .map_err(|e| format!("apply task: {e}"))??;
++
++    // Kill any lingering child processes (claude CLI etc.) so Update.exe
++    // doesn't trip on locked file handles during the swap.
++    #[cfg(target_os = "windows")]
++    crate::assistant::kill_child_processes_on_exit();
++
++    // Give Tauri ~150ms to flush the final IPC ack so the UI doesn't see a
++    // raw "channel closed" error, then exit so Update.exe (waiting on our PID)
++    // can proceed with the swap + relaunch immediately.
++    let app_handle = app.clone();
++    tokio::spawn(async move {
++        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
++        log::info!("apply_pending_update: exiting process so Update.exe can swap binary");
++        app_handle.exit(0);
++    });
++
++    Ok(())
+ }
+diff --git a/src-tauri/src/update_service.rs b/src-tauri/src/update_service.rs
+index 8c96e7b0..67c0a2fa 100644
+--- a/src-tauri/src/update_service.rs
++++ b/src-tauri/src/update_service.rs
+@@ -137,6 +137,22 @@ impl UpdateService {
+             let info = g.pending.clone().ok_or_else(|| "no pending update — call check first".to_string())?;
+             (mgr, info)
+         };
++        // Log which path velopack picked so post-mortems on slow updates can
++        // tell delta from full nupkg without rummaging through %LocalAppData%.
++        if info.BaseRelease.is_some() && !info.DeltasToTarget.is_empty() {
++            log::info!(
++                "UpdateService.download: DELTA path — {} delta(s) from base {} to {}",
++                info.DeltasToTarget.len(),
++                info.BaseRelease.as_ref().map(|b| b.Version.as_str()).unwrap_or("?"),
++                info.TargetFullRelease.Version,
++            );
++        } else {
++            log::info!(
++                "UpdateService.download: FULL path — {} ({} bytes). No local base or no delta chain available.",
++                info.TargetFullRelease.FileName,
++                info.TargetFullRelease.Size,
++            );
++        }
+         mgr.download_updates(&info, Some(progress))
+             .map_err(|e| format!("download_updates: {e}"))
+     }
+diff --git a/src/lib/components/dialogs/UpdateDialog.svelte b/src/lib/components/dialogs/UpdateDialog.svelte
+index 59ec8457..570bee60 100644
+--- a/src/lib/components/dialogs/UpdateDialog.svelte
++++ b/src/lib/components/dialogs/UpdateDialog.svelte
+@@ -153,7 +153,7 @@
+               </div>
+               <div class="progress-foot">
+                 {#if updates.state === "applying"}
+-                  Closing Rift, swapping the binary, relaunching.
++                  {updates.applyingHint}
+                 {:else}
+                   {updates.sizeLabel
+                     ? `${(updates.info?.sizeBytes ? (updates.info.sizeBytes * updates.progress / 100 / (1024*1024)).toFixed(1) : "0.0")} of ${updates.sizeLabel}`
+@@ -250,6 +250,11 @@
+         {:else if updates.state === "applying"}
+           <span class="foot-status">Rift is closing…</span>
+           <div class="foot-spacer"></div>
++          {#if updates.applyingStuck}
++            <button class="btn" type="button" onclick={() => window.close()} title="Force-quit Rift so the installer can finish">
++              Force quit
++            </button>
++          {/if}
+ 
+         {:else}
+           <button class="btn ghost" type="button" onclick={() => updates.close()}>Close</button>
+diff --git a/src/lib/state/updates.svelte.ts b/src/lib/state/updates.svelte.ts
+index b1b0bc89..ec31d312 100644
+--- a/src/lib/state/updates.svelte.ts
++++ b/src/lib/state/updates.svelte.ts
+@@ -55,6 +55,11 @@ class UpdateStore {
+   dialogOpen = $state(false);
+   toastVisible = $state(false);
+   dismissedVersion = $state<string | null>(loadDismissed());
++  /** Wall-clock ms since `applying` started. Drives the "AV may be scanning"
++   *  + "force-quit" escape-hatch hints in the dialog after long apply phases. */
++  applyingElapsedMs = $state(0);
++  private applyingTimer: ReturnType<typeof setInterval> | null = null;
++  private applyingStartedAt = 0;
+ 
+   private progressUnlisten: UnlistenFn | null = null;
+   private downloadedUnlisten: UnlistenFn | null = null;
+@@ -127,16 +132,57 @@ class UpdateStore {
+     }
+   }
+ 
+-  /** Apply the staged download + restart. Control never returns on success. */
++  /** Apply the staged download + restart. Backend kills children, then exits
++   *  this process so Velopack's Update.exe can swap the binary. The invoke
++   *  returns Ok ~150ms before exit; control rarely returns past that. */
+   async applyNow() {
+     if (this.state !== "ready") return;
+     this.state = "applying";
+     this.error = "";
++    this.startApplyingTimer();
+     try {
+       await invoke<void>("apply_pending_update");
++      // If we're still here a few seconds after the invoke resolves, the
++      // backend's `app.exit(0)` didn't take effect — surface that as an error
++      // so the user isn't left staring at a phantom "Applying..." forever.
++      setTimeout(() => {
++        if (this.state === "applying" && this.applyingElapsedMs > 10_000) {
++          this.error = "Update.exe was launched but Rift didn't exit. Try quitting Rift manually to finish the swap.";
++        }
++      }, 6_000);
+     } catch (e) {
+       this.error = String(e);
+       this.state = "error";
++      this.stopApplyingTimer();
++    }
++  }
++
++  /** Hint copy for the apply phase. Switches at 20s + 90s thresholds. */
++  get applyingHint(): string {
++    const s = Math.floor(this.applyingElapsedMs / 1000);
++    if (s < 20) return "Closing Rift, swapping the binary, relaunching.";
++    if (s < 90) return "Still working — Windows Defender or your antivirus may be scanning the new files. This is normal on first apply.";
++    return "This is taking longer than usual. You can force-quit Rift; the installer will finish the swap and relaunch on its own.";
++  }
++
++  /** True once we've crossed the 90s mark — UI offers a "force quit" button. */
++  get applyingStuck(): boolean {
++    return this.state === "applying" && this.applyingElapsedMs >= 90_000;
++  }
++
++  private startApplyingTimer() {
++    this.stopApplyingTimer();
++    this.applyingStartedAt = Date.now();
++    this.applyingElapsedMs = 0;
++    this.applyingTimer = setInterval(() => {
++      this.applyingElapsedMs = Date.now() - this.applyingStartedAt;
++    }, 500);
++  }
++
++  private stopApplyingTimer() {
++    if (this.applyingTimer !== null) {
++      clearInterval(this.applyingTimer);
++      this.applyingTimer = null;
+     }
+   }
+ 
+@@ -153,7 +199,14 @@ class UpdateStore {
+ 
+   dismissToast() { this.toastVisible = false; }
+ 
+-  /** Called once on app launch from AppShell.onMount. */
++  /** Called once on app launch from AppShell.onMount.
++   *
++   *  As of 2026-05-25: if an update is detected AND the user hasn't snoozed
++   *  this version, kick off the download in the background immediately. By the
++   *  time the user clicks the toast → "Install", the bytes are already on disk
++   *  and the apply phase is the only wait. Velopack short-circuits a second
++   *  `download_updates` call when the target nupkg already exists, so this is
++   *  idempotent. */
+   async checkOnLaunch() {
+     await this.refresh();
+     if (
+@@ -162,12 +215,18 @@ class UpdateStore {
+       this.info.version !== this.dismissedVersion
+     ) {
+       this.toastVisible = true;
++      // Fire-and-forget background download. UI stays on `available` for the
++      // toast/pill, but the dialog shows live progress if the user opens it.
++      void this.download();
+     }
+   }
+ 
+   open()  { this.dialogOpen = true; this.toastVisible = false; }
+   close() { this.dialogOpen = false; }
+ 
++  // App-lifetime singleton: listeners attach once on first update-flow entry
++  // and live until app exit. `dispose()` exists for completeness but is never
++  // called in normal app lifecycle. (#263)
+   private async ensureListeners() {
+     if (!this.progressUnlisten) {
+       this.progressUnlisten = await listen<number>("update-progress", (e) => {
